@@ -30,6 +30,7 @@
 #include "auxiliary.hpp"
 #include "tensile_host.hpp"
 #include <Tensile/DataTypes.hpp>
+#include <mutex>
 #include <shared_mutex>
 
 #include <map>
@@ -48,6 +49,25 @@ public:
         return gInstance;
     }
 
+    // Whether file_path's recorded build version matches the running build.
+    // Computed lazily and cached on first call via std::call_once (see
+    // m_versionCheckOnce) - hipblasLtMatmulAlgoGetHeuristic() can be called
+    // concurrently from multiple threads for the same or different problems,
+    // and a hand-rolled "if(!checked) { compute; checked = true; }" guard
+    // would let two threads race on m_versionCurrent/m_versionChecked with no
+    // synchronization between the write and other threads' reads - undefined
+    // behavior even though every thread would compute the same value.
+    // call_once guarantees exactly one thread runs the computation and that
+    // its result is visible to every caller that returns from call_once
+    // afterward. Entries that carry a stable solution name are
+    // validated/healed directly against the live solution library and never
+    // consult this; it exists only so legacy entries (parsed before the
+    // solution_name column existed, so they cannot be validated that way)
+    // keep the old fail-safe behavior of falling back to default selection
+    // instead of trusting a possibly-stale index - see
+    // problem_override_from_file[_cpp]() in rocblaslt_auxiliary.cpp.
+    bool isBuildVersionCurrent();
+
     // copy contructor
     OverrideSingleton(const OverrideSingleton&) = delete;
     // assignment operator
@@ -65,6 +85,9 @@ private:
     }
 
     ~OverrideSingleton() {}
+
+    std::once_flag m_versionCheckOnce;
+    bool           m_versionCurrent = true;
 };
 
 namespace TensileLite
@@ -83,7 +106,21 @@ namespace TensileLite
         c_type,
         compute_type,
         solution_index,
+        solution_name,
         count
+    };
+
+    // A tuning-cache entry: the solution index found during offline tuning,
+    // plus (when available) the stable Tensile solution name it referred to
+    // at tuning time. `index` is only a fast-path hint - it can go stale
+    // after a rebuild reorders the solution library. `name` is what lets a
+    // stale index be healed instead of silently used or the whole override
+    // file being discarded. `name` is empty for legacy (pre solution_name
+    // column) override files, which keeps them working exactly as before.
+    struct TunedSolution
+    {
+        int         index = -1;
+        std::string name;
     };
 
     class ProblemOverride
@@ -156,7 +193,8 @@ namespace TensileLite
         size_t           m_batchSize;
     };
 
-    std::pair<ProblemOverride, int> problemFromEntries(const std::vector<std::string>& entries);
+    std::pair<ProblemOverride, TunedSolution>
+        problemFromEntries(const std::vector<std::string>& entries);
 
     void getContractionProblemsFromFile(const std::string& path);
 
@@ -216,23 +254,53 @@ namespace TensileLite
             return size;
         }
 
-        auto find(const ProblemOverride& prob_key)
+        // Returns a snapshot (copy) of every TunedSolution stored for prob_key.
+        // Deliberately NOT a pair of live iterators: callers used to hold onto
+        // iterators returned from equal_range() after this function's lock was
+        // released, then read `iterator->second` unsynchronized - which raced
+        // with update()/erase() running concurrently on another thread (e.g.
+        // one thread healing an entry while another thread reads it mid-
+        // assignment). A snapshot has no such lifetime/synchronization
+        // dependency on the map: once returned, it is exclusively owned by the
+        // caller.
+        std::vector<TunedSolution> find(const ProblemOverride& prob_key)
         {
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      iter = m_override.equal_range(prob_key);
-            return iter;
+            auto                                      range = m_override.equal_range(prob_key);
+            std::vector<TunedSolution>                result;
+            result.reserve(std::distance(range.first, range.second));
+            for(auto it = range.first; it != range.second; ++it)
+                result.push_back(it->second);
+            return result;
         }
 
-        void add(const std::pair<ProblemOverride, int>& problemSolution)
+        void add(const std::pair<ProblemOverride, TunedSolution>& problemSolution)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
             m_override.insert(problemSolution);
         }
 
-        void erase(std::multimap<ProblemOverride, int>::iterator& sol_idx)
+        // Heals a cache entry in place after its solution has been relocated
+        // to a new index by a rebuild, so subsequent find() calls in this
+        // process return the healed index directly. Re-locates the specific
+        // entry to update under its own lock (matched by prob_key and the
+        // pre-heal index recorded in `original`) rather than trusting a
+        // previously-returned iterator/reference, so this can never race with
+        // a concurrent find() the way updating via a stale iterator would.
+        void update(const ProblemOverride& prob_key,
+                    const TunedSolution&   original,
+                    const TunedSolution&   healed)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_override.erase(sol_idx);
+            auto                                      range = m_override.equal_range(prob_key);
+            for(auto it = range.first; it != range.second; ++it)
+            {
+                if(it->second.index == original.index && it->second.name == original.name)
+                {
+                    it->second = healed;
+                    break;
+                }
+            }
         }
 
         std::mutex& getLock()
@@ -241,9 +309,9 @@ namespace TensileLite
         }
 
     private:
-        std::multimap<ProblemOverride, int> m_override;
-        std::mutex                          m_guard;
-        std::shared_timed_mutex             m_mutex;
+        std::multimap<ProblemOverride, TunedSolution> m_override;
+        std::mutex                                     m_guard;
+        std::shared_timed_mutex                        m_mutex;
     };
 } // namespace Tensile
 

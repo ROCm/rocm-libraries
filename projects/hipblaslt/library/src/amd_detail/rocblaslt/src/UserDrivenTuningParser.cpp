@@ -27,9 +27,30 @@
 
 #include "UserDrivenTuningParser.hpp"
 #include <fstream>
+#include <hipblaslt/hipblaslt-version.h>
 #include <shared_mutex>
 #include <sstream>
 #include <utility>
+
+#define TUNING_PARSER_TO_STR2(x) #x
+#define TUNING_PARSER_TO_STR(x) TUNING_PARSER_TO_STR2(x)
+
+bool OverrideSingleton::isBuildVersionCurrent()
+{
+    std::call_once(m_versionCheckOnce, [this]() {
+        static constexpr char currentVersion[] = TUNING_PARSER_TO_STR(HIPBLASLT_VERSION_TWEAK);
+
+        std::string   firstLine;
+        std::ifstream file_read(file_path);
+        std::getline(file_read, firstLine);
+
+        const std::string header = "Git Version: ";
+        size_t            pos    = firstLine.find(header);
+        m_versionCurrent         = (pos != std::string::npos)
+                           && (firstLine.substr(pos + header.length()) == currentVersion);
+    });
+    return m_versionCurrent;
+}
 
 namespace TensileLite
 {
@@ -60,6 +81,8 @@ namespace TensileLite
             return "compute_type";
         case HeaderFields::solution_index:
             return "solution_index";
+        case HeaderFields::solution_name:
+            return "solution_name";
         default:
             return "";
         }
@@ -113,15 +136,14 @@ namespace TensileLite
 
                         auto problemSolution = problemFromEntries(entries);
 
-                        if(problemSolution.second > 0)
+                        if(problemSolution.second.index > 0)
                         {
-                            auto sol_iter       = m_override.find(problemSolution.first);
+                            auto existing       = m_override.find(problemSolution.first);
                             bool duplicate_find = false;
 
-                            for(auto sol_idx = sol_iter.first; sol_idx != sol_iter.second;
-                                sol_idx++)
+                            for(const auto& tuned : existing)
                             {
-                                if(sol_idx->second == problemSolution.second)
+                                if(tuned.index == problemSolution.second.index)
                                 {
                                     duplicate_find = true;
                                     break;
@@ -139,16 +161,25 @@ namespace TensileLite
         }
     }
 
-    std::pair<ProblemOverride, int> problemFromEntries(const std::vector<std::string>& entries)
+    std::pair<ProblemOverride, TunedSolution>
+        problemFromEntries(const std::vector<std::string>& entries)
     {
+        // Full rows include the trailing solution_name column (new format);
+        // legacy rows stop one field earlier, at solution_index, and are
+        // still accepted for backward compatibility - they just come back
+        // with an empty TunedSolution::name, so they get index-only
+        // treatment (no healing) at resolution time, matching pre-existing
+        // behavior for old tuning files.
+        constexpr size_t fullFieldCount   = static_cast<size_t>(HeaderFields::count);
+        constexpr size_t legacyFieldCount = fullFieldCount - 1;
 
         const size_t entries_n = entries.size();
-        if(entries_n != static_cast<size_t>(HeaderFields::count))
+        if(entries_n != fullFieldCount && entries_n != legacyFieldCount)
         {
-            return std::make_pair(ProblemOverride{}, -1);
+            return std::make_pair(ProblemOverride{}, TunedSolution{});
         }
 
-        //Expected format: transA,transB,batch_count,M,N,K,input_type,output_type,compute_type,solution_index
+        //Expected format: transA,transB,batch_count,M,N,K,input_type,output_type,compute_type,solution_index[,solution_name]
         bool transA = (entries[static_cast<size_t>(HeaderFields::transA)] != "N");
         bool transB = (entries[static_cast<size_t>(HeaderFields::transB)] != "N");
 
@@ -182,23 +213,28 @@ namespace TensileLite
         }
         catch(std::invalid_argument const& ex)
         {
-            return std::make_pair(ProblemOverride{}, -1);
+            return std::make_pair(ProblemOverride{}, TunedSolution{});
         }
         catch(std::out_of_range const& ex)
         {
-            return std::make_pair(ProblemOverride{}, -1);
+            return std::make_pair(ProblemOverride{}, TunedSolution{});
         }
 
         if(inputTypeA == rocisa::DataType::None || inputTypeB == rocisa::DataType::None
            || outputType == rocisa::DataType::None || computeType == rocisa::DataType::None)
         {
-            return std::make_pair(ProblemOverride{}, -1);
+            return std::make_pair(ProblemOverride{}, TunedSolution{});
         }
 
         ProblemOverride po(
             transA, transB, inputTypeA, inputTypeB, computeType, outputType, m, n, k, b);
 
-        return std::make_pair(po, solution_idx);
+        TunedSolution tuned;
+        tuned.index = solution_idx;
+        if(entries_n == fullFieldCount)
+            tuned.name = entries[static_cast<size_t>(HeaderFields::solution_name)];
+
+        return std::make_pair(po, tuned);
     }
 
     ProblemOverride::ProblemOverride()
