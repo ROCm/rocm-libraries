@@ -810,7 +810,7 @@ static constexpr bool is_target_wave_size_64(amdgcn_target target)
 #define MAP_COMPILER_STATE_TO_GFX10_3_TARGET(COMPILER_STATE, TARGET_ID) \
     if constexpr(amdgcn_compiler_target_state::COMPILER_STATE)          \
     {                                                                   \
-        return make_amdgcn_gfx9_target(amdgcn_target_id::TARGET_ID);    \
+        return make_amdgcn_gfx10_3_target(amdgcn_target_id::TARGET_ID); \
     }
 
 #define MAP_COMPILER_STATE_TO_GFX9_TARGET(COMPILER_STATE, TARGET_ID) \
