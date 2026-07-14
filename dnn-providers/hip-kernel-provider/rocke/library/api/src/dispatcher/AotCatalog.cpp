@@ -88,6 +88,12 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
         }
 
         // --- Step 4: set device, load HSACO, verify, unload ---
+        // TODO(kpack-fastfollow): TEMPORARY smoke-test wiring. This whole
+        // set-device + hipModuleLoadData + unload block exists only to prove the
+        // full kpack -> hipModuleLoadData -> hipModuleGetFunction path works
+        // right now; nothing is launched or retained. Remove once hipModuleLoad
+        // is deferred to plan construction (see loadForDevice() header) and the
+        // deviceId parameter is dropped (module/device binding leaves AotCatalog).
         // Save and restore the previously active HIP device.
         int prevDevice = 0;
         const bool deviceSaved = (hipGetDevice(&prevDevice) == hipSuccess);
