@@ -102,9 +102,10 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*GPU*")
     endif()
 
-    # Heavyweight (multi-GB) large-stride numerical tests (ROCM-23997); excluded from the
-    # default filter so they don't run in standard/pre-checkin. Run explicitly when needed.
+    # Heavyweight (multi-GB) numerical conv tests; excluded from the default
+    # filter so they don't run in standard/pre-checkin. Run explicitly when needed.
     add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
+    add_gtest_negative_filter("*UnitTestConvSolver*Large2D*")
 
     # NONE datatype is explicitly enabled for all the state, all the NONE tests take 4 seconds to complete.
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
