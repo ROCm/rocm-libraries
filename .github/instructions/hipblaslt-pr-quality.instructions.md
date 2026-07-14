@@ -13,6 +13,6 @@ hipBLASLt maintains an agent skill named `hipblaslt-pr-quality`. A skill is a se
 When reviewing a hipBLASLt PR, read and follow that skill as your review rubric:
 
 - hipBLASLt overlay (start here): `projects/hipblaslt/skills/hipblaslt-pr-quality/SKILL.md`
-- Base skill it extends (in `ROCm/TheRock`): `skills/rocm-pr-quality/SKILL.md` and its `reference.md`
+- Base skill it extends (in `ROCm/TheRock`, not present in this repo): https://github.com/ROCm/TheRock/blob/develop/skills/rocm-pr-quality/SKILL.md and https://github.com/ROCm/TheRock/blob/develop/skills/rocm-pr-quality/reference.md
 
 The overlay tightens the base skill for hipBLASLt and never relaxes a base rule; on any conflict, the skill files are the source of truth. This guidance is advisory: it points at the rubric and raises the review floor, but does not by itself approve or block a merge.
