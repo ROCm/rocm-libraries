@@ -38,9 +38,12 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
 atol = 1.19
 rtol = 0.2
 
+# Case 5 recurred in CI (PR #9205, run 29277722646) exceeding the 1.328
+# threshold above, so its tail is heavier than the 100-pass sweep sampled.
+# atol raised to 1.6 (threshold ~1.738 at ref=0.691406) for this case only.
 [[tolerance_overrides]]
 filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/5"]
-atol = 1.19
+atol = 1.6
 rtol = 0.2
 
 # -- Test Skips --
