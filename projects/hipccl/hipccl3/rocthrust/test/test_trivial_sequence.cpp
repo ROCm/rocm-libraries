@@ -66,8 +66,8 @@ void test_func(Iterator first, Iterator last)
 
   using TrivialIterator = typename thrust::detail::trivial_sequence<Iterator, System>::iterator_type;
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<Iterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TrivialIterator>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<Iterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<TrivialIterator>, true);
 }
 
 TYPED_TEST(TrivialSequenceTests, TestTrivialSequence)
