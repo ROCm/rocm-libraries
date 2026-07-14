@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""MemToken helpers for gfx1250 subtile StinkyTofu waitcnt insertion."""
+"""MemToken helpers for subtile StinkyTofu waitcnt insertion."""
 
 from __future__ import annotations
 

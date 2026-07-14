@@ -616,12 +616,9 @@ class Solution(collections.abc.Mapping):
   # assign tile sizes
   @staticmethod
   def _assignStinkySubtile(state):
-    """Enable Subtile StinkyTofu."""
-    if not state.get("UseSubtileImpl") or tuple(state["ISA"]) != (12, 5, 0):
-      return
-    import rocisa
-    if rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(state["ISA"]):
-      state["_StinkySubtile"] = 1
+    """Derive _StinkySubtile from the explicit StinkySubtile solution parameter."""
+    if state.get("UseSubtileImpl") and state.get("StinkySubtile"):
+      state["_StinkySubtile"] = True
 
   @staticmethod
   def assignProblemIndependentDerivedParameters(state, printRejectionReason: bool, isaInfoMap: Dict[str, IsaInfo]):

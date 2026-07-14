@@ -4963,7 +4963,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   @staticmethod
   def _subtileStinkyWaitcntOverrides():
-    """Gfx1250 subtile waitcnt-only ST options (Step 5: no overlapping passes).
+    """Subtile waitcnt-only ST options (no overlapping passes).
 
     Python LogicalScheduler owns cluster barriers, wait-alu, and instruction
     scheduling (SIA=3). ST runs at OptLevel 0 with waitcnt insertion only.
@@ -5395,7 +5395,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    if kernel.get("_StinkySubtile") and rocisa.isSupportedByStinkyTofu(self.states.version):
+    if kernel.get("_StinkySubtile"):
       passResult = self._runRocIsaPassOnKernelBody(kernel, moduleKernelBody)
       kernel["MathClocksUnrolledLoop"] = passResult.cycles
       self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)

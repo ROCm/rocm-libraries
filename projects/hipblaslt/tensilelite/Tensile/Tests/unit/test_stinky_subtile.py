@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Unit tests for gfx1250 subtile StinkyTofu waitcnt-only wiring (Step 1).
+# Unit tests for subtile StinkyTofu waitcnt-only wiring.
 ################################################################################
 
 import os
@@ -21,13 +21,14 @@ from Tensile.SolutionStructs.Solution import Solution
 GFX1250_ISA = (12, 5, 0)
 
 
-def _minimal_subtile_state(isa=GFX1250_ISA, use_subtile=True, schedule_iter_alg=3):
+def _minimal_subtile_state(isa=GFX1250_ISA, use_subtile=True, stinky_subtile=False, schedule_iter_alg=3):
     return {
         "Valid": True,
         "AssignedProblemIndependentDerivedParameters": False,
         "ISA": isa,
         "ScheduleIterAlg": schedule_iter_alg,
         "UseSubtileImpl": use_subtile,
+        "StinkySubtile": stinky_subtile,
         "ProblemType": {
             "StridedBatched": True,
             "Batched": True,
@@ -36,34 +37,29 @@ def _minimal_subtile_state(isa=GFX1250_ISA, use_subtile=True, schedule_iter_alg=
     }
 
 
-@pytest.fixture(scope="module")
-def _st_backend_available():
-    import rocisa
-    return rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(GFX1250_ISA)
 
-
-def test_gfx1250_subtile_sets_waitcnt_only_flag(_st_backend_available):
-    if not _st_backend_available:
-        pytest.skip("StinkyTofu gfx1250 backend not available")
-
-    state = _minimal_subtile_state()
+def test_subtile_stinky_opt_in_sets_derived_flag():
+    state = _minimal_subtile_state(stinky_subtile=True)
     Solution._assignStinkySubtile(state)
-    assert state.get("_StinkySubtile") == 1
+    assert state.get("_StinkySubtile") is True
 
 
-def test_gfx1250_non_subtile_no_waitcnt_only_flag(_st_backend_available):
-    if not _st_backend_available:
-        pytest.skip("StinkyTofu gfx1250 backend not available")
-
-    state = _minimal_subtile_state(use_subtile=False)
+def test_non_subtile_stinky_opt_in_no_derived_flag():
+    state = _minimal_subtile_state(use_subtile=False, stinky_subtile=True)
     Solution._assignStinkySubtile(state)
     assert "_StinkySubtile" not in state
 
 
-def test_gfx950_subtile_no_waitcnt_only_flag():
-    state = _minimal_subtile_state(isa=(9, 5, 0))
+def test_subtile_without_stinky_opt_in_no_derived_flag():
+    state = _minimal_subtile_state(stinky_subtile=False)
     Solution._assignStinkySubtile(state)
     assert "_StinkySubtile" not in state
+
+
+def test_stinky_opt_in_any_isa_sets_derived_flag():
+    state = _minimal_subtile_state(isa=(9, 5, 0), stinky_subtile=True)
+    Solution._assignStinkySubtile(state)
+    assert state.get("_StinkySubtile") is True
 
 
 def test_build_stinky_options_waitcnt_only_overrides():
@@ -164,10 +160,10 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
     kw.updateOccupancyFromMaxVgpr = MagicMock()
     kw._runStinkyTofuPipeline = fake_pipeline
 
-    kernel = {"_StinkySubtile": 1}
+    kernel = {"_StinkySubtile": True}
 
     error = kw.states.overflowedResources
-    if kernel.get("_StinkySubtile") and rocisa.isSupportedByStinkyTofu(kw.states.version):
+    if kernel.get("_StinkySubtile"):
         passResult = kw._runRocIsaPassOnKernelBody(kernel, module_kernel_body)
         kernel["MathClocksUnrolledLoop"] = passResult.cycles
         kw.updateOccupancyFromMaxVgpr(kernel, module_kernel_body, passResult.maxVgpr)
@@ -217,7 +213,7 @@ def test_subtile_mem_token_flip_helpers():
     )
 
     writer = _writer_with_mem_tokens()
-    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
+    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
     flipGrWriteTokens(writer, kernel)
     assert writer.states.ldsDirectToLDSTokenIdx == 1
     assert writer.states.ldsWriteTokenIdx == 1
@@ -231,10 +227,10 @@ def test_subtile_mem_token_barrier_tokens():
     from Tensile.Components.Subtile.SubtileMemToken import barrierTokens
 
     writer = _writer_with_mem_tokens(double_buffer=True)
-    assert barrierTokens(writer, {"_StinkySubtile": 1, "1LDSBuffer": False}) == [0, 1]
+    assert barrierTokens(writer, {"_StinkySubtile": True, "1LDSBuffer": False}) == [0, 1]
 
     writer = _writer_with_mem_tokens(double_buffer=False)
-    assert barrierTokens(writer, {"_StinkySubtile": 1, "1LDSBuffer": True}) == [0]
+    assert barrierTokens(writer, {"_StinkySubtile": True, "1LDSBuffer": True}) == [0]
 
 
 def test_subtile_mem_token_tag_instructions():
@@ -249,7 +245,7 @@ def test_subtile_mem_token_tag_instructions():
     )
 
     writer = _writer_with_mem_tokens()
-    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
+    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
 
     dtl = BufferLoadB128(dst=None, vaddr=vgpr(0), saddr=sgpr(0, 4), soffset=0)
     tagDtlLoad(dtl, writer, kernel)
@@ -274,7 +270,7 @@ def test_subtile_emit_sync_tags_barrier():
     from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 
     writer = _writer_with_mem_tokens()
-    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
+    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
     emitter = InstructionEmitter.__new__(InstructionEmitter)
     emitter.writer = writer
     emitter.kernel = kernel
@@ -298,7 +294,7 @@ def test_subtile_emit_wait_gr_lr_skipped_when_stinky_subtile():
     counts = WaitGRCounts(A=1, B=1, SA=0, SB=0)
     source = WaitGROp(wait_gr_counts=counts)
 
-    emitter.kernel = {"_StinkySubtile": 1, "enableTDMA": False, "enableTDMB": False}
+    emitter.kernel = {"_StinkySubtile": True, "enableTDMA": False, "enableTDMB": False}
     assert emitter.emit_wait_gr(source) == []
     assert emitter.emit_wait_lr() == []
 
@@ -318,7 +314,7 @@ def test_subtile_cluster_barrier_tags_mem_tokens():
     writer = _writer_with_mem_tokens()
     writer.labels = MagicMock()
     writer.labels.getUniqueNamePrefix.return_value = "cb"
-    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
+    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
 
     for mod in (subtileClusterBarrierSignal(writer, kernel),
                 subtileClusterBarrierWait(writer, kernel)):
@@ -338,7 +334,7 @@ def test_subtile_gr_lds_buffer_swap_flips_write_tokens():
     writer.states.a.tileInfo.emitGRLDSBufferSwap.return_value = MagicMock()
     writer.states.b.tileInfo = writer.states.a.tileInfo
 
-    kernel = {"_StinkySubtile": 1, "enableTDMA": False, "enableTDMB": False}
+    kernel = {"_StinkySubtile": True, "enableTDMA": False, "enableTDMB": False}
     globalReadLDSBufferSwap("A", writer, kernel)
     assert writer.states.ldsDirectToLDSTokenIdx == 1
     assert writer.states.ldsWriteTokenIdx == 1
@@ -352,7 +348,7 @@ def test_subtile_lr_lds_buffer_swap_flips_read_token():
     writer.states.a.tileInfo = MagicMock()
     writer.states.a.tileInfo.emitLRLDSBufferSwap.return_value = MagicMock()
 
-    kernel = {"_StinkySubtile": 1}
+    kernel = {"_StinkySubtile": True}
     localReadLDSBufferSwap("A", writer, kernel)
     assert writer.states.ldsReadTokenIdx == 1
 
