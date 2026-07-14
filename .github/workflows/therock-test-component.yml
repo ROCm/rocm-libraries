@@ -153,6 +153,10 @@ jobs:
           # Create logs directory
           mkdir -p ./test_logs
 
+          if [[ "${{ inputs.coverage_enabled }}" == "true" ]]; then
+            export LLVM_PROFILE_FILE="${GITHUB_WORKSPACE}/coverage-profraw/${TEST_COMPONENT}-shard${{ matrix.shard }}-%p-%m.profraw"
+          fi
+
           # Run test and capture output (still display to console)
           python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
@@ -163,13 +167,13 @@ jobs:
         env:
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
           PROJECT: ${{ fromJSON(inputs.component).job_name }}
-          BUILD: ${{ github.workspace }}/build
-          PROFRAW_DIR: ${{ github.workspace }}/coverage-profraw
-          REPORT_DIR: ${{ github.workspace }}/coverage-report
-          LLVM_BIN: ${{ github.workspace }}/build/lib/llvm/bin
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build/lib/llvm/lib:${{ github.workspace }}/build/lib
         run: |
           set -euo pipefail
+          BUILD="${GITHUB_WORKSPACE}/build"
+          PROFRAW_DIR="${GITHUB_WORKSPACE}/coverage-profraw"
+          REPORT_DIR="${GITHUB_WORKSPACE}/coverage-report"
+          LLVM_BIN="${BUILD}/lib/llvm/bin"
+          export LD_LIBRARY_PATH="${BUILD}/lib/llvm/lib:${BUILD}/lib:${LD_LIBRARY_PATH:-}"
           mkdir -p "${REPORT_DIR}"
           OBJECT="${BUILD}/lib/lib${PROJECT}.so"
           PROFDATA="${REPORT_DIR}/${PROJECT}.profdata"
