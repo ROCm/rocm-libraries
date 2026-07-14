@@ -3,7 +3,7 @@
 """Reporting primitive - serialize a record and format record/diff views (pure).
 
 The consume-side counterpart to the harness: it turns a measurement record into
-(a) round-trippable JSON and (b) human/agent-readable views - the diagnostic
+(a) round-trippable JSON and (b) human-readable views - the diagnostic
 **panel** for one record, and a **diff** of two records (metric delta + per-panel
 change). It makes no judgement call: it computes and formats deltas but does not
 decide "regression vs noise" - that gate lives in the user tool's `selfcheck`
@@ -36,7 +36,7 @@ def from_json(text: str) -> dict:
 def panel(record: Mapping[str, Any]) -> dict:
     """Flatten the diagnostic panel (`schema.PANEL_KEYS`) into name -> value.
 
-    Only keys that are actually present are returned, so a Tier-W or RDNA record
+    Only keys that are actually present are returned, so a wall-only or RDNA record
     (partial coverage) yields a smaller panel rather than zeros it never measured.
     """
     out: dict = {}

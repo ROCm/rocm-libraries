@@ -16,8 +16,8 @@ not one shot.
     instead of a bare delta;
   - `derived` is recomputed from the median counters (+ profiler_overhead_pct);
   - `n_samples` records K;
-  - `counter_samples` (opt-in per-dispatch, if present) is passed through from the
-    every input record and tagged with `sample_index`, preserving the raw evidence
+  - `counter_samples` (opt-in per-dispatch, if present) is collected from every
+    input record and tagged with `sample_index`, preserving the raw evidence
     behind an aggregate without conflating dispatch ids across repeats.
 
 Pure and stdlib-only: writes nothing, runs no profiler. Mixing identities is a
@@ -57,14 +57,14 @@ def _spread_pct(vals: Sequence[float]) -> Optional[float]:
 
 
 def _median_counters(records: Sequence[Mapping[str, Any]]) -> dict:
-    """Per-counter median across records (union of keys; missing values skipped)."""
-    keys: set[str] = set()
-    for r in records:
-        keys.update((r.get("counters") or {}).keys())
+    """Per-counter median across records, requiring every run to capture the key."""
+    keys = set((records[0].get("counters") or {}).keys())
+    for r in records[1:]:
+        keys.intersection_update((r.get("counters") or {}).keys())
     out: dict = {}
     for k in keys:
         vals = [(r.get("counters") or {}).get(k) for r in records]
-        m = _median([v for v in vals if v is not None])
+        m = _median(vals) if all(v is not None for v in vals) else None
         if m is not None:
             out[k] = _as_int_if_whole(m)
     return out
@@ -76,13 +76,13 @@ def _median_timing(records: Sequence[Mapping[str, Any]], section: str) -> dict:
     ms_vals = [(r.get(section) or {}).get("ms_median") for r in records]
     ms_vals = [v for v in ms_vals if v is not None]
     out: dict = {}
-    if ms_vals:
+    if len(ms_vals) == len(records):
         out["ms_median"] = statistics.median(ms_vals)
         out["ms_spread_pct"] = _spread_pct(ms_vals)
         out["samples"] = [{"ms": v} for v in ms_vals]
     for k in ("tflops", "gbs", "pct_peak"):
         vals = [(r.get(section) or {}).get(k) for r in records]
-        m = _median([v for v in vals if v is not None])
+        m = _median(vals) if all(v is not None for v in vals) else None
         if m is not None:
             out[k] = m
     return out
@@ -91,11 +91,13 @@ def _median_timing(records: Sequence[Mapping[str, Any]], section: str) -> dict:
 def _derived(counters: Mapping[str, Any]) -> dict:
     """Recompute derived ratios from median counters (same defs as the harness)."""
     d: dict = {}
-    if counters.get("total_clocks"):
-        d["busy_fraction"] = counters.get("busy_cycles", 0) / counters["total_clocks"]
-    hits = counters.get("l2_hit", 0)
-    misses = counters.get("l2_miss", 0)
-    if (hits + misses) > 0:
+    busy = counters.get("busy_cycles")
+    total = counters.get("total_clocks")
+    if busy is not None and total:
+        d["busy_fraction"] = busy / total
+    hits = counters.get("l2_hit")
+    misses = counters.get("l2_miss")
+    if hits is not None and misses is not None and (hits + misses) > 0:
         d["l2_hit_rate"] = hits / (hits + misses)
     return d
 
@@ -106,6 +108,27 @@ def _all_counter_samples(records: Sequence[Mapping[str, Any]]) -> list[dict]:
     for sample_index, record in enumerate(records):
         for sample in record.get("counter_samples") or []:
             out.append({**sample, "sample_index": sample_index})
+    return out
+
+
+def _aggregate_verification(records: Sequence[Mapping[str, Any]]) -> dict:
+    """Combine explicit verification results without inheriting only run zero."""
+    results = [record.get("verify") or {} for record in records]
+    statuses = [result.get("ok") for result in results]
+    if any(status is False for status in statuses):
+        ok = False
+    elif statuses and all(status is True for status in statuses):
+        ok = True
+    else:
+        return {}
+    out = {"ok": ok}
+    diffs = [result.get("max_abs_diff") for result in results]
+    if all(value is not None for value in diffs):
+        out["max_abs_diff"] = max(diffs)
+    for key in ("bad_count", "total"):
+        values = [result.get(key) for result in results]
+        if all(value is not None for value in values):
+            out[key] = sum(values)
     return out
 
 
@@ -130,7 +153,9 @@ def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
     busy = [(r.get("counters") or {}).get(_schema.PRIMARY_METRIC) for r in records]
     spread = {
         "ms_pct": wall.get("ms_spread_pct"),
-        "busy_cycles_pct": _spread_pct([v for v in busy if v is not None]),
+        "busy_cycles_pct": (
+            _spread_pct(busy) if all(v is not None for v in busy) else None
+        ),
     }
 
     derived = _derived(counters)
@@ -145,6 +170,7 @@ def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
     out["counters"] = counters
     out["derived"] = derived
     out["captured_counters"] = sorted(counters)
+    out["verify"] = _aggregate_verification(records)
     out["spread"] = spread
     out["n_samples"] = len(records)
     if any("counter_samples" in r for r in records):

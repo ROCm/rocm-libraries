@@ -7,9 +7,8 @@ Composes the primitives into one `rocke.bench.measurement/v1` record:
   +  profiled (timing of the profiled run, correlates with counters)
   +  wall (a separate un-profiled run = real-world timing)   ->  one record.
 
-Writes NOTHING (pure produce-side): a consumer decides where the record goes.
-Reuses rocke's `probe_rocprof_single` pattern - wrap a kernel-launch command with
-rocprofv3; PMU replay is separated from wall timing (replay perturbs time).
+Does not persist records: a consumer decides where the record goes. PMU replay is
+separated from wall timing because replay perturbs time.
 
 Stdlib only. Needs a GPU + rocprofv3 for `counters`; degrades to wall-only if the
 profiler is unavailable.
@@ -20,10 +19,12 @@ import csv
 import glob
 import hashlib
 import json
+import math
 import os
 import statistics
 import subprocess
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, Sequence
@@ -203,23 +204,61 @@ def _perf_from_stdout(stdout: str) -> dict:
     """Timing metrics from a launcher's PerfJSON line (ms/tflops/gbs/pct_peak)."""
     p = _parse_perfjson(stdout)
     out: dict = {}
-    if "ms" in p:
-        out["ms_median"] = float(p["ms"])
-    for k in ("tflops", "gbps", "pct_peak"):
-        if k in p:
-            out["gbs" if k == "gbps" else k] = float(p[k])
+    for source, target in (
+        ("ms", "ms_median"),
+        ("tflops", "tflops"),
+        ("gbps", "gbs"),
+        ("pct_peak", "pct_peak"),
+    ):
+        try:
+            value = float(p[source])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            out[target] = value
     return out
 
 
-def _wall(cmd: Sequence[str], env: dict, timeout: int) -> dict:
+def _verification_from_stdout(stdout: str, *, verified: bool = False) -> dict:
+    """Correctness fields emitted by rocke.run_manifest, when present."""
+    if not verified:
+        return {}
+    p = _parse_perfjson(stdout)
+    out: dict = {}
+    try:
+        value = float(p["max_abs_diff"])
+        if math.isfinite(value):
+            out["max_abs_diff"] = value
+    except (KeyError, TypeError, ValueError):
+        pass
+    for key in ("bad_count", "total"):
+        try:
+            out[key] = int(p[key])
+        except (KeyError, TypeError, ValueError):
+            pass
+    if "bad_count" in out:
+        out["ok"] = out["bad_count"] == 0
+    return out
+
+
+def _wall(cmd: Sequence[str], env: dict, timeout: int) -> tuple[dict, dict]:
     """Separate un-profiled run -> real-world timing (no profiler overhead)."""
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, env=env
         )
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    return _perf_from_stdout(proc.stdout or "")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"kernel command failed: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"kernel command exited with status {proc.returncode}{suffix}"
+        )
+    stdout = proc.stdout or ""
+    return _perf_from_stdout(stdout), _verification_from_stdout(
+        stdout, verified="--verify" in cmd
+    )
 
 
 def profile(
@@ -356,13 +395,13 @@ def profile(
     # profiled: timing of the profiled run (same execution as the counters, so it
     # correlates with them). wall: a separate un-profiled run (real-world timing).
     profiled = _perf_from_stdout(prof_stdout)
-    wall = _wall(cmd, env, timeout)
+    wall, verify = _wall(cmd, env, timeout)
 
     derived: dict = {}
-    if counters_out.get("total_clocks"):
-        derived["busy_fraction"] = (
-            counters_out.get("busy_cycles", 0) / counters_out["total_clocks"]
-        )
+    busy = counters_out.get("busy_cycles")
+    total = counters_out.get("total_clocks")
+    if busy is not None and total:
+        derived["busy_fraction"] = busy / total
     hits = counters_out.get("l2_hit")
     misses = counters_out.get("l2_miss")
     if hits is not None and misses is not None and (hits + misses) > 0:
@@ -385,12 +424,13 @@ def profile(
     if label and dispatched and dispatched != label:
         kernel["dispatch_symbol"] = dispatched  # keep the real symbol for debugging
 
+    now = _utc()
     record = {
         "schema": _schema.SCHEMA_VERSION,
         "run": {
-            "run_id": f"{_utc()}",
+            "run_id": f"{now}_{uuid.uuid4().hex[:12]}",
             "arch": arch,
-            "timestamp": _utc(),
+            "timestamp": now,
             "gpu_name": "",
             "rocm_version": "",
         },
@@ -401,7 +441,7 @@ def profile(
         "resources": resources,
         "derived": derived,
         "captured_counters": sorted(counters_out),
-        "verify": {},
+        "verify": verify,
     }
     if per_dispatch:
         record["counter_samples"] = samples  # raw per-dispatch values (opt-in)

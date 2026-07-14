@@ -34,6 +34,9 @@ class TestOccupancyEstimate(unittest.TestCase):
     def test_zero_vgpr_none(self):
         self.assertIsNone(occupancy._occupancy_estimate(0, "gfx950"))
 
+    def test_gfx90a_uses_eight_vgpr_allocation_granularity(self):
+        self.assertEqual(occupancy._occupancy_estimate(65, "gfx90a"), 7)
+
 
 if __name__ == "__main__":
     unittest.main()

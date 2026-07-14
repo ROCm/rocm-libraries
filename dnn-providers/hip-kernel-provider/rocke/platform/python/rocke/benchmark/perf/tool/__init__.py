@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""rocke.benchmark.perf.tool - LAYER 2: the user tool (dev OR agent), the ONLY writer.
+"""rocke.benchmark.perf.tool - local history and self-check CLI.
 
-The primitives in `rocke.benchmark.perf` are pure and write nothing. This package is the thin
-convenience layer a developer or an agent drives to actually *keep* results and see
+The primitives in `rocke.benchmark.perf` do not persist records. This package is the
+thin convenience layer a developer drives to *keep* results and see
 improve/regress:
 
   store.py      persist/read records in a USER CACHE dir (~/.cache/rocke-perf),

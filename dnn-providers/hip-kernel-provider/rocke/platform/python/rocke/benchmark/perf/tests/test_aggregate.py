@@ -101,6 +101,42 @@ class TestAggregate(unittest.TestCase):
         self.assertAlmostEqual(out["derived"]["busy_fraction"], 0.6)
         self.assertAlmostEqual(out["derived"]["l2_hit_rate"], 80 / 100)
 
+    def test_partial_counter_capture_is_not_reported_as_stable(self):
+        out = aggregate.aggregate(
+            [_rec(busy=100, total=1000), _rec(ms=1.0), _rec(busy=120, total=1000)]
+        )
+        self.assertNotIn("busy_cycles", out["counters"])
+        self.assertIsNone(out["spread"]["busy_cycles_pct"])
+
+    def test_missing_l2_counter_omits_derived_ratio(self):
+        out = aggregate.aggregate([_rec(l2_hit=90), _rec(l2_hit=80), _rec(l2_hit=70)])
+        self.assertNotIn("l2_hit_rate", out["derived"])
+
+    def test_verification_combines_every_repeat(self):
+        recs = [_rec(busy=100), _rec(busy=110)]
+        recs[0]["verify"] = {
+            "ok": True,
+            "max_abs_diff": 0.1,
+            "bad_count": 0,
+            "total": 8,
+        }
+        recs[1]["verify"] = {
+            "ok": False,
+            "max_abs_diff": 0.2,
+            "bad_count": 1,
+            "total": 8,
+        }
+        out = aggregate.aggregate(recs)
+        self.assertEqual(
+            out["verify"],
+            {"ok": False, "max_abs_diff": 0.2, "bad_count": 1, "total": 16},
+        )
+
+    def test_missing_verification_does_not_inherit_first_repeat(self):
+        recs = [_rec(busy=100), _rec(busy=110)]
+        recs[0]["verify"] = {"ok": True}
+        self.assertEqual(aggregate.aggregate(recs)["verify"], {})
+
     def test_tier_w_only(self):
         recs = [_rec(ms=m) for m in (1.0, 1.5, 2.0)]
         out = aggregate.aggregate(recs)

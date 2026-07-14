@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Measurement-record schema - the contract every rocke.benchmark.perf component speaks.
 
-One record per (run, kernel, shape, config), composed from several primitives:
+One record per measured kernel invocation, composed from several primitives:
 
   run       : invocation metadata (run_id, arch, commit, timestamp, ...)
   kernel    : identity + launch config (name, op, shape, grid/block, dispatch_symbol)
@@ -22,13 +22,15 @@ One record per (run, kernel, shape, config), composed from several primitives:
               counter_pass) pair repeats once per run; absent unless requested [GPU]
   verify    : correctness (ok, max_abs_diff)
 
-`counters`/`resources`/`derived` are nullable - a record may carry only wall
-(profiler unavailable) or only resources (no-GPU occupancy check). Keep the schema
-**additive-only** so old records stay readable. Stdlib only.
+`counters`/`resources`/`derived` are nullable, so a record may carry only wall
+timing when the profiler is unavailable. Keep the schema **additive-only** so old
+records stay readable. Stdlib only.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping, Optional, Sequence
+from urllib.parse import quote
 
 SCHEMA_VERSION = "rocke.bench.measurement/v1"
 
@@ -36,7 +38,8 @@ SCHEMA_VERSION = "rocke.bench.measurement/v1"
 # same GPU and shape. Kernel-AGNOSTIC: (arch, kernel_name, shape-signature) - the
 # shape signature is a generic serialization of whatever the shape dict holds
 # (GEMM: M/N/K; conv: N/H/W/C/...; attention: batch/heads/seqlen/...), so no op is
-# privileged. (config hash is an optional tiebreaker the caller may add.)
+# privileged. Callers that need configuration-specific identities should use a
+# configuration-specific kernel_name.
 # Primary regression metric is clock-invariant (cycles); wall time is the fallback
 # when the profiler was unavailable.
 PRIMARY_METRIC = "busy_cycles"  # from record["counters"]
@@ -75,13 +78,19 @@ def validate(record: Mapping[str, Any]) -> None:
         raise SchemaError(
             f"schema mismatch: {record['schema']!r} != {SCHEMA_VERSION!r}"
         )
+    run = record["run"]
+    kernel = record["kernel"]
+    if not isinstance(run, Mapping):
+        raise SchemaError("run must be an object")
+    if not isinstance(kernel, Mapping):
+        raise SchemaError("kernel must be an object")
     for k in _REQUIRED_RUN:
-        if k not in record["run"]:
+        if k not in run:
             raise SchemaError(f"missing run.{k}")
     for k in _REQUIRED_KERNEL:
-        if k not in record["kernel"]:
+        if k not in kernel:
             raise SchemaError(f"missing kernel.{k}")
-    shape = record["kernel"]["shape"]
+    shape = kernel["shape"]
     if not isinstance(shape, Mapping):
         raise SchemaError("kernel.shape must be an object")
 
@@ -91,7 +100,14 @@ def shape_signature(shape: Mapping[str, Any]) -> str:
 
     GEMM -> 'K=512,M=512,N=512'; conv/attention -> their own dims. No op privileged.
     """
-    return ",".join(f"{k}={shape[k]}" for k in sorted(shape or {}))
+    parts = []
+    for key in sorted(shape or {}):
+        encoded_key = quote(str(key), safe="")
+        encoded_value = quote(
+            json.dumps(shape[key], sort_keys=True, separators=(",", ":")), safe=""
+        )
+        parts.append(f"{encoded_key}={encoded_value}")
+    return ",".join(parts)
 
 
 def identity(record: Mapping[str, Any]) -> tuple:

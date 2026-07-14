@@ -4,6 +4,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from rocke.benchmark.perf import harness
 
@@ -20,6 +21,28 @@ class TestPerfFromStdout(unittest.TestCase):
     def test_empty_when_no_perfjson(self):
         self.assertEqual(harness._perf_from_stdout("just logs\n"), {})
 
+    def test_malformed_numeric_fields_are_ignored(self):
+        out = harness._perf_from_stdout(
+            'PerfJSON: {"ms": "bad", "tflops": 12.0, "gbps": null}\n'
+        )
+        self.assertEqual(out, {"tflops": 12.0})
+
+    def test_parses_verification_fields(self):
+        out = harness._verification_from_stdout(
+            'PerfJSON: {"max_abs_diff": 0.25, "bad_count": 3, "total": 64}\n',
+            verified=True,
+        )
+        self.assertEqual(
+            out,
+            {"max_abs_diff": 0.25, "bad_count": 3, "total": 64, "ok": False},
+        )
+
+    def test_unverified_payload_does_not_claim_correctness(self):
+        out = harness._verification_from_stdout(
+            'PerfJSON: {"max_abs_diff": 0.0, "bad_count": 0, "total": 64}\n'
+        )
+        self.assertEqual(out, {})
+
 
 class TestPmcInput(unittest.TestCase):
     def test_one_line_per_group(self):
@@ -27,6 +50,41 @@ class TestPmcInput(unittest.TestCase):
             p = Path(d) / "pmc.txt"
             harness._write_pmc_input([["A", "B", "C"], ["D"]], p)
             self.assertEqual(p.read_text(), "pmc: A B C\npmc: D\n")
+
+
+class TestWall(unittest.TestCase):
+    def test_nonzero_command_is_rejected(self):
+        original = harness.subprocess.run
+        harness.subprocess.run = lambda *args, **kwargs: SimpleNamespace(
+            returncode=1,
+            stdout='PerfJSON: {"ms": 1.0, "bad_count": 1}\n',
+            stderr="verification failed",
+        )
+        try:
+            with self.assertRaisesRegex(RuntimeError, "status 1"):
+                harness._wall(["kernel"], {}, 1)
+        finally:
+            harness.subprocess.run = original
+
+    def test_success_returns_timing_and_verification(self):
+        original = harness.subprocess.run
+        harness.subprocess.run = lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=(
+                'PerfJSON: {"ms": 1.0, "max_abs_diff": 0.0, '
+                '"bad_count": 0, "total": 64}\n'
+            ),
+            stderr="",
+        )
+        try:
+            wall, verify = harness._wall(["kernel", "--verify"], {}, 1)
+        finally:
+            harness.subprocess.run = original
+        self.assertEqual(wall, {"ms_median": 1.0})
+        self.assertEqual(
+            verify,
+            {"max_abs_diff": 0.0, "bad_count": 0, "total": 64, "ok": True},
+        )
 
 
 class TestCountPasses(unittest.TestCase):
@@ -107,7 +165,14 @@ class TestCounterSamples(unittest.TestCase):
         out = harness._counter_samples(rows, {"H": "l2_hit"})
         self.assertEqual(
             out,
-            [{"dispatch_id": 1, "counter_pass": "pmc_1", "l2_hit": 10, "duration_ns": 10}],
+            [
+                {
+                    "dispatch_id": 1,
+                    "counter_pass": "pmc_1",
+                    "l2_hit": 10,
+                    "duration_ns": 10,
+                }
+            ],
         )
 
     def test_per_dispatch_sorted_all_dispatches(self):
@@ -259,7 +324,7 @@ class TestProfileDegradation(unittest.TestCase):
         self._orig_wall = harness._wall
         self._orig_read = harness._read_counter_csvs
         self._orig_passes = harness._count_passes
-        harness._wall = lambda cmd, env, timeout: {}  # no subprocess
+        harness._wall = lambda cmd, env, timeout: ({}, {})  # no subprocess
 
     def tearDown(self):
         harness._counters.discover = self._orig_disc
@@ -305,7 +370,10 @@ class TestProfileDegradation(unittest.TestCase):
         first = harness.profile(["first"], "gfx1201", op="o", shape={})
         second = harness.profile(["second"], "gfx1201", op="o", shape={})
         self.assertTrue(first["kernel"]["kernel_name"].startswith("command_"))
-        self.assertNotEqual(first["kernel"]["kernel_name"], second["kernel"]["kernel_name"])
+        self.assertNotEqual(
+            first["kernel"]["kernel_name"], second["kernel"]["kernel_name"]
+        )
+        self.assertNotEqual(first["run"]["run_id"], second["run"]["run_id"])
 
     def test_negative_warmup_rejected(self):
         with self.assertRaises(ValueError):

@@ -59,6 +59,13 @@ class TestValidate(unittest.TestCase):
         with self.assertRaises(schema.SchemaError):
             schema.validate(rec)
 
+    def test_run_and_kernel_must_be_mappings(self):
+        for key in ("run", "kernel"):
+            rec = _rec(busy=100)
+            rec[key] = None
+            with self.subTest(key=key), self.assertRaises(schema.SchemaError):
+                schema.validate(rec)
+
 
 class TestShapeSignature(unittest.TestCase):
     def test_sorted_key_serialization(self):
@@ -76,6 +83,11 @@ class TestShapeSignature(unittest.TestCase):
             schema.shape_signature({"batch": 2, "heads": 8, "seqlen": 1024}),
             "batch=2,heads=8,seqlen=1024",
         )
+
+    def test_values_are_escaped_to_avoid_collisions(self):
+        combined = schema.shape_signature({"x": "1,y=2"})
+        separate = schema.shape_signature({"x": "1", "y": "2"})
+        self.assertNotEqual(combined, separate)
 
 
 class TestIdentity(unittest.TestCase):

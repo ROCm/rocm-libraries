@@ -82,7 +82,9 @@ def parse_notes(hsaco_bytes: bytes) -> dict:
 
 def _occupancy_estimate(vgpr: int, arch: str) -> Optional[int]:
     """Coarse VGPR-limited waves/SIMD (relative ranking, not absolute)."""
-    caps = _CAPS.get(_family(arch))
+    caps = dict(_CAPS.get(_family(arch), {}))
+    if (arch or "").split(":", 1)[0] == "gfx90a":
+        caps["granularity"] = 8
     if not caps or vgpr <= 0:
         return None
     alloc = -(-vgpr // caps["granularity"]) * caps["granularity"]  # round up

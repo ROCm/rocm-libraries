@@ -3,8 +3,8 @@
 """Local record store - append-only JSON Lines in a user cache dir.
 
 The one place records are persisted. Deliberately NOT a database: an append-only
-`history.jsonl` under `~/.cache/rocke-perf` (one record per line), so a developer or
-an agent can keep a run history and compare across runs without any server. The
+`history.jsonl` under `~/.cache/rocke-perf` (one record per line), so a developer can
+keep a run history and compare across runs without any server. The
 data lives in a user cache dir *outside the repo* - only this code is committed,
 never the results.
 
@@ -69,7 +69,15 @@ def _is_readable_record(record: object) -> bool:
     kernel = record.get("kernel")
     if not isinstance(run, Mapping) or not isinstance(kernel, Mapping):
         return False
-    return "arch" in run and "kernel_name" in kernel and "shape" in kernel
+    for section in ("counters", "wall", "spread"):
+        if section in record and record[section] is not None:
+            if not isinstance(record[section], Mapping):
+                return False
+    return (
+        "arch" in run
+        and "kernel_name" in kernel
+        and isinstance(kernel.get("shape"), Mapping)
+    )
 
 
 def load(*, cache: Optional[os.PathLike | str] = None) -> list[dict]:

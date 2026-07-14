@@ -69,6 +69,22 @@ class TestStore(unittest.TestCase):
         got = store.load(cache=self.cache)
         self.assertEqual([r["counters"]["busy_cycles"] for r in got], [1, 5])
 
+    def test_non_object_shape_is_skipped(self):
+        malformed = _rec(busy=5)
+        malformed["kernel"]["shape"] = [8, 8]
+        with store.history_path(self.cache).open("a") as f:
+            f.write(json.dumps(malformed) + "\n")
+        self.assertEqual(store.load(cache=self.cache), [])
+
+    def test_non_object_metric_section_is_skipped(self):
+        for section in ("counters", "wall", "spread"):
+            malformed = _rec(busy=5)
+            malformed[section] = [1]
+            with store.history_path(self.cache).open("w") as f:
+                f.write(json.dumps(malformed) + "\n")
+            with self.subTest(section=section):
+                self.assertEqual(store.load(cache=self.cache), [])
+
     def test_env_var_resolution(self):
         import os
 

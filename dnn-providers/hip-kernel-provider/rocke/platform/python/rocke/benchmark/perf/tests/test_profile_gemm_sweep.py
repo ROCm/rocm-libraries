@@ -43,7 +43,7 @@ class TestLaunchCmd(unittest.TestCase):
         )
         cmd = ex._launch_cmd(v)
         self.assertIn("rocke.run_manifest", cmd)
-        self.assertEqual(cmd[-2:], ["--shape", "512,256,128"])
+        self.assertEqual(cmd[-3:], ["--shape", "512,256,128", "--verify"])
         self.assertIn("/t/a.hsaco", cmd)
 
 

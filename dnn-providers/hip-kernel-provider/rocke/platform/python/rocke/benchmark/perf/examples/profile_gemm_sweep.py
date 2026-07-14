@@ -53,6 +53,7 @@ def _launch_cmd(v: Variant) -> list[str]:
         v.manifest,
         "--shape",
         f"{m},{n},{k}",
+        "--verify",
     ]
 
 

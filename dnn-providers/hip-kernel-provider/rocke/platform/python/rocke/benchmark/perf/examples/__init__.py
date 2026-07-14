@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Examples - reference integrations that wire the rocke.benchmark.perf primitives.
 
-These ship in the repo as the reference for how a consumer (a developer, an agent,
+These ship in the repo as the reference for how a consumer (a developer,
 or the external perf framework) drives the primitives for a given workflow - e.g.
 `profile_gemm_sweep` over rocKE's GEMM sweep. Each is a thin consumer; the reusable
 logic lives in the `rocke.benchmark.perf` primitives (and the local store in

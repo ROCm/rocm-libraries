@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""rocke.benchmark.perf - rocKE kernel performance PRIMITIVES (pure library, produce side).
+"""rocke.benchmark.perf - rocKE kernel performance measurement primitives.
 
 Lives at `rocke/platform/python/rocke/benchmark/perf/`, alongside the other
 `benchmark/` harnesses; invoked by rocKE kernel-launch commands.
@@ -17,7 +17,7 @@ without inheriting file-writing behavior.
   report.py     - record -> JSON string/dict (serialize; no writes)
 
 LAYER 2 - the user tool lives in a SEPARATE package `rocke.benchmark.perf.tool` (store, self-
-check, CLI; dev OR agent). It imports these primitives; primitives never import it.
+check, CLI). It imports these primitives; primitives never import it.
 """
 
 from . import schema  # noqa: F401

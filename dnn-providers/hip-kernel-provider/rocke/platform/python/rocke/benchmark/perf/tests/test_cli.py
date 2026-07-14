@@ -298,6 +298,21 @@ class TestParser(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _run(["profile", "--arch", "gfx950", "--warmup", "-1", "--", "prog"])
 
+    def test_nonpositive_repeats_error(self):
+        for repeats in ("0", "-1"):
+            with self.subTest(repeats=repeats), self.assertRaises(SystemExit):
+                _run(
+                    [
+                        "profile",
+                        "--arch",
+                        "gfx950",
+                        "--repeats",
+                        repeats,
+                        "--",
+                        "prog",
+                    ]
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

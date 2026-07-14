@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Command-line entry point for the user tool (dev OR agent).
+"""Command-line entry point for the local benchmarking tool.
 
 `python -m rocke.benchmark.perf.tool <cmd>` ties the primitives + store + self-check together:
 
@@ -10,7 +10,7 @@
   compare    -- load the stored history and report improve/regress per kernel.
                [no GPU]
 
-Every command takes `--json` so an agent can consume structured output instead of
+Every command takes `--json` for structured output instead of
 the human text. Only this layer writes (via `store`, to the user cache dir).
 Stdlib only.
 """
@@ -53,6 +53,13 @@ def _nonnegative_int(text: str) -> int:
     return value
 
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return value
+
+
 def _cmd_profile(a: argparse.Namespace) -> int:
     # argparse.REMAINDER keeps the literal '--' separator as cmd[0]; drop it so we
     # don't try to exec a program named '--'.
@@ -62,20 +69,23 @@ def _cmd_profile(a: argparse.Namespace) -> int:
     shape = _shape_arg(a.shape)
     _warn = lambda m: print(f"warning: {m}", file=sys.stderr)
     samples = []
-    for _ in range(max(1, a.repeats)):
-        samples.append(
-            _harness.profile(
-                cmd,
-                a.arch,
-                match=a.match_kernel,
-                label=a.kernel_name,
-                op=a.op,
-                shape=shape,
-                warmup=a.warmup,
-                per_dispatch=a.per_dispatch,
-                warn=_warn,
+    for _ in range(a.repeats):
+        try:
+            samples.append(
+                _harness.profile(
+                    cmd,
+                    a.arch,
+                    match=a.match_kernel,
+                    label=a.kernel_name,
+                    op=a.op,
+                    shape=shape,
+                    warmup=a.warmup,
+                    per_dispatch=a.per_dispatch,
+                    warn=_warn,
+                )
             )
-        )
+        except RuntimeError as exc:
+            raise SystemExit(f"profile: {exc}") from exc
     rec = _aggregate.aggregate(samples)
 
     identity = _schema.identity(rec)
@@ -157,7 +167,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="emit JSON (for agents)",
+        help="emit JSON",
     )
     common.add_argument(
         "--cache", default=argparse.SUPPRESS, help="override the cache dir"
@@ -186,7 +196,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="substring of the dispatched symbol to profile; "
         "default = busiest non-helper dispatch",
     )
-    pr.add_argument("--repeats", type=int, default=1)
+    pr.add_argument("--repeats", type=_positive_int, default=1)
     pr.add_argument(
         "--warmup",
         type=_nonnegative_int,
