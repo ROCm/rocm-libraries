@@ -65,30 +65,48 @@ namespace hip_rocprim
 template <typename T>
 using pointer = thrust::pointer<T, thrust::hip_rocprim::tag, thrust::tagged_reference<T, thrust::hip_rocprim::tag>>;
 
-/*! \p hip::universal_pointer stores a pointer to an object allocated in
- *  memory accessible by the \p hip system and host systems.
- *
- *  \p hip::universal_pointer has pointer semantics: it may be dereferenced
- *  and manipulated with pointer arithmetic.
- *
- *  \p hip::universal_pointer can be created with \p hip::universal_allocator
- *  or by explicitly calling its constructor with a raw pointer.
- *
- *  The raw pointer encapsulated by a \p hip::universal_pointer may be
- *  obtained by either its <tt>get</tt> member function or the \p
- *  raw_pointer_cast function.
- *
- *  \note \p hip::universal_pointer is not a "smart" pointer; it is the
- *        programmer's responsibility to deallocate memory pointed to by
- *        \p hip::universal_pointer.
- *
- *  \tparam T specifies the type of the pointee.
- *
- *  \see hip::universal_allocator
- *  \see raw_pointer_cast
- */
+//! \p hip::universal_pointer stores a pointer to an object allocated in memory accessible by the \p hip system and
+//! host systems. Algorithms dispatching based on this pointer type will prefer the hip system.
+//!
+//! \p hip::universal_pointer has pointer semantics: it may be dereferenced and manipulated with pointer arithmetic.
+//!
+//! \p hip::universal_pointer can be created with \p hip::universal_allocator or by explicitly calling its constructor
+//! with a raw pointer.
+//!
+//! The raw pointer encapsulated by a \p hip::universal_pointer may be obtained by either its <tt>get</tt> member
+//! function or the \p raw_pointer_cast function.
+//!
+//! \note \p hip::universal_pointer is not a "smart" pointer; it is the programmer's responsibility to deallocate
+//! memory pointed to by \p hip::universal_pointer.
+//!
+//! \tparam T specifies the type of the pointee.
+//!
+//! \see hip::universal_allocator
+//! \see raw_pointer_cast
 template <typename T>
 using universal_pointer = thrust::pointer<T, thrust::hip_rocprim::tag, _THRUST_STD::add_lvalue_reference_t<T>>;
+
+//! \p hip::universal_host_pinned_pointer stores a pointer to an object allocated in memory accessible by the \p hip
+//! system and host systems. Algorithms dispatching based on this pointer type will prefer the host system.
+//!
+//! \p hip::universal_host_pinned_pointer has pointer semantics: it may be dereferenced and manipulated with pointer
+//! arithmetic.
+//!
+//! \p hip::universal_host_pinned_pointer can be created with \p hip::universal_host_pinned_allocator or by explicitly
+//! calling its constructor with a raw pointer.
+//!
+//! The raw pointer encapsulated by a \p hip::universal_host_pinned_pointer may be obtained by either its <tt>get</tt>
+//! member function or the \p raw_pointer_cast function.
+//!
+//! \note \p hip::universal_host_pinned_pointer is not a "smart" pointer; it is the programmer's responsibility to
+//! deallocate memory pointed to by \p hip::universal_host_pinned_pointer.
+//!
+//! \tparam T specifies the type of the pointee.
+//!
+//! \see hip::universal_host_pinned_allocator
+//! \see raw_pointer_cast
+template <typename T>
+using universal_host_pinned_pointer = thrust::pointer<T, cpp::tag, _THRUST_STD::add_lvalue_reference_t<T>>;
 
 /*! \p hip::reference is a wrapped reference to an object stored in memory
  *  accessible by the \p hip system. \p hip::reference is the type of the
@@ -122,6 +140,7 @@ namespace hip
 {
 using thrust::hip_rocprim::pointer;
 using thrust::hip_rocprim::reference;
+using thrust::hip_rocprim::universal_host_pinned_pointer;
 using thrust::hip_rocprim::universal_pointer;
 } // namespace hip
 } // namespace system
@@ -135,6 +154,7 @@ namespace hip
 {
 using thrust::hip_rocprim::pointer;
 using thrust::hip_rocprim::reference;
+using thrust::hip_rocprim::universal_host_pinned_pointer;
 using thrust::hip_rocprim::universal_pointer;
 } // namespace hip
 
