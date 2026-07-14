@@ -1642,6 +1642,17 @@ public:
         const double mu    = 10000;
         const double sigma = 4.0;
 
+        /*
+         * Notes on the choice of value for mu:
+         * Running experiments on values to use for the test showed 
+         * that FP32 can handle an acceptable precision as long as 
+         * the mantissa of the mean value is within 7 digits. 
+         * This means that the moment the mean's exponent exceeds 7,
+         * the variance quickly starts to diverge. Yet,
+         * Yet, this test case already fails when Welford's algorithm
+         * is not used.
+         */
+
         double epsilon      = MIO_BN_TEST_EPSILON;
         double expAvgFactor = MIO_BN_TEST_EXPAVGFACTOR;
 
@@ -1750,7 +1761,7 @@ public:
         {
             for(std::size_t cidx = 0; cidx < rs_channels; cidx++)
             {
-                double invVar      = (1.0 / (sqrt(cpuVar(nidx, cidx, 0, 0)) + epsilon));
+                double invVar      = (1.0 / (sqrt(cpuVar(nidx, cidx, 0, 0) + epsilon) ));
                 bool curVarFitting = (abs(saveInvVar(nidx, cidx, 0, 0) - invVar) < 0.001);
                 variance_fitting &= curVarFitting;
                 if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
