@@ -128,7 +128,8 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
-    src/harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.cpp
+    src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    src/harness/input_init/SynthesizeInputs.cpp
 )
 
 add_subdirectory(src/integration_tests)

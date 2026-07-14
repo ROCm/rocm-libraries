@@ -1353,6 +1353,7 @@ def mainLoop(writer, kernel):
           partitionSizeN=partSizeN,
           pgr=schedulerPgr,
           grPlacement=grPlacement,
+          pgl=kernel.get("PrefetchGL2", 0),
       )
 
       scheduler = LogicalScheduler(cfg)
