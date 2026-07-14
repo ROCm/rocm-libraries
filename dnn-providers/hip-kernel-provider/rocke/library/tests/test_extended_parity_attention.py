@@ -16,6 +16,7 @@ PYTHONPATH is derived from this file's location so the test is portable:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import pathlib
 import subprocess
@@ -27,24 +28,25 @@ _PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
 _SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 
 
-def _detect_gpu_arch():
-    """(has_gpu, gfx) via torch — imported FIRST so rocke binds torch's HIP."""
+def _device_arch():
+    """Running device's gfx arch via the rocke HIP runtime (no torch dependency)."""
     try:
-        import torch
+        from rocke.runtime.hip_module import get_device_arch
 
-        if not torch.cuda.is_available():
-            return False, None
-        name = torch.cuda.get_device_properties(0).gcnArchName
-        return True, name.split(":", 1)[0]
+        return get_device_arch(0)
     except Exception:
-        return False, None
+        return None
 
 
-GPU, ARCH = _detect_gpu_arch()
+ARCH = _device_arch()
 _CDNA = ARCH in ("gfx942", "gfx950")
+# The parity harness subprocess imports torch for its reference; gate on torch being
+# importable (a dependency check, not a device probe) so a torch-free env skips cleanly
+# instead of running into an ImportError.
+_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(ARCH and GPU, "needs a ROCm GPU + torch (run under a torch venv)")
+@unittest.skipUnless(ARCH and _HAS_TORCH, "needs a ROCm GPU + torch")
 class TestAttentionParityLibrary(unittest.TestCase):
     """Launch the library attention parity harness and check all cases pass."""
 

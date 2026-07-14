@@ -18,15 +18,30 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
 
 
 def _visible_device_count() -> int:
+    """Visible HIP device count via the rocke runtime (no torch dependency)."""
     try:
-        import torch
+        from rocke.runtime.hip_module import get_device_count
 
-        return int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+        return get_device_count()
     except Exception:
         return 0
 
 
-@unittest.skipUnless(_visible_device_count() >= 2, "requires at least two ROCm GPUs")
+def _device_arch():
+    try:
+        from rocke.runtime.hip_module import get_device_arch
+
+        return get_device_arch(0)
+    except Exception:
+        return None
+
+
+# The sweep builds+launches gfx950 code objects across lanes, so require both the
+# exact arch and >=2 visible devices.
+@unittest.skipUnless(
+    _visible_device_count() >= 2 and _device_arch() == "gfx950",
+    "requires at least two gfx950 GPUs",
+)
 class TestGemmFp16RcrMultiGpuSweep(unittest.TestCase):
     def test_compile_once_and_run_sweep_on_multiple_gpu_lanes(self):
         plan = expand_sweep(

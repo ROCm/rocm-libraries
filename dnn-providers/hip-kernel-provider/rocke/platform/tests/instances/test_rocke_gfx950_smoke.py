@@ -13,6 +13,7 @@ Run on a gfx950 ROCm runner:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import json
 import subprocess
@@ -27,26 +28,31 @@ _DEFAULT_BASELINE = _ROCKE / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
 _DEFAULT_REPORT = Path("/tmp/rocke_gfx950_smoke_perf_current.json")
 
 
-def _detect_gpu_arch() -> tuple[bool, str | None, str]:
+def _device_info() -> tuple[str | None, str | None]:
+    """(arch, marketing_name) via the rocke HIP runtime (no torch dependency)."""
     try:
-        import torch
+        from rocke.runtime.hip_module import get_device_arch, get_device_name
 
-        if not torch.cuda.is_available():
-            return False, None, "torch reports no ROCm GPU"
-        props = torch.cuda.get_device_properties(0)
-        arch = props.gcnArchName.split(":", 1)[0]
-        return True, arch, torch.cuda.get_device_name(0)
-    except Exception as exc:  # pragma: no cover - environment dependent
-        return False, None, f"torch GPU detection failed: {exc!r}"
+        return get_device_arch(0), get_device_name(0)
+    except Exception:  # pragma: no cover - environment dependent
+        return None, None
 
 
-GPU_AVAILABLE, GPU_ARCH, GPU_REASON = _detect_gpu_arch()
+GPU_ARCH, GPU_NAME = _device_info()
+# One of the smoke workloads (fused_moe_e2e_perf) imports torch; gate on torch being
+# importable (a dependency check, not a device probe) so a torch-free env skips cleanly
+# instead of running the body into an ImportError.
+_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(
-    GPU_AVAILABLE and GPU_ARCH == "gfx950",
-    f"needs a gfx950 ROCm GPU; detected {GPU_ARCH or GPU_REASON}",
-)
+def _skip_reason() -> str:
+    dev = f"{GPU_ARCH} ({GPU_NAME})" if GPU_ARCH else "no ROCm GPU detected"
+    if not _HAS_TORCH:
+        return f"needs a gfx950 ROCm GPU + torch; detected {dev}, torch not importable"
+    return f"needs a gfx950 ROCm GPU; detected {dev}"
+
+
+@unittest.skipUnless(GPU_ARCH == "gfx950" and _HAS_TORCH, _skip_reason())
 class TestRockeGfx950Smoke(unittest.TestCase):
     maxDiff = 4000
     current_perf: dict[str, dict] = {}
@@ -68,7 +74,7 @@ class TestRockeGfx950Smoke(unittest.TestCase):
                 Path(os.environ.get("ROCKE_GFX950_PERF_BASELINE", _DEFAULT_BASELINE))
             ),
             "device_arch": GPU_ARCH,
-            "device": GPU_REASON,
+            "device": GPU_NAME,
             "workloads": cls.current_perf,
         }
         report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

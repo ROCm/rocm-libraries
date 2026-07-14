@@ -15,6 +15,7 @@ Run on a gfx950 ROCm runner:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -32,26 +33,31 @@ _DEFAULT_BASELINE = (
 )
 
 
-def _detect_gpu_arch() -> tuple[bool, str | None, str]:
+def _device_info() -> tuple[str | None, str | None]:
+    """(arch, marketing_name) via the rocke HIP runtime (no torch dependency)."""
     try:
-        import torch
+        from rocke.runtime.hip_module import get_device_arch, get_device_name
 
-        if not torch.cuda.is_available():
-            return False, None, "torch reports no ROCm GPU"
-        props = torch.cuda.get_device_properties(0)
-        arch = props.gcnArchName.split(":", 1)[0]
-        return True, arch, torch.cuda.get_device_name(0)
-    except Exception as exc:  # pragma: no cover - environment dependent
-        return False, None, f"torch GPU detection failed: {exc!r}"
+        return get_device_arch(0), get_device_name(0)
+    except Exception:  # pragma: no cover - environment dependent
+        return None, None
 
 
-GPU_AVAILABLE, GPU_ARCH, GPU_REASON = _detect_gpu_arch()
+GPU_ARCH, GPU_NAME = _device_info()
+# The attention parity subprocess imports torch for its numeric reference; gate on torch
+# being importable (a dependency check, not a device probe) so a torch-free env skips
+# cleanly instead of running the body into an ImportError.
+_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(
-    GPU_AVAILABLE and GPU_ARCH == "gfx950",
-    f"needs a gfx950 ROCm GPU; detected {GPU_ARCH or GPU_REASON}",
-)
+def _skip_reason() -> str:
+    dev = f"{GPU_ARCH} ({GPU_NAME})" if GPU_ARCH else "no ROCm GPU detected"
+    if not _HAS_TORCH:
+        return f"needs a gfx950 ROCm GPU + torch; detected {dev}, torch not importable"
+    return f"needs a gfx950 ROCm GPU; detected {dev}"
+
+
+@unittest.skipUnless(GPU_ARCH == "gfx950" and _HAS_TORCH, _skip_reason())
 class TestGfx950AttentionSmoke(unittest.TestCase):
     maxDiff = 4000
     baseline = json.loads(
