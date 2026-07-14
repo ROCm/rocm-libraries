@@ -85,7 +85,8 @@ const MiopenTensor& BatchnormFwdInferenceWithVarianceParams::variance() const
 double BatchnormFwdInferenceWithVarianceParams::epsilonValue(
     const hipdnnPluginDeviceBuffer_t* deviceBuffers, uint32_t numDeviceBuffers) const
 {
-    return miopen_utils::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
+    return miopen_utils::toDouble(
+        miopen_utils::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 const std::optional<MiopenActivationDescriptor>&

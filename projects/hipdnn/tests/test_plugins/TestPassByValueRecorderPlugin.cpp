@@ -134,8 +134,8 @@ public:
 
             for(const auto& op : gScalarOperands)
             {
-                const double value
-                    = hipdnn_plugin_sdk::resolveScalarOperand(op, deviceBuffers, numDeviceBuffers);
+                const double value = hipdnn_plugin_sdk::toDouble(
+                    hipdnn_plugin_sdk::resolveScalarOperand(op, deviceBuffers, numDeviceBuffers));
                 gRecordedScalars.emplace_back(op.uid, value);
             }
 

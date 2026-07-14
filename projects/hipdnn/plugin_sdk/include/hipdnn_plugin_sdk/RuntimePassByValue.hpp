@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstring>
 #include <unordered_map>
+#include <variant>
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -38,16 +39,34 @@
 namespace hipdnn_plugin_sdk
 {
 
+/// A pass-by-value scalar carried without widening: one arm per DataType the SDK
+/// resolves. `double` is first so a default-constructed ScalarValue holds 0.0.
+using ScalarValue = std::variant<double, // DataType::DOUBLE
+                                 float, // DataType::FLOAT
+                                 hipdnn_data_sdk::types::half, // DataType::HALF
+                                 hipdnn_data_sdk::types::bfloat16, // DataType::BFLOAT16
+                                 int32_t, // DataType::INT32
+                                 int64_t, // DataType::INT64
+                                 bool>; // DataType::BOOLEAN
+
+/// Collapses a ScalarValue to double for floating-point consumers (epsilon/momentum).
+/// The widening is explicit and greppable here rather than hidden in the SDK.
+inline double toDouble(const ScalarValue& value)
+{
+    return std::visit([](auto v) { return static_cast<double>(v); }, value);
+}
+
 /// @brief A scalar tensor operand (epsilon/momentum) resolved either at plan-build
 /// (compile-time constant or runtime-with-default) or at execute (pure runtime
 /// user-supplied, i.e. is_runtime_pass_by_value() && value_type() == NONE).
+
 struct ScalarOperand
 {
     int64_t uid = 0;
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
     bool isRuntimeUserSupplied = false;
-    double bakedDefault = 0.0;
+    ScalarValue bakedDefault;
 };
 
 /// @brief Builds a ScalarOperand from the op-graph tensor at plan-build time.
@@ -67,22 +86,67 @@ inline ScalarOperand makeScalarOperand(
     {
         return ScalarOperand{uid, attr->data_type(), true, 0.0};
     }
-    return ScalarOperand{
-        uid,
-        attr->data_type(),
-        false,
-        hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(attr, paramName)};
+
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;
+    switch(attr->data_type())
+    {
+    case DataType::DOUBLE:
+        return ScalarOperand{uid,
+                             attr->data_type(),
+                             false,
+                             ScalarValue{extractValueFromTensorValue<double>(attr, paramName)}};
+    case DataType::FLOAT:
+        return ScalarOperand{uid,
+                             attr->data_type(),
+                             false,
+                             ScalarValue{extractValueFromTensorValue<float>(attr, paramName)}};
+    case DataType::HALF:
+        return ScalarOperand{uid,
+                             attr->data_type(),
+                             false,
+                             ScalarValue{extractValueFromTensorValue<hipdnn_data_sdk::types::half>(
+                                 attr, paramName)}};
+    case DataType::BFLOAT16:
+        return ScalarOperand{
+            uid,
+            attr->data_type(),
+            false,
+            ScalarValue{
+                extractValueFromTensorValue<hipdnn_data_sdk::types::bfloat16>(attr, paramName)}};
+    case DataType::INT32:
+        return ScalarOperand{uid,
+                             attr->data_type(),
+                             false,
+                             ScalarValue{extractValueFromTensorValue<int32_t>(attr, paramName)}};
+    case DataType::INT64:
+        return ScalarOperand{uid,
+                             attr->data_type(),
+                             false,
+                             ScalarValue{extractValueFromTensorValue<int64_t>(attr, paramName)}};
+    case DataType::BOOLEAN:
+        return ScalarOperand{uid,
+                             attr->data_type(),
+                             false,
+                             ScalarValue{extractValueFromTensorValue<bool>(attr, paramName)}};
+    case DataType::UNSET:
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                    "Scalar operand has UNSET data type");
+    default:
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                    "Scalar operand has unsupported data type");
+    }
 }
 
 namespace detail
 {
 
 template <typename T>
-double readHostScalar(const void* ptr)
+T readHostScalar(const void* ptr)
 {
     T value;
     std::memcpy(&value, ptr, sizeof(T));
-    return static_cast<double>(value);
+    return value;
 }
 
 } // namespace detail
@@ -91,9 +155,9 @@ double readHostScalar(const void* ptr)
 /// read the host scalar from the matching device_buffers slot (throws
 /// HIPDNN_PLUGIN_STATUS_INVALID_VALUE if absent); all other operands return the
 /// baked default and ignore any device_buffers slot for that uid.
-inline double resolveScalarOperand(const ScalarOperand& op,
-                                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                   uint32_t numDeviceBuffers)
+inline ScalarValue resolveScalarOperand(const ScalarOperand& op,
+                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                        uint32_t numDeviceBuffers)
 {
     if(!op.isRuntimeUserSupplied)
     {
@@ -108,19 +172,19 @@ inline double resolveScalarOperand(const ScalarOperand& op,
     switch(op.dataType)
     {
     case DataType::DOUBLE:
-        return detail::readHostScalar<double>(ptr);
+        return ScalarValue{detail::readHostScalar<double>(ptr)};
     case DataType::FLOAT:
-        return detail::readHostScalar<float>(ptr);
+        return ScalarValue{detail::readHostScalar<float>(ptr)};
     case DataType::HALF:
-        return detail::readHostScalar<hipdnn_data_sdk::types::half>(ptr);
+        return ScalarValue{detail::readHostScalar<hipdnn_data_sdk::types::half>(ptr)};
     case DataType::BFLOAT16:
-        return detail::readHostScalar<hipdnn_data_sdk::types::bfloat16>(ptr);
+        return ScalarValue{detail::readHostScalar<hipdnn_data_sdk::types::bfloat16>(ptr)};
     case DataType::INT32:
-        return detail::readHostScalar<int32_t>(ptr);
+        return ScalarValue{detail::readHostScalar<int32_t>(ptr)};
     case DataType::INT64:
-        return detail::readHostScalar<int64_t>(ptr);
+        return ScalarValue{detail::readHostScalar<int64_t>(ptr)};
     case DataType::BOOLEAN:
-        return detail::readHostScalar<bool>(ptr);
+        return ScalarValue{detail::readHostScalar<bool>(ptr)};
     case DataType::UNSET:
         throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                     "Scalar operand has UNSET data type");

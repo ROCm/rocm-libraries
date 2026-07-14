@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <variant>
+
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
@@ -61,7 +63,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandCompileTimeConstantBakesValue)
 
     EXPECT_EQ(op.uid, 1);
     EXPECT_FALSE(op.isRuntimeUserSupplied);
-    EXPECT_NEAR(op.bakedDefault, 1e-5, 1e-10);
+    EXPECT_NEAR(std::get<float>(op.bakedDefault), 1e-5f, 1e-7f);
 }
 
 TEST(TestRuntimePassByValue, MakeScalarOperandRuntimeWithDefaultBakesValue)
@@ -74,7 +76,7 @@ TEST(TestRuntimePassByValue, MakeScalarOperandRuntimeWithDefaultBakesValue)
 
     EXPECT_EQ(op.uid, 2);
     EXPECT_FALSE(op.isRuntimeUserSupplied);
-    EXPECT_NEAR(op.bakedDefault, 1e-3, 1e-10);
+    EXPECT_NEAR(std::get<float>(op.bakedDefault), 1e-3f, 1e-6f);
 }
 
 TEST(TestRuntimePassByValue, MakeScalarOperandPureRuntimeUserSuppliedDefersRead)
@@ -101,7 +103,7 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReturnsBakedDefaultIgnoringDevi
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, &wrongHostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_NEAR(resolved, 1e-5, 1e-10);
+    EXPECT_NEAR(std::get<double>(resolved), 1e-5, 1e-10);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostFloatForPureRuntimeUserSupplied)
@@ -112,7 +114,7 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostFloatForPureRuntimeUse
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{7, &hostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_NEAR(resolved, 5.0, 1e-6);
+    EXPECT_NEAR(std::get<float>(resolved), 5.0f, 1e-6f);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostDoubleForPureRuntimeUserSupplied)
@@ -123,7 +125,7 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostDoubleForPureRuntimeUs
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{8, &hostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_NEAR(resolved, 2.5, 1e-12);
+    EXPECT_NEAR(std::get<double>(resolved), 2.5, 1e-12);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostInt32ForPureRuntimeUserSupplied)
@@ -134,7 +136,7 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostInt32ForPureRuntimeUse
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{9, &hostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_EQ(resolved, 42.0);
+    EXPECT_EQ(std::get<int32_t>(resolved), 42);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsIfPureRuntimeUserSuppliedBufferMissing)
@@ -167,7 +169,8 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostHalfForPureRuntimeUser
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{12, &hostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_DOUBLE_EQ(resolved, static_cast<double>(hostValue));
+    EXPECT_DOUBLE_EQ(static_cast<double>(std::get<hipdnn_data_sdk::types::half>(resolved)),
+                     static_cast<double>(hostValue));
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostBfloat16ForPureRuntimeUserSupplied)
@@ -178,7 +181,8 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostBfloat16ForPureRuntime
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{13, &hostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_DOUBLE_EQ(resolved, static_cast<double>(hostValue));
+    EXPECT_DOUBLE_EQ(static_cast<double>(std::get<hipdnn_data_sdk::types::bfloat16>(resolved)),
+                     static_cast<double>(hostValue));
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostInt64ForPureRuntimeUserSupplied)
@@ -189,7 +193,20 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostInt64ForPureRuntimeUse
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{14, &hostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_EQ(resolved, static_cast<double>(hostValue));
+    EXPECT_EQ(std::get<int64_t>(resolved), hostValue);
+}
+
+TEST(TestRuntimePassByValue, ResolveScalarOperandPreservesLargeInt64)
+{
+    // 2^53 + 1: NOT exactly representable in double. Proves the SDK carries INT64
+    // without widening through a double intermediate (the reviewed bug).
+    const ScalarOperand op{20, DataType::INT64, true, 0.0};
+
+    int64_t hostValue = 9007199254740993LL;
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{20, &hostValue}};
+
+    auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
+    EXPECT_EQ(std::get<int64_t>(resolved), 9007199254740993LL);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostBooleanForPureRuntimeUserSupplied)
@@ -200,7 +217,7 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostBooleanForPureRuntimeU
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{15, &hostValue}};
 
     auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
-    EXPECT_EQ(resolved, 1.0);
+    EXPECT_EQ(std::get<bool>(resolved), true);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsOnUnsupportedDataType)

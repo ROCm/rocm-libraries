@@ -142,7 +142,8 @@ const MiopenTensor& BatchnormFwdTrainingParams::bias() const
 double BatchnormFwdTrainingParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                                 uint32_t numDeviceBuffers) const
 {
-    return miopen_utils::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
+    return miopen_utils::toDouble(
+        miopen_utils::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
@@ -204,7 +205,8 @@ double BatchnormFwdTrainingParams::momentumValue(const hipdnnPluginDeviceBuffer_
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "momentumValue() called but momentum was not set");
     }
-    return miopen_utils::resolveScalarOperand(*_momentum, deviceBuffers, numDeviceBuffers);
+    return miopen_utils::toDouble(
+        miopen_utils::resolveScalarOperand(*_momentum, deviceBuffers, numDeviceBuffers));
 }
 
 const MiopenTensor& BatchnormFwdTrainingParams::nextRunningMean() const

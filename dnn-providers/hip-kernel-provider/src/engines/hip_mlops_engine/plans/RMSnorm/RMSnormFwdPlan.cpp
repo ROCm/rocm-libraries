@@ -53,7 +53,7 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::
 double RMSnormFwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                       uint32_t numDeviceBuffers) const
 {
-    return resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
+    return toDouble(resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::bias() const
