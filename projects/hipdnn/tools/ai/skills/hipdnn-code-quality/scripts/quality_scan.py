@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Diff-scoped code-quality metrics for hipDNN reviews. In-harness only: no
-external analyzers (clang-tidy / lizard / cloc). Emits candidate signals for a
+"""Diff-scoped code-quality metrics for hipDNN reviews. In-harness only,
+text-based - defers to the project's clang-tidy config (see `.clang-tidy`,
+wired via `cmake/ClangTidy.cmake`) for anything an AST-based linter already
+does better: function size, identifier casing, brace style, pass-by-value
+params, and dozens of bugprone/modernize/performance checks. This script
+covers what clang-tidy structurally cannot: cross-file and whole-tree
+duplication, plus outlier file size. Emits candidate signals for a
 human/agent to triage - every signal is a lead, not a verdict.
 
 Usage:
@@ -11,17 +16,18 @@ Usage:
     quality_scan.py --repo <root> --base <ref> --json
 
 Design notes learned from running against the real tree:
-  * Long-function detection must be namespace-aware and Allman-brace-aware
-    (hipDNN opens `{` on its own line and wraps everything in `namespace {}`).
   * Duplication uses normalized N-line windows - no parser, so it survives the
     template/macro-heavy files that ast-grep's C++ grammar fails to parse.
   * Changed files are the "needles"; the whole tree is the duplication
     "haystack" so a copy of existing code is found even if the original is
     untouched by the diff.
-  * Naming is intentionally NOT auto-flagged: the frontend mirrors the cuDNN
-    snake_case API while the backend mandates camelCase. A repo-wide rule is
-    all false positives. Naming is reported per-file only as a convention-mix
-    hint, left for human judgement against the file's own dominant style.
+  * Long-function and naming detectors were removed from this script:
+    clang-tidy's `readability-function-size` and `readability-identifier-naming`
+    (both enabled, `WarningsAsErrors: "*"`) do this precisely via a real AST;
+    a text heuristic here was strictly weaker and, for naming, actively wrong
+    (the frontend intentionally mirrors cuDNN's snake_case API while the
+    backend mandates camelCase - a repo-wide regex flagged 588 false
+    positives in testing).
 """
 import argparse, os, re, subprocess, sys, json
 from collections import defaultdict
@@ -63,40 +69,6 @@ def read(path):
         return []
 
 
-# --- Long functions: namespace-aware, Allman-aware brace tracker -------------
-_KW = ("if", "for", "while", "switch", "else", "struct", "class", "namespace",
-       "enum", "union", "do", "catch", "template", "return", "case", "}")
-_SIG = re.compile(r"\)\s*(const\s*)?(noexcept\s*)?(override\s*)?(->[\w:<>,& ]+)?$")
-
-
-def long_funcs(path, thresh):
-    lines = read(path)
-    stack, out = [], []
-    for i, l in enumerate(lines):
-        s = l.strip()
-        opens, closes = l.count("{"), l.count("}")
-        if s == "{" or (opens and s.endswith("{")):
-            j = i - 1
-            while j >= 0 and not lines[j].strip():
-                j -= 1
-            prev = lines[j].strip() if j >= 0 else ""
-            inside = any(k == "func" for _, k in stack)
-            is_func = (not inside and bool(_SIG.search(prev))
-                       and not any(prev.startswith(k) for k in _KW)
-                       and "(" in prev + s)
-            for n in range(opens):
-                stack.append((i, "func" if (is_func and n == 0) else "other"))
-        elif opens:
-            for _ in range(opens):
-                stack.append((i, "other"))
-        for _ in range(closes):
-            if stack:
-                si, kind = stack.pop()
-                if kind == "func" and (i - si + 1) >= thresh:
-                    out.append((i - si + 1, si + 1))
-    return out
-
-
 # --- Duplication: normalized N-line windows across the tree ------------------
 def norm(l):
     s = l.strip()
@@ -127,7 +99,6 @@ def main():
     ap.add_argument("--repo", required=True)
     ap.add_argument("--base")
     ap.add_argument("--files", nargs="*")
-    ap.add_argument("--fn-threshold", type=int, default=120)
     ap.add_argument("--file-threshold", type=int, default=800)
     ap.add_argument("--dup-window", type=int, default=6)
     ap.add_argument("--json", action="store_true")
@@ -138,21 +109,14 @@ def main():
     changed = [os.path.join(repo, p) for p in rels if is_src(p)]
     changed = [p for p in changed if os.path.exists(p)]
     report = {"changed_src": [os.path.relpath(p, repo) for p in changed],
-              "size": [], "long_functions": [], "duplication": [],
-              "naming_mix": []}
+              "size": [], "duplication": []}
 
-    # size + long functions + naming-mix on changed files only
+    # size on changed files only; function-size and naming are clang-tidy's job
     for p in changed:
         rel = os.path.relpath(p, repo)
         lines = read(p)
         if len(lines) >= a.file_threshold:
             report["size"].append({"file": rel, "loc": len(lines)})
-        for n, ln in long_funcs(p, a.fn_threshold):
-            report["long_functions"].append({"file": rel, "line": ln, "loc": n})
-        camel = len(re.findall(r"\b[a-z]+[A-Z]\w*\s*\(", "\n".join(lines)))
-        snake = len(re.findall(r"\b[a-z]+_[a-z]\w*\s*\(", "\n".join(lines)))
-        if camel and snake and 0.2 < snake / (camel + snake) < 0.8:
-            report["naming_mix"].append({"file": rel, "camel": camel, "snake": snake})
 
     # duplication: changed files' windows looked up in whole-tree index.
     # Collapse consecutive matching windows into a single region so a 40-line
@@ -186,7 +150,6 @@ def main():
                 "occurrences": occ})
             i = j + 1
 
-    report["long_functions"].sort(key=lambda d: -d["loc"])
     report["duplication"].sort(key=lambda d: (-d["span"], -d["occurrences"]))
 
     if a.json:
@@ -198,23 +161,12 @@ def main():
         for d in report["size"]:
             print(f"  {d['file']}  {d['loc']} LOC")
         print()
-    if report["long_functions"]:
-        print(f"## Long functions (>= {a.fn_threshold} LOC)")
-        for d in report["long_functions"][:20]:
-            print(f"  {d['loc']:4d}  {d['file']}:{d['line']}")
-        print()
     if report["duplication"]:
         print(f"## Duplicated regions (>= {a.dup_window} contiguous lines, seen elsewhere)")
         for d in report["duplication"][:20]:
             print(f"  {d['occurrences']}x  {d['file']}:{d['line']} (~{d['span']} lines)  also {d['also_in']}")
         print()
-    if report["naming_mix"]:
-        print("## Mixed naming (judge vs file's own dominant style; frontend is "
-              "intentionally snake_case)")
-        for d in report["naming_mix"]:
-            print(f"  {d['file']}  camel={d['camel']} snake={d['snake']}")
-        print()
-    total = sum(len(report[k]) for k in ("size", "long_functions", "duplication", "naming_mix"))
+    total = sum(len(report[k]) for k in ("size", "duplication"))
     if total == 0:
         print("No metric signals on changed files.")
 
