@@ -86,10 +86,11 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
 }
 
 /// Returns true if any tensor in the finalized serialized graph is a runtime
-/// pass-by-value scalar. Missing/invalid graph buffer means false.
-bool readIsRuntimePassByValueEnabled(const GraphDescriptor& graphDesc)
+/// pass-by-value scalar. Missing/invalid graph buffer means false. Takes the
+/// already-serialized graph data so callers that already hold it (e.g.
+/// getApplicableEngineIds) don't re-invoke GraphDescriptor::getSerializedGraph().
+bool readIsRuntimePassByValueEnabled(const hipdnnPluginConstData_t& serializedGraphData)
 {
-    auto serializedGraphData = graphDesc.getSerializedGraph();
     if(serializedGraphData.ptr == nullptr || serializedGraphData.size == 0)
     {
         return false;
@@ -379,7 +380,7 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const bool isRuntimePBV = readIsRuntimePassByValueEnabled(*graphDesc);
+    const bool isRuntimePBV = readIsRuntimePassByValueEnabled(serializedGraphData);
     const auto& requiredVersion
         = computeMinimumPluginApiVersion(isOverrideShapeEnabled, isRuntimePBV);
 

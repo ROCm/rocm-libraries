@@ -543,7 +543,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnFinalize)
 // VALUE_EXT wire encoding (HIPDNN_TYPE_CHAR, sizeof(T) count, raw bytes).
 // set_value() resets dims/strides to {1}, so scalar dimensions are expected.
 template <typename T>
-class TestDescriptorHelpersPassByValue : public TestDescriptorHelpers
+class DescriptorHelpersPassByValueTyped : public TestDescriptorHelpers
 {
 };
 
@@ -556,9 +556,9 @@ using PassByValueScalarTypes = ::testing::Types<float,
                                                 int64_t,
                                                 bool>;
 // Empty third argument required for C++17 compatibility with TYPED_TEST_SUITE macro
-TYPED_TEST_SUITE(TestDescriptorHelpersPassByValue, PassByValueScalarTypes, );
+TYPED_TEST_SUITE(DescriptorHelpersPassByValueTyped, PassByValueScalarTypes, );
 
-TYPED_TEST(TestDescriptorHelpersPassByValue, EnsureTensorDescSetsPassByValue)
+TYPED_TEST(DescriptorHelpersPassByValueTyped, EnsureTensorDescSetsPassByValue)
 {
     const TypeParam tensorValue = passByValueTestScalar<TypeParam>();
 
