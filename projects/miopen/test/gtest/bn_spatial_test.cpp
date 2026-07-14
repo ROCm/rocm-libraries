@@ -1552,30 +1552,31 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
     auto savedInvVar_dev = handle.Write(saveInvVar.data);
 
     miopen::ActivationDescriptor actDesc(miopenActivationPASTHRU, 0.0f, 0.0f, 0.0f);
-    miopen::BatchNormBackward(handle,
-                              miopenBNSpatial,
-                              &alpha,
-                              &beta,
-                              &alpha,
-                              &beta,
-                              out.desc,
-                              xin_dev.get(),
-                              init_grad.desc,
-                              dyin_dev.get(),
-                              dx_out.desc,
-                              dx_out_dev.get(),
-                              scale.desc,
-                              dshift.desc,
-                              dshift.desc,
-                              dshift.desc,
-                              scale_dev.get(),
-                              nullptr,
-                              dscale_dev.get(),
-                              dshift_dev.get(),
-                              epsilon,
-                              savedMean_dev.get(),
-                              savedInvVar_dev.get(),
-                              actDesc);
+    miopen::BatchNormBackward(
+        handle,
+        miopenBNSpatial,
+        &alpha,
+        &beta,
+        &alpha,
+        &beta,
+        input.desc,
+        in_dev.get(), // PyTorch takes the same mem address as the input, not the normalized output
+        init_grad.desc,
+        dyin_dev.get(),
+        dx_out.desc,
+        dx_out_dev.get(),
+        scale.desc,
+        dshift.desc,
+        dshift.desc,
+        dshift.desc,
+        scale_dev.get(),
+        nullptr,
+        dscale_dev.get(),
+        dshift_dev.get(),
+        epsilon,
+        savedMean_dev.get(),
+        savedInvVar_dev.get(),
+        actDesc);
 
     dx_out.data = handle.Read<float>(dx_out_dev, dx_out.data.size());
     dscale.data = handle.Read<float>(dscale_dev, dscale.data.size());
@@ -1644,9 +1645,9 @@ public:
 
         /*
          * Notes on the choice of value for mu:
-         * Running experiments on values to use for the test showed 
-         * that FP32 can handle an acceptable precision as long as 
-         * the mantissa of the mean value is within 7 digits. 
+         * Running experiments on values to use for the test showed
+         * that FP32 can handle an acceptable precision as long as
+         * the mantissa of the mean value is within 7 digits.
          * This means that the moment the mean's exponent exceeds 7,
          * the variance quickly starts to diverge. Yet,
          * Yet, this test case already fails when Welford's algorithm
@@ -1761,7 +1762,7 @@ public:
         {
             for(std::size_t cidx = 0; cidx < rs_channels; cidx++)
             {
-                double invVar      = (1.0 / (sqrt(cpuVar(nidx, cidx, 0, 0) + epsilon) ));
+                double invVar      = (1.0 / (sqrt(cpuVar(nidx, cidx, 0, 0) + epsilon)));
                 bool curVarFitting = (abs(saveInvVar(nidx, cidx, 0, 0) - invVar) < 0.001);
                 variance_fitting &= curVarFitting;
                 if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
