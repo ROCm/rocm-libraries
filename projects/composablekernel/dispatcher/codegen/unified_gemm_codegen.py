@@ -212,6 +212,10 @@ class GemmVariant(Enum):
     # equivalence" should be read with that scope. Closing the gap means feeding
     # the missing TE tiles into the tile list (the codegen handles them); the
     # divergent DISP-only tiles are configs TE does not enumerate at all.
+    # NOTE: this limitation is inherent only to driving the codegen standalone.
+    # When the bridge is implemented on top of this codegen, the tile list is
+    # supplied by Tile-Engine directly, so the emitted Stream-K surface matches
+    # the full Old-TE tile space by construction and the gap closes.
     STREAM_K = "stream_k"
 
 
