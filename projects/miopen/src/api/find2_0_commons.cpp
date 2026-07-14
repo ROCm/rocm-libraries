@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <miopen/miopen.h>
+#include <miopen/miopen_impl.h>
 
 #include <miopen/common.hpp>
 #include <miopen/errors.hpp>
@@ -35,23 +35,24 @@ static miopenStatus_t MakeProblem(miopenProblem_t* problem,
 }
 
 extern "C" {
-miopenStatus_t miopenCreateConvProblem(miopenProblem_t* problem,
-                                       miopenConvolutionDescriptor_t operatorDesc,
-                                       miopenProblemDirection_t direction)
+miopenStatus_t miopenCreateConvProblem_impl(miopenProblem_t* problem,
+                                            miopenConvolutionDescriptor_t operatorDesc,
+                                            miopenProblemDirection_t direction)
 {
     MIOPEN_LOG_FUNCTION(problem, operatorDesc, direction);
     return MakeProblem(problem, operatorDesc, direction);
 }
 
-miopenStatus_t miopenCreateActivationProblem(miopenProblem_t* problem,
-                                             miopenActivationDescriptor_t operatorDesc,
-                                             miopenProblemDirection_t direction)
+miopenStatus_t miopenCreateActivationProblem_impl(miopenProblem_t* problem,
+                                                  miopenActivationDescriptor_t operatorDesc,
+                                                  miopenProblemDirection_t direction)
 {
     MIOPEN_LOG_FUNCTION(problem, operatorDesc, direction);
     return MakeProblem(problem, operatorDesc, direction);
 }
 
-miopenStatus_t miopenCreateBiasProblem(miopenProblem_t* problem, miopenProblemDirection_t direction)
+miopenStatus_t miopenCreateBiasProblem_impl(miopenProblem_t* problem,
+                                            miopenProblemDirection_t direction)
 {
     MIOPEN_LOG_FUNCTION(problem, direction);
 
@@ -68,26 +69,26 @@ miopenStatus_t miopenCreateBiasProblem(miopenProblem_t* problem, miopenProblemDi
     });
 }
 
-miopenStatus_t miopenCreateMhaProblem(miopenProblem_t* problem,
-                                      miopenMhaDescriptor_t operatorDesc,
-                                      miopenProblemDirection_t direction)
+miopenStatus_t miopenCreateMhaProblem_impl(miopenProblem_t* problem,
+                                           miopenMhaDescriptor_t operatorDesc,
+                                           miopenProblemDirection_t direction)
 {
     MIOPEN_LOG_FUNCTION(problem, direction);
     return MakeProblem(problem, operatorDesc, direction);
 }
 
-miopenStatus_t miopenCreateSoftmaxProblem(miopenProblem_t* problem,
-                                          miopenSoftmaxDescriptor_t operatorDesc,
-                                          miopenProblemDirection_t direction)
+miopenStatus_t miopenCreateSoftmaxProblem_impl(miopenProblem_t* problem,
+                                               miopenSoftmaxDescriptor_t operatorDesc,
+                                               miopenProblemDirection_t direction)
 {
     MIOPEN_LOG_FUNCTION(problem, direction);
     return MakeProblem(problem, operatorDesc, direction);
 }
 
-miopenStatus_t miopenCreateBatchnormProblem(miopenProblem_t* problem,
-                                            miopenBatchNormMode_t mode,
-                                            bool runningMeanVariance,
-                                            miopenProblemDirection_t direction)
+miopenStatus_t miopenCreateBatchnormProblem_impl(miopenProblem_t* problem,
+                                                 miopenBatchNormMode_t mode,
+                                                 bool runningMeanVariance,
+                                                 miopenProblemDirection_t direction)
 {
     MIOPEN_LOG_FUNCTION(problem, mode, direction);
 
@@ -104,7 +105,7 @@ miopenStatus_t miopenCreateBatchnormProblem(miopenProblem_t* problem,
     });
 }
 
-miopenStatus_t miopenFuseProblems(miopenProblem_t problem1, miopenProblem_t problem2)
+miopenStatus_t miopenFuseProblems_impl(miopenProblem_t problem1, miopenProblem_t problem2)
 {
     MIOPEN_LOG_FUNCTION(problem1, problem2);
     return miopen::try_([&] {
@@ -140,15 +141,15 @@ miopenStatus_t miopenFuseProblems(miopenProblem_t problem1, miopenProblem_t prob
     });
 }
 
-miopenStatus_t miopenDestroyProblem(miopenProblem_t problem)
+miopenStatus_t miopenDestroyProblem_impl(miopenProblem_t problem)
 {
     MIOPEN_LOG_FUNCTION(problem);
     return miopen::try_([&] { miopen_destroy_object(problem); });
 }
 
-miopenStatus_t miopenSetProblemTensorDescriptor(miopenProblem_t problem,
-                                                miopenTensorArgumentId_t id,
-                                                const miopenTensorDescriptor_t descriptor)
+miopenStatus_t miopenSetProblemTensorDescriptor_impl(miopenProblem_t problem,
+                                                     miopenTensorArgumentId_t id,
+                                                     const miopenTensorDescriptor_t descriptor)
 {
     MIOPEN_LOG_FUNCTION(problem, id, descriptor);
 
@@ -169,7 +170,7 @@ miopenStatus_t miopenSetProblemTensorDescriptor(miopenProblem_t problem,
     });
 }
 
-miopenStatus_t miopenCreateFindOptions(miopenFindOptions_t* options)
+miopenStatus_t miopenCreateFindOptions_impl(miopenFindOptions_t* options)
 {
     MIOPEN_LOG_FUNCTION(options);
     return miopen::try_([&] {
@@ -178,13 +179,13 @@ miopenStatus_t miopenCreateFindOptions(miopenFindOptions_t* options)
     });
 }
 
-miopenStatus_t miopenDestroyFindOptions(miopenFindOptions_t options)
+miopenStatus_t miopenDestroyFindOptions_impl(miopenFindOptions_t options)
 {
     MIOPEN_LOG_FUNCTION(options);
     return miopen::try_([&] { miopen_destroy_object(options); });
 }
 
-miopenStatus_t miopenSetFindOptionTuning(miopenFindOptions_t options, int value)
+miopenStatus_t miopenSetFindOptionTuning_impl(miopenFindOptions_t options, int value)
 {
     MIOPEN_LOG_FUNCTION(options, value);
 
@@ -194,8 +195,8 @@ miopenStatus_t miopenSetFindOptionTuning(miopenFindOptions_t options, int value)
     });
 }
 
-miopenStatus_t miopenSetFindOptionResultsOrder(miopenFindOptions_t options,
-                                               miopenFindResultsOrder_t value)
+miopenStatus_t miopenSetFindOptionResultsOrder_impl(miopenFindOptions_t options,
+                                                    miopenFindResultsOrder_t value)
 {
     MIOPEN_LOG_FUNCTION(options, value);
 
@@ -205,7 +206,7 @@ miopenStatus_t miopenSetFindOptionResultsOrder(miopenFindOptions_t options,
     });
 }
 
-miopenStatus_t miopenSetFindOptionWorkspaceLimit(miopenFindOptions_t options, size_t value)
+miopenStatus_t miopenSetFindOptionWorkspaceLimit_impl(miopenFindOptions_t options, size_t value)
 {
     MIOPEN_LOG_FUNCTION(options, value);
 
@@ -215,8 +216,9 @@ miopenStatus_t miopenSetFindOptionWorkspaceLimit(miopenFindOptions_t options, si
     });
 }
 
-miopenStatus_t
-miopenSetFindOptionPreallocatedWorkspace(miopenFindOptions_t options, void* buffer, size_t size)
+miopenStatus_t miopenSetFindOptionPreallocatedWorkspace_impl(miopenFindOptions_t options,
+                                                             void* buffer,
+                                                             size_t size)
 {
     MIOPEN_LOG_FUNCTION(options, buffer, size);
 
@@ -226,9 +228,9 @@ miopenSetFindOptionPreallocatedWorkspace(miopenFindOptions_t options, void* buff
     });
 }
 
-miopenStatus_t miopenSetFindOptionPreallocatedTensor(miopenFindOptions_t options,
-                                                     miopenTensorArgumentId_t id,
-                                                     void* buffer)
+miopenStatus_t miopenSetFindOptionPreallocatedTensor_impl(miopenFindOptions_t options,
+                                                          miopenTensorArgumentId_t id,
+                                                          void* buffer)
 {
     MIOPEN_LOG_FUNCTION(options, id, buffer);
 
@@ -238,7 +240,7 @@ miopenStatus_t miopenSetFindOptionPreallocatedTensor(miopenFindOptions_t options
     });
 }
 
-miopenStatus_t miopenSetFindOptionAttachBinaries(miopenFindOptions_t options, unsigned attach)
+miopenStatus_t miopenSetFindOptionAttachBinaries_impl(miopenFindOptions_t options, unsigned attach)
 {
     MIOPEN_LOG_FUNCTION(options, attach);
 
@@ -248,12 +250,12 @@ miopenStatus_t miopenSetFindOptionAttachBinaries(miopenFindOptions_t options, un
     });
 }
 
-miopenStatus_t miopenFindSolutions(miopenHandle_t handle,
-                                   miopenProblem_t problem,
-                                   miopenFindOptions_t options,
-                                   miopenSolution_t* solutions,
-                                   size_t* numSolutions,
-                                   size_t maxSolutions)
+miopenStatus_t miopenFindSolutions_impl(miopenHandle_t handle,
+                                        miopenProblem_t problem,
+                                        miopenFindOptions_t options,
+                                        miopenSolution_t* solutions,
+                                        size_t* numSolutions,
+                                        size_t maxSolutions)
 {
     MIOPEN_LOG_FUNCTION(handle, problem, options, solutions, numSolutions, maxSolutions);
 
@@ -371,12 +373,12 @@ inline std::ostream& operator<<(std::ostream& stream, const miopenTensorArgument
     return stream;
 }
 
-miopenStatus_t miopenRunSolution(miopenHandle_t handle,
-                                 miopenSolution_t solution,
-                                 size_t nInputs,
-                                 const miopenTensorArgument_t* tensors,
-                                 void* workspace,
-                                 size_t workspaceSize)
+miopenStatus_t miopenRunSolution_impl(miopenHandle_t handle,
+                                      miopenSolution_t solution,
+                                      size_t nInputs,
+                                      const miopenTensorArgument_t* tensors,
+                                      void* workspace,
+                                      size_t workspaceSize)
 {
     const auto tensors_vector = std::vector<miopenTensorArgument_t>{tensors, tensors + nInputs};
     MIOPEN_LOG_FUNCTION(handle, solution, nInputs, tensors_vector, workspace, workspaceSize);
@@ -401,13 +403,13 @@ miopenStatus_t miopenRunSolution(miopenHandle_t handle,
     });
 }
 
-miopenStatus_t miopenDestroySolution(miopenSolution_t solution)
+miopenStatus_t miopenDestroySolution_impl(miopenSolution_t solution)
 {
     MIOPEN_LOG_FUNCTION(solution);
     return miopen::try_([&] { miopen_destroy_object(solution); });
 }
 
-miopenStatus_t miopenLoadSolution(miopenSolution_t* solution, const char* data, size_t size)
+miopenStatus_t miopenLoadSolution_impl(miopenSolution_t* solution, const char* data, size_t size)
 {
     MIOPEN_LOG_FUNCTION(solution, data, size);
 
@@ -421,7 +423,7 @@ miopenStatus_t miopenLoadSolution(miopenSolution_t* solution, const char* data, 
     });
 }
 
-miopenStatus_t miopenSaveSolution(miopenSolution_t solution, char* data)
+miopenStatus_t miopenSaveSolution_impl(miopenSolution_t solution, char* data)
 {
     MIOPEN_LOG_FUNCTION(solution, data);
 
@@ -445,7 +447,7 @@ miopenStatus_t miopenSaveSolution(miopenSolution_t solution, char* data)
     });
 }
 
-miopenStatus_t miopenGetSolutionSize(miopenSolution_t solution, size_t* size)
+miopenStatus_t miopenGetSolutionSize_impl(miopenSolution_t solution, size_t* size)
 {
     MIOPEN_LOG_FUNCTION(solution);
 
@@ -465,7 +467,7 @@ miopenStatus_t miopenGetSolutionSize(miopenSolution_t solution, size_t* size)
     });
 }
 
-miopenStatus_t miopenGetSolutionWorkspaceSize(miopenSolution_t solution, size_t* workspaceSize)
+miopenStatus_t miopenGetSolutionWorkspaceSize_impl(miopenSolution_t solution, size_t* workspaceSize)
 {
     MIOPEN_LOG_FUNCTION(solution);
 
@@ -475,7 +477,7 @@ miopenStatus_t miopenGetSolutionWorkspaceSize(miopenSolution_t solution, size_t*
     });
 }
 
-miopenStatus_t miopenGetSolutionTime(miopenSolution_t solution, float* time)
+miopenStatus_t miopenGetSolutionTime_impl(miopenSolution_t solution, float* time)
 {
     MIOPEN_LOG_FUNCTION(solution);
 
@@ -485,7 +487,7 @@ miopenStatus_t miopenGetSolutionTime(miopenSolution_t solution, float* time)
     });
 }
 
-miopenStatus_t miopenGetSolutionSolverId(miopenSolution_t solution, uint64_t* solverId)
+miopenStatus_t miopenGetSolutionSolverId_impl(miopenSolution_t solution, uint64_t* solverId)
 {
     MIOPEN_LOG_FUNCTION(solution);
 
@@ -495,7 +497,7 @@ miopenStatus_t miopenGetSolutionSolverId(miopenSolution_t solution, uint64_t* so
     });
 }
 
-miopenStatus_t miopenGetSolverIdConvAlgorithm(uint64_t solverId, miopenConvAlgorithm_t* result)
+miopenStatus_t miopenGetSolverIdConvAlgorithm_impl(uint64_t solverId, miopenConvAlgorithm_t* result)
 {
     MIOPEN_LOG_FUNCTION(solverId);
 

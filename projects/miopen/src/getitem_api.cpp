@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/getitem.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -117,10 +118,11 @@ static void LogCmdGetitem(const miopenTensorDescriptor_t dyDesc,
     }
 }
 
-extern "C" miopenStatus_t miopenGetGetitemWorkspaceSize(miopenHandle_t handle,
-                                                        uint32_t indexCount,
-                                                        const miopenTensorDescriptor_t* indexDescs,
-                                                        size_t* sizeInBytes)
+extern "C" miopenStatus_t
+miopenGetGetitemWorkspaceSize_impl(miopenHandle_t handle,
+                                   uint32_t indexCount,
+                                   const miopenTensorDescriptor_t* indexDescs,
+                                   size_t* sizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(handle, indexCount, indexDescs);
 
@@ -135,23 +137,23 @@ extern "C" miopenStatus_t miopenGetGetitemWorkspaceSize(miopenHandle_t handle,
     });
 };
 
-extern "C" miopenStatus_t miopenGetitemBackward(miopenHandle_t handle,
-                                                void* workspace,
-                                                size_t workspaceSizeInBytes,
-                                                const miopenTensorDescriptor_t dyDesc,
-                                                const void* dy,
-                                                uint32_t indexCount,
-                                                const miopenTensorDescriptor_t* indexDescs,
-                                                const void* const* indexs,
-                                                const miopenTensorDescriptor_t dxDesc,
-                                                void* dx,
-                                                const miopenTensorDescriptor_t errorDesc,
-                                                void* error,
-                                                uint32_t dimCount,
-                                                const int32_t* dims,
-                                                uint32_t sliceCount,
-                                                const int32_t* slices,
-                                                uint32_t offset)
+extern "C" miopenStatus_t miopenGetitemBackward_impl(miopenHandle_t handle,
+                                                     void* workspace,
+                                                     size_t workspaceSizeInBytes,
+                                                     const miopenTensorDescriptor_t dyDesc,
+                                                     const void* dy,
+                                                     uint32_t indexCount,
+                                                     const miopenTensorDescriptor_t* indexDescs,
+                                                     const void* const* indexs,
+                                                     const miopenTensorDescriptor_t dxDesc,
+                                                     void* dx,
+                                                     const miopenTensorDescriptor_t errorDesc,
+                                                     void* error,
+                                                     uint32_t dimCount,
+                                                     const int32_t* dims,
+                                                     uint32_t sliceCount,
+                                                     const int32_t* slices,
+                                                     uint32_t offset)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         workspace,

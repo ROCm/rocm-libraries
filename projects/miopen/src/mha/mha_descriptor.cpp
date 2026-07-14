@@ -24,13 +24,14 @@
  *
  *******************************************************************************/
 #include <miopen/mha/mha_descriptor.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/logger.hpp>
 
 #include <nlohmann/json.hpp>
 
 namespace miopen {
 
-extern "C" miopenStatus_t miopenCreateMhaDescriptor(miopenMhaDescriptor_t* mhaDesc)
+extern "C" miopenStatus_t miopenCreateMhaDescriptor_impl(miopenMhaDescriptor_t* mhaDesc)
 {
     MIOPEN_LOG_FUNCTION(mhaDesc);
     return miopen::try_([&] {
@@ -39,13 +40,13 @@ extern "C" miopenStatus_t miopenCreateMhaDescriptor(miopenMhaDescriptor_t* mhaDe
     });
 }
 
-extern "C" miopenStatus_t miopenSetMhaDescriptor(miopenMhaDescriptor_t mhaDesc, float scale)
+extern "C" miopenStatus_t miopenSetMhaDescriptor_impl(miopenMhaDescriptor_t mhaDesc, float scale)
 {
     MIOPEN_LOG_FUNCTION(mhaDesc, scale);
     return miopen::try_([&] { miopen::deref(mhaDesc).SetParams(scale); });
 }
 
-extern "C" miopenStatus_t miopenGetMhaDescriptor(miopenMhaDescriptor_t mhaDesc, float* scale)
+extern "C" miopenStatus_t miopenGetMhaDescriptor_impl(miopenMhaDescriptor_t mhaDesc, float* scale)
 {
     MIOPEN_LOG_FUNCTION(mhaDesc);
     return miopen::try_([&] { *scale = miopen::deref(mhaDesc).GetScale(); });

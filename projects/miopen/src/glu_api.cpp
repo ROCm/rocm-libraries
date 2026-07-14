@@ -25,18 +25,19 @@
  *******************************************************************************/
 
 #include <cstdint>
+#include <miopen/miopen_impl.h>
 #include <miopen/glu.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/tensor_ops.hpp>
 
-extern "C" miopenStatus_t miopenGLUForward(miopenHandle_t handle,
-                                           const miopenTensorDescriptor_t inputDesc,
-                                           const void* input,
-                                           const miopenTensorDescriptor_t outputDesc,
-                                           void* output,
-                                           const uint32_t dim)
+extern "C" miopenStatus_t miopenGLUForward_impl(miopenHandle_t handle,
+                                                const miopenTensorDescriptor_t inputDesc,
+                                                const void* input,
+                                                const miopenTensorDescriptor_t outputDesc,
+                                                void* output,
+                                                const uint32_t dim)
 {
     MIOPEN_LOG_FUNCTION(handle, inputDesc, input, outputDesc, output, dim);
 
@@ -50,14 +51,14 @@ extern "C" miopenStatus_t miopenGLUForward(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenGLUBackward(miopenHandle_t handle,
-                                            const miopenTensorDescriptor_t inputDesc,
-                                            const void* input,
-                                            const miopenTensorDescriptor_t outputGradDesc,
-                                            const void* outputGrad,
-                                            const miopenTensorDescriptor_t inputGradDesc,
-                                            void* inputGrad,
-                                            const uint32_t dim)
+extern "C" miopenStatus_t miopenGLUBackward_impl(miopenHandle_t handle,
+                                                 const miopenTensorDescriptor_t inputDesc,
+                                                 const void* input,
+                                                 const miopenTensorDescriptor_t outputGradDesc,
+                                                 const void* outputGrad,
+                                                 const miopenTensorDescriptor_t inputGradDesc,
+                                                 void* inputGrad,
+                                                 const uint32_t dim)
 {
     MIOPEN_LOG_FUNCTION(
         handle, inputDesc, input, outputGradDesc, outputGrad, inputGradDesc, inputGrad, dim);
