@@ -58,7 +58,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_generator,
                                generator_prng_offset_tests,
                                threefry2x64_20_generator_prng_offset_tests_types);
 
-#ifdef CODE_COVERAGE_ENABLED
+#ifdef ROCRAND_ENABLE_COVERAGE
 #include "test_rocrand_host_prng.hpp"
 
 using rocrand_impl::host::threefry2x64_20_generator_host;
@@ -85,7 +85,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_host_generator,
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_host_generator,
                                generator_prng_offset_host_tests,
                                threefry2x64_20_generator_prng_offset_host_tests_types);
-#endif //CODE_COVERAGE_ENABLED
+#endif //ROCRAND_ENABLE_COVERAGE
 // threefry2x64_20-specific generator API tests
 INSTANTIATE_TYPED_TEST_SUITE_P(threefry2x64_20_generator,
                                threefryNx64_20_generator_prng_tests,

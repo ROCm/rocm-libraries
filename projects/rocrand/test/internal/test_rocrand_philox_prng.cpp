@@ -59,7 +59,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_generator,
 INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_generator,
                                generator_prng_offset_tests,
                                philox_generator_prng_offset_tests_types);
-#ifdef CODE_COVERAGE_ENABLED
+#ifdef ROCRAND_ENABLE_COVERAGE
 #include "test_rocrand_host_prng.hpp"
 
 using rocrand_impl::host::philox4x32_10_generator_host;
@@ -86,7 +86,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_host_generator,
 INSTANTIATE_TYPED_TEST_SUITE_P(philox4x32_10_host_generator,
                                generator_prng_offset_host_tests,
                                philox4x32_10_generator_prng_offset_host_tests_types);
-#endif //CODE_COVERAGE_ENABLED
+#endif //ROCRAND_ENABLE_COVERAGE
 
 // Engine API tests
 class philox4x32_10_engine_type_test : public philox4x32_10_generator::engine_type
