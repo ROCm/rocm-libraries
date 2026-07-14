@@ -78,6 +78,39 @@ TEST(LibcxxIteratorTests, TestLibcxxCountingIterator)
   }
 }
 
+TEST(LibcxxIteratorTests, TestLibcxxPermutationIterator)
+{
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::device_vector<int> off{5, 2, 7, 0};
+    thrust::device_vector<int> res{-1, -1, -1, -1, -1};
+    thrust::copy(_THRUST_LIBCXX::permutation_iterator{vec.begin(), off.begin()},
+                 _THRUST_LIBCXX::permutation_iterator{vec.begin(), off.end()},
+                 res.begin());
+    ASSERT_TRUE(res == thrust::device_vector<int>{6, 3, 8, 1, -1});
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::host_vector<int> off{5, 2, 7, 0};
+    thrust::host_vector<int> res{-1, -1, -1, -1, -1};
+    thrust::copy(_THRUST_LIBCXX::permutation_iterator{vec.begin(), off.begin()},
+                 _THRUST_LIBCXX::permutation_iterator{vec.begin(), off.end()},
+                 res.begin());
+    ASSERT_TRUE(res == thrust::host_vector<int>{6, 3, 8, 1, -1});
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    std::vector<int> off{5, 2, 7, 0};
+    std::vector<int> res{-1, -1, -1, -1, -1};
+    thrust::copy(_THRUST_LIBCXX::permutation_iterator{vec.begin(), off.begin()},
+                 _THRUST_LIBCXX::permutation_iterator{vec.begin(), off.end()},
+                 res.begin());
+    ASSERT_TRUE(res == std::vector<int>{6, 3, 8, 1, -1});
+  }
+}
+
 TEST(LibcxxIteratorTests, TestLibcxxStridedIterator)
 {
   auto discard = _THRUST_LIBCXX::discard_iterator{};
