@@ -38,13 +38,16 @@ filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/14"]
 atol = 1.19
 rtol = 0.2
 
-# Case 5 recurred in CI exceeding the 1.328 threshold above, so its tail is
-# heavier than the 100-pass sweep sampled. atol raised to 1.6 (threshold
-# ~1.738 at ref=0.691406) for this case only.
+# Case 5 recurred in CI exceeding the 1.328 threshold above. A ~1300-run sweep
+# on gfx942 showed the excursion is multi-element (worst channels DW[0,0,0,0,0]
+# ref=1.39 maxdiff=1.52, DW[0,14,...] ref=-2.56 maxdiff=1.58, DW[0,8,...]
+# ref=-4.94 maxdiff=2.00) and that atol=1.6 still failed ~0.2%. Cover the tail
+# via rtol instead: atol reverted to 1.19, rtol raised to 0.3 (threshold
+# 1.19 + 0.3*|ref|) so the loosening scales with each channel's magnitude.
 [[tolerance_overrides]]
 filters = ["Smoke/IntegrationGpuConvWrw3dBfp16.Correctness/5"]
-atol = 1.6
-rtol = 0.2
+atol = 1.19
+rtol = 0.3
 
 # -- Test Skips --
 # Skip tests on specific architectures (or globally if 'archs' is omitted).
