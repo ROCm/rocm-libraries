@@ -88,12 +88,11 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
         }
 
         // --- Step 4: set device, load HSACO, verify, unload ---
-        // TODO(kpack-fastfollow): TEMPORARY smoke-test wiring. This whole
-        // set-device + hipModuleLoadData + unload block exists only to prove the
-        // full kpack -> hipModuleLoadData -> hipModuleGetFunction path works
-        // right now; nothing is launched or retained. Remove once hipModuleLoad
-        // is deferred to plan construction (see loadForDevice() header) and the
-        // deviceId parameter is dropped (module/device binding leaves AotCatalog).
+        // TODO(AICK-1484): temporary smoke-test wiring. This set-device +
+        // hipModuleLoadData + unload block only proves the
+        // kpack -> hipModuleLoadData -> hipModuleGetFunction path works today;
+        // nothing is launched or retained. It moves to plan construction (and
+        // the deviceId parameter goes away) under AICK-1484 -- see AotCatalog.hpp.
         // Save and restore the previously active HIP device.
         int prevDevice = 0;
         const bool deviceSaved = (hipGetDevice(&prevDevice) == hipSuccess);
@@ -129,17 +128,15 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
             return AotCatalog{};
         }
 
-        // Unload immediately: this is a skeleton probe, not production use.
+        // Unload immediately: this is a temporary probe, not production use.
         static_cast<void>(hipModuleUnload(loaded.module));
 
         // Stable, greppable marker for integration-test log capture.
         HIPDNN_PLUGIN_LOG_INFO(AOT_SKELETON_LOAD_OK << " arch=" << arch << " symbol=" << symbol
                                                     << " kpack=" << kpackPath.string());
 
-        // TODO(kpack-fastfollow): SKELETON ONLY — parse real instances
-        // (compile_spec / selection.batch / attribute_constraints) into the
-        // catalog, defer hipModuleLoad to plan-construction, and wire selection
-        // + execution + KERNEL LAUNCH + RESULT VALIDATION.
+        // TODO(AICK-1484): scaffolding only -- return a real Catalog of candidate
+        // instances (op+arch scoped) instead of an empty one; see AotCatalog.hpp.
         // Today we load+unload one kernel purely to prove the wiring.
         return AotCatalog{};
     }

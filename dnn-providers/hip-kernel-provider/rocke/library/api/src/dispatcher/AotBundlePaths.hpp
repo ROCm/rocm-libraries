@@ -22,8 +22,8 @@ namespace rocke_client::dispatcher
 //   tests stage valid/corrupt bundles beside the test binary and point to them
 //   without touching the production arch_content tree.
 //
-// TODO(kpack-fastfollow): replace with an injected content root (passed to the
-//   dispatcher at construction) once the real selection/execution dispatcher
+// TODO(AICK-1484): replace the env override with a content root injected into
+//   the dispatcher at construction, once real plan-based selection/execution
 //   lands, so tests don't need a process-wide env override.
 inline std::filesystem::path aotBundleDir(const std::filesystem::path& pluginDir,
                                           const std::string& arch)

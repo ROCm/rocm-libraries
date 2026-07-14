@@ -39,8 +39,8 @@ target_link_libraries(
 )
 
 # Expose api/src/ so the test can include dispatcher/AotSkeletonMarkers.hpp and
-# dispatcher/AotBundlePaths.hpp (temporary skeleton observability; removed with
-# the skeleton markers when real execution lands).
+# dispatcher/AotBundlePaths.hpp (temporary observability; removed with the
+# markers when real plan-based execution lands -- AICK-1484).
 target_include_directories(rocke_client_integration_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
@@ -74,6 +74,18 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
         set(_bundle_root    "${CMAKE_CURRENT_BINARY_DIR}/aot_test_bundles")
 
         set(_all_bundle_outputs "")
+        # Both generators run through the rocke pyenv interpreter
+        # (ROCKE_PYENV_PYTHON), so each custom command MUST be ordered after the
+        # rocke-pyenv target. add_dependencies() on the aggregate target below is
+        # NOT sufficient: it orders only the aggregate's stamp, not the commands
+        # that produce its DEPENDS, so ninja can run them before the venv
+        # interpreter exists (seen on Windows: "system cannot find the path
+        # specified"). Add rocke-pyenv directly to each command's DEPENDS.
+        set(_pyenv_order_dep "")
+        if(TARGET rocke-pyenv)
+            set(_pyenv_order_dep rocke-pyenv)
+        endif()
+
         foreach(_arch IN LISTS GPU_TARGETS)
             set(_probe_work  "${CMAKE_CURRENT_BINARY_DIR}/probe_work/${_arch}")
             set(_probe_co    "${_probe_work}/probe.co")
@@ -110,7 +122,7 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
                         --arch  "${_arch}"
                         --outdir "${_valid_dir}"
                         --kpack-python-dir "${ROCKE_KPACK_PYTHON_DIR}"
-                DEPENDS "${_probe_hsaco}" "${_gen_valid}"
+                DEPENDS "${_probe_hsaco}" "${_gen_valid}" ${_pyenv_order_dep}
                 COMMENT "Generating valid rocKE test bundle for ${_arch}"
             )
 
@@ -121,7 +133,7 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
                 COMMAND "${ROCKE_PYENV_PYTHON}" "${_gen_corrupt}"
                         --arch  "${_arch}"
                         --outdir "${_corrupt_dir}"
-                DEPENDS "${_gen_corrupt}"
+                DEPENDS "${_gen_corrupt}" ${_pyenv_order_dep}
                 COMMENT "Generating corrupt rocKE test bundle for ${_arch}"
             )
 

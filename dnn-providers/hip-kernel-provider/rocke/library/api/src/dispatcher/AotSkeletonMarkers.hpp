@@ -7,14 +7,14 @@ namespace rocke_client::dispatcher
 {
 
 // Stable, greppable substrings emitted by AotCatalog::loadForDevice() to mark
-// the outcome of the AOT skeleton load probe. Integration tests capture stderr
-// (testing::internal::CaptureStderr) and match these exact substrings so they
-// can verify the load path was actually exercised, not silently skipped.
+// the outcome of the temporary AOT load probe. The integration test captures
+// stderr (testing::internal::CaptureStderr) and matches these exact substrings
+// to verify the load path was actually exercised, not silently skipped.
 //
-// TODO(kpack-fastfollow): temporary skeleton observability — remove these
-// markers and the log-capture integration test once real selection/execution +
-// result validation land (at which point a live graph submission proves the path
-// far more strongly than a log match).
+// TODO(AICK-1484): temporary observability. Remove these markers and the
+// log-capture integration test when real plan-based execution lands, replaced
+// by E2E tests (graph submit + kernel launch + result validation) that prove
+// the path far more strongly than a log match.
 
 /// Emitted at INFO level when kpack_open -> kpack_get_kernel ->
 /// hipModuleLoadData -> hipModuleGetFunction all succeed.

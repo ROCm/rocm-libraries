@@ -5,7 +5,7 @@
 //   ROCKE_CLIENT_AOT_BUNDLE_DIR (env) -> aotBundleDir() -> aotKpackPath() ->
 //   RockeClientDispatcher::catalogForDevice() -> AotCatalog::loadForDevice() ->
 //   kpack_open -> kpack_get_kernel -> hipModuleLoadData -> hipModuleGetFunction
-//   -> hipModuleUnload -> empty catalog (engine stays inert, skeleton only).
+//   -> hipModuleUnload -> empty catalog (engine stays inert; scaffolding only).
 //
 // The lazy load fires on the first selection attempt per device, which
 // graph.is_supported_ext(handle) triggers via:
@@ -18,9 +18,10 @@
 //   captures that output so tests can assert the stable markers emitted by
 //   loadForDevice() without GPU result validation.
 //
-// TODO(kpack-fastfollow): replace log-marker assertions with a real graph submit
-//   + kernel launch + result validation once selection/execution is wired. The
-//   AotSkeletonMarkers.hpp constants and this entire test are temporary.
+// TODO(AICK-1484): this whole test is temporary. It proves the load wiring by
+//   asserting on log markers; replace it with a real E2E test (graph submit +
+//   kernel launch + result validation) once plan-based execution lands. The
+//   AotSkeletonMarkers.hpp constants are removed with it.
 //
 // Bundle layout (beside the integration-test binary, NOT under arch_content):
 //   <testExeDir>/aot_test_bundles/valid/<arch>/rocke_client_<arch>.{kpack,json}
