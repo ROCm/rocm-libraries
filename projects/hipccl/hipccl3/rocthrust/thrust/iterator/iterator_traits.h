@@ -261,6 +261,13 @@ struct iterator_traversal<_THRUST_LIBCXX::tabulate_output_iterator<Fn, Index>>
 };
 
 template <class Iter, class Fn>
+struct iterator_system<_THRUST_LIBCXX::transform_output_iterator<Iter, Fn>> : iterator_system<Iter>
+{};
+template <class Iter, class Fn>
+struct iterator_traversal<_THRUST_LIBCXX::transform_output_iterator<Iter, Fn>> : iterator_traversal<Iter>
+{};
+
+template <class Iter, class Fn>
 struct iterator_system<_THRUST_LIBCXX::transform_iterator<Iter, Fn>> : iterator_system<Iter>
 {};
 template <class Iter, class Fn>
