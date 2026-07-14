@@ -335,12 +335,61 @@ run_hipblaslt_bench_check() {
 
 write_tensilelite_check_yaml() {
   local yaml="$1"
-  local direct_to_vgpr_a=True
+
   if [[ "${TENSILELITE_GPU_TARGET}" == "gfx1151" ]]; then
-    # gfx1151 rejects this TLUA + f32 + MIInputPerThread > 1 combination when
-    # DirectToVgprA is enabled. Keep the rest of the reduced problem identical
-    # so the target still exercises the standalone TensileLite client path.
-    direct_to_vgpr_a=False
+    # gfx1151 f32 does not support the WMMA instruction shape used by the
+    # gfx94x/gfx950 smoke below. Use a small VALU assembly config that still
+    # exercises the Tensile front end, kernel writer, and standalone client.
+    cat >"${yaml}" <<'YAML'
+GlobalParameters:
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  CpuThreads: 1
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [1, 1]
+        - WorkGroup:
+          - [8, 8, 1]
+        - DepthU: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [1]
+        - StaggerU: [32]
+        - StaggerUStride: [256]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [1]
+        - SourceSwap: [False]
+        - NumElementsPerBatchStore: [0]
+        - ClusterLocalRead: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 32]
+YAML
+    return
   fi
 
   # One reduced config is embedded here to keep this bridge job self-contained.
@@ -398,7 +447,7 @@ BenchmarkProblems:
         - SourceSwap: [True]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
-        - DirectToVgprA: [${direct_to_vgpr_a}]
+        - DirectToVgprA: [True]
         - DirectToVgprB: [False]
         - WorkGroup: [[32, 4, 4]]
       BenchmarkJoinParameters:
