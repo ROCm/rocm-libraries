@@ -30,22 +30,18 @@ target_compile_options(rocke_client_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIO
 
 target_link_libraries(
     rocke_client_tests PUBLIC GTest::gtest hip::host rocke_client_private hipdnn_test_sdk
-                              hipdnn_plugin_sdk Threads::Threads
+                              hipdnn_plugin_sdk Threads::Threads ${CMAKE_DL_LIBS}
 )
 
-# Absolute path to the committed synthetic .kpack fixture (host-tier ELF magic test).
-target_compile_definitions(rocke_client_tests PRIVATE
-    "ROCKE_KPACK_TEST_FIXTURE=\"${CMAKE_CURRENT_SOURCE_DIR}/data/rocke_client_gfx942.kpack\""
+# Copy the committed test fixture tree beside the test binary so testModuleDir()
+# resolves arch_content/rocke/<arch>/rocke_client_<arch>.kpack at runtime.
+add_custom_command(
+    TARGET rocke_client_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/data/arch_content"
+        "$<TARGET_FILE_DIR:rocke_client_tests>/arch_content"
+    COMMENT "Copying rocke-client test fixture tree"
 )
-
-# Optional: bake in a build-tree bundle dir so the GPU tier can find a real
-# AOT-produced .kpack without setting ROCKE_CLIENT_BUNDLE_DIR at runtime.
-# Pass -DROCKE_CLIENT_TEST_BUNDLE_DIR=/path/to/arch_content/rocke to cmake.
-if(ROCKE_CLIENT_TEST_BUNDLE_DIR)
-    target_compile_definitions(rocke_client_tests PRIVATE
-        "ROCKE_CLIENT_BUNDLE_DIR_DEFAULT=\"${ROCKE_CLIENT_TEST_BUNDLE_DIR}\""
-    )
-endif()
 
 target_include_directories(rocke_client_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
