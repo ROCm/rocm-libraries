@@ -3698,7 +3698,7 @@ class LogicalScheduler:
         return groups
 
     def _weaveFillersIntoMfmaGaps(self, flat, numFillers, emitFiller, woven,
-                                  perGap=None, stride=None):
+                                  perGap=None, stride=None, tailStart=None):
         """Shared MFMA-gap weaver for the PLSIN hoist passes (B3): the single place
         that decides WHERE hoisted fillers land relative to the loop's MFMAs. Both the
         NGLL coord-hoist and the NLL store-init hoist route through here so a placement
@@ -3709,27 +3709,39 @@ class LogicalScheduler:
         instruction, or a multi-instruction block / SCC carry-chain) into `woven` and
         returns the next filler index; `numFillers` is the total unit count. Exactly one
         policy is given:
-          perGap=k : packed  -- up to k fillers immediately after each MFMA
-          stride=s : spread  -- one filler after every s-th MFMA
-        Leftover fillers (fewer MFMA gaps than fillers) are appended in order. Returns
-        the next filler index consumed."""
+          perGap=k    : packed   -- up to k fillers immediately after each MFMA
+          stride=s    : spread   -- one filler after every s-th MFMA
+          tailStart=t : terminal -- one filler after each MFMA past the t-th (C1): the
+                        exposed back-to-back tail MFMAs stall (~48c on ATT) while the
+                        earlier gaps already overlap the loop's ds_reads, so directing
+                        the fillers at the tail hides the real stalls instead of
+                        redundantly re-hiding already-covered early gaps.
+        Leftover fillers (fewer targeted gaps than fillers) are appended in order.
+        Returns the next filler index consumed."""
         idx = 0
         credit = 0
+        mfmaSeen = 0
         for inst in flat:
             woven.add(inst)
-            if idx >= numFillers or not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+            isMfma = isinstance(inst, (MFMAInstruction, MXMFMAInstruction))
+            if isMfma:
+                mfmaSeen += 1
+            if idx >= numFillers or not isMfma:
                 continue
             if perGap is not None:
                 for _ in range(perGap):
                     if idx >= numFillers:
                         break
                     idx = emitFiller(idx, woven)
+            elif tailStart is not None:
+                if mfmaSeen > tailStart:
+                    idx = emitFiller(idx, woven)
             else:
                 credit += 1
                 if credit >= stride:
                     credit = 0
                     idx = emitFiller(idx, woven)
-        while idx < numFillers:  # fewer MFMA gaps than fillers: append the remainder
+        while idx < numFillers:  # fewer targeted gaps than fillers: append the remainder
             idx = emitFiller(idx, woven)
         return idx
 
@@ -3792,10 +3804,18 @@ class LogicalScheduler:
         # Opt back to the packed behavior by setting TENSILE_NLL_HOIST_STOREINIT_PER_GAP
         # (test-only). Placement itself is delegated to the shared _weaveFillersIntoMfmaGaps.
         perGapEnv = plsinDebugEnv("TENSILE_NLL_HOIST_STOREINIT_PER_GAP", None)
+        # C1 terminal-gap targeting is opt-in (test-only) while the perf win is being
+        # measured (see C3); the shipped default stays the validated uniform spread so
+        # production kernels are unchanged.
+        tailMode = plsinDebugEnv("TENSILE_NLL_HOIST_STOREINIT_TAIL", "0") != "0"
         totalMfma = sum(1 for i in flat
                         if isinstance(i, (MFMAInstruction, MXMFMAInstruction)))
         if perGapEnv is not None:
             self._weaveFillersIntoMfmaGaps(flat, nU, _emitUnit, woven, perGap=int(perGapEnv))
+        elif tailMode:
+            # Pack the units into the final nU MFMA gaps (the exposed back-to-back tail).
+            self._weaveFillersIntoMfmaGaps(flat, nU, _emitUnit, woven,
+                                           tailStart=max(0, totalMfma - nU))
         else:
             # Drop one unit after roughly every `stride`-th MFMA so the units span the
             # whole loop, including the exposed back-to-back tail.
