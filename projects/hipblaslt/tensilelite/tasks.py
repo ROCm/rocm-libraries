@@ -12,6 +12,13 @@ import sys
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
+# Ensure the Tensile package (shipped next to this file) is importable when
+# invoke runs from the tensilelite root, regardless of cwd/sys.path state.
+if str(_TASKS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TASKS_DIR))
+
+from Tensile.RocisaStatus import _rocisa_install_status
+
 
 def _cmake_bool(value):
     return "ON" if value else "OFF"
@@ -71,11 +78,10 @@ def get_gpu_arch(c):
 def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     """Install rocisa as an editable pip package.
 
-    Run once after cloning, or after changes to rocisa's pyproject.toml or
-    CMakeLists.txt. C++ source changes are picked up automatically: `invoke
-    build-client` re-runs this editable install (an incremental no-op when
-    nothing changed), with the staleness check in rocisa/__init__.py as a
-    backstop if you skip that.
+    Not required before `invoke build-client` — the client build enables
+    HIPBLASLT_BUNDLE_PYTHON_DEPS automatically when rocisa is absent. Run
+    this task to make rocisa importable system-wide (outside the build
+    directory), or after changes to rocisa's pyproject.toml or CMakeLists.txt.
 
     Builds and installs stinkytofu locally first so rocisa uses
     find_package(stinkytofu) — mirroring how TheRock wires the two together.
@@ -181,54 +187,19 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
 
 
-def _rocisa_is_editable():
-    """Return True only if rocisa is currently installed as an editable package.
-
-    Reads PEP 610 direct_url.json metadata; it does NOT import rocisa, so the
-    import-time staleness check is never triggered here. `invoke rocisa`
-    (pip install -e) sets dir_info.editable=true; a plain `pip install rocisa/`
-    (e.g. tox) or a wheel does not, so we never rebuild over a deliberate
-    non-editable install, and we return False when rocisa is absent.
-    """
-    import json
-    from importlib import metadata
-
-    try:
-        raw = metadata.distribution("rocisa").read_text("direct_url.json")
-    except metadata.PackageNotFoundError:
-        return False
-    if not raw:
-        return False
-    try:
-        return bool(json.loads(raw).get("dir_info", {}).get("editable"))
-    except (ValueError, AttributeError):
-        return False
-
-
 def _maybe_rebuild_rocisa(c, rocisa_dir=None):
     """Refresh the editable rocisa so `import rocisa` picks up C++ edits.
 
-    `invoke build-client` builds a *separate* `_rocisa.so` under the client
-    build dir; it never touches the editable install that `import rocisa`
-    (and `Tensile/bin/Tensile`) actually load. So after editing rocisa C++ and
-    running only build-client, those bindings are stale — silently for installs
-    without `_build_info.py`, or an ImportError otherwise. Re-running the
-    editable install here fixes that.
+    Only acts when rocisa is installed editable (pip install -e). When
+    absent, rocisa is built by CMake via HIPBLASLT_BUNDLE_PYTHON_DEPS.
+    When non-editable (e.g. tox), does nothing.
 
-    This also re-runs the stinkytofu cmake configure+build+install step. cmake is
-    incremental, so when stinkytofu sources are unchanged this is a fast no-op and
-    does not affect the staleness-check semantics — the stale rocisa detection via
-    _build_info.py / direct_url.json is unaffected.
-
-    No-op unless rocisa is installed editable. Degrades to a warning — never a
-    hard failure — when the build backend (scikit-build-core / nanobind) is
-    unavailable, since the editable install uses --no-build-isolation and needs
-    those importable. This keeps build-client working in CI/tox and on fresh
-    checkouts that lack the rocisa build toolchain.
+    Degrades to a warning — never a hard failure — when the build backend
+    (scikit-build-core / nanobind) is unavailable.
     """
     import importlib.util
 
-    if not _rocisa_is_editable():
+    if _rocisa_install_status() != "editable":
         return
 
     missing = [m for m in ("scikit_build_core", "nanobind") if importlib.util.find_spec(m) is None]
@@ -262,7 +233,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101).",
         "rocm_path": "Path to a ROCm install whose amdclang/amdclang++ should be used.",
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
-        "bundle_python_deps": "Enable HIPBLASLT_BUNDLE_PYTHON_DEPS.",
+        "bundle_python_deps": "Force HIPBLASLT_BUNDLE_PYTHON_DEPS on or off; auto-enabled when rocisa is not pip-installed.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
@@ -286,10 +257,10 @@ def build_client(
     """Build the tensilelite-client C++ executable.
 
     To run Tensile after building, use: Tensile/bin/Tensile <args>
-    rocisa must first be installed via: invoke rocisa. After that, this task
-    keeps the editable rocisa in sync — if it is installed editable, the
-    bindings are rebuilt here so rocisa C++ edits are not silently stale
-    (disable with --no-rebuild-rocisa).
+    When rocisa is not pip-installed, HIPBLASLT_BUNDLE_PYTHON_DEPS is
+    enabled automatically so CMake builds it in the client build
+    directory. When rocisa is installed editable, the bindings are
+    refreshed to pick up C++ edits (disable with --no-rebuild-rocisa).
     """
 
     if gpu_targets is None:
@@ -315,6 +286,11 @@ def build_client(
 
     if rebuild_rocisa:
         _maybe_rebuild_rocisa(c)
+
+    if not bundle_python_deps and _rocisa_install_status() == "absent":
+        print("rocisa is not pip-installed; enabling HIPBLASLT_BUNDLE_PYTHON_DEPS=ON "
+              "so CMake builds it in the client build directory.")
+        bundle_python_deps = True
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {shlex.quote(build_dir)}")

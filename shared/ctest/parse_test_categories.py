@@ -49,6 +49,112 @@ def _dedupe_preserve_order(values):
     return result
 
 
+def _rtest_script_basename(name_prefix: str) -> str:
+    """Basename of the rtest driver script next to the gtest binary.
+
+    ``name_prefix`` is normally the gtest executable name used in CTest (for
+    example ``mylib-test``). The co-installed rtest driver is expected to be
+    ``<stem>_rtest.py`` where ``stem`` is ``name_prefix`` with a trailing
+    ``-test`` removed (``mylib-test`` -> ``mylib_rtest.py``). If there is no
+    ``-test`` suffix, hyphens in ``name_prefix`` are turned into underscores and
+    ``_rtest.py`` is appended.
+    """
+    if name_prefix.endswith("-test"):
+        return name_prefix[: -len("-test")] + "_rtest.py"
+    stem = name_prefix.replace("-", "_")
+    return stem + "_rtest.py"
+
+
+def _format_gtest_command_tail(
+    executable,
+    pattern_string,
+    extra_args_string,
+    command_args_string="",
+    test_yaml=None,
+):
+    """Gtest binary invocation: optional args, --yaml, --gtest_filter, then extra_args."""
+    tail = f"{executable}{command_args_string}"
+    if test_yaml:
+        tail += f" --yaml {shlex.quote(test_yaml)}"
+    if pattern_string:
+        tail += f" --gtest_filter={pattern_string}"
+    return f"{tail}{extra_args_string}"
+
+
+def _ctest_python_command(is_windows):
+    """Python executable name for CTest rtest invocations at run time.
+
+    Windows Python installs typically expose ``python`` on PATH, not ``python3``.
+    """
+    return "python" if is_windows else "python3"
+
+
+def _format_category_command(
+    use_rtest_driver,
+    name_prefix,
+    target_name,
+    pattern_string,
+    extra_args_string,
+    category_name,
+    test_yaml=None,
+    command_args_string="",
+    is_windows=False,
+):
+    """Return the COMMAND tail for add_test (everything after COMMAND)."""
+    if use_rtest_driver:
+        rtest_script = _rtest_script_basename(name_prefix)
+        rtest_set = f"ctest_{category_name}"
+        py = _ctest_python_command(is_windows)
+        return f"{py} {rtest_script} -t {rtest_set}{extra_args_string}"
+    return _format_gtest_command_tail(
+        target_name,
+        pattern_string,
+        extra_args_string,
+        command_args_string,
+        test_yaml,
+    )
+
+
+def _format_install_add_test_line(
+    use_rtest_driver,
+    name_prefix,
+    category_name,
+    target_name,
+    pattern_string,
+    extra_args_string,
+    cmake_python3,
+    test_yaml=None,
+    gpu_arch=None,
+    install_executable=None,
+    install_command_args_string="",
+    is_windows=False,
+):
+    """One-line add_test(...) for install-time CTestTestfile fragments."""
+    suffix = f"_{gpu_arch}" if gpu_arch else ""
+    test_name = f"{name_prefix}_{category_name}{suffix}_suite"
+    if use_rtest_driver:
+        py = (
+            shlex.quote(cmake_python3)
+            if cmake_python3
+            else _ctest_python_command(is_windows)
+        )
+        rtest_script = _rtest_script_basename(name_prefix)
+        rtest_set = f"ctest_{category_name}"
+        return (
+            f'add_test({test_name} {py} "../{rtest_script}" '
+            f"-t {rtest_set}{extra_args_string})\n"
+        )
+    exe = install_executable if install_executable is not None else f"../{target_name}"
+    gtest_tail = _format_gtest_command_tail(
+        _cmake_quote(exe),
+        pattern_string,
+        extra_args_string,
+        install_command_args_string,
+        test_yaml,
+    )
+    return f"add_test({test_name} {gtest_tail})\n"
+
+
 # Allowlist patterns for YAML-sourced values
 _IDENTIFIER_RE = re.compile(r"^[\w\-\.]+$")
 _GTEST_PATTERN_RE = re.compile(r"^[\w\*\.\-/]+$")
@@ -129,6 +235,17 @@ def validate_config(categories, exclude_gpu_config, is_windows, is_linux):
                 err = validate_identifier(label)
                 if err is not None:
                     errors.append(f"category {category_name!r} label: {err}")
+
+            test_yaml = category_info.get("test_yaml")
+            if test_yaml is not None:
+                err = validate_identifier(test_yaml)
+                if err is not None:
+                    errors.append(f"category {category_name!r} test_yaml: {err}")
+
+            if not patterns and not test_yaml:
+                errors.append(
+                    f"category {category_name!r}: must define test_patterns and/or test_yaml"
+                )
 
     if exclude_gpu_config is None:
         return errors
@@ -299,6 +416,24 @@ def main():
             "same-keyed execution_settings.environment entry from the YAML."
         ),
     )
+    parser.add_argument(
+        "--use-rtest-driver",
+        action="store_true",
+        dest="use_rtest_driver",
+        help=(
+            "Generate CTest commands that run the rtest driver script "
+            "(basename derived from name_prefix; typically mylib-test -> "
+            "mylib_rtest.py) with -t ctest_<category> instead of invoking the "
+            "gtest binary with --gtest_filter=... "
+            '(requires matching <test sets="ctest_<category>"> entries in the '
+            "project's rtest XML)."
+        ),
+    )
+    parser.add_argument(
+        "--cmake-python3",
+        default=None,
+        help="Absolute path to Python3 interpreter (for install-tree add_test lines).",
+    )
 
     args = parser.parse_args()
 
@@ -307,6 +442,8 @@ def main():
     working_dir = args.working_dir
     install_test_file = args.install_test_file
     resource_group = args.resource_group
+    use_rtest_driver = args.use_rtest_driver
+    cmake_python3 = args.cmake_python3
     if args.test_name_prefix is not None:
         err = validate_identifier(args.test_name_prefix)
         if err is not None:
@@ -408,10 +545,11 @@ def main():
         category_data = {}
 
         for category_name, category_info in categories.items():
-            patterns = category_info.get("test_patterns", [])
-            if not patterns:
+            patterns = category_info.get("test_patterns", []) or []
+            test_yaml = category_info.get("test_yaml")
+            if not patterns and not test_yaml:
                 print(
-                    f"Warning: Category '{category_name}' has no test_patterns defined, skipping.",
+                    f"Warning: Category '{category_name}' has no test_patterns or test_yaml defined, skipping.",
                     file=sys.stderr,
                 )
                 continue
@@ -447,6 +585,7 @@ def main():
                 "exclude_string": exclude_string,
                 "labels": labels[:],  # Make a copy
                 "timeout": timeout,
+                "test_yaml": test_yaml,
                 "extra_args": (
                     list(extra_args) if isinstance(extra_args, list) else extra_args
                 ),
@@ -467,9 +606,18 @@ def main():
             # =======================================================================
             print("add_test(")
             print(f"  NAME {name_prefix}_{category_name}_suite")
-            print(
-                f"  COMMAND {target_name}{command_args_string} --gtest_filter={pattern_string}{extra_args_string}"
+            cmd_tail = _format_category_command(
+                use_rtest_driver,
+                name_prefix,
+                target_name,
+                pattern_string,
+                extra_args_string,
+                category_name,
+                test_yaml,
+                command_args_string,
+                is_windows=is_windows,
             )
+            print(f"  COMMAND {cmd_tail}")
             print(f"  WORKING_DIRECTORY {working_dir}")
             print(")")
 
@@ -489,7 +637,19 @@ def main():
             if install_file_handle:
                 try:
                     install_file_handle.write(
-                        f"add_test({name_prefix}_{category_name}_suite {_cmake_quote(install_executable)}{install_command_args_string} --gtest_filter={pattern_string}{extra_args_string})\n"
+                        _format_install_add_test_line(
+                            use_rtest_driver,
+                            name_prefix,
+                            category_name,
+                            target_name,
+                            pattern_string,
+                            extra_args_string,
+                            cmake_python3,
+                            test_yaml,
+                            install_executable=install_executable,
+                            install_command_args_string=install_command_args_string,
+                            is_windows=is_windows,
+                        )
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                     install_file_handle.write(
@@ -591,6 +751,7 @@ def main():
                 cat_labels = cat_data["labels"]
                 timeout = cat_data["timeout"]
                 cat_extra_args_string = _format_extra_args(cat_data.get("extra_args"))
+                cat_test_yaml = cat_data.get("test_yaml")
 
                 # Build combined pattern string: positive - category_excludes:gpu_excludes
                 combined_exclude_string = ""
@@ -614,9 +775,19 @@ def main():
                 print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
                 print("add_test(")
                 print(f"  NAME {name_prefix}_{category_name}_{gpu_arch}_suite")
-                print(
-                    f"  COMMAND {target_name}{command_args_string} --gtest_filter={pattern_string}{cat_extra_args_string}"
+                # GPU-specific gtest slices are not represented in rtest XML; always use the binary.
+                cmd_tail = _format_category_command(
+                    False,
+                    name_prefix,
+                    target_name,
+                    pattern_string,
+                    cat_extra_args_string,
+                    category_name,
+                    cat_test_yaml,
+                    command_args_string,
+                    is_windows=is_windows,
                 )
+                print(f"  COMMAND {cmd_tail}")
                 print(f"  WORKING_DIRECTORY {working_dir}")
                 print(")")
 
@@ -636,7 +807,20 @@ def main():
                 if install_file_handle:
                     try:
                         install_file_handle.write(
-                            f"add_test({name_prefix}_{category_name}_{gpu_arch}_suite {_cmake_quote(install_executable)}{install_command_args_string} --gtest_filter={pattern_string}{cat_extra_args_string})\n"
+                            _format_install_add_test_line(
+                                False,
+                                name_prefix,
+                                category_name,
+                                target_name,
+                                pattern_string,
+                                cat_extra_args_string,
+                                cmake_python3,
+                                cat_test_yaml,
+                                gpu_arch=gpu_arch,
+                                install_executable=install_executable,
+                                install_command_args_string=install_command_args_string,
+                                is_windows=is_windows,
+                            )
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                         install_file_handle.write(

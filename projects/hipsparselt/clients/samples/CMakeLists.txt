@@ -9,7 +9,9 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
   target_compile_features(${sample_name} PRIVATE cxx_std_17)
 
   if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(${sample_name} PRIVATE -mf16c)
+    if(HIPSPARSELT_CXX_HAS_MF16C)
+      target_compile_options(${sample_name} PRIVATE -mf16c)
+    endif()
     target_compile_definitions(${sample_name} PRIVATE HIPSPARSELT_INTERNAL_API)
   endif()
 
