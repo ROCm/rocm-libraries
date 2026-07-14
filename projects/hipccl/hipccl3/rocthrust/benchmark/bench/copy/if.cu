@@ -38,17 +38,6 @@
 
 PRIMBENCH_REGISTER_TYPE(bench_utils::large_data, "large_data")
 
-template <class T>
-struct less_then_t
-{
-  T m_val;
-
-  __host__ __device__ bool operator()(const T& val) const
-  {
-    return val < m_val;
-  }
-};
-
 template <typename T>
 struct copy_benchmark : public primbench::benchmark_interface
 {
@@ -69,8 +58,8 @@ struct copy_benchmark : public primbench::benchmark_interface
 
   void run(primbench::state& state) override
   {
-    T val = bench_utils::value_from_entropy<T>(bench_utils::get_entropy_percentage(entropy));
-    less_then_t<T> select_op{val};
+    const T val = bench_utils::lerp_min_max<T>(bench_utils::get_entropy_percentage(entropy));
+    bench_utils::less_then_t<T> select_op{val};
 
     bench_utils::caching_allocator_t alloc{};
     thrust::detail::device_t policy{};
