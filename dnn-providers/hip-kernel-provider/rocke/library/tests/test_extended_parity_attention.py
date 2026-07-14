@@ -23,26 +23,19 @@ import subprocess
 import sys
 import unittest
 
+from rocke.runtime.hip_module import get_device_arch
+
 _LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
 _PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
 _SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 
 
-def _device_arch():
-    """Running device's gfx arch via the rocke HIP runtime (no torch dependency)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:
-        return None
-
-
-ARCH = _device_arch()
+# Detect arch via the rocke HIP runtime (no torch). The parity harness subprocess
+# imports torch for its numeric reference, so also gate on torch being importable (a
+# dependency check, not a device probe) — a torch-free env then skips cleanly instead of
+# hitting an ImportError in the body.
+ARCH = get_device_arch(0)
 _CDNA = ARCH in ("gfx942", "gfx950")
-# The parity harness subprocess imports torch for its reference; gate on torch being
-# importable (a dependency check, not a device probe) so a torch-free env skips cleanly
-# instead of running into an ImportError.
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 

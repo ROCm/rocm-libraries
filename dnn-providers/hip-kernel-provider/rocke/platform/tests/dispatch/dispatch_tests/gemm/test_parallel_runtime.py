@@ -15,21 +15,13 @@ from pathlib import Path
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.runtime.hip_module import get_device_arch
 
 
-def _device_arch():
-    """Running device's gfx arch via the rocke HIP runtime (no torch dependency)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:
-        return None
-
-
-# The runtime bodies below build+launch a gfx950 code object, so gate on the exact
-# arch: on any other device the launch would fail with hipError(209) no kernel image.
-_ARCH = _device_arch()
+# The runtime bodies below build+launch a gfx950 code object, so gate on the exact arch
+# (via the rocke HIP runtime, no torch): on any other device the launch would fail with
+# hipError(209) no kernel image.
+_ARCH = get_device_arch(0)
 
 
 def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:

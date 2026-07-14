@@ -22,37 +22,31 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from rocke.runtime.hip_module import get_device_arch, get_device_name
+
 _ROCKE = Path(__file__).resolve().parents[2]  # instances -> tests -> rocKE
 _PY_ROOT = _ROCKE / "python"
 _DEFAULT_BASELINE = _ROCKE / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
 _DEFAULT_REPORT = Path("/tmp/rocke_gfx950_smoke_perf_current.json")
 
 
-def _device_info() -> tuple[str | None, str | None]:
-    """(arch, marketing_name) via the rocke HIP runtime (no torch dependency)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch, get_device_name
-
-        return get_device_arch(0), get_device_name(0)
-    except Exception:  # pragma: no cover - environment dependent
-        return None, None
-
-
-GPU_ARCH, GPU_NAME = _device_info()
-# One of the smoke workloads (fused_moe_e2e_perf) imports torch; gate on torch being
-# importable (a dependency check, not a device probe) so a torch-free env skips cleanly
-# instead of running the body into an ImportError.
+# GPU/arch via the rocke HIP runtime (no torch); get_device_name is the rocminfo
+# "Marketing Name". One smoke workload (fused_moe_e2e_perf) imports torch, so also gate
+# on torch being importable (a dependency check, not a device probe) — a torch-free env
+# then skips cleanly instead of hitting an ImportError.
+GPU_ARCH = get_device_arch(0)
+GPU_NAME = get_device_name(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
+_DETECTED = f"{GPU_ARCH} ({GPU_NAME})" if GPU_ARCH else "no ROCm GPU detected"
+_SKIP_REASON = (
+    f"needs a gfx950 ROCm GPU; detected {_DETECTED}"
+    if _HAS_TORCH
+    else f"needs a gfx950 ROCm GPU + torch; detected {_DETECTED} (torch not importable)"
+)
 
-def _skip_reason() -> str:
-    dev = f"{GPU_ARCH} ({GPU_NAME})" if GPU_ARCH else "no ROCm GPU detected"
-    if not _HAS_TORCH:
-        return f"needs a gfx950 ROCm GPU + torch; detected {dev}, torch not importable"
-    return f"needs a gfx950 ROCm GPU; detected {dev}"
 
-
-@unittest.skipUnless(GPU_ARCH == "gfx950" and _HAS_TORCH, _skip_reason())
+@unittest.skipUnless(GPU_ARCH == "gfx950" and _HAS_TORCH, _SKIP_REASON)
 class TestRockeGfx950Smoke(unittest.TestCase):
     maxDiff = 4000
     current_perf: dict[str, dict] = {}

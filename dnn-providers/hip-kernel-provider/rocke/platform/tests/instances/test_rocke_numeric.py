@@ -35,28 +35,21 @@ import sys
 import tempfile
 import unittest
 
+from rocke.runtime.hip_module import get_device_arch
+
 _PYDIR = pathlib.Path(__file__).resolve().parents[2] / "python"  # rocke/platform/python
 _LIBDIR = pathlib.Path(__file__).resolve().parents[3] / "library"  # rocke/library
 _SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 
 
-def _device_arch():
-    """Running device's gfx arch via the rocke HIP runtime (no torch dependency)."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0)
-    except Exception:
-        return None
-
-
-ARCH = _device_arch()
+# Detect arch via the rocke HIP runtime (no torch). The parity harnesses run in
+# subprocesses (see _run) and import torch there for their numeric reference, so also
+# gate on torch being importable (a dependency check, not a device probe) — a torch-free
+# env then skips cleanly. This replaces the old "import torch first so rocke binds torch's
+# HIP" ordering hack: the HIP query binds no device context, and the subprocess bodies
+# init torch fresh in their own process.
+ARCH = get_device_arch(0)
 _CDNA = ARCH in ("gfx942", "gfx950")  # MFMA targets; gfx1151 is RDNA/WMMA
-# The parity harnesses run in subprocesses (see _run) and import torch there for their
-# numeric reference; gate on torch being importable (a dependency check, not a device
-# probe) so a torch-free env skips cleanly. Detecting arch via the HIP runtime replaces
-# the old "import torch first so rocke binds torch's HIP" ordering hack — the probe now
-# binds no device context, and the subprocess bodies init torch fresh in their own process.
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
