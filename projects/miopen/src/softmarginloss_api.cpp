@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include "miopen/miopen.h"
+#include <miopen/miopen_impl.h>
 #include <miopen/softmarginloss.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
@@ -31,12 +32,12 @@
 #include <miopen/tensor_ops.hpp>
 
 extern "C" miopenStatus_t
-miopenGetSoftMarginLossForwardWorkspaceSize(miopenHandle_t handle,
-                                            const miopenTensorDescriptor_t inputDesc,
-                                            const miopenTensorDescriptor_t targetDesc,
-                                            const miopenTensorDescriptor_t outputDesc,
-                                            const miopenLossReductionMode_t reduction,
-                                            size_t* sizeInBytes)
+miopenGetSoftMarginLossForwardWorkspaceSize_impl(miopenHandle_t handle,
+                                                 const miopenTensorDescriptor_t inputDesc,
+                                                 const miopenTensorDescriptor_t targetDesc,
+                                                 const miopenTensorDescriptor_t outputDesc,
+                                                 const miopenLossReductionMode_t reduction,
+                                                 size_t* sizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(handle, inputDesc, targetDesc, outputDesc, reduction);
 
@@ -50,16 +51,17 @@ miopenGetSoftMarginLossForwardWorkspaceSize(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenSoftMarginLossForward(miopenHandle_t handle,
-                                                      const miopenTensorDescriptor_t inputDesc,
-                                                      const void* input,
-                                                      const miopenTensorDescriptor_t targetDesc,
-                                                      const void* target,
-                                                      const miopenTensorDescriptor_t outputDesc,
-                                                      void* output,
-                                                      const miopenLossReductionMode_t reduction,
-                                                      void* workspace,
-                                                      const size_t workspaceSizeInBytes)
+extern "C" miopenStatus_t
+miopenSoftMarginLossForward_impl(miopenHandle_t handle,
+                                 const miopenTensorDescriptor_t inputDesc,
+                                 const void* input,
+                                 const miopenTensorDescriptor_t targetDesc,
+                                 const void* target,
+                                 const miopenTensorDescriptor_t outputDesc,
+                                 void* output,
+                                 const miopenLossReductionMode_t reduction,
+                                 void* workspace,
+                                 const size_t workspaceSizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         workspace,
@@ -86,16 +88,17 @@ extern "C" miopenStatus_t miopenSoftMarginLossForward(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenSoftMarginLossBackward(miopenHandle_t handle,
-                                                       const miopenTensorDescriptor_t inputDesc,
-                                                       const void* input,
-                                                       const miopenTensorDescriptor_t targetDesc,
-                                                       const void* target,
-                                                       const miopenTensorDescriptor_t doutputDesc,
-                                                       const void* doutput,
-                                                       const miopenTensorDescriptor_t dinputDesc,
-                                                       void* dinput,
-                                                       const miopenLossReductionMode_t reduction)
+extern "C" miopenStatus_t
+miopenSoftMarginLossBackward_impl(miopenHandle_t handle,
+                                  const miopenTensorDescriptor_t inputDesc,
+                                  const void* input,
+                                  const miopenTensorDescriptor_t targetDesc,
+                                  const void* target,
+                                  const miopenTensorDescriptor_t doutputDesc,
+                                  const void* doutput,
+                                  const miopenTensorDescriptor_t dinputDesc,
+                                  void* dinput,
+                                  const miopenLossReductionMode_t reduction)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         inputDesc,

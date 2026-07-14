@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <miopen/addlayernorm.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -51,7 +52,7 @@ LogCmdAddLayerNorm(const miopenTensorDescriptor_t xDesc, const miopenNormMode_t 
         }
 
         int32_t size = {0};
-        miopenGetTensorDescriptorSize(xDesc, &size);
+        miopenGetTensorDescriptorSize_impl(xDesc, &size);
         ss << " -n " << miopen::deref(xDesc).GetLengths()[0] << " -c "
            << miopen::deref(xDesc).GetLengths()[1];
         if(size == 5)
@@ -76,24 +77,24 @@ LogCmdAddLayerNorm(const miopenTensorDescriptor_t xDesc, const miopenNormMode_t 
     }
 }
 
-extern "C" miopenStatus_t miopenAddLayerNormForward(miopenHandle_t handle,
-                                                    miopenNormMode_t mode,
-                                                    const miopenTensorDescriptor_t xDesc,
-                                                    const void* x,
-                                                    const miopenTensorDescriptor_t x2Desc,
-                                                    const void* x2,
-                                                    const miopenTensorDescriptor_t weightDesc,
-                                                    const void* weight,
-                                                    const miopenTensorDescriptor_t biasDesc,
-                                                    const void* bias,
-                                                    const float epsilon,
-                                                    const int32_t normalized_dim,
-                                                    const miopenTensorDescriptor_t yDesc,
-                                                    void* y,
-                                                    const miopenTensorDescriptor_t meanDesc,
-                                                    void* mean,
-                                                    const miopenTensorDescriptor_t rstdDesc,
-                                                    void* rstd)
+extern "C" miopenStatus_t miopenAddLayerNormForward_impl(miopenHandle_t handle,
+                                                         miopenNormMode_t mode,
+                                                         const miopenTensorDescriptor_t xDesc,
+                                                         const void* x,
+                                                         const miopenTensorDescriptor_t x2Desc,
+                                                         const void* x2,
+                                                         const miopenTensorDescriptor_t weightDesc,
+                                                         const void* weight,
+                                                         const miopenTensorDescriptor_t biasDesc,
+                                                         const void* bias,
+                                                         const float epsilon,
+                                                         const int32_t normalized_dim,
+                                                         const miopenTensorDescriptor_t yDesc,
+                                                         void* y,
+                                                         const miopenTensorDescriptor_t meanDesc,
+                                                         void* mean,
+                                                         const miopenTensorDescriptor_t rstdDesc,
+                                                         void* rstd)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         mode,
