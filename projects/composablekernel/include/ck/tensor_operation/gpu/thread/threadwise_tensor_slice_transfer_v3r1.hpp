@@ -206,6 +206,9 @@ struct ThreadwiseTensorSliceTransfer_v3r1
             constexpr auto src_data_idx_seq = generate_sequence_v2(
                 [&](auto i) { return Number<src_data_idx[i]>{}; }, Number<src_data_idx.Size()>{});
 
+
+            using vector_t = typename vector_type_maker<DstData, SrcScalarPerVector>::type::type;
+
             // maintain a container record is_src_valid, waiting for RunWrite use.
             if constexpr(std::is_same_v<IndexType, long_index_t>)
             {
