@@ -28,9 +28,6 @@ target_compile_definitions(
     PRIVATE
         PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/rocke-client"
         HIPDNN_ENABLE_SDPA
-        # Absolute build-tree root of the generated valid/corrupt test bundles
-        # (see below). Test-only; never installed, never under arch_content.
-        ROCKE_CLIENT_AOT_TEST_BUNDLE_ROOT="${CMAKE_CURRENT_BINARY_DIR}/aot_test_bundles"
 )
 
 target_link_libraries(
@@ -48,16 +45,23 @@ target_include_directories(rocke_client_integration_tests PRIVATE
 add_dependencies(rocke_client_integration_tests rocke_client)
 
 # ---------------------------------------------------------------------------
-# Build-time test bundles (NOT installed; test artifacts only)
+# Build-time test bundles (test-only; installed + relocatable)
 # ---------------------------------------------------------------------------
-# Generate per-arch valid + corrupt probe bundles into:
-#   <integration_tests_builddir>/aot_test_bundles/valid/<arch>/
-#   <integration_tests_builddir>/aot_test_bundles/corrupt/<arch>/
+# Generate per-arch valid + corrupt probe bundles beside the installed test
+# layout so the test finds them RELATIVE TO ITS OWN EXECUTABLE, both in the
+# build tree and after a relocatable install:
+#   <exe_dir>/hip_kernel_provider/tests/aot_test_bundles/{valid,corrupt}/<arch>/
 #
-# TestRockeClientAotLoad sets ROCKE_CLIENT_AOT_BUNDLE_DIR at runtime to point
-# to the appropriate subdir, which aotBundleDir() returns directly (no
-# arch_content/rocke/<arch> suffix). Bundles are NEVER placed under arch_content
-# and NEVER install()'d.
+# TestRockeClientAotLoad::bundleRootDir() resolves that via
+# getCurrentExecutableDirectory(); each test sets ROCKE_CLIENT_AOT_BUNDLE_DIR to
+# the valid|corrupt/<arch> subdir, which aotBundleDir() returns directly (no
+# arch_content/rocke/<arch> suffix).
+#
+# These are dev/test content: installed under bin/hip_kernel_provider/tests/ and
+# captured by the existing hipkernelprovider [test] artifact glob
+# (bin/hip_kernel_provider/tests/**), so NO TheRock packaging change is needed.
+# They are NEVER placed under arch_content and NEVER enter the runtime lib
+# artifact.
 #
 # Requires the rocke pyenv (ROCKE_PYENV_PYTHON) and rocm_kpack Python source
 # (ROCKE_KPACK_PYTHON_DIR) already resolved by the parent build system, plus
@@ -71,7 +75,7 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
         set(_probe_src      "${CMAKE_CURRENT_SOURCE_DIR}/../tests/probe.hip")
         set(_gen_valid      "${CMAKE_CURRENT_SOURCE_DIR}/../tests/generate_test_bundle.py")
         set(_gen_corrupt    "${CMAKE_CURRENT_SOURCE_DIR}/../tests/generate_corrupt_bundle.py")
-        set(_bundle_root    "${CMAKE_CURRENT_BINARY_DIR}/aot_test_bundles")
+        set(_bundle_root    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider/tests/aot_test_bundles")
 
         set(_all_bundle_outputs "")
         # Both generators run through the rocke pyenv interpreter
@@ -150,6 +154,13 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
         if(TARGET rocke-pyenv)
             add_dependencies(rocke_client_aot_test_bundles rocke-pyenv)
         endif()
+
+        # Install the generated bundles as test-only content. This lands under
+        # bin/hip_kernel_provider/tests/aot_test_bundles/ and is captured by the
+        # existing hipkernelprovider [test] artifact glob
+        # (bin/hip_kernel_provider/tests/**) -- no TheRock packaging change.
+        install(DIRECTORY "${_bundle_root}/"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider/tests/aot_test_bundles")
     else()
         message(STATUS
             "rocke-client: hipcc or clang-offload-bundler not found; "

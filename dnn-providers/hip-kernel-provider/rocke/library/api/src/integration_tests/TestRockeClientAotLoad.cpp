@@ -23,10 +23,11 @@
 //   kernel launch + result validation) once plan-based execution lands. The
 //   AotSkeletonMarkers.hpp constants are removed with it.
 //
-// Bundle layout (beside the integration-test binary, NOT under arch_content):
-//   <testExeDir>/aot_test_bundles/valid/<arch>/rocke_client_<arch>.{kpack,json}
-//   <testExeDir>/aot_test_bundles/corrupt/<arch>/rocke_client_<arch>.{kpack,json}
-// Generated at build time by the CMake custom commands in integration_tests/CMakeLists.txt.
+// Bundle layout (test-only; installed + relocatable, NOT under arch_content):
+//   <exeDir>/hip_kernel_provider/tests/aot_test_bundles/valid/<arch>/rocke_client_<arch>.{kpack,json}
+//   <exeDir>/hip_kernel_provider/tests/aot_test_bundles/corrupt/<arch>/rocke_client_<arch>.{kpack,json}
+// Generated at build time and installed by integration_tests/CMakeLists.txt;
+// captured by the hipkernelprovider [test] artifact via bin/hip_kernel_provider/tests/**.
 
 #include <gtest/gtest.h>
 
@@ -136,13 +137,18 @@ std::string runningDeviceArch()
     return arch;
 }
 
-// Build-tree root of the generated valid/corrupt test bundles, baked in by
-// CMake (ROCKE_CLIENT_AOT_TEST_BUNDLE_ROOT). ROCKE_CLIENT_AOT_BUNDLE_DIR is set
-// per-test to <root>/<valid|corrupt>/<arch> so aotBundleDir() returns that dir
-// directly (no arch_content/rocke/<arch> suffix). Test-only; never installed.
+// Root of the valid/corrupt test bundles, resolved RELATIVE TO THE TEST
+// EXECUTABLE so it works both in the build tree and after a relocatable install:
+//   <exe_dir>/hip_kernel_provider/tests/aot_test_bundles
+// CMake stages and installs the bundles there (see integration_tests/
+// CMakeLists.txt); the hipkernelprovider [test] artifact captures them via
+// bin/hip_kernel_provider/tests/**. Each test sets ROCKE_CLIENT_AOT_BUNDLE_DIR
+// to <root>/<valid|corrupt>/<arch> so aotBundleDir() returns that dir directly.
+// Test-only; never under arch_content or the runtime lib artifact.
 std::filesystem::path bundleRootDir()
 {
-    return {ROCKE_CLIENT_AOT_TEST_BUNDLE_ROOT};
+    return hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / "hip_kernel_provider"
+           / "tests" / "aot_test_bundles";
 }
 
 // Minimal fp16 SDPA forward graph that triggers loadForDevice() on the first
