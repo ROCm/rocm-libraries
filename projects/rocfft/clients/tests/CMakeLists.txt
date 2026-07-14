@@ -568,11 +568,11 @@ endif()
 
 set(COVERAGE_TEST_OPTIONS "--smoketest;--gtest_filter=-*call*" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
 
-if(BUILD_CODE_COVERAGE)
+if(ROCFFT_ENABLE_COVERAGE)
   # Coverage won't work in a standalone build of the tests, as we can't
   # guarantee the library was built with coverage enabled
   if( NOT TARGET rocfft )
-    message( FATAL_ERROR "BUILD_CODE_COVERAGE requires building from the root of rocFFT" )
+    message( FATAL_ERROR "ROCFFT_ENABLE_COVERAGE requires building from the root of rocFFT" )
   endif()
 
   add_custom_target(

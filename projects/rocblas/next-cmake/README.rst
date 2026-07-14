@@ -89,7 +89,7 @@ Options
 
 * ``BUILD_SHARED_LIBS``: Build the rocBLAS shared or static library (default: ``ON``)
 * ``BUILD_TESTING``: Build test client (default: ``ON``)
-* ``BUILD_CODE_COVERAGE``: Build tests with coverage support (default: ``OFF``)
+* ``ROCBLAS_ENABLE_COVERAGE``: Build tests with coverage support (default: ``OFF``)
 
 *Project wide options*:
 
