@@ -31,7 +31,6 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Debug.hpp>
-#include <origami/nn/config.hpp>
 #if ORIGAMI_ENABLE_NN
 #  include <origami/nn/nn.hpp>
 #endif

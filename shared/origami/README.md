@@ -338,8 +338,6 @@ grep ORIGAMI_ENABLE_NN build/origami-config.cmake
 # or inspect compile definitions on the origami target
 ```
 
-Headers in `origami/nn/config.hpp` expose `ORIGAMI_NN_AVAILABLE` (1 when `ORIGAMI_ENABLE_NN=ON`).
-
 ### Model Weights
 
 Weights live under:

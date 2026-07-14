@@ -12,7 +12,6 @@
 #include "origami/gemm.hpp"
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
-#include "origami/nn/config.hpp"
 #include "origami/nn/detail/recommender.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"

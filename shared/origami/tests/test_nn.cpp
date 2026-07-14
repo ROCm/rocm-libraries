@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "common.hpp"
-#include "origami/nn/config.hpp"
 #include "origami/nn/features/gemm_tilewright.hpp"
 #include "origami/nn/filter.hpp"
 #include "origami/nn/nn.hpp"

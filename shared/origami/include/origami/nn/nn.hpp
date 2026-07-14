@@ -26,8 +26,6 @@
 
 #pragma once
 
-#include "origami/nn/config.hpp"
-
 #if !ORIGAMI_ENABLE_NN
 #  error "origami::nn requires ORIGAMI_ENABLE_NN=ON"
 #endif

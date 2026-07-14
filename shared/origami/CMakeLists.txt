@@ -78,7 +78,6 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/config.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/types.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
