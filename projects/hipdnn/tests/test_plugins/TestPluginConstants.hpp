@@ -131,6 +131,17 @@ inline const std::string& testPassByValuePluginPath()
     return s_path;
 }
 
+// Runtime pass-by-value RECORDER fake reports "1.2.0" and records the host scalar
+// it resolves from device_buffers at execute, for delivery verification.
+#ifdef TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME
+inline const std::string& testPassByValueRecorderPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME);
+    return s_path;
+}
+#endif
+
 inline const std::string& testOverrideOmittingPluginPath()
 {
     static const std::string s_path

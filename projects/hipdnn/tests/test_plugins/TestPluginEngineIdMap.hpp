@@ -51,6 +51,10 @@ HIPDNN_MAP_TO_ID(VersionZeroPlugin, -17);
 // Runtime pass-by-value fake reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
 HIPDNN_MAP_TO_ID(PassByValuePlugin, -24);
 
+// Runtime pass-by-value RECORDER fake reports "1.2.0" and records the scalar it
+// resolves from device_buffers at execute (delivery-verification plugin).
+HIPDNN_MAP_TO_ID(PassByValueRecorderPlugin, -25);
+
 // Autotune test plugins.
 HIPDNN_MAP_TO_ID(AutotunePlugin, -18);
 HIPDNN_MAP_TO_ID(AutotunePluginEngineB, -19);
