@@ -630,6 +630,37 @@ class TestAttentionHelpers(unittest.TestCase):
         # `qq_bias_stride_0` is the very last kernel param.
         self.assertIn("i32 %qq_bias_stride_0", ll)
 
+    def test_gfx942_bf16_swa_decode_no_fp8_loader_assert(self):
+        """Regression: bf16 windowed-decode must not trip the fp8-loader assert.
+
+        gfx942 2D built the fp8 chunk-count assert unconditionally. A bf16
+        SWA/decode small-tile config (T=16, HD=64, THREADS=256) gives
+        fp8_total_chunks=128; 128 % 256 != 0 raised AssertionError even though
+        the fp8 loader is never used for bf16 (gfx942 has no fp8 K/V support).
+        Guarding the assert with KV_FP8 (matching the 3D builder) fixes it.
+        """
+        from kernels.gfx942.attention_tiled_2d import (
+            UnifiedAttention2DTiledSpec,
+            build_unified_attention_2d_tiled,
+        )
+
+        spec = UnifiedAttention2DTiledSpec(
+            head_size=64,
+            block_size=16,
+            num_query_heads=64,
+            num_kv_heads=8,          # gpt-oss 64/8 GQA
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=128,
+            has_softcap=False,
+            num_warps=4,             
+            tile_size=16,   
+            block_m_per_warp=16,
+        )
+        k = build_unified_attention_2d_tiled(spec, arch="gfx942")
+        ll = lower_kernel_to_llvm(k, arch="gfx942")
+        self.assertIn("define amdgpu_kernel void", ll)
+
     def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
         """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
         from kernels import (
