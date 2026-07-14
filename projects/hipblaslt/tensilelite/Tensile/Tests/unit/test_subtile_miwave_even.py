@@ -47,8 +47,8 @@ def _state(useSubtile, miWaveTile, miWaveGroup, isa=GFX950):
     }
 
 
-def test_subtile_odd_product_is_rejected():
-    # Every factor odd -> odd product -> rejected on gfx950.
+def test_subtile_both_dims_odd_is_rejected():
+    # Both per-dimension products odd -> rejected on gfx950.
     state = _state(True, [1, 1], [1, 1])
 
     valid = _validateSubtileMIWaveEven(state, False)
@@ -66,8 +66,28 @@ def test_subtile_odd_miwavetile_odd_miwavegroup_is_rejected():
     assert state["Valid"] is False
 
 
+def test_subtile_dim0_odd_is_rejected():
+    # MIWaveTile[0] * MIWaveGroup[0] = 1 (odd) -> rejected even though dim1 is even.
+    state = _state(True, [1, 2], [1, 2])
+
+    valid = _validateSubtileMIWaveEven(state, False)
+
+    assert valid is False
+    assert state["Valid"] is False
+
+
+def test_subtile_dim1_odd_is_rejected():
+    # MIWaveTile[1] * MIWaveGroup[1] = 1 (odd) -> rejected even though dim0 is even.
+    state = _state(True, [2, 1], [1, 1])
+
+    valid = _validateSubtileMIWaveEven(state, False)
+
+    assert valid is False
+    assert state["Valid"] is False
+
+
 def test_subtile_even_miwavegroup_2x2_is_accepted():
-    # MIWaveGroup=[2, 2] makes the product even regardless of MIWaveTile.
+    # MIWaveGroup=[2, 2] makes both per-dimension products even.
     state = _state(True, [1, 1], [2, 2])
 
     valid = _validateSubtileMIWaveEven(state, False)
@@ -76,19 +96,9 @@ def test_subtile_even_miwavegroup_2x2_is_accepted():
     assert state["Valid"] is True
 
 
-def test_subtile_even_miwavetile_is_accepted():
-    # A single even MIWaveTile factor makes the product even.
-    state = _state(True, [2, 1], [1, 1])
-
-    valid = _validateSubtileMIWaveEven(state, False)
-
-    assert valid is True
-    assert state["Valid"] is True
-
-
-@pytest.mark.parametrize("mi_wave_group", [[2, 2], [4, 1], [1, 4]])
-def test_subtile_multi_wave_group_is_accepted(mi_wave_group):
-    state = _state(True, [1, 1], mi_wave_group)
+def test_subtile_both_dims_even_is_accepted():
+    # Each dimension has at least one even factor -> both products even.
+    state = _state(True, [2, 2], [1, 1])
 
     valid = _validateSubtileMIWaveEven(state, False)
 

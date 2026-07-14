@@ -181,23 +181,25 @@ def _disableUnsupportedRuntimeStaggerU(state):
 
 
 def _validateSubtileMIWaveEven(state, printRejectionReason):
-  # TODO: TEMPORARY FIX. Reject UseSubtileImpl solutions whose combined
-  # MIWaveTile * MIWaveGroup product is odd. An odd product (i.e. every one of
-  # MIWaveTile[0], MIWaveTile[1], MIWaveGroup[0], MIWaveGroup[1] is odd) produces
-  # a numerical mismatch we have not yet root-caused. A single even factor makes
-  # the product even, so common cases such as MIWaveGroup=[2, 2] are unaffected
-  # and need no rejection. Only the subtile (UseSubtileImpl) path on gfx950 is
-  # affected. Remove this once the underlying mismatch is understood and fixed.
+  # TODO: TEMPORARY FIX. Reject UseSubtileImpl solutions whose per-dimension
+  # MIWaveTile * MIWaveGroup product is odd. The two dimensions are checked
+  # independently: reject if either MIWaveTile[0] * MIWaveGroup[0] or
+  # MIWaveTile[1] * MIWaveGroup[1] is odd. A per-dimension odd product produces a
+  # numerical mismatch we have not yet root-caused. A single even factor in a
+  # dimension makes that product even, so common cases such as MIWaveGroup=[2, 2]
+  # are unaffected and need no rejection. Only the subtile (UseSubtileImpl) path
+  # on gfx950 is affected. Remove this once the underlying mismatch is understood
+  # and fixed.
   if not state["UseSubtileImpl"]:
     return True
   if tuple(state["ISA"]) != (9, 5, 0):
     return True
-  miwtMiwgProduct = (state["MIWaveTile"][0] * state["MIWaveTile"][1]
-                     * state["MIWaveGroup"][0] * state["MIWaveGroup"][1])
-  if miwtMiwgProduct % 2 != 0:
+  product0 = state["MIWaveTile"][0] * state["MIWaveGroup"][0]
+  product1 = state["MIWaveTile"][1] * state["MIWaveGroup"][1]
+  if product0 % 2 != 0 or product1 % 2 != 0:
     reject(state, printRejectionReason,
-           "UseSubtileImpl=1 requires MIWaveTile * MIWaveGroup to be even, "
-           "got MIWaveTile=[%d, %d], MIWaveGroup=[%d, %d]"
+           "UseSubtileImpl=1 requires MIWaveTile * MIWaveGroup to be even per "
+           "dimension, got MIWaveTile=[%d, %d], MIWaveGroup=[%d, %d]"
            % (state["MIWaveTile"][0], state["MIWaveTile"][1],
               state["MIWaveGroup"][0], state["MIWaveGroup"][1]))
     return False
