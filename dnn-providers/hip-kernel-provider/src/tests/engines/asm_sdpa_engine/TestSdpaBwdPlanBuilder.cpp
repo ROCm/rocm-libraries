@@ -188,7 +188,7 @@ using asm_sdpa_engine::bwd_dispatch::BF16_CVT_FP16_SENTINEL;
 
 // POC config: hd128 / bf16 / NO_MASK / BATCH must still resolve across all
 // three pipeline-stage registries.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16NoMaskBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
@@ -236,7 +236,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16NoMaskBatch)
 // registry actually carries for that head-dim. This exercises the lookup for
 // a hd64 entry even though isApplicable's day-one matrix forces pddv=1 and
 // therefore rejects hd64 at dispatch time.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd64Fp16NoMaskBatch)
+TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd64NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
@@ -283,7 +283,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd64Fp16NoMaskBatch)
 
 // hd192 / bf16 / TOP_LEFT_CAUSAL row resolves via the registry. isApplicable
 // rejects causal day-one but the lookup itself must work.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd192Bf16CausalBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd192Bf16CausalBatch)
 {
     using namespace bwd_dispatch;
 
@@ -323,7 +323,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd192Bf16CausalBatch)
 // graph-derived RoundingMode (e.g. RTNE = 0) still resolves the row.
 // isApplicable rejects gfx950 day-one, so we exercise the registry helper
 // directly.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Gfx950Hd128Bf16NoMaskBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupGfx950Hd128Bf16NoMaskBatch)
 {
     using namespace bwd_dispatch;
 
@@ -371,7 +371,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Gfx950Hd128Bf16NoMaskBatch)
 
 // Causal (mask=1) dispatch: DQDKDV uses mask=1 row; ODO and DQ_CONVERT remain
 // mask=0 (mask-agnostic stages).
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16CausalBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBatch)
 {
     using namespace bwd_dispatch;
 
@@ -419,7 +419,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16CausalBatch)
 }
 
 // Bottom-right causal (mask=2) dispatch.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16CausalBrBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16CausalBrBatch)
 {
     using namespace bwd_dispatch;
 
@@ -438,7 +438,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16CausalBrBatch)
 }
 
 // SWA / window (mask=3) dispatch — only hd128 gfx942 has SWA rows in the CSV.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16SwaBatch)
+TEST(TestSdpaBwdRegistryLookup, RegistryLookupHd128Bf16SwaBatch)
 {
     using namespace bwd_dispatch;
 
@@ -457,7 +457,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16SwaBatch)
 }
 
 // FP16 causal (mask=1) dispatch.
-TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Fp16CausalBatch)
+TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
 {
     using namespace bwd_dispatch;
 
@@ -475,7 +475,7 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Fp16CausalBatch)
     EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsHd96)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 {
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -489,7 +489,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsHd96)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFp8)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -505,7 +505,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFp8)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsGfx950)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
 {
     // Cannot synthesise a different device string from the test harness, so
     // this test only meaningfully runs on a non-gfx942 device. On gfx942 it
@@ -523,7 +523,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsGfx950)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFractionalGqaRatio)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -556,7 +556,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsFractionalGqaRatio)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsAsymmetricHdim)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -718,7 +718,7 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return plan_utils::getMaskType(attrs);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTogether)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -733,7 +733,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTo
     EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -751,7 +751,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -770,7 +770,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftB
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -788,7 +788,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBounds)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -811,7 +811,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBo
 // as unbounded (-1), so a partially specified trio still derives the mask it
 // describes.
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCausal)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioRightZeroLeftUnsetDerivesTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -829,7 +829,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCa
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomRightCausal)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioRightZeroBottomRightDerivesBottomRightCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -846,7 +846,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomR
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftCausal)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioExplicitCausalBoundsDeriveTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -863,7 +863,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftC
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioBothUnsetDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -879,7 +879,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioBothUnboundedDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -895,7 +895,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesSlidingWindow)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioSymmetricWindowDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -911,7 +911,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesSlidingWindo
     EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesSlidingWindow)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrioLeftOnlyDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -934,7 +934,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesSlidingWindow)
 // These tests use createSdpaBwdGraphWithMask (defined above) and require a
 // gfx942 device to exercise the full isApplicable() path.
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsCausalMaskBottomRight)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCausalMaskBottomRight)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -958,7 +958,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsCausalMaskBottomRight)
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsWindowMask)
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -987,7 +987,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsWindowMask)
 // Accumulator-aware workspace sizing tests
 // =============================================================================
 
-TEST(SdpaBwdWorkspaceSize, A32IncludesDqAccBuffer)
+TEST(TestSdpaBwdWorkspaceSize, A32IncludesDqAccBuffer)
 {
     // a32: workspace = D buffer + dq_acc buffer
     constexpr size_t K_B = 2;
@@ -1002,7 +1002,7 @@ TEST(SdpaBwdWorkspaceSize, A32IncludesDqAccBuffer)
     EXPECT_GT(a32Size, sdpaBwdDBufferSize(K_B, K_H, K_S));
 }
 
-TEST(SdpaBwdWorkspaceSize, A16IsDBufferOnly)
+TEST(TestSdpaBwdWorkspaceSize, A16IsDBufferOnly)
 {
     // a16: workspace = D buffer only (no dq_acc)
     constexpr size_t K_B = 2;
@@ -1014,7 +1014,7 @@ TEST(SdpaBwdWorkspaceSize, A16IsDBufferOnly)
     EXPECT_EQ(a16Size, dBufferOnly);
 }
 
-TEST(SdpaBwdWorkspaceSize, A16SmallerThanA32)
+TEST(TestSdpaBwdWorkspaceSize, A16SmallerThanA32)
 {
     constexpr size_t K_B = 4;
     constexpr size_t K_H = 16;
@@ -1027,7 +1027,7 @@ TEST(SdpaBwdWorkspaceSize, A16SmallerThanA32)
     EXPECT_EQ(a32Size - a16Size, sdpaBwdDqAccBufferSize(K_B, K_H, K_S, K_D));
 }
 
-TEST(SdpaBwdWorkspaceSize, A16UnalignedDimensions)
+TEST(TestSdpaBwdWorkspaceSize, A16UnalignedDimensions)
 {
     // B=1, H=3, S=255 — D buffer raw size (3060) is NOT aligned to 64
     constexpr size_t K_B = 1;

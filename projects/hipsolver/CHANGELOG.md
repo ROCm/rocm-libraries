@@ -14,6 +14,13 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Upcoming changes
 
 
+## hipSOLVER 3.5.0 for ROCm 7.14.0
+
+### Changed
+
+* Minor internal changes
+
+
 ## hipSOLVER 3.4.0 for ROCm 7.13.0
 
 ### Added
