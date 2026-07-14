@@ -460,7 +460,7 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     I n = argus.get<I>("n", m);
     I nq = (sideC == 'L' ? m : n);
     I kd = argus.get<I>("kd", 1);
-    I ldv = argus.get<I>("ldv", 2 * kd);
+    I ldv = argus.get<I>("ldv", 2 * kd - 1);
     I ldc = argus.get<I>("ldc", m);
     I ldq = nq;
     I ldr = std::max(m, nq);
@@ -516,7 +516,7 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     double errors[3] = {0, 0, 0}, gpu_time_used = 0, cpu_time_used = 0;
 
     // check invalid sizes
-    bool invalid_size = (m < 0 || n < 0 || kd < 1 || ldv < 2 * kd || ldc < m);
+    bool invalid_size = (m < 0 || n < 0 || kd < 1 || ldv < 2 * kd - 1 || ldc < m);
     if(invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, kd, (T*)nullptr,

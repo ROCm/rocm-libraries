@@ -131,7 +131,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_argCheck(rocblas_handle handle,
     }
 
     // 2. invalid size
-    if(m < 0 || n < 0 || kd < 1 || ldv < 2 * kd || ldc < m)
+    if(m < 0 || n < 0 || kd < 1 || ldv < 2 * kd - 1 || ldc < m)
     {
         return rocblas_status_invalid_size;
     }
