@@ -585,6 +585,26 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     return _enable_d128_small_tile(problem) and problem.block_size >= 32
 
 
+def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
+    """Arch-agnostic cohort for the gfx950 bf16 D256 prefill fast path.
+
+    The arch gate is applied by callers (``_d256_gfx950_fast`` uses the resolved
+    device arch; the ``dispatch.attention`` candidate uses the request arch), so
+    this stays CPU-pure and is the single source of truth for the cohort shape.
+    """
+    return (
+        problem.head_size == 256
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        and problem.max_seqlen_q > 1
+    )
+
+
 def _d256_gfx950_fast(problem: "UnifiedAttentionProblem") -> bool:
     """Route the D256 gfx950 bf16 prefill cohort to the 32x32
     transposed fast path + FA3-style softmax<->MFMA interleave.
@@ -599,18 +619,7 @@ def _d256_gfx950_fast(problem: "UnifiedAttentionProblem") -> bool:
     Perf (MI355X, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
     mode2 g4 gives +9.1% @ Sq4096 and +10.1% @ Sq8192 over the 32x32 base.
     """
-    return (
-        _resolve_attention_arch() == "gfx950"
-        and problem.head_size == 256
-        and problem.dtype == "bf16"
-        and not problem.use_fp8
-        and problem.sliding_window == 0
-        and problem.softcap == 0
-        and not problem.use_sinks
-        and not problem.use_alibi
-        and not problem.use_qq_bias
-        and problem.max_seqlen_q > 1
-    )
+    return _resolve_attention_arch() == "gfx950" and _d256_gfx950_cohort(problem)
 
 
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
