@@ -1,0 +1,56 @@
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+- entries:
+  - file: known-issues.md
+    title: Known issues
+
+- caption: User guides
+  entries:
+  - file: user/global-parameters.md
+    title: Global parameters
+  - file: user/ir-converter.md
+    title: IR converter
+  - file: user/asm-emitter.md
+    title: Assembly emitter
+  - file: user/virtual-registers.md
+    title: Virtual registers
+  - file: user/long-branch-cfg.md
+    title: Long-branch CFG construction
+  - file: user/stinky-waitcnt-insertion-pass.md
+    title: StinkyWaitCnt insertion pass
+  - file: user/remove-instruction-pass.md
+    title: RemoveInstructionPass
+  - file: user/error-codes.md
+    title: Error codes
+
+- caption: Developer guides
+  entries:
+  - file: developer/architecture.md
+    title: Architecture overview
+  - file: developer/adding-instructions.md
+    title: Adding instructions
+  - file: developer/adding-architecture.md
+    title: Adding a GPU architecture
+  - file: developer/adding-peephole-patterns.md
+    title: Adding peephole patterns
+  - file: developer/adding-intrinsics.md
+    title: Adding intrinsics
+  - file: developer/pattern-grammar.md
+    title: Pattern grammar reference
+  - file: developer/cluster-barrier.md
+    title: Insert cluster barrier pass
+  - file: developer/wmma-vgpr-reorder-pass.md
+    title: WMMA VGPR reorder pass
+
+- caption: Reference
+  entries:
+  - file: reference/api-reference.rst
+    title: API reference
+
+- caption: About
+  entries:
+  - file: license.rst
+    title: License

@@ -402,6 +402,27 @@ def tidy(c, build_dir=None):
 
 @task(
     help={
+        "build_dir": "Build directory to use (default: build/).",
+        "open_report": "Open the generated HTML docs in a browser when finished.",
+    }
+)
+def docs(c, build_dir=None, open_report=False):
+    """Build the Doxygen + Sphinx documentation site. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not bld.exists():
+        print("No build directory found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(f'cmake --build "{bld.as_posix()}" --target sphinx_docs')
+    html_index = bld / "docs" / "html" / "index.html"
+    print(f"\nHTML docs: {html_index.as_posix()}")
+    if open_report:
+        import webbrowser
+
+        webbrowser.open(html_index.as_uri())
+
+
+@task(
+    help={
         "build_dir": "Coverage build directory (default: build-coverage/).",
         "open_report": "Open the HTML report in a browser when finished.",
         "jobs": "Number of parallel build jobs (default: all cores).",
