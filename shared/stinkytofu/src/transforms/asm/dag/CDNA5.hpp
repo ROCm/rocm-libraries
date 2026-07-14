@@ -1039,7 +1039,11 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
 
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
+        // Returns false when no non-WMMA can be issued right now (e.g. the only
+        // pending ds_load is held back by the co-exec hazard gate). In that case
+        // there is nothing to interleave, so the next WMMA should be allowed to go.
+        const bool hasPickableNonWmma =
+            findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
 
         const bool blockWmmaForLoopHeadBalance =
             deferHeadBalanceThisRegion_ && deferFirstHeadWmmaActive_ && otherQueuesHaveWork;
@@ -1049,7 +1053,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         bool blockWmmaForAtLeastOneNonWmmaInterleaving = false;
         if (lastPickedNode_ != nullptr) {
             blockWmmaForAtLeastOneNonWmmaInterleaving =
-                otherQueuesHaveWork && isMatrixInstruction(*lastPickedNode_->inst);
+                hasPickableNonWmma && isMatrixInstruction(*lastPickedNode_->inst);
         }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase B candidate wmmaId=" << bestWMMA->id
                              << " bestLatency=" << bestLatency
