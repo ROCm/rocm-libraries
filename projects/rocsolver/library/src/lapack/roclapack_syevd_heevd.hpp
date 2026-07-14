@@ -175,10 +175,10 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
             *size_he2hb_work = std::max(
                 *size_he2hb_work, size_Tr + size_W2 + size_Z2 + size_work2 + size_workArr2);
 
-            // workspace for ormqr (he2hb back-transform), k = n - kd
+            // workspace for ormqr (he2hb back-transform): applies Q (n-kd x n-kd) to W[kd:n, :]
             size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
             rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                rocblas_side_left, n, n, std::max(n - kd, 0), batch_count, &size_scalars2,
+                rocblas_side_left, std::max(n - kd, 0), n, std::max(n - kd, 0), batch_count, &size_scalars2,
                 &size_AbyxORwork, &size_diagORtmptr, &size_trfact, &size_workArr3);
             *size_scalars = std::max(*size_scalars, size_scalars2);
             *size_he2hb_work = std::max(
@@ -353,10 +353,10 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
             *size_he2hb_work = std::max(
                 *size_he2hb_work, size_Tr + size_W2 + size_Z2 + size_work2 + size_workArr2);
 
-            // workspace for ormqr (he2hb back-transform), k = n - kd
+            // workspace for ormqr (he2hb back-transform): applies Q (n-kd x n-kd) to W[kd:n, :]
             size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
             rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                rocblas_side_left, n, n, std::max(n - kd, 0), batch_count, &size_scalars2,
+                rocblas_side_left, std::max(n - kd, 0), n, std::max(n - kd, 0), batch_count, &size_scalars2,
                 &size_AbyxORwork, &size_diagORtmptr, &size_trfact, &size_workArr3);
             *size_scalars = std::max(*size_scalars, size_scalars2);
             *size_he2hb_work = std::max(
@@ -552,23 +552,24 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 const rocblas_int k_he2hb = std::max(n - kd, 0);
                 size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
                 rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                    rocblas_side_left, n, n, k_he2hb, batch_count, &size_scalars, &size_AbyxORwork,
-                    &size_diagORtmptr, &size_trfact, &size_workArr3);
+                    rocblas_side_left, k_he2hb, n, k_he2hb, batch_count, &size_scalars,
+                    &size_AbyxORwork, &size_diagORtmptr, &size_trfact, &size_workArr3);
                 T* ormqr_AbyxORwork = he2hb_work;
                 T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
                 T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
                 T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
 
-                // Apply Q_he2hb from left: tmptau_W := Q_he2hb * tmptau_W
-                // Householder vectors V are stored in A below diagonal kd
+                // Apply Q_he2hb on the left to W[kd:n, 0:n]:
+                //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
                 // 2-stage is only reached when batch_count == 1, so BATCHED is always false
                 // here at runtime; the if constexpr prevents instantiation for BATCHED=true
                 // where A would be T* const* (incompatible with the T* A overload).
                 if constexpr(!BATCHED)
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-                        handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
-                        shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
+                        handle, rocblas_side_left, rocblas_operation_none, k_he2hb, n, k_he2hb, A,
+                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n,
+                        tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, batch_count,
                         scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
                         ormqr_workArr));
                 }
@@ -818,23 +819,24 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                 const rocblas_int k_he2hb = std::max(n - kd, 0);
                 size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
                 rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                    rocblas_side_left, n, n, k_he2hb, batch_count, &size_scalars, &size_AbyxORwork,
-                    &size_diagORtmptr, &size_trfact, &size_workArr3);
+                    rocblas_side_left, k_he2hb, n, k_he2hb, batch_count, &size_scalars,
+                    &size_AbyxORwork, &size_diagORtmptr, &size_trfact, &size_workArr3);
                 T* ormqr_AbyxORwork = he2hb_work;
                 T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
                 T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
                 T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
 
-                // Apply Q_he2hb from left: tmptau_W := Q_he2hb * tmptau_W
-                // Householder vectors V are stored in A below diagonal kd
+                // Apply Q_he2hb on the left to W[kd:n, 0:n]:
+                //   V is in A[kd:n, 0:n-kd], Q is (n-kd) x (n-kd)
                 // 2-stage is only reached when batch_count == 1, so BATCHED is always false
                 // here at runtime; the if constexpr prevents instantiation for BATCHED=true
                 // where A would be T* const* (incompatible with the T* A overload).
                 if constexpr(!BATCHED)
                 {
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-                        handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
-                        shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
+                        handle, rocblas_side_left, rocblas_operation_none, k_he2hb, n, k_he2hb, A,
+                        shiftA + idx2D(kd, 0, lda), lda, strideA, tau, n,
+                        tmptau_W, idx2D(kd, 0, ldw), ldw, strideW, batch_count,
                         scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
                         ormqr_workArr));
                 }
