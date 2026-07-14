@@ -12,19 +12,48 @@ from invoke import task
 ROOT_PATH = Path(__file__).resolve().parent
 BUILD_DIR = ROOT_PATH / "build"
 
-# Fail early if invoke is running under a different Python than the active
-# venv.  This happens when invoke is installed system-wide (/usr/bin/invoke)
-# but a venv is active — sys.executable will be the system Python, so cmake
-# gets the wrong -DPython_EXECUTABLE and venv packages like pytest won't be
-# found.
-_venv = os.environ.get("VIRTUAL_ENV")
-if _venv and not sys.executable.startswith(_venv):
-    raise SystemExit(
-        f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
-        f"is set to {_venv}.\n"
-        f"Install invoke in the venv:  pip install invoke\n"
-        f"Then re-run:  invoke build"
-    )
+
+def _check_venv():
+    """Fail early if invoke is running under a different Python than the active venv.
+
+    This happens when invoke is installed system-wide (/usr/bin/invoke) but a
+    venv is active — sys.executable will be the system Python, so cmake gets
+    the wrong -DPython_EXECUTABLE and venv packages like pytest won't be found.
+    Called at the start of build() so importing this module (e.g. by downstream
+    tasks.py files) does not trigger the check as a side effect.
+    """
+    _venv = os.environ.get("VIRTUAL_ENV")
+    if _venv and not sys.executable.startswith(_venv):
+        raise SystemExit(
+            f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
+            f"is set to {_venv}.\n"
+            f"Install invoke in the venv:  pip install invoke\n"
+            f"Then re-run:  invoke build"
+        )
+
+
+def cmake_build_args(
+    install_prefix=None, tests=True, python=True, examples=True, shared=True
+):
+    """Canonical cmake args for a stinkytofu build.
+
+    Single source of truth for build flags — import this in downstream tasks
+    (e.g. tensilelite/tasks.py) so a new required option only needs to be
+    added here.
+
+    Defaults reflect the full standalone/CI build (tests, python, examples all
+    ON, shared library). Downstream callers that integrate stinkytofu (rocisa)
+    pass tests=False, python=False explicitly.
+    """
+    args = [
+        f"-DBUILD_SHARED_LIBS={'ON' if shared else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_EXAMPLES={'ON' if examples else 'OFF'}",
+    ]
+    if install_prefix is not None:
+        args.append(f"-DCMAKE_INSTALL_PREFIX={install_prefix}")
+    return args
 
 
 def _detect_rocm() -> Path:
@@ -79,6 +108,25 @@ def _detect_rocm() -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _parse_vcvars_env(stdout):
+    """Parse `KEY=VALUE` lines from `vcvarsall.bat ... && set` output.
+
+    Tolerant of stray U+FFFD replacement characters: when the process's active
+    code page can't represent a byte in vcvarsall.bat's banner text (e.g. a
+    JIS/Shift-JIS system locale with an English-language VS install),
+    `_setup_msvc_env()` decodes with errors="replace" rather than crashing, so
+    a banner line may come through full of �. Such lines either fail the
+    "=" check below or produce a garbage key that's harmless to set; the real
+    KEY=VALUE environment lines are plain ASCII and parse normally either way.
+    """
+    env = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            env[key] = value
+    return env
+
+
 def _setup_msvc_env():
     """Initialize the full MSVC build environment from vcvarsall.bat."""
     if sys.platform != "win32":
@@ -100,13 +148,11 @@ def _setup_msvc_env():
         capture_output=True,
         text=True,
         encoding="mbcs",
+        errors="replace",
         shell=True,
     )
     original_lib = os.environ.get("LIB", "")
-    for line in result.stdout.splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            os.environ[key] = value
+    os.environ.update(_parse_vcvars_env(result.stdout))
     # Restore original LIB entries so vcvarsall doesn't drop existing SDK paths
     if original_lib:
         existing = os.environ.get("LIB", "")
@@ -194,6 +240,7 @@ def build(
     coverage=False,
     rocm_path=None,
 ):
+    _check_venv()
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
 
     if clean and bld.exists():
@@ -214,12 +261,7 @@ def build(
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
-        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
-        # Standalone dev build: build the example plugins (demo + exercised by the
-        # unit tests). Default OFF in CMake so integrated/ROCm builds never ship them.
-        "-DSTINKYTOFU_BUILD_EXAMPLES=ON",
+        *cmake_build_args(tests=tests, python=not no_python, shared=not static),
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
         f"-DSTINKYTOFU_CODE_COVERAGE={'ON' if coverage else 'OFF'}",
     ]
@@ -360,6 +402,27 @@ def tidy(c, build_dir=None):
 
 @task(
     help={
+        "build_dir": "Build directory to use (default: build/).",
+        "open_report": "Open the generated HTML docs in a browser when finished.",
+    }
+)
+def docs(c, build_dir=None, open_report=False):
+    """Build the Doxygen + Sphinx documentation site. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not bld.exists():
+        print("No build directory found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(f'cmake --build "{bld.as_posix()}" --target sphinx_docs')
+    html_index = bld / "docs" / "html" / "index.html"
+    print(f"\nHTML docs: {html_index.as_posix()}")
+    if open_report:
+        import webbrowser
+
+        webbrowser.open(html_index.as_uri())
+
+
+@task(
+    help={
         "build_dir": "Coverage build directory (default: build-coverage/).",
         "open_report": "Open the HTML report in a browser when finished.",
         "jobs": "Number of parallel build jobs (default: all cores).",
@@ -447,10 +510,14 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
 
     # 5. Collect the instrumented binaries to report on. The library carries the
     #    code we care about; the tools/test binaries add their own coverage.
+    # unit_tests links stinkytofu_static (coverage embedded in the exe).
+    # api_tests links stinkytofu shared, so include the shared lib too so
+    # llvm-cov can resolve its binary ID and avoid "mismatched data" warnings.
     obj_names = (
         "libstinkytofu.so",
         "stinkytofu.dll",
         "unit_tests",
+        "api_tests",
         "stinkytofu-opt",
         "stinkytofu-check",
         "test_gen_instructions",
@@ -460,14 +527,14 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
         objects += [
             p
             for p in bld.rglob(f"{name}*")
-            if p.is_file() and p.suffix.lower() in (".exe", ".dll")
+            if p.is_file() and p.suffix.lower() in (".exe", ".dll", ".so", "")
         ]
     if not objects:
         raise SystemExit("ERROR: no instrumented binaries found to report on.")
     obj_args = " ".join(f'-object "{o.as_posix()}"' for o in objects)
 
     # Keep the report focused on library/tool sources, not test or 3rd-party code.
-    ignore = '--ignore-filename-regex="(tests|examples|build|_deps|rocisa|/usr/)"'
+    ignore = '--ignore-filename-regex="([/\\\\]tests[/\\\\]|[/\\\\]examples[/\\\\]|[/\\\\]build[^/\\\\]*[/\\\\]|_deps|rocisa|/usr/)"'
 
     # 6. HTML report, lcov export for CI, and a console summary.
     html_dir = bld / "coverage-report"

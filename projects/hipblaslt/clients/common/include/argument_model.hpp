@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "benchmark_stats.hpp"
 #include "efficiency_monitor.hpp"
 #include "hipblaslt_arguments.hpp"
 #include <fstream>
@@ -72,7 +73,9 @@ public:
                   double                      cpu_us,
                   double                      norm,
                   double                      atol,
-                  double                      rtol)
+                  double                      rtol,
+                  double                      max_ulp,
+                  double                      avg_ulp)
     {
         // requires enablement for frequency logging
         ArgumentModel_log_performance(name_line, val_line);
@@ -112,7 +115,7 @@ public:
         name_line << ",us";
         val_line << "," << gpu_us;
 
-        if(arg.unit_check || arg.norm_check || arg.allclose_check)
+        if(arg.unit_check || arg.norm_check || arg.allclose_check || arg.ulp_check)
         {
             if(cpu_us != ArgumentLogging::NA_value)
             {
@@ -155,6 +158,13 @@ public:
                         val_line << "," << rtol;
                 }
             }
+            if(arg.ulp_check)
+            {
+                name_line << ",max_ulp_error";
+                val_line << "," << max_ulp;
+                name_line << ",avg_ulp_error";
+                val_line << "," << avg_ulp;
+            }
         }
     }
 
@@ -174,9 +184,12 @@ public:
                   double                      gflops,
                   double                      gbytes = ArgumentLogging::NA_value,
                   double                      cpu_us = ArgumentLogging::NA_value,
-                  double                      norm   = ArgumentLogging::NA_value,
-                  double                      atol   = ArgumentLogging::NA_value,
-                  double                      rtol   = ArgumentLogging::NA_value)
+                  double                      norm    = ArgumentLogging::NA_value,
+                  double                      atol    = ArgumentLogging::NA_value,
+                  double                      rtol    = ArgumentLogging::NA_value,
+                  double                      max_ulp = 0.0,
+                  double                      avg_ulp = 0.0,
+                  const hipblaslt_bench::TimingResult& timing = {})
     {
         hipblaslt_internal_ostream name_list;
         hipblaslt_internal_ostream value_list;
@@ -282,7 +295,28 @@ public:
                      cpu_us,
                      norm,
                      atol,
-                     rtol);
+                     rtol,
+                     max_ulp,
+                     avg_ulp);
+
+        // Adaptive-timing distribution columns ("us"/Gflops above are the median).
+        // Emitted only when the adaptive path ran, so the fixed-count line carries
+        // no trailing columns.
+        if(arg.timing && timing.adaptive)
+        {
+            const char* status = !timing.noise_active ? "-"
+                                 : timing.converged   ? "converged"
+                                 : timing.stable      ? "stable"
+                                                      : "noisy";
+            print("batch", timing.batch);
+            print("samples", timing.samples);
+            print("hot_iters", timing.hot_iters);
+            print("mean_us", timing.mean_us);
+            print("min_us", timing.min_us);
+            print("cv", timing.cv);
+            print("rel_iqr", timing.rel_iqr);
+            print("status", status);
+        }
 
         if(archName != "")
         {

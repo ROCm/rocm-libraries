@@ -241,6 +241,20 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     """
     Returns returncode if detection failure
     """
+    # Belt-and-suspenders for the GPU-less --cpu-only switch: when CpuOnly is set,
+    # return a spoofed per-arch IsaVersion (derived from gfxToIsa) instead of shelling
+    # out to a device-enumeration tool. The arch comes from the CpuOnlyArch plumbing key.
+    # This backstops any entry path that reaches detection without passing an arch (the
+    # primary path supplies the arch via --gpu-targets and never reaches here). Returning
+    # an IsaVersion makes the isinstance(...) guard in detectGlobalCurrentISA pass so the
+    # "Failed to detect currect ISA" raise never fires GPU-less.
+    # Imported lazily to avoid a circular import (GlobalParameters imports from this module).
+    from .GlobalParameters import globalParameters
+    if globalParameters.get("CpuOnly"):
+        isa = gfxToIsa(globalParameters.get("CpuOnlyArch", "gfx942"))
+        if isa is not None:
+            print(f"# CpuOnly: spoofing GPU {deviceId} ISA as " + isaToGfx(isa))
+            return isa
     process = run([detectionTool], stdout=PIPE)
     archList = []
     for line in process.stdout.decode().split("\n"):
@@ -271,6 +285,63 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     if not isinstance(result, IsaVersion):
         raise Exception("Failed to detect currect ISA")
     return result
+
+
+def detectHostGfxArchs() -> List[str]:
+    """Enumerate the supported GPU architectures physically present on this host.
+
+    Reuses the same device-enumeration tool selection as the rest of the
+    toolchain (``ToolchainDefaults.DEVICE_ENUMERATOR`` -> ``rocm_agent_enumerator``
+    or ``amdgpu-arch``) and the canonical ``gfxToIsa``/``isaToGfx`` maps. Each
+    enumerated line is normalized through ``gfxToIsa`` (which strips ``:xnack±``
+    and other suffixes) and filtered to ``SUPPORTED_ISA``, so CPU agents
+    (``gfx000``) and unsupported devices are dropped.
+
+    Returns:
+        A de-duplicated list of canonical gfx names (e.g. ``["gfx950"]``).
+        Returns an empty list when no enumerator is available or it fails --
+        callers should treat "empty" as "cannot benchmark here".
+    """
+    # Lazy import: keep this module free of a load-time dependency on the
+    # Toolchain package (which imports Common.Utilities) and avoid any import cycle.
+    try:
+        from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+    except Exception:
+        return []
+
+    tool = ToolchainDefaults.DEVICE_ENUMERATOR
+    try:
+        toolPath = validateToolchain(tool)
+    except (FileNotFoundError, ValueError):
+        return []
+
+    try:
+        process = run([toolPath], stdout=PIPE, stderr=PIPE)
+    except OSError:
+        return []
+    if process.returncode:
+        return []
+
+    archs: List[str] = []
+    for line in process.stdout.decode(errors="replace").splitlines():
+        isa = gfxToIsa(line.strip())
+        if isa is not None and isa in SUPPORTED_ISA:
+            gfx = isaToGfx(isa)
+            if gfx not in archs:
+                archs.append(gfx)
+    return archs
+
+
+def hostHasArch(arch: str) -> bool:
+    """Return True iff ``arch`` matches a supported GPU present on this host.
+
+    Comparison is done on the normalized ISA version, so ``:xnack±`` / CU
+    variants on either side (requested arch or enumerated arch) compare equal.
+    """
+    target = gfxToIsa(arch)
+    if target is None:
+        return False
+    return any(gfxToIsa(a) == target for a in detectHostGfxArchs())
 
 
 class ArchInfo(NamedTuple):

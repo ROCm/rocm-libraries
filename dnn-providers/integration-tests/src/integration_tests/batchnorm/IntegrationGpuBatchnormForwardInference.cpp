@@ -110,7 +110,8 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

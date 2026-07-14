@@ -95,4 +95,4 @@ add_dependencies(
 )
 
 clang_tidy_check(hipdnn_public_backend_tests)
-add_integration_test_target(hipdnn_public_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
