@@ -385,52 +385,25 @@ class StreamK(Component):
     # ------------------------------------------------------------------
     # Single-hop next-neighbor work stealing (codegen-time, off by default)
     #
-    # Queues are one per XCD: numQueues = writer.states.archCaps["NumXCD"], a
-    # power of two so the mapping can use shift/AND fast masking:
-    #   queueIdx     = StreamKIdx & (numQueues - 1)
-    #   counter addr = AddressFlags + (queueIdx << cacheLineLog2)
-    #   global index = (perQueueRaw << log2(numQueues)) + queueIdx
-    #
-    # A queue whose home fetch comes up empty makes a single-hop next-neighbor
-    # steal from s = (q + 1) & (numQueues - 1). Each queue is stolen from by
-    # exactly one predecessor p = (q - 1) & (numQueues - 1), so its atomic_inc
-    # auto-reset bound is a static predecessor-inclusive value that self-zeroes
-    # the counter each launch -- no explicit end-of-kernel reset is needed.
-    #
-    # The per-queue counter stride is the hardware L2 cache-line size (read from
-    # writer.states.archCaps["CacheLineBytes"], the codegen mirror of origami
-    # hardware_t::get_default_cache_line_bytes; 128B for gfx942/gfx950). Stride
-    # == cache-line size, so each per-XCD atomic counter occupies its own line
-    # -> no false sharing.
+    # Queues are one per XCD: numQueues = archCaps["NumXCD"], a power of two so
+    # queue mapping uses shift/AND fast masking (queueIdx = StreamKIdx & mask).
+    # A queue whose home fetch is empty steals once from its next neighbor
+    # s = (q+1) & mask; each queue has exactly one predecessor p = (q-1) & mask.
     #
     # AddressFlags buffer layout (per problem):
     #   [0, numQueues*stride)     per-queue counters, one per cache line
-    #   [numQueues*stride, ...)   partials/fixup ready flags (one word per tile,
-    #                             offset = (partialIdx << 2) + numQueues*stride).
-    #
-    # numQueues is read at codegen time from writer.states.archCaps["NumXCD"]
-    # (the codegen mirror of origami get_default_num_xcds). The host
-    # (ContractionSolution.cpp) reads the same origami value and additionally
-    # rejects the dynamic-queue path when the device's runtime NUM_XCD differs
-    # from this baked count (e.g. MI300A's 6 XCDs vs the gfx942-baked 8).
+    #   [numQueues*stride, ...)   partials/fixup ready flags (one word per tile)
+    # Counter stride == archCaps["CacheLineBytes"] (128B on gfx942/gfx950), so
+    # each per-XCD counter sits on its own line. Each counter's atomic_inc uses a
+    # static predecessor-inclusive auto-reset bound, so it self-zeroes every
+    # launch -- there is no explicit end-of-kernel reset.
 
     def _wsQueueConstants(self, writer, kernel):
         """Return (numQueues, mask, log2Queues, cacheLineLog2) for this arch.
 
-        Centralizes the dynamic-queue / work-stealing fast-mask constants so the
-        queue count and per-queue counter stride each live in exactly one place.
-        ``numQueues`` is read from ``writer.states.archCaps["NumXCD"]`` (the
-        codegen mirror of origami get_default_num_xcds) and must be a power of
-        two for the shift/AND masking to be valid; the host guards the same
-        assumption at runtime, rejecting devices whose runtime NUM_XCD is not a
-        power of two or does not equal this baked count (e.g. MI300A's 6 XCDs).
-
-        ``cacheLineLog2`` is log2 of the per-queue counter stride, which equals
-        the hardware L2 cache-line size ``writer.states.archCaps["CacheLineBytes"]``
-        (the codegen mirror of origami get_default_cache_line_bytes; 128B for
-        gfx942/gfx950). Stride == cache-line size so each per-XCD counter sits on
-        its own line (no false sharing); it must be a power of two for the
-        queue-address shift to be valid.
+        ``numQueues`` = archCaps["NumXCD"] and the counter stride =
+        archCaps["CacheLineBytes"]; both must be powers of two for the shift/AND
+        queue masking and queue-address shift to be valid (asserted below).
         """
         numQueues = writer.states.archCaps["NumXCD"]
         assert numQueues > 0 and (numQueues & (numQueues - 1)) == 0, (
@@ -445,11 +418,8 @@ class StreamK(Component):
     def _wsFlagsBaseOffset(self, writer, kernel):
         """Byte offset where the partials/fixup ready flags begin.
 
-        The per-queue counter region occupies ``numQueues`` cache lines
-        (``numQueues * strideBytes`` bytes, with stride == the cache-line size),
-        so the flags region starts right after it. Both terms come from
-        ``_wsQueueConstants`` (numQueues and log2(stride)); for gfx942/gfx950
-        this is 8 * 128 = 1024.
+        The flags region starts right after the per-queue counters, i.e. after
+        ``numQueues * strideBytes`` bytes (8 * 128 = 1024 on gfx942/gfx950).
         """
         numQueues, _, _, cacheLineLog2 = self._wsQueueConstants(writer, kernel)
         return numQueues << cacheLineLog2
@@ -471,19 +441,13 @@ class StreamK(Component):
     def streamKWorkStealingHomeBound(self, writer, mod, kernel, sBound, sQueueIdx, sGrid):
         """Fold the predecessor's workgroup count into the home auto-reset bound.
 
-        The non-stealing bound ``tiles_q + W_q - 1`` wraps queue q's counter back
-        to 0 after ``tiles_q + W_q`` fetches (all tiles + one empty per WG). With
-        stealing q also absorbs W_p increments from its single predecessor
-        p = (q-1) & (numQueues-1), so the bound becomes ``tiles_q + W_q + W_p - 1``.
-        This adds the W_p term (W_p = (skGrid >> log2) + [p < (skGrid & mask)]) to
-        the ``tiles_q + W_q - 1`` already in ``sBound``. Caller must gate on
-        kernel["StreamKWorkStealing"] and pass the mode-appropriate grid SGPR name
-        (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic). ``sQueueIdx`` is
-        preserved.
-
-        Precondition (see Solution validation): exact only when W_q >= 1 whenever
-        tiles_q >= 1, i.e. skGrid >= numQueues; the Solution layer rejects debug
-        overrides that could violate this.
+        Adds the predecessor term W_p to the ``tiles_q + W_q - 1`` already in
+        ``sBound``, giving the stealing bound ``tiles_q + W_q + W_p - 1`` (queue q
+        also absorbs W_p increments from its one predecessor p = (q-1) & mask).
+        Caller gates on kernel["StreamKWorkStealing"] and passes the grid SGPR
+        name ("skGrid" for SK4, "SKGrid" for SK5-dynamic); ``sQueueIdx`` is
+        preserved. Exact only when W_q >= 1 whenever tiles_q >= 1 (skGrid >=
+        numQueues); the Solution layer rejects debug overrides that break this.
         """
         _, mask, log2Queues, _ = self._wsQueueConstants(writer, kernel)
         sPred = writer.sgprPool.checkOut(1, "wsPredQueue")
@@ -504,18 +468,15 @@ class StreamK(Component):
     def streamKWorkStealingSteal(self, writer, mod, kernel, sQueueIdx, sWorkItemIdx, sGrid, mkLabel):
         """Single-hop next-neighbor steal on the per-XCD queue topology.
 
-        Register contract: on entry sQueueIdx holds the home queue index q and
-        sWorkItemIdx holds the home fetch result; both must be live. If the home
-        fetch was valid (index < TotalItems) this is a no-op. Otherwise the WG
-        steals one tile from its next neighbor s = (q+1) & (numQueues-1) via a
-        single s_atomic_inc, then recomputes the global tile index from s. A lost
-        race leaves sWorkItemIdx >= TotalItems so the downstream valid-index check
-        turns this WG into a no-op. sQueueIdx is clobbered (advanced to s). Caller
-        must gate on kernel["StreamKWorkStealing"] and pass the mode-appropriate
-        grid SGPR name (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic).
-
-        The steal atomic uses the same predecessor-inclusive static bound as the
-        home path, evaluated for the stolen queue: ``tiles_s + W_s + W_q - 1``.
+        On entry sQueueIdx holds home queue q and sWorkItemIdx holds the home
+        fetch result (both live). If the home fetch was valid (index <
+        TotalItems) this is a no-op; otherwise one s_atomic_inc steals from the
+        next neighbor s = (q+1) & mask and the global tile index is recomputed
+        from s. A lost race leaves sWorkItemIdx >= TotalItems, so the downstream
+        valid-index check turns this WG into a no-op. sQueueIdx is clobbered
+        (advanced to s). Caller gates on kernel["StreamKWorkStealing"] and passes
+        the grid SGPR name ("skGrid" for SK4, "SKGrid" for SK5-dynamic). The
+        steal atomic uses the stolen queue's bound ``tiles_s + W_s + W_q - 1``.
         """
         _, mask, log2Queues, cacheLineLog2 = self._wsQueueConstants(writer, kernel)
         skFetchDone = mkLabel("SK_FetchDone")
@@ -3129,9 +3090,8 @@ class StreamKDynamic(StreamK):
         module.add(SCBranchSCC0(labelName=skSkipWorkItem.getLabelName(), comment="Skip work item"))
         writer.sgprPool.checkIn(sWave)
 
-        # Per-arch dynamic-queue fast-mask constants (log2(numQueues) for the
-        # StreamKIdx/queue divisions, log2(cache-line size) for the per-queue
-        # counter stride == one cache line, no false sharing).
+        # Per-arch dynamic-queue fast-mask constants: log2(numQueues) for the
+        # StreamKIdx/queue divisions, log2(cache-line size) for the counter stride.
         _, _, wsLog2Queues, wsCacheLineLog2 = self._wsQueueConstants(writer, kernel)
 
         # Default queue index
@@ -3486,13 +3446,7 @@ class StreamKDynamic(StreamK):
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK Dynamic kernelEnd")
 
-        # We don't need to track completed kernels if we know total tiles and grid size.
-        # The reset is baked into the atomic_inc auto-reset bound at the top of the
-        # loop: under single-hop next-neighbor work stealing the per-queue bound folds in the
-        # predecessor's workgroup count (see streamKWorkStealingHomeBound /
-        # streamKWorkStealingSteal), so every counter wraps back to 0 on its own and
-        # leaves the (host-zeroed-once) Synchronizer clean for the next launch. No
-        # explicit end-of-kernel reset is required.
+        # Per-queue atomic_inc auto-resets; no kernelEnd reset needed.
 
         return module
 
@@ -3788,9 +3742,8 @@ class StreamKHybrid(StreamK):
                                     comment="Skip work item"))
             writer.sgprPool.checkIn(sWave)
 
-            # Per-arch dynamic-queue fast-mask constants (log2(numQueues) for
-            # the StreamKIdx/queue divisions, log2(cache-line size) for the
-            # per-queue counter stride == one cache line, no false sharing).
+            # Per-arch dynamic-queue fast-mask constants: log2(numQueues) for the
+            # StreamKIdx/queue divisions, log2(cache-line size) for the counter stride.
             _, _, wsLog2Queues, wsCacheLineLog2 = self._wsQueueConstants(writer, kernel)
 
             # Default queue index
@@ -4337,10 +4290,7 @@ class StreamKHybrid(StreamK):
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK Hybrid kernelEnd")
 
-        # Single-hop next-neighbor work stealing self-resets every per-queue counter via the
-        # predecessor-inclusive atomic_inc auto-reset bound at the top of the loop
-        # (see streamKWorkStealingHomeBound / streamKWorkStealingSteal), so no
-        # explicit end-of-kernel reset is required on either SK5 sub-path.
+        # Per-queue atomic_inc auto-resets; no kernelEnd reset needed.
 
         return module
 

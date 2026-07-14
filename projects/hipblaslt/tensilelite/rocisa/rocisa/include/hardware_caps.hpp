@@ -610,12 +610,8 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // StreamK queue masking (AND/shift) valid.
     rv["NumXCD"] = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
 
-    // codegen-side mirror of origami's L2 cache-line size
-    // (hardware_t::get_default_cache_line_bytes): 128 B for the dynamic-queue
-    // arches gfx942/gfx950. Power-of-two so the StreamK queue-address shift
-    // stays valid; the StreamK per-XCD counter stride is set equal to this
-    // cache-line size so each counter occupies its own line (no false sharing).
-    rv["CacheLineBytes"] = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}}) ? 128 : 128;
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported archs).
+    rv["CacheLineBytes"] = 128;
 
     return rv;
 }

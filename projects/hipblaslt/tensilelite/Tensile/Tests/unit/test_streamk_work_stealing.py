@@ -5,20 +5,15 @@
 These tests assert that the work-stealing assembly is emitted by the helper
 methods on the ``StreamK`` base class, and -- crucially -- that those helpers
 are only ever reached behind the codegen-time ``StreamKWorkStealing`` toggle.
-Following the StreamK=5 hybrid tests, they import rocisa instructions and
-inspect emitted modules rather than matching source text; the toggle gating
-and the Solution-level validation are verified by executing the *real* source
-(via the AST) so the assertions track the actual code, not a copy of it.
+They import rocisa instructions and inspect emitted modules rather than matching
+source text; the toggle gating and the Solution-level validation are verified by
+executing the *real* source (via the AST) so the assertions track the actual code.
 
 Emission contract (single-hop next-neighbor + sticky-home + static auto-reset):
-  * The steal always fires on an empty home fetch -- there is no remainder /
-    structural-extra guard (no ``s_cmp_ge_u32`` neighbor guard, no
-    ``remainder == 0`` skip).
-  * The steal & home atomic bounds are the predecessor-inclusive self-reset
-    value.
+  * The steal fires on an empty home fetch with no neighbor structural-extra guard.
+  * The steal & home atomic bounds are the predecessor-inclusive self-reset value.
   * A per-WG sticky-empty SGPR gates the home fetch.
-  * There is no ``streamKWorkStealingKernelEndReset`` / completion counter /
-    reset barrier.
+  * kernelEnd emits no explicit reset; per-queue counters auto-reset.
 """
 
 import ast
@@ -230,8 +225,7 @@ class TestValidParameters:
 
 
 # ===========================================================================
-# 2. The work-stealing helper methods: the new steal/bound helpers exist and
-#    the removed single-hop-reset helpers are gone.
+# 2. The work-stealing helper methods exist on the StreamK base class.
 # ===========================================================================
 class TestHelperMethodsExist:
     @pytest.mark.parametrize(
@@ -243,23 +237,6 @@ class TestHelperMethodsExist:
     )
     def test_method_is_defined_on_base(self, name):
         assert callable(getattr(StreamK, name))
-
-    @pytest.mark.parametrize(
-        "name",
-        [
-            "streamKWorkStealingHomeNoReset",
-            "streamKWorkStealingKernelEndReset",
-        ],
-    )
-    def test_removed_methods_are_gone(self, name):
-        assert not hasattr(StreamK, name), (
-            "explicit-reset / no-reset helpers must be removed"
-        )
-
-    def test_completion_counter_constant_is_gone(self):
-        assert not hasattr(StreamK, "_WS_COMPLETION_COUNTER_OFFSET"), (
-            "the 0x80 completion-counter offset must be removed"
-        )
 
 
 # ===========================================================================
@@ -399,8 +376,7 @@ class TestStickyHomeGate:
 
 
 # ===========================================================================
-# 3d. No explicit reset survives anywhere in kernelEnd, and the 0x80
-#     completion counter / reset barrier are gone.
+# 3d. kernelEnd emits no work-stealing reset and no completion counter.
 # ===========================================================================
 class TestNoExplicitReset:
     @pytest.mark.parametrize("func", [StreamKDynamic.kernelEnd, StreamKHybrid.kernelEnd])
@@ -496,8 +472,8 @@ class TestSolutionValidation:
 
     @pytest.mark.parametrize("debug", [1, 2, 3])
     def test_rejected_with_debug_streamk(self, debug):
-        # Proof condition #1: DebugStreamK overrides could break the W_q>=1
-        # (skGrid>=numQueues) precondition the per-queue auto-reset relies on.
+        # DebugStreamK overrides can break the W_q>=1 precondition the per-queue
+        # auto-reset relies on, so the combination is rejected.
         state = self._run(streamk=4, atomic=0, debug_streamk=debug)
         assert state["Valid"] is False
 
