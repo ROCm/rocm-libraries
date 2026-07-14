@@ -173,7 +173,7 @@ jobs:
 
       - name: Build frontend bindings
         shell: pwsh
-        run: cmake --build $env:PYTHON_BUILD_DIR --config Release
+        run: cmake --build $env:PYTHON_BUILD_DIR
 
       - name: Pack frontend wheel
         shell: pwsh
