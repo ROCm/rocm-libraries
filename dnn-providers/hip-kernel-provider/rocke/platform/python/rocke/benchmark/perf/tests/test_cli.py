@@ -294,6 +294,10 @@ class TestParser(unittest.TestCase):
                 ]
             )
 
+    def test_negative_warmup_errors(self):
+        with self.assertRaises(SystemExit):
+            _run(["profile", "--arch", "gfx950", "--warmup", "-1", "--", "prog"])
+
 
 if __name__ == "__main__":
     unittest.main()

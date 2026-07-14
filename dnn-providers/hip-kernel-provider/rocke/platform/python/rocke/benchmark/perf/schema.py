@@ -14,9 +14,12 @@ One record per (run, kernel, shape, config), composed from several primitives:
   counters  : PMU-counter primitive (rocprofv3): cycles/cache/waves/insts/stalls [GPU]
   resources : occupancy primitive (ELF notes, NO GPU): vgpr/agpr/sgpr/lds/occupancy
   derived   : busy_fraction, l2_hit_rate, ...
-  captured_counters : which normalized counters this arch/run actually captured
-  counter_samples   : OPT-IN raw per-dispatch counter values (all dispatches, keyed
-              by dispatch_id) for downstream profiling; absent unless requested [GPU]
+   captured_counters : which normalized counters this arch/run actually captured
+  counter_samples   : OPT-IN raw per-dispatch counter values and duration_ns (when
+              rocprofv3 timestamps are available), tagged with dispatch_id and
+              counter_pass (unique within one run). Aggregated records also carry
+              sample_index to identify the originating run, so a (dispatch_id,
+              counter_pass) pair repeats once per run; absent unless requested [GPU]
   verify    : correctness (ok, max_abs_diff)
 
 `counters`/`resources`/`derived` are nullable - a record may carry only wall
@@ -34,15 +37,10 @@ SCHEMA_VERSION = "rocke.bench.measurement/v1"
 # shape signature is a generic serialization of whatever the shape dict holds
 # (GEMM: M/N/K; conv: N/H/W/C/...; attention: batch/heads/seqlen/...), so no op is
 # privileged. (config hash is an optional tiebreaker the caller may add.)
-IDENTITY_KEYS = ("arch", "kernel_name", "shape")
-
 # Primary regression metric is clock-invariant (cycles); wall time is the fallback
 # when the profiler was unavailable.
 PRIMARY_METRIC = "busy_cycles"  # from record["counters"]
 FALLBACK_METRIC = "ms_median"  # from record["wall"]
-
-# Static resource fields (from ELF notes; no GPU) - the occupancy primitive.
-RESOURCE_KEYS = ("vgpr", "agpr", "sgpr", "lds_bytes", "occupancy")
 
 # Fields that, when present, form the diagnostic panel a regression report shows
 # (dynamic counters + static resources - both help localize a change).

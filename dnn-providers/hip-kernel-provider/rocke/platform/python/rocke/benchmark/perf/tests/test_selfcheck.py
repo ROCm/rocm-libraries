@@ -76,6 +76,15 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(r["verdict"], "within_noise")
         self.assertAlmostEqual(r["floor_pct"], 12.0)
 
+    def test_noise_floor_uses_baseline_spread(self):
+        # The baseline has 4% observed variation, so a later +8% change remains
+        # within the 12% noise floor even when the current run is perfectly stable.
+        prev = _rec(busy=1000, total=1000, spread={"busy_cycles_pct": 4.0})
+        cur = _rec(busy=1080, total=1000, spread={"busy_cycles_pct": 0.0})
+        r = selfcheck.compare(prev, cur)
+        self.assertEqual(r["verdict"], "within_noise")
+        self.assertAlmostEqual(r["floor_pct"], 12.0)
+
     def test_reports_which_counter_moved(self):
         # slowdown accompanied by an L2 hit-rate collapse -> panel shows it
         prev = _rec(busy=1000, total=1000, l2_hit=90, l2_miss=10)

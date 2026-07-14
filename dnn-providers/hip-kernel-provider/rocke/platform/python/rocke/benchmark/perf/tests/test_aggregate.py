@@ -16,7 +16,8 @@ def _rec(
     ms=None,
     prof_ms=None,
     l2_hit=None,
-    l2_miss=None
+    l2_miss=None,
+    counter_samples=None,
 ):
     """Minimal schema-valid single-run record with the fields under test."""
     counters = {}
@@ -30,7 +31,7 @@ def _rec(
         counters["l2_miss"] = l2_miss
     wall = {"ms_median": ms} if ms is not None else {}
     profiled = {"ms_median": prof_ms} if prof_ms is not None else {}
-    return {
+    record = {
         "schema": schema.SCHEMA_VERSION,
         "run": {"run_id": "r", "arch": arch, "timestamp": "t"},
         "kernel": {"kernel_name": kernel, "op": "gemm", "shape": shape or {"M": 8}},
@@ -42,6 +43,9 @@ def _rec(
         "captured_counters": sorted(counters),
         "verify": {},
     }
+    if counter_samples is not None:
+        record["counter_samples"] = counter_samples
+    return record
 
 
 class TestProfiled(unittest.TestCase):
@@ -119,6 +123,40 @@ class TestAggregate(unittest.TestCase):
     def test_output_is_schema_valid(self):
         out = aggregate.aggregate([_rec(busy=100, total=1000, ms=1.0)])
         schema.validate(out)  # raises on failure
+
+    def test_counter_samples_preserved_across_repeats(self):
+        recs = [
+            _rec(
+                busy=100,
+                counter_samples=[
+                    {"dispatch_id": 5, "duration_ns": 10, "busy_cycles": 100}
+                ],
+            ),
+            _rec(
+                busy=110,
+                counter_samples=[
+                    {"dispatch_id": 5, "duration_ns": 12, "busy_cycles": 110}
+                ],
+            ),
+        ]
+        out = aggregate.aggregate(recs)
+        self.assertEqual(
+            out["counter_samples"],
+            [
+                {
+                    "dispatch_id": 5,
+                    "duration_ns": 10,
+                    "busy_cycles": 100,
+                    "sample_index": 0,
+                },
+                {
+                    "dispatch_id": 5,
+                    "duration_ns": 12,
+                    "busy_cycles": 110,
+                    "sample_index": 1,
+                },
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -43,6 +43,20 @@ class TestCountPasses(unittest.TestCase):
             self.assertEqual(harness._count_passes(Path(d)), 0)
 
 
+class TestReadCounterCsvs(unittest.TestCase):
+    def test_records_rocprof_counter_pass(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            first = root / "pmc_1" / "first_counter_collection.csv"
+            second = root / "pmc_2" / "second_counter_collection.csv"
+            first.parent.mkdir()
+            second.parent.mkdir()
+            first.write_text("Dispatch_Id,Counter_Name,Counter_Value\n1,H,10\n")
+            second.write_text("Dispatch_Id,Counter_Name,Counter_Value\n1,M,20\n")
+            rows = harness._read_counter_csvs(root)
+        self.assertCountEqual([row["counter_pass"] for row in rows], ["pmc_1", "pmc_2"])
+
+
 class TestCounterMedians(unittest.TestCase):
     def _rows(self, did_val_pairs, counter="C1"):
         # one CSV row per (dispatch, counter)
@@ -77,18 +91,137 @@ class TestCounterMedians(unittest.TestCase):
 
 
 class TestCounterSamples(unittest.TestCase):
+    def test_duration_ns_parses_float_timestamps(self):
+        # rocprofv3 CSVs can emit timestamps as floats/scientific notation, like the
+        # counter/dispatch fields; duration_ns must survive that, not silently drop.
+        rows = [
+            {
+                "Dispatch_Id": "1",
+                "Counter_Name": "H",
+                "Counter_Value": "10",
+                "counter_pass": "pmc_1",
+                "Start_Timestamp": "100.0",
+                "End_Timestamp": "1.1e2",
+            }
+        ]
+        out = harness._counter_samples(rows, {"H": "l2_hit"})
+        self.assertEqual(
+            out,
+            [{"dispatch_id": 1, "counter_pass": "pmc_1", "l2_hit": 10, "duration_ns": 10}],
+        )
+
     def test_per_dispatch_sorted_all_dispatches(self):
         rows = [
-            {"Dispatch_Id": "3", "Counter_Name": "H", "Counter_Value": "30"},
-            {"Dispatch_Id": "3", "Counter_Name": "M", "Counter_Value": "3"},
-            {"Dispatch_Id": "1", "Counter_Name": "H", "Counter_Value": "10"},
-            {"Dispatch_Id": "1", "Counter_Name": "M", "Counter_Value": "1"},
+            {
+                "Dispatch_Id": "3",
+                "Counter_Name": "H",
+                "Counter_Value": "30",
+                "counter_pass": "pmc_1",
+                "Start_Timestamp": "300",
+                "End_Timestamp": "325",
+            },
+            {
+                "Dispatch_Id": "3",
+                "Counter_Name": "M",
+                "Counter_Value": "3",
+                "counter_pass": "pmc_1",
+                "Start_Timestamp": "300",
+                "End_Timestamp": "325",
+            },
+            {
+                "Dispatch_Id": "1",
+                "Counter_Name": "H",
+                "Counter_Value": "10",
+                "counter_pass": "pmc_1",
+                "Start_Timestamp": "100",
+                "End_Timestamp": "110",
+            },
+            {
+                "Dispatch_Id": "1",
+                "Counter_Name": "M",
+                "Counter_Value": "1",
+                "counter_pass": "pmc_1",
+                "Start_Timestamp": "100",
+                "End_Timestamp": "110",
+            },
         ]
         out = harness._counter_samples(rows, {"H": "l2_hit", "M": "l2_miss"})
         # sorted by dispatch_id, warmup NOT dropped, each dispatch has both counters
         self.assertEqual([s["dispatch_id"] for s in out], [1, 3])
-        self.assertEqual(out[0], {"dispatch_id": 1, "l2_hit": 10, "l2_miss": 1})
-        self.assertEqual(out[1], {"dispatch_id": 3, "l2_hit": 30, "l2_miss": 3})
+        self.assertEqual(
+            out[0],
+            {
+                "dispatch_id": 1,
+                "counter_pass": "pmc_1",
+                "l2_hit": 10,
+                "l2_miss": 1,
+                "duration_ns": 10,
+            },
+        )
+        self.assertEqual(
+            out[1],
+            {
+                "dispatch_id": 3,
+                "counter_pass": "pmc_1",
+                "l2_hit": 30,
+                "l2_miss": 3,
+                "duration_ns": 25,
+            },
+        )
+
+    def test_per_dispatch_keeps_counter_passes_separate(self):
+        rows = [
+            {
+                "Dispatch_Id": "1",
+                "Counter_Name": "H",
+                "Counter_Value": "10",
+                "counter_pass": "pmc_1",
+                "Start_Timestamp": "100",
+                "End_Timestamp": "110",
+            },
+            {
+                "Dispatch_Id": "1",
+                "Counter_Name": "M",
+                "Counter_Value": "3",
+                "counter_pass": "pmc_2",
+                "Start_Timestamp": "200",
+                "End_Timestamp": "225",
+            },
+        ]
+        out = harness._counter_samples(rows, {"H": "l2_hit", "M": "l2_miss"})
+        self.assertEqual(
+            out,
+            [
+                {
+                    "dispatch_id": 1,
+                    "counter_pass": "pmc_1",
+                    "l2_hit": 10,
+                    "duration_ns": 10,
+                },
+                {
+                    "dispatch_id": 1,
+                    "counter_pass": "pmc_2",
+                    "l2_miss": 3,
+                    "duration_ns": 25,
+                },
+            ],
+        )
+
+    def test_per_dispatch_omits_invalid_timestamps(self):
+        rows = [
+            {
+                "Dispatch_Id": "1",
+                "Counter_Name": "H",
+                "Counter_Value": "10",
+                "Start_Timestamp": "20",
+                "End_Timestamp": "10",
+            }
+        ]
+        out = harness._counter_samples(rows, {"H": "l2_hit"})
+        self.assertEqual(
+            out,
+            [{"dispatch_id": 1, "counter_pass": "pmc_0", "l2_hit": 10}],
+        )
 
     def test_ignores_unrequested_counters(self):
         rows = [{"Dispatch_Id": "1", "Counter_Name": "X", "Counter_Value": "9"}]
@@ -166,6 +299,17 @@ class TestProfileDegradation(unittest.TestCase):
         rec = harness.profile(["x"], "gfx1201", label="lbl", op="o", shape={})
         self.assertEqual(rec["kernel"]["kernel_name"], "lbl")
         self.assertNotIn("dispatch_symbol", rec["kernel"])
+
+    def test_profiler_fallback_uses_a_stable_command_identity(self):
+        harness._counters.discover = lambda arch: {}
+        first = harness.profile(["first"], "gfx1201", op="o", shape={})
+        second = harness.profile(["second"], "gfx1201", op="o", shape={})
+        self.assertTrue(first["kernel"]["kernel_name"].startswith("command_"))
+        self.assertNotEqual(first["kernel"]["kernel_name"], second["kernel"]["kernel_name"])
+
+    def test_negative_warmup_rejected(self):
+        with self.assertRaises(ValueError):
+            harness.profile(["x"], "gfx1201", warmup=-1)
 
     def test_l2_hit_without_miss_skips_ratio_no_keyerror(self):
         # Only the L2 hit counter populated (miss absent, e.g. a partial arch

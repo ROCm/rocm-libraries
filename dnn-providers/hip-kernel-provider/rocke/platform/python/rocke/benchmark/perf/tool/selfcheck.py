@@ -10,8 +10,10 @@ so a positive percent change is slower.
 
 Why a noise floor and not a bare threshold: one run wobbles even on the cycle
 metric, so `aggregate` records a spread; gating on `noise_k * spread` stops the tool
-crying wolf when a "slowdown" is smaller than the run-to-run wobble. It stays
-**advisory** - it never fails a build; that policy belongs to whatever consumes it.
+crying wolf when a "slowdown" is smaller than the run-to-run wobble. The library
+only returns a verdict and never raises on a regression; the shipped CLI
+(`profile`/`compare`) turns a `regressed` verdict into exit status 1, so other
+consumers can adopt their own policy.
 
 Defaults: threshold 5% (fraction 0.05), noise_k 3. Stdlib only.
 """
@@ -37,7 +39,8 @@ def compare(
 
     Returns a dict with `verdict` in {regressed, improved, within_noise, unknown},
     the metric used, the percent change, the noise floor that gated it, and the full
-    `report.diff` (panel included) so a caller can show *why*.
+    `report.diff` (panel included) so a caller can show *why*. The noise floor uses
+    the larger spread from the baseline and current records.
     """
     d = _report.diff(previous, current)
     pct = d.get("pct_change")

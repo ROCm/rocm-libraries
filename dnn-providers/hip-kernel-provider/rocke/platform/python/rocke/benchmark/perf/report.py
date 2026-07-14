@@ -105,8 +105,20 @@ def diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict:
         "baseline": b_val,
         "current": c_val,
         "metric_mismatch": bool(b_which and c_which and b_which != c_which),
-        "spread_pct": _spread_pct(current, c_which),
+        "baseline_spread_pct": _spread_pct(baseline, b_which),
+        "current_spread_pct": _spread_pct(current, c_which),
     }
+    # Only a same-metric comparison has a meaningful combined noise floor; mixing a
+    # cycles-spread with a wall-spread would be a bogus number, so omit it on mismatch.
+    if out["metric_mismatch"]:
+        out["spread_pct"] = None
+    else:
+        spreads = [
+            spread
+            for spread in (out["baseline_spread_pct"], out["current_spread_pct"])
+            if spread is not None
+        ]
+        out["spread_pct"] = max(spreads) if spreads else None
     if b_val is not None and c_val is not None and not out["metric_mismatch"]:
         out["abs_delta"] = c_val - b_val
         out["pct_change"] = ((c_val - b_val) / b_val * 100.0) if b_val else None

@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the local record store (pure, no GPU)."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,9 +50,24 @@ class TestStore(unittest.TestCase):
         with store.history_path(self.cache).open("a") as f:
             f.write("\n")
             f.write("{not valid json}\n")
+            f.write("[]\n")
+            f.write('"interrupted-write"\n')
+            f.write('{"schema":"wrong"}\n')
         store.append(_rec(busy=2), cache=self.cache)
         got = store.load(cache=self.cache)
         self.assertEqual([r["counters"]["busy_cycles"] for r in got], [1, 2])
+
+    def test_future_schema_record_stays_readable(self):
+        # additive-only schema: a record from a newer version must still load, so a
+        # version bump doesn't silently erase existing history on read.
+        store.append(_rec(busy=1), cache=self.cache)
+        future = _rec(busy=5)
+        future["schema"] = "rocke.bench.measurement/v2"
+        future["new_future_field"] = {"anything": True}
+        with store.history_path(self.cache).open("a") as f:
+            f.write(json.dumps(future, sort_keys=True) + "\n")
+        got = store.load(cache=self.cache)
+        self.assertEqual([r["counters"]["busy_cycles"] for r in got], [1, 5])
 
     def test_env_var_resolution(self):
         import os

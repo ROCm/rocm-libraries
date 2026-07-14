@@ -55,8 +55,30 @@ def append(
     return p
 
 
+def _is_readable_record(record: object) -> bool:
+    """A record safe for `identity()`/comparison: a dict with the identity fields.
+
+    Deliberately NOT a full `schema.validate` - the schema is additive-only so a
+    record written under a newer version must still load. We only require the
+    load-bearing structure downstream code dereferences (run.arch, kernel.*), so a
+    truncated write or a JSON scalar/list is skipped instead of crashing `compare`.
+    """
+    if not isinstance(record, dict):
+        return False
+    run = record.get("run")
+    kernel = record.get("kernel")
+    if not isinstance(run, Mapping) or not isinstance(kernel, Mapping):
+        return False
+    return "arch" in run and "kernel_name" in kernel and "shape" in kernel
+
+
 def load(*, cache: Optional[os.PathLike | str] = None) -> list[dict]:
-    """Read all records back, in append order. Blank/corrupt lines are skipped."""
+    """Read all records back, in append order. Blank/corrupt lines are skipped.
+
+    Skips lines that aren't a JSON object with the identity structure; it does NOT
+    drop a well-formed record merely because its `schema` version differs (the
+    schema is additive-only, so older/newer records stay readable).
+    """
     p = history_path(cache)
     if not p.exists():
         return []
@@ -66,9 +88,12 @@ def load(*, cache: Optional[os.PathLike | str] = None) -> list[dict]:
         if not line:
             continue
         try:
-            out.append(json.loads(line))
+            record = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not _is_readable_record(record):
+            continue
+        out.append(record)
     return out
 
 

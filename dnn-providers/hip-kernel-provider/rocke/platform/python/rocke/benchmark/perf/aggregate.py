@@ -17,7 +17,8 @@ not one shot.
   - `derived` is recomputed from the median counters (+ profiler_overhead_pct);
   - `n_samples` records K;
   - `counter_samples` (opt-in per-dispatch, if present) is passed through from the
-    first record - it is a per-run raw artifact, so pair it with `--repeats 1`.
+    every input record and tagged with `sample_index`, preserving the raw evidence
+    behind an aggregate without conflating dispatch ids across repeats.
 
 Pure and stdlib-only: writes nothing, runs no profiler. Mixing identities is a
 caller bug, so it raises rather than silently averaging unrelated kernels.
@@ -99,6 +100,15 @@ def _derived(counters: Mapping[str, Any]) -> dict:
     return d
 
 
+def _all_counter_samples(records: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """Preserve raw dispatch samples from every run with their source run index."""
+    out: list[dict] = []
+    for sample_index, record in enumerate(records):
+        for sample in record.get("counter_samples") or []:
+            out.append({**sample, "sample_index": sample_index})
+    return out
+
+
 def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
     """Reduce K same-identity records to one median+spread record.
 
@@ -137,5 +147,7 @@ def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
     out["captured_counters"] = sorted(counters)
     out["spread"] = spread
     out["n_samples"] = len(records)
+    if any("counter_samples" in r for r in records):
+        out["counter_samples"] = _all_counter_samples(records)
     _schema.validate(out)
     return out

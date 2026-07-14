@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import glob
+import hashlib
 import json
 import os
 import statistics
@@ -86,8 +87,18 @@ def _count_passes(outdir: Path) -> int:
 def _read_counter_csvs(outdir: Path) -> list[dict]:
     rows: list[dict] = []
     for f in glob.glob(str(outdir / "**" / "*counter_collection.csv"), recursive=True):
+        path = Path(f)
+        # rocprofv3 writes each replay pass under a 1-indexed `pmc_N` dir; the
+        # "pmc_0" sentinel only applies to a CSV not under any such dir (e.g. a
+        # single-pass layout), so it never collides with a real pass.
+        counter_pass = next(
+            (parent.name for parent in path.parents if parent.name.startswith("pmc_")),
+            "pmc_0",
+        )
         with open(f, newline="") as fh:
-            rows.extend(csv.DictReader(fh))
+            for row in csv.DictReader(fh):
+                row["counter_pass"] = counter_pass
+                rows.append(row)
     return rows
 
 
@@ -96,10 +107,13 @@ def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
 
     Drops the first `warmup` dispatches per counter (ordered by `Dispatch_Id`) so
     the counters exclude cold-cache warmup launches and line up with the timed-only
-    wall/profiled ms. Each counter's rows come from a single collection pass (a
-    counter lives in one group), so per-counter ordering is that run's launch order.
+    wall/profiled ms. Each counter lives in exactly one collection pass, so its
+    per-dispatch ordering is that pass's launch order. We key by
+    `(counter_pass, dispatch_id)` per counter so that if a block is ever split
+    across passes (see the pass-count warning in `profile`), the same dispatch is
+    not counted twice.
     """
-    by_raw: dict[str, list[tuple[int, float]]] = {}
+    by_raw: dict[str, dict[tuple[str, int], float]] = {}
     for r in trows:
         cn = r.get("Counter_Name", "")
         if cn not in raw_to_norm:
@@ -109,12 +123,14 @@ def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
             val = float(r["Counter_Value"])
         except (ValueError, KeyError, TypeError):
             continue
-        by_raw.setdefault(cn, []).append((did, val))
+        counter_pass = str(r.get("counter_pass", "pmc_0"))
+        by_raw.setdefault(cn, {})[(counter_pass, did)] = val
     out: dict = {}
-    for raw, pairs in by_raw.items():
-        pairs.sort(key=lambda p: p[0])  # launch order
-        kept = pairs[warmup:] or pairs  # keep all if warmup >= dispatches
-        m = _median([v for _, v in kept])
+    for raw, by_key in by_raw.items():
+        # (counter_pass, dispatch_id) launch order; one value per key already deduped
+        ordered = [by_key[k] for k in sorted(by_key)]
+        kept = ordered[warmup:] or ordered  # keep all if warmup >= dispatches
+        m = _median(kept)
         if m is not None:
             out[raw_to_norm[raw]] = int(m) if m == int(m) else m
     return out
@@ -123,12 +139,13 @@ def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
 def _counter_samples(trows: list[dict], raw_to_norm: dict) -> list[dict]:
     """Per-dispatch normalized counter values for the target kernel (raw signal).
 
-    Returns one dict per dispatch, `{"dispatch_id": int, <normalized>: value, ...}`,
-    sorted by `Dispatch_Id`. Includes ALL dispatches (warmup NOT dropped) so
-    downstream tooling can slice warmup vs steady-state itself. Opt-in (see
+    Returns one dict per dispatch and rocprofv3 counter pass, with `dispatch_id`,
+    `counter_pass`, and normalized counter values. When rocprofv3 emits both
+    timestamps, each sample also has `duration_ns`. Includes ALL dispatches (warmup
+    NOT dropped) so downstream tooling can slice warmup vs steady-state itself. Opt-in (see
     `profile(per_dispatch=True)`) because it is much larger than the aggregate.
     """
-    by_disp: dict[int, dict] = {}
+    by_disp: dict[tuple[str, int], dict] = {}
     for r in trows:
         cn = r.get("Counter_Name", "")
         if cn not in raw_to_norm:
@@ -138,8 +155,19 @@ def _counter_samples(trows: list[dict], raw_to_norm: dict) -> list[dict]:
             val = float(r["Counter_Value"])
         except (ValueError, KeyError, TypeError):
             continue
-        d = by_disp.setdefault(did, {"dispatch_id": did})
+        counter_pass = str(r.get("counter_pass", "pmc_0"))
+        d = by_disp.setdefault(
+            (counter_pass, did),
+            {"dispatch_id": did, "counter_pass": counter_pass},
+        )
         d[raw_to_norm[cn]] = int(val) if val == int(val) else val
+        try:
+            start_ns = int(float(r["Start_Timestamp"]))
+            end_ns = int(float(r["End_Timestamp"]))
+        except (ValueError, KeyError, TypeError):
+            continue
+        if end_ns >= start_ns:
+            d["duration_ns"] = end_ns - start_ns
     return [by_disp[k] for k in sorted(by_disp)]
 
 
@@ -236,6 +264,9 @@ def profile(
     def _warn(msg: str) -> None:
         if warn:
             warn(msg)
+
+    if warmup < 0:
+        raise ValueError("warmup must be non-negative")
 
     env = {**os.environ, **(env or {})}
     sel = _counters.discover(arch)  # normalized -> raw
@@ -342,7 +373,8 @@ def profile(
         )
 
     dispatched = kmeta.get("kernel_name", "") or (match or "")
-    kernel_name = label or dispatched
+    command_id = hashlib.sha256("\0".join(cmd).encode()).hexdigest()[:12]
+    kernel_name = label or dispatched or f"command_{command_id}"
     kernel: dict = {
         "kernel_name": kernel_name,
         "op": op,

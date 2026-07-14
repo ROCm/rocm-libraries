@@ -46,6 +46,13 @@ def _shape_arg(text: Optional[str]) -> dict:
     return val
 
 
+def _nonnegative_int(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return value
+
+
 def _cmd_profile(a: argparse.Namespace) -> int:
     # argparse.REMAINDER keeps the literal '--' separator as cmd[0]; drop it so we
     # don't try to exec a program named '--'.
@@ -182,7 +189,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--repeats", type=int, default=1)
     pr.add_argument(
         "--warmup",
-        type=int,
+        type=_nonnegative_int,
         default=0,
         help="leading warmup dispatches to drop from counter medians "
         "(match the launcher's warmup_iters)",
