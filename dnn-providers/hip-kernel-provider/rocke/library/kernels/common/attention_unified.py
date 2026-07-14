@@ -993,6 +993,8 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     # gfx942 D64 oracle: paired with ``T=block_size`` and mw=32, four waves fit
     # in the MI300X 64 KB LDS budget and match the direct gfx942 harness.
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
+        if problem.all_decode:
+            return 1
         return 4
     if _enable_combo_2d(problem):
         # bf16 sliding-window is prelude-bound -> nw2 (lighter prelude). But
