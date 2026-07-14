@@ -1374,10 +1374,8 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.use_fp8:
         return False
-    # softcap/sinks: not wired into the transposed softmax. use_alibi and
-    # use_qq_bias are intentionally NOT checked here — the multi-batch branch
-    # allows them; they are excluded upstream by _enable_combo_2d and
-    # _enable_single_batch_combo before reaching this point.
+    # Only softcap/sinks gated here — alibi/qq_bias are handled by the
+    # transposed softmax body, so do NOT add them to this check.
     if problem.softcap > 0 or problem.use_sinks:
         return False
     if problem.head_size not in (64, 128):
