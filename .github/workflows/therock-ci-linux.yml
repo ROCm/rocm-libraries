@@ -180,8 +180,7 @@ jobs:
     # artifacts from the just-finished TheRock build and runs two small workloads
     # under rocjitsu's race detector. The workloads run entirely under CPU-side
     # emulation; use the CPU build runner instead of consuming GPU test capacity.
-    # Keep it gated to hipblaslt + known rocjitsu race-check targets while
-    # rocjitsu packaging and runner capacity are still evolving.
+    # Gate on hipBLASLt and artifact families with checked-in rocjitsu configs.
     if: ${{ inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(format(',{0},', inputs.projects_to_test), ',hipblaslt,') }}
     runs-on: ${{ inputs.build_runs_on }}
     timeout-minutes: 90
@@ -235,13 +234,13 @@ jobs:
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
 
-      # The base image intentionally does not contain a full ROCm install. Keep
-      # the apt dependency set to ordinary host build tools; the ROCm runtime,
-      # clients, and TensileLite Python tree come from TheRock artifacts below.
+      # The base image contains the shell and source-control tools used before
+      # artifact fetch; install only the host libraries needed for the local
+      # rocjitsu source build. ROCm runtime pieces come from TheRock artifacts.
       - name: Install rocjitsu build dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
             cmake \
