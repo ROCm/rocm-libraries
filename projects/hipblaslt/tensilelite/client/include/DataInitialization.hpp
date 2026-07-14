@@ -951,7 +951,14 @@ namespace TensileLite
                     }
                 }
             }
-            virtual void postSolution() override {}
+            virtual void postSolution() override
+            {
+                if(m_boundsCheck == BoundsCheckMode::GuardPageAll)
+                {
+                    m_numRunsInSolution = 0;
+                    m_curBoundsCheck    = BoundsCheckMode::GuardPageFront;
+                }
+            }
             virtual bool needMoreRunsInSolution() const override
             {
                 return m_numRunsInSolution < m_numRunsPerSolution;
@@ -959,6 +966,8 @@ namespace TensileLite
 
             virtual size_t numWarmupRuns() override
             {
+                if(m_numRunsInSolution < m_numRunsPerSolution)
+                    return 1;
                 return 0;
             };
             virtual void setNumWarmupRuns(size_t count) override {}
@@ -1105,6 +1114,7 @@ namespace TensileLite
                 ConvertToProblemInputs(ContractionProblemGemm const& problem, bool isGPU);
 
             std::vector<VectorDataInitProperties> m_vdata;
+            std::vector<std::shared_ptr<void>>    m_guardPages;
             std::vector<void*>                    m_cpuPtrs;
             std::vector<void*>                    m_gpuPtrs;
             std::vector<std::vector<size_t>>      m_groupedOffsets;

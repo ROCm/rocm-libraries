@@ -287,6 +287,63 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     return result
 
 
+def detectHostGfxArchs() -> List[str]:
+    """Enumerate the supported GPU architectures physically present on this host.
+
+    Reuses the same device-enumeration tool selection as the rest of the
+    toolchain (``ToolchainDefaults.DEVICE_ENUMERATOR`` -> ``rocm_agent_enumerator``
+    or ``amdgpu-arch``) and the canonical ``gfxToIsa``/``isaToGfx`` maps. Each
+    enumerated line is normalized through ``gfxToIsa`` (which strips ``:xnack±``
+    and other suffixes) and filtered to ``SUPPORTED_ISA``, so CPU agents
+    (``gfx000``) and unsupported devices are dropped.
+
+    Returns:
+        A de-duplicated list of canonical gfx names (e.g. ``["gfx950"]``).
+        Returns an empty list when no enumerator is available or it fails --
+        callers should treat "empty" as "cannot benchmark here".
+    """
+    # Lazy import: keep this module free of a load-time dependency on the
+    # Toolchain package (which imports Common.Utilities) and avoid any import cycle.
+    try:
+        from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+    except Exception:
+        return []
+
+    tool = ToolchainDefaults.DEVICE_ENUMERATOR
+    try:
+        toolPath = validateToolchain(tool)
+    except (FileNotFoundError, ValueError):
+        return []
+
+    try:
+        process = run([toolPath], stdout=PIPE, stderr=PIPE)
+    except OSError:
+        return []
+    if process.returncode:
+        return []
+
+    archs: List[str] = []
+    for line in process.stdout.decode(errors="replace").splitlines():
+        isa = gfxToIsa(line.strip())
+        if isa is not None and isa in SUPPORTED_ISA:
+            gfx = isaToGfx(isa)
+            if gfx not in archs:
+                archs.append(gfx)
+    return archs
+
+
+def hostHasArch(arch: str) -> bool:
+    """Return True iff ``arch`` matches a supported GPU present on this host.
+
+    Comparison is done on the normalized ISA version, so ``:xnack±`` / CU
+    variants on either side (requested arch or enumerated arch) compare equal.
+    """
+    target = gfxToIsa(arch)
+    if target is None:
+        return False
+    return any(gfxToIsa(a) == target for a in detectHostGfxArchs())
+
+
 class ArchInfo(NamedTuple):
     Name: str
     Gfx: str
