@@ -316,7 +316,7 @@ const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
      * specific atom, so it is invariant across the arches that list op_id --
      * the first catalog hit wins. The catalog c_dtype is already the normalised
      * (canonical) key, matching normalize_dtype(o["c"]). Op_ids absent from
-     * every catalog return NULL (caller treats a miss as the default f32). */
+     * every catalog return NULL. */
     for(i = 0; i < rocke_ati_arch_registry_len; ++i)
     {
         const rocke_arch_target_t* t = rocke_ati_arch_registry[i].target;

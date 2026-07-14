@@ -60,12 +60,11 @@ static int rocke_mma_c_frag_len(const char* op_id)
 }
 
 /* True when op_id accumulates in i32 (integer WMMA), from the arch catalog SSOT
- * (target._op_id_c_dtype()[op_id] == "i32"). Op_ids absent from the catalog
- * default to the f32 accumulator. */
+ * (target._op_id_c_dtype()[op_id] == "i32"). */
 static bool rocke_mma_is_int_acc(const char* op_id)
 {
     const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
-    return c_dtype != NULL && strcmp(c_dtype, "i32") == 0;
+    return c_dtype != NULL && strcmp(c_dtype, ROCKE_DTYPE_I32) == 0;
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)

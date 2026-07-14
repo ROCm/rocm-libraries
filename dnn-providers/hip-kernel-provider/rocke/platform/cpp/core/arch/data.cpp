@@ -25,6 +25,7 @@
  */
 #include "rocke/arch_target_internal.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -46,11 +47,26 @@ typedef struct rocke_ati_dtype_alias
 /* Byte-for-byte the _DTYPE_ALIASES map (insertion order is irrelevant: lookup is
  * by exact lowercased key). */
 static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
-    {"f16", "fp16"},      {"half", "fp16"},       {"fp16", "fp16"},   {"bf16", "bf16"},
-    {"bfloat16", "bf16"}, {"f32", "fp32"},        {"float", "fp32"},  {"fp32", "fp32"},
-    {"fp8", "fp8e4m3"},   {"fp8e4m3", "fp8e4m3"}, {"bf8", "bf8e5m2"}, {"bf8e5m2", "bf8e5m2"},
-    {"iu8", "iu8"},       {"iu4", "iu4"},         {"i8", "i8"},       {"int8", "i8"},
-    {"i4", "i4"},         {"int4", "i4"},         {"i32", "i32"},     {"int32", "i32"},
+    {"f16", "fp16"},
+    {"half", "fp16"},
+    {"fp16", "fp16"},
+    {"bf16", "bf16"},
+    {"bfloat16", "bf16"},
+    {"f32", "fp32"},
+    {"float", "fp32"},
+    {"fp32", "fp32"},
+    {"fp8", "fp8e4m3"},
+    {"fp8e4m3", "fp8e4m3"},
+    {"bf8", "bf8e5m2"},
+    {"bf8e5m2", "bf8e5m2"},
+    {"iu8", "iu8"},
+    {"iu4", "iu4"},
+    {"i8", "i8"},
+    {"int8", "i8"},
+    {"i4", "i4"},
+    {"int4", "i4"},
+    {"i32", ROCKE_DTYPE_I32},
+    {"int32", ROCKE_DTYPE_I32},
 };
 #define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
 
@@ -834,16 +850,27 @@ static const rocke_layout_map_t lm_wmma_gfx12_c
  * internal header like the cross-bucket rocke_ati_ symbols are.
  *
  * NOTE (drift): this is still a hand-maintained mirror of the Python
- * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it. Codegen from the
- * Python SSOT is a viable follow-up; until then the tests assert this table and
- * _MMA_FRAGMENT_INFO agree (test_arch_mma_ssot.py) so the two copies cannot
- * silently drift.
+ * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it.
+ * TODO: codegen this table from the Python SSOT (_MMA_FRAGMENT_INFO) at build
+ * time so the two engines share a single source of truth. Until then the tests
+ * assert this table and _MMA_FRAGMENT_INFO agree (test_arch_mma_ssot.py) so the
+ * two copies cannot silently drift.
  */
 typedef struct rocke_ati_mma_frag_row
 {
     const char* op_id;
     int c_frag_len;
 } rocke_ati_mma_frag_row_t;
+
+/* Layout guard for the rocke_arch_mma_c_frag_len lookup below, which derives its
+ * row count from sizeof(table)/sizeof(row). That division is exact for any
+ * element size, so padding of rocke_ati_mma_frag_row_t (12 bytes of data padded
+ * out to 16 for op_id's 8-byte alignment) cannot desync the count. These asserts
+ * pin the field order so a future reorder/resize is caught at compile time. */
+static_assert(offsetof(rocke_ati_mma_frag_row_t, op_id) == 0,
+              "op_id must be the first field of rocke_ati_mma_frag_row_t");
+static_assert(offsetof(rocke_ati_mma_frag_row_t, c_frag_len) == sizeof(const char*),
+              "c_frag_len must immediately follow op_id (no leading padding)");
 
 static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     /* --- MFMA fp32 (wave64) --- */

@@ -243,12 +243,18 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
  * zero-length _FragInfo fallback). */
 int rocke_arch_mma_c_frag_len(const char* op_id);
 
+/* Canonical (normalised) accumulator-dtype key, as produced by
+ * rocke_normalize_dtype / the _DTYPE_ALIASES table. Compare an op_id's
+ * accumulator dtype against this instead of a raw string literal so the spelling
+ * has a single definition site shared by producer (the normalise table) and
+ * consumers (e.g. the integer-accumulator predicate in ir_tile). */
+#define ROCKE_DTYPE_I32 "i32"
+
 /* Normalised accumulator dtype for op_id, aggregated across every arch's
  * catalog (mirrors target._op_id_c_dtype()[op_id]). The dtype is invariant
  * across the arches that list an op_id, so the first catalog hit wins. Returns
- * NULL for an op_id absent from every catalog (callers treat a miss as the
- * default f32 accumulator). The returned string is an interned canonical key
- * (e.g. "i32"/"fp32"); do not free. */
+ * NULL for an op_id absent from every catalog. The returned string is an
+ * interned canonical key (e.g. ROCKE_DTYPE_I32 / "fp32"); do not free. */
 const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
 
 /* ============================== arch target =========================== */
