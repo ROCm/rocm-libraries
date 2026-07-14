@@ -1133,3 +1133,74 @@ TEST_CASE("Origami: tensile_params_t hash function", "[origami]") {
     REQUIRE(base_params.hash() != params_wgm_xcc.hash());
   }
 }
+
+TEST_CASE("Origami: resolve_num_cus", "[origami]") {
+  // 0 means "use all CUs": falls back to the physical count.
+  REQUIRE(origami::resolve_num_cus(0, 256) == 256);
+  // A non-zero request below the physical count caps the budget.
+  REQUIRE(origami::resolve_num_cus(64, 256) == 64);
+  // A request equal to the physical count is unchanged.
+  REQUIRE(origami::resolve_num_cus(256, 256) == 256);
+  // A request above the physical count clamps to the physical count.
+  REQUIRE(origami::resolve_num_cus(512, 256) == 256);
+}
+
+TEST_CASE("Origami: num_cus adjusts solution selection", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - CU budget affects ranked latency") {
+      auto       hardware = make_hardware(gpu_arch);
+      const auto mi = hardware.get_recommended_matrix_instruction(origami::data_type_t::BFloat16);
+
+      // CU-bound problem: far more output tiles than CUs, so the usable CU
+      // count directly drives the number of timesteps (and thus latency).
+      auto make_p = [&](size_t num_cus) {
+        auto p    = make_problem(8192, 8192, 4096);
+        p.num_cus = num_cus;
+        return p;
+      };
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 256, 64, mi.m, mi.n, mi.k, false, 1, 4));
+
+      const auto full   = origami::rank_configs(make_p(0), hardware, configs);
+      const auto equal  = origami::rank_configs(make_p(hardware.N_CU), hardware, configs);
+      const auto capped = origami::rank_configs(make_p(hardware.N_CU / 4), hardware, configs);
+
+      // num_cus == 0 and num_cus == N_CU both mean "use all CUs": identical.
+      REQUIRE(equal[0].latency == Approx(full[0].latency));
+
+      // Restricting to fewer CUs cannot make a CU-bound GEMM faster; here it is
+      // strictly slower because timesteps scale with 1 / usable_cus.
+      REQUIRE(capped[0].latency > full[0].latency);
+    }
+  }
+}
+
+TEST_CASE("Origami: num_cus in mapping selectors", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - mapping honors CU budget") {
+      auto         hardware = make_hardware(gpu_arch);
+      auto         config   = make_config(256, 256, 64);
+      const size_t skGrid   = 2048;
+
+      auto problem_full    = make_problem(8192, 8192, 8192);
+      problem_full.num_cus = 0;
+      auto problem_equal    = problem_full;
+      problem_equal.num_cus = hardware.N_CU;  // equivalent to "use all CUs"
+
+      const auto wgm_full  = origami::select_workgroup_mapping(problem_full, hardware, config, skGrid);
+      const auto wgm_equal = origami::select_workgroup_mapping(problem_equal, hardware, config, skGrid);
+
+      // num_cus == N_CU must behave exactly like num_cus == 0.
+      REQUIRE(wgm_full.wgm == wgm_equal.wgm);
+      REQUIRE(wgm_full.wgmxcc == wgm_equal.wgmxcc);
+      REQUIRE(wgm_full.wgmxccchunk == wgm_equal.wgmxccchunk);
+
+      const auto su_full  = origami::select_staggerU(problem_full, hardware, config, skGrid, wgm_full.wgm);
+      const auto su_equal = origami::select_staggerU(problem_equal, hardware, config, skGrid, wgm_equal.wgm);
+      REQUIRE(su_full.staggerU == su_equal.staggerU);
+      REQUIRE(su_full.staggerUMapping == su_equal.staggerUMapping);
+      REQUIRE(su_full.staggerUStrideShift == su_equal.staggerUStrideShift);
+    }
+  }
+}
