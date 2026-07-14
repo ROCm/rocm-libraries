@@ -62,6 +62,15 @@ class WaitCntInsertionTest : public ::testing::Test {
         pass->run(func, passCtx, am);
     }
 
+    void runStripPass(Function& func) {
+        PassContext passCtx;
+        passCtx.setGemmTileConfig(gemmConfig);
+        AnalysisManager am;
+        registerAllAnalyses(am);
+        auto pass = createStinkyRemoveWaitCntPass();
+        pass->run(func, passCtx, am);
+    }
+
     struct WaitCntInfo {
         StinkyInstruction* inst;
         SWaitCntData* waitData;
@@ -1731,14 +1740,8 @@ st.func @test_strip_then_reinsert() {
     ASSERT_NE(func, nullptr);
 
     // Step 1: strip pass, exactly as Gfx1250Backend.cpp runs it before the
-    // insertion pass (createStinkyRemoveWaitCntPass()).
-    {
-        PassContext ctx;
-        AnalysisManager stripAm;
-        registerAllAnalyses(stripAm);
-        auto stripPass = createStinkyRemoveWaitCntPass();
-        stripPass->run(*func, ctx, stripAm);
-    }
+    // insertion pass.
+    runStripPass(*func);
 
     BasicBlock& entryBB = *func->begin();
     ASSERT_EQ(countWaitCnt(entryBB), 0) << "Strip pass should have removed the hand-placed wait";
