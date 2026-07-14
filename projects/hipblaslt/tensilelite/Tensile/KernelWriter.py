@@ -7063,7 +7063,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ClusterLocalRead"]:
       self.states.numVgprBuffer = kernel["LoopIters"]
     else:
-      self.states.numVgprBuffer = kernel["PrefetchLocalRead"] + 1
+      self.states.numVgprBuffer = min(kernel["PrefetchLocalRead"] + 1, kernel["LoopIters"])
 
     if kernel["ClusterLocalRead"]:
       self.states.numVgprBufferPackA = kernel["LoopIters"]
