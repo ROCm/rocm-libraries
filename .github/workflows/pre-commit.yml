@@ -27,9 +27,9 @@ jobs:
       # commit that existed before the push (github.event.before).
       FROM_REF: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || github.event.before }}
       DEFAULT_REF: ${{ format('origin/{0}', github.event.repository.default_branch) }}
-      # A branch-creation push has no source ref in its event payload. PRs use
-      # their actual base ref; configure another source if matching new push
-      # branches can originate outside the default branch.
+      # A branch-creation push has no source ref in its event payload. It falls
+      # back to the default branch's merge base and can include inherited changes
+      # when the branch originates elsewhere. PRs use their actual base ref.
       NULL_REF: 0000000000000000000000000000000000
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
