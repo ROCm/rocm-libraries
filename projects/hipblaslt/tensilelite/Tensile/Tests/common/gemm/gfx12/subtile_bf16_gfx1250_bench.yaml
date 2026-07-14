@@ -1,0 +1,81 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  NumElementsToValidateWinner: -1
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  PruneSparseMode: 0
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 2
+  EnqueuesPerSync: 1000
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+  KeepBuildTmp: True
+  PrintLevel: 2
+  SkipSlowSolutionRatio: 0.0
+  RotatingBufferSize: 0
+
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256 WG 2x2
+        - DepthU: [128]
+        - WavefrontSize: [32]
+        - PrefetchGL2: [0, 1, 2]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - PreloadKernArgs: [True]
+        - UseSubtileImpl: [True]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - ClusterDim: [[1, 1], [2, 2], [2, 4], [4, 4]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Small K
+          - Exact: [4096, 4096, 1, 1024]
+          # Skinny
+          - Exact: [512, 8192, 1, 2048]
+          - Exact: [8192, 512, 1, 2048]
+          # Compute-bound baseline
+          - Exact: [4096, 4096, 1, 65536]
