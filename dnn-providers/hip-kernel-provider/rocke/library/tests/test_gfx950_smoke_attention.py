@@ -174,6 +174,22 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
                         f"max_abs {max_abs:.3e} exceeds 5e-2",
                     )
 
+    def test_attention_combo_bias_smoke(self):
+        """Correctness check for 2D-combo prefill with softcap + ALiBi + QQ-bias."""
+        scenario = "combo_bias_bf16_d64_b32_gqa8_64x8"
+        out, rows = self._run_scenario(scenario)
+        self.assertTrue(rows, f"{scenario}: empty report")
+        self.assertIn("ck-auto", out, f"{scenario}: DSL path not exercised")
+        self.assertNotIn("FAIL", out, f"{scenario}: correctness failure")
+        for row in rows:
+            max_abs = float(row["ck_auto_vs_ref"]["max_abs"])
+            self.assertLess(
+                max_abs,
+                5e-2,
+                f"{scenario} seq={row.get('seq_lens')}: "
+                f"max_abs {max_abs:.3e} exceeds 5e-2",
+            )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -384,6 +384,22 @@ def default_scenarios() -> List[Scenario]:
             block_size=32,
             dtype=torch.bfloat16,
         ),
+        # Same combo cohort with softcap + ALiBi + QQ-bias enabled.  max_seqlen_q
+        # == 512 > 256 keeps routing on the 2D combo path (_enable_combo_2d).
+        # qq_bias_stride_0 == batch (2 sequences).
+        Scenario(
+            name="combo_bias_bf16_d64_b32_gqa8_64x8",
+            seq_lens=[(512, 1024), (512, 1024)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.bfloat16,
+            softcap=50.0,
+            use_alibi=True,
+            use_qq_bias=True,
+            qq_bias_stride_0=2,  # == batch (number of sequences)
+        ),
         # Same combo cohort by GQA-8 ratio but a tensor-parallel-sharded head
         # split (16/2). Exercises the combo stack WITHOUT the 64/8-only fast
         # paged-KV descriptor -- the path the use_fast_paged_kv_desc gating fix
