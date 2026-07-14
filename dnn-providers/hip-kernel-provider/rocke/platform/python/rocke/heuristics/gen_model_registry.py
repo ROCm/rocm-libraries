@@ -60,8 +60,8 @@ def _discover(models_dir: Path) -> List[dict]:
     identity collision).
     """
     entries: List[dict] = []
-    seen_keys: set[tuple[str, str, str]] = set()
-    seen_symbols: set[str] = set()
+    seen_keys: dict[tuple[str, str, str], Path] = {}
+    seen_symbols: dict[str, Path] = {}
 
     for meta_path in sorted(models_dir.rglob("*.meta.json")):
         meta = json.loads(meta_path.read_text())
@@ -76,18 +76,18 @@ def _discover(models_dir: Path) -> List[dict]:
         if key_tuple in seen_keys:
             raise ValueError(
                 f"{meta_path}: duplicate (op, arch, dtype) = {key_tuple!r}; "
-                "each predictor must have a unique (op, arch, dtype) key"
+                f"conflicts with {seen_keys[key_tuple]}"
             )
-        seen_keys.add(key_tuple)
+        seen_keys[key_tuple] = meta_path
 
         # Check for duplicate symbol -- C linkage requires unique identifiers.
         symbol = meta["symbol"]
         if symbol in seen_symbols:
             raise ValueError(
-                f"{meta_path}: duplicate symbol {symbol!r}; each predictor must "
-                "have a unique C linkage identity"
+                f"{meta_path}: duplicate symbol {symbol!r}; "
+                f"conflicts with {seen_symbols[symbol]}"
             )
-        seen_symbols.add(symbol)
+        seen_symbols[symbol] = meta_path
 
         entries.append(meta)
 

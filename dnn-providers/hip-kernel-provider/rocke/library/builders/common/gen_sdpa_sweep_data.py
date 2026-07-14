@@ -348,8 +348,10 @@ def _enumerate_from(
             # from _resolve_lds_budget). Skip such shapes rather than abort.
             for tiled in _grid_tiled_specs(prob, arch):
                 specs.append(_SdpaCandidate(problem=prob, tiled=tiled))
-        except (RuntimeError, ValueError, TypeError) as e:
+        except (RuntimeError, ValueError) as e:
             # Shape unbuildable or over-budget; skip and report at the end.
+            # Narrow to RuntimeError/ValueError: LDS budget overflow, invalid dimensions.
+            # Do NOT catch TypeError (would mask programming errors like wrong arg types).
             skipped_shapes.append((shape, str(e)))
             continue
 
