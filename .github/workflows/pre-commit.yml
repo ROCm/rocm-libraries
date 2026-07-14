@@ -26,6 +26,11 @@ jobs:
       # For PRs, diff against the base branch. For pushes, diff against the
       # commit that existed before the push (github.event.before).
       FROM_REF: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || github.event.before }}
+      DEFAULT_REF: ${{ format('origin/{0}', github.event.repository.default_branch) }}
+      # A branch-creation push has no source ref in its event payload. PRs use
+      # their actual base ref; configure another source if matching new push
+      # branches can originate outside the default branch.
+      NULL_REF: 0000000000000000000000000000000000
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -34,17 +39,28 @@ jobs:
           filter: blob:none
           sparse-checkout: .github
 
-      - name: Fetch base branch for diff
+      - name: Select diff base for new branch
+        if: env.FROM_REF == env.NULL_REF
+        run: echo "FROM_REF=${DEFAULT_REF}" >> "$GITHUB_ENV"
+
+      - name: Fetch diff base
         env:
-          BASE_BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          CURRENT_BRANCH: ${{ github.ref_name }}
         run: |
-          # Fetch just the branch we diff against (commits/trees only) so the
-          # --from-ref/--to-ref merge base resolves without fetching every
-          # branch. --unshallow (guarded) gives it full history.
+          # FROM_REF is origin/<base branch> for PRs and the prior commit SHA
+          # for pushes. Fetch the PR base branch or the complete pushed-branch
+          # history so the three-dot merge base is available in this shallow clone.
           UNSHALLOW=""
           if [ -f "$(git rev-parse --git-dir)/shallow" ]; then UNSHALLOW="--unshallow"; fi
+          if [[ "$FROM_REF" == origin/* ]]; then
+            BASE_BRANCH="${FROM_REF#origin/}"
+            TARGET_REF="refs/remotes/${FROM_REF}"
+          else
+            BASE_BRANCH="$CURRENT_BRANCH"
+            TARGET_REF="refs/remotes/origin/${CURRENT_BRANCH}"
+          fi
           git fetch --no-tags --prune --no-recurse-submodules --filter=blob:none $UNSHALLOW origin \
-            "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+            "+refs/heads/${BASE_BRANCH}:${TARGET_REF}"
 
       - name: Sparse-checkout changed projects
         run: |
@@ -90,5 +106,5 @@ jobs:
 
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         with:
-          # Only check changed files in the PR/push
+          # Only check changed files in the PR/push.
           extra_args: --from-ref ${{ env.FROM_REF }} --to-ref HEAD
