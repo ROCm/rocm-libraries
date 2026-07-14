@@ -42,24 +42,13 @@
 #include <string>
 #include <vector>
 
-template <class T>
-struct less_then_t
-{
-  T m_val;
-
-  __host__ __device__ bool operator()(const T& val) const
-  {
-    return val < m_val;
-  }
-};
-
 struct basic
 {
   template <typename T, typename Policy>
   float64_t run(thrust::device_vector<T>& input,
                 thrust::device_vector<T>& output,
                 const std::size_t elements,
-                less_then_t<T> select_op,
+                bench_utils::less_then_t<T> select_op,
                 Policy policy)
   {
     thrust::partition_copy(
@@ -90,7 +79,7 @@ template <class Benchmark, class T>
 void run_benchmark(
   benchmark::State& state, const std::size_t elements, const std::string seed_type, const int entropy_reduction)
 {
-  using select_op_t = less_then_t<T>;
+  using select_op_t = bench_utils::less_then_t<T>;
 
   // Benchmark object
   Benchmark benchmark{};
@@ -99,7 +88,7 @@ void run_benchmark(
   std::vector<double> gpu_times;
 
   // Generate input
-  T val = bench_utils::value_from_entropy<T>(bench_utils::get_entropy_percentage(entropy_reduction));
+  const T val = bench_utils::lerp_min_max<T>(bench_utils::get_entropy_percentage(entropy_reduction));
   select_op_t select_op{val};
 
   thrust::device_vector<T> input = bench_utils::generate(elements, seed_type);
