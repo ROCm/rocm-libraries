@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 #include <variant>
 
@@ -50,10 +51,33 @@ using ScalarValue = std::variant<double, // DataType::DOUBLE
                                  bool>; // DataType::BOOLEAN
 
 /// Collapses a ScalarValue to double for floating-point consumers (epsilon/momentum).
-/// The widening is explicit and greppable here rather than hidden in the SDK.
+/// The widening is explicit and greppable here rather than hidden in the SDK. Integer
+/// arms are checked for exact round-trip through double (the mantissa loses precision
+/// above 2^53); a value that cannot round-trip throws rather than silently rounding --
+/// this is a defensive backstop, not a used path today, since every shipped consumer
+/// (epsilon/momentum) is floating-point.
 inline double toDouble(const ScalarValue& value)
 {
-    return std::visit([](auto v) { return static_cast<double>(v); }, value);
+    return std::visit(
+        [](auto v) -> double {
+            using T = decltype(v);
+            if constexpr(std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>)
+            {
+                const auto widened = static_cast<double>(v);
+                if(static_cast<T>(widened) != v)
+                {
+                    throw HipdnnPluginException(
+                        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                        "toDouble: integer scalar value is not exactly representable as double");
+                }
+                return widened;
+            }
+            else
+            {
+                return static_cast<double>(v);
+            }
+        },
+        value);
 }
 
 /// @brief A scalar tensor operand (epsilon/momentum) resolved either at plan-build
@@ -80,7 +104,13 @@ inline ScalarOperand makeScalarOperand(
     int64_t uid,
     const char* paramName)
 {
-    const auto* attr = tensorMap.at(uid);
+    const auto it = tensorMap.find(uid);
+    if(it == tensorMap.end())
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                    std::string(paramName) + " tensor uid not found in graph");
+    }
+    const auto* attr = it->second;
     if(attr->is_runtime_pass_by_value()
        && attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
     {

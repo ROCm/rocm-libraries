@@ -268,4 +268,14 @@ TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
 
     EXPECT_TRUE(scalarA.logicallyEquals(scalarB));
     EXPECT_FALSE(scalarA.logicallyEquals(scalarC));
+
+    // Same value, different pass-by-value mode: runtime-with-default (floors the
+    // provider at 1.2.0) vs. compile-time constant (1.0.0) are not interchangeable
+    // even though the baked value matches.
+    const TensorAttributes runtimeWithDefault(2.5f, ScalarType::RUNTIME_PARAM);
+    const TensorAttributes compileTimeConstant(2.5f, ScalarType::COMPILE_TIME_CONST);
+    EXPECT_TRUE(runtimeWithDefault.get_is_runtime_pass_by_value());
+    EXPECT_FALSE(compileTimeConstant.get_is_runtime_pass_by_value());
+    EXPECT_FALSE(runtimeWithDefault.logicallyEquals(compileTimeConstant));
+    EXPECT_FALSE(compileTimeConstant.logicallyEquals(runtimeWithDefault));
 }

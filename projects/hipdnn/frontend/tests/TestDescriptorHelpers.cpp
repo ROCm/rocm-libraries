@@ -1009,6 +1009,48 @@ TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultBoolSurvives)
     EXPECT_FALSE(out->get_compile_time_constant<bool>().has_value());
 }
 
+// --- Typed round-trip: every supported scalar type, both baked states --------
+// The three hand-written tests above (float/int64/bool) predate this suite and
+// are kept for their descriptive names; this closes the gap for
+// half/bfloat16/uint8/double that they left unexercised.
+
+template <typename T>
+class DescriptorHelpersRoundTripTyped : public TestDescriptorHelpersRoundTrip
+{
+};
+
+TYPED_TEST_SUITE(DescriptorHelpersRoundTripTyped, PassByValueScalarTypes, );
+
+TYPED_TEST(DescriptorHelpersRoundTripTyped, CompileTimeConstantSurvives)
+{
+    const TypeParam value = passByValueTestScalar<TypeParam>();
+    auto in = std::make_shared<TensorAttributes>(value, ScalarType::COMPILE_TIME_CONST);
+    in->set_uid(101);
+
+    const auto out = this->roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_FALSE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->template get_compile_time_constant<TypeParam>().has_value());
+    EXPECT_EQ(out->template get_compile_time_constant<TypeParam>().value(), value);
+    EXPECT_FALSE(out->template get_pass_by_value<TypeParam>().has_value());
+}
+
+TYPED_TEST(DescriptorHelpersRoundTripTyped, RuntimeWithDefaultSurvives)
+{
+    const TypeParam value = passByValueTestScalar<TypeParam>();
+    auto in = std::make_shared<TensorAttributes>(value, ScalarType::RUNTIME_PARAM);
+    in->set_uid(102);
+
+    const auto out = this->roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->template get_pass_by_value<TypeParam>().has_value());
+    EXPECT_EQ(out->template get_pass_by_value<TypeParam>().value(), value);
+    EXPECT_FALSE(out->template get_compile_time_constant<TypeParam>().has_value());
+}
+
 // --- Runtime user-supplied: set_as_runtime_parameter() -----------------------
 // flag true, no value -> both typed getters nullopt, umbrella true.
 

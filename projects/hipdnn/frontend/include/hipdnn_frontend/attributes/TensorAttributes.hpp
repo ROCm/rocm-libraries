@@ -566,6 +566,10 @@ public:
         {
             return false;
         }
+        if(this->_isRuntimePassByValue != other._isRuntimePassByValue)
+        {
+            return false;
+        }
         // Compare pass-by-value scalar variants
         if(this->_value != other._value)
         {

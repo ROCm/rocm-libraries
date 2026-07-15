@@ -475,7 +475,9 @@ template <typename T>
     }
 
     // Restore the runtime pass-by-value flag. Must be set AFTER any set_value()
-    // above, which clears the flag. For a pure user-supplied tensor IS_BY_VALUE
+    // above, which unconditionally forces the flag to true (it can't tell compile-time-
+    // constant from runtime-with-default). Restoring it here after the fact applies the
+    // actual wire value for both states; for a pure user-supplied tensor IS_BY_VALUE
     // is false (no value read), and only the flag is restored here.
     bool isRuntime = false;
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(tensorDesc,

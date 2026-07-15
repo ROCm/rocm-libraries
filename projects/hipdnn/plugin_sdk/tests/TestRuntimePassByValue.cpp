@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <variant>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -49,6 +50,56 @@ flatbuffers::FlatBufferBuilder buildScalarTensorAttributes(int64_t uid,
     return builder;
 }
 
+// Builds a scalar TensorAttributes flatbuffer with a fully-formed union value of
+// the given type, for exercising makeScalarOperand's per-dtype baked switch beyond
+// the FLOAT-only coverage buildScalarTensorAttributes provides.
+template <typename StructT>
+flatbuffers::FlatBufferBuilder buildScalarTensorAttributesWithValue(int64_t uid,
+                                                                    DataType dataType,
+                                                                    bool isRuntimePassByValue,
+                                                                    TensorValue valueType,
+                                                                    const StructT& value)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1};
+
+    const auto valueOffset = builder.CreateStruct(value).Union();
+
+    auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                   uid,
+                                                   "scalar",
+                                                   dataType,
+                                                   &dims,
+                                                   &dims,
+                                                   /*virtual_=*/false,
+                                                   valueType,
+                                                   valueOffset,
+                                                   isRuntimePassByValue);
+    builder.Finish(attrOffset);
+    return builder;
+}
+
+// Builds a scalar TensorAttributes flatbuffer with UNSET data type or no union
+// value at all, for exercising makeScalarOperand's error paths.
+flatbuffers::FlatBufferBuilder buildScalarTensorAttributesNoValue(int64_t uid, DataType dataType)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1};
+
+    auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                   uid,
+                                                   "scalar",
+                                                   dataType,
+                                                   &dims,
+                                                   &dims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   0,
+                                                   /*is_runtime_pass_by_value=*/false);
+    builder.Finish(attrOffset);
+    return builder;
+}
+
 } // namespace
 
 // --- makeScalarOperand ---
@@ -90,6 +141,116 @@ TEST(TestRuntimePassByValue, MakeScalarOperandPureRuntimeUserSuppliedDefersRead)
     EXPECT_EQ(op.uid, 3);
     EXPECT_TRUE(op.isRuntimeUserSupplied);
     EXPECT_EQ(op.dataType, DataType::FLOAT);
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandBakesDoubleValue)
+{
+    auto builder = buildScalarTensorAttributesWithValue(
+        21, DataType::DOUBLE, false, TensorValue::Float64Value, Float64Value(2.5));
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{21, attr}};
+    auto op = makeScalarOperand(tensorMap, 21, "Epsilon");
+
+    EXPECT_FALSE(op.isRuntimeUserSupplied);
+    EXPECT_NEAR(std::get<double>(op.bakedDefault), 2.5, 1e-12);
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandBakesHalfValue)
+{
+    auto builder = buildScalarTensorAttributesWithValue(
+        22, DataType::HALF, false, TensorValue::Float16Value, Float16Value(0.5f));
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{22, attr}};
+    auto op = makeScalarOperand(tensorMap, 22, "Epsilon");
+
+    EXPECT_FALSE(op.isRuntimeUserSupplied);
+    EXPECT_DOUBLE_EQ(static_cast<double>(std::get<hipdnn_data_sdk::types::half>(op.bakedDefault)),
+                     static_cast<double>(hipdnn_data_sdk::types::half(0.5f)));
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandBakesBfloat16Value)
+{
+    auto builder = buildScalarTensorAttributesWithValue(
+        23, DataType::BFLOAT16, false, TensorValue::BFloat16Value, BFloat16Value(0.25f));
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{23, attr}};
+    auto op = makeScalarOperand(tensorMap, 23, "Epsilon");
+
+    EXPECT_FALSE(op.isRuntimeUserSupplied);
+    EXPECT_DOUBLE_EQ(
+        static_cast<double>(std::get<hipdnn_data_sdk::types::bfloat16>(op.bakedDefault)),
+        static_cast<double>(hipdnn_data_sdk::types::bfloat16(0.25f)));
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandBakesInt32Value)
+{
+    auto builder = buildScalarTensorAttributesWithValue(
+        24, DataType::INT32, false, TensorValue::Int32Value, Int32Value(42));
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{24, attr}};
+    auto op = makeScalarOperand(tensorMap, 24, "Epsilon");
+
+    EXPECT_FALSE(op.isRuntimeUserSupplied);
+    EXPECT_EQ(std::get<int32_t>(op.bakedDefault), 42);
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandBakesLargeInt64Value)
+{
+    // 2^53 + 1: not exactly representable in double. Proves the baked path also
+    // carries INT64 without widening (the resolve-side path is covered separately
+    // by ResolveScalarOperandPreservesLargeInt64).
+    auto builder = buildScalarTensorAttributesWithValue(
+        25, DataType::INT64, false, TensorValue::Int64Value, Int64Value(9007199254740993LL));
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{25, attr}};
+    auto op = makeScalarOperand(tensorMap, 25, "Epsilon");
+
+    EXPECT_FALSE(op.isRuntimeUserSupplied);
+    EXPECT_EQ(std::get<int64_t>(op.bakedDefault), 9007199254740993LL);
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandBakesBooleanValue)
+{
+    auto builder = buildScalarTensorAttributesWithValue(
+        26, DataType::BOOLEAN, false, TensorValue::BoolValue, BoolValue(true));
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{26, attr}};
+    auto op = makeScalarOperand(tensorMap, 26, "Epsilon");
+
+    EXPECT_FALSE(op.isRuntimeUserSupplied);
+    EXPECT_EQ(std::get<bool>(op.bakedDefault), true);
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandThrowsOnUnsetDataType)
+{
+    auto builder = buildScalarTensorAttributesNoValue(27, DataType::UNSET);
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{27, attr}};
+    EXPECT_THROW(makeScalarOperand(tensorMap, 27, "Epsilon"), HipdnnPluginException);
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandThrowsOnUnsupportedDataType)
+{
+    // A dtype with no case in the baked switch (e.g. FP8) must hit the default throw,
+    // regardless of union-value presence.
+    auto builder = buildScalarTensorAttributesNoValue(28, DataType::FP8_E4M3);
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{28, attr}};
+    EXPECT_THROW(makeScalarOperand(tensorMap, 28, "Epsilon"), HipdnnPluginException);
+}
+
+TEST(TestRuntimePassByValue, MakeScalarOperandThrowsWhenUidNotInTensorMap)
+{
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap;
+    EXPECT_THROW(makeScalarOperand(tensorMap, 999, "Epsilon"), HipdnnPluginException);
 }
 
 // --- resolveScalarOperand ---
@@ -230,4 +391,31 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsOnUnsupportedDataType)
 
     EXPECT_THROW(resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())),
                  HipdnnPluginException);
+}
+
+// --- toDouble ---
+
+TEST(TestRuntimePassByValue, ToDoubleWidensEachArm)
+{
+    EXPECT_DOUBLE_EQ(toDouble(ScalarValue{1.5}), 1.5);
+    EXPECT_FLOAT_EQ(static_cast<float>(toDouble(ScalarValue{2.5f})), 2.5f);
+    EXPECT_EQ(toDouble(ScalarValue{int32_t{42}}), 42.0);
+    EXPECT_EQ(toDouble(ScalarValue{true}), 1.0);
+    EXPECT_EQ(toDouble(ScalarValue{int64_t{1234567890123LL}}), 1234567890123.0);
+}
+
+TEST(TestRuntimePassByValue, ToDoubleThrowsOnUnrepresentableInt64)
+{
+    // 2^53 + 1: rounds to 2^53 in double, so the round-trip check must catch it
+    // rather than silently returning the wrong value.
+    EXPECT_THROW(toDouble(ScalarValue{int64_t{9007199254740993LL}}), HipdnnPluginException);
+}
+
+TEST(TestRuntimePassByValue, ToDoubleThrowsOnUnrepresentableInt32IsUnreachableButInt64Guarded)
+{
+    // int32_t is always exactly representable in double (24 vs 53 mantissa bits
+    // needed), so this documents that the guard is a no-op for INT32 -- included
+    // for completeness of the toDouble arm coverage, not because it can fail.
+    EXPECT_EQ(toDouble(ScalarValue{std::numeric_limits<int32_t>::max()}),
+              static_cast<double>(std::numeric_limits<int32_t>::max()));
 }
