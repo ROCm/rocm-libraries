@@ -1812,6 +1812,20 @@ class GlobalWriteBatchWriter:
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
         storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
+        # Gate the TDM store on destination == the final, directly-written D (bf16) output.
+        #   * 'MultipleBuffer'            : writes fp32 partials to the GSU workspace; a
+        #                                   separate reduction kernel converts them to D, so
+        #                                   this store's destination is NOT D -> stay buffer.
+        #   * 'MultipleBufferSingleKernel': does the GSU reduction in-kernel; its final D
+        #                                   store is entangled with that reduction path and
+        #                                   the whole-MT TDM flush is not compatible with it
+        #                                   (FFM: ~all elements wrong) -> excluded pending a
+        #                                   dedicated MBSK D-store-via-TDM change.
+        #   * StreamK                     : uses the MultipleBuffer workspace accumulation
+        #                                   (GSUAMB) for its partial tiles -> excluded by the
+        #                                   'MultipleBuffer' case above.
+        # GSU=1 (SingleBuffer) and subtile (which itself requires GSU=1) write D directly and
+        # therefore use the whole-MT TDM store.
         if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):
           if self.batchIdx == 0 and elementIdx == 0:
             _setupMod, self.parentWriter._tdmStoreBaseVgpr = self.parentWriter._emitTDMStoreBaseSetup(self.kernel, self.tmpS01)
