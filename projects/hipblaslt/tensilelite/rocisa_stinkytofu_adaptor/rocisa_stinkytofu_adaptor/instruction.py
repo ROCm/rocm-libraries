@@ -2602,9 +2602,12 @@ class SWaitXCnt(Instruction):
 
     __slots__ = ("cnt",)
 
-    def __init__(self, cnt: int = 0, comment: str = ""):
+    def __init__(self, xcnt: int = 0, comment: str = "", *, cnt: int = None):
         super().__init__(InstType.INST_NOTYPE, comment)
-        self.cnt = int(cnt)
+        # Native rocisa ctor keyword is ``xcnt`` and clamps to min(xcnt, 63);
+        # accept legacy ``cnt`` too for backward compatibility.
+        value = xcnt if cnt is None else cnt
+        self.cnt = min(int(value), 63)
         self.setInst("s_wait_xcnt")
 
     def getParams(self):

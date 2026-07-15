@@ -168,6 +168,11 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 
     rv["HasAtomicAdd"] = hasAnyMnemonic(m, {"buffer_atomic_add_f32"});
 
+    // Scalar-memory atomics (s_atomic_*): false on gfx12/gfx1250. The GSU and
+    // StreamK paths gate on asmCaps["HasSAtomic"] (mirrors rocisa
+    // hardware_caps.hpp which probes "s_atomic_dec s11, s[0:1]").
+    rv["HasSAtomic"] = tryAsm(isaName, ws, "s_atomic_dec s11, s[0:1]");
+
     // Modifier caps: test the actual modifier syntax via comgr
     rv["HasGLCModifier"] =
         tryAsmAny(isaName, ws,
