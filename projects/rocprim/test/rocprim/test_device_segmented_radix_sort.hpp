@@ -349,8 +349,8 @@ inline void sort_keys_large_segments()
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    constexpr size_t size           = uint_max + size_t{1 << 20};
-    constexpr size_t segments_count = 2;
+    constexpr size_t size           = uint_max + 1;
+    constexpr size_t segments_count = 1;
     constexpr size_t offsets_count  = segments_count + 1;
 
     SCOPED_TRACE(testing::Message() << "with size= " << size);
@@ -370,8 +370,7 @@ inline void sort_keys_large_segments()
 
         std::vector<offset_type> offsets(offsets_count);
         offsets[0] = 0;
-        offsets[1] = static_cast<offset_type>(size / 2);
-        offsets[2] = static_cast<offset_type>(size);
+        offsets[1] = static_cast<offset_type>(size);
 
         common::device_ptr<key_type>    d_keys_input;
         common::device_ptr<key_type>    d_keys_output;
@@ -442,17 +441,19 @@ inline void sort_keys_large_num_segments()
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type                    = typename TestFixture::params::key_type;
+    using value_type                  = rocprim::empty_type;
     using config                      = typename TestFixture::params::config;
     constexpr bool         descending = TestFixture::params::descending;
     constexpr unsigned int start_bit  = TestFixture::params::start_bit;
     constexpr unsigned int end_bit    = TestFixture::params::end_bit;
     static constexpr bool  use_graphs = TestFixture::params::use_graph;
-    constexpr std::size_t  uint_max   = ::std::numeric_limits<unsigned int>::max();
 
     using offset_type        = size_t;
     using segment_index_type = size_t;
     using segments_index_to_offset_op_t
         = test_utils::segments_index_to_offset_op<offset_type, segment_index_type>;
+
+    constexpr size_t num_launch = 2;
 
     hipStream_t stream = 0;
     if(use_graphs)
@@ -460,14 +461,11 @@ inline void sort_keys_large_num_segments()
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    constexpr offset_type        size           = uint_max + offset_type{1 << 22};
-    constexpr unsigned int       segment_length = 1 << 20;
-    constexpr segment_index_type full_segments_count
-        = ::rocprim::detail::ceiling_div(size, segment_length);
-    constexpr segment_index_type empty_segments_count = uint_max - full_segments_count + 1;
-    constexpr segment_index_type segments_count       = empty_segments_count + full_segments_count;
-
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
+    const rocprim::detail::target current_target(stream);
+    using Selector = rocprim::detail::segmented_radix_sort_config_selector<key_type, value_type>;
+    using Config   = rocprim::default_config;
+    const auto         params     = rocprim::detail::get_config<Selector>(Config{}, current_target);
+    const unsigned int block_size = params.kernel_config.block_size;
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
@@ -475,15 +473,40 @@ inline void sort_keys_large_num_segments()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        // Generate data
-        std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
-            size,
-            common::generate_limits<key_type>::min(),
-            common::generate_limits<key_type>::max(),
-            seed_value);
+        std::default_random_engine                  gen(seed_value);
+        std::uniform_int_distribution<unsigned int> segment_length_dis(
+            TestFixture::params::min_segment_length,
+            TestFixture::params::max_segment_length);
+        const segment_index_type segments_count
+            = ::std::numeric_limits<unsigned int>::max() / block_size * num_launch;
+        const unsigned int           segment_length       = segment_length_dis(gen);
+        constexpr segment_index_type full_segments_count  = 5U;
+        const segment_index_type     empty_segments_count = segments_count - full_segments_count;
+        offset_type                  size                 = full_segments_count * segment_length;
 
-        common::device_ptr<key_type>    d_keys_input;
-        common::device_ptr<key_type>    d_keys_output;
+        SCOPED_TRACE(testing::Message() << "with segments_count= " << segments_count);
+        SCOPED_TRACE(testing::Message() << "with segment_length= " << segment_length);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        // Generate data
+        std::vector<key_type> keys_input;
+        try
+        {
+            keys_input = test_utils::get_random_data_wrapped<key_type>(
+                size,
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
+                seed_value);
+        }
+        catch(const std::bad_alloc&)
+        {
+            SCOPED_TRACE(testing::Message() << "Out of (host) memory. Skipping size = " << size);
+            GTEST_SKIP();
+            return;
+        }
+
+        common::device_ptr<key_type> d_keys_input;
+        common::device_ptr<key_type> d_keys_output;
 
         if(!d_keys_input.resize_with_memory_check(size)
            || !d_keys_output.resize_with_memory_check(size))

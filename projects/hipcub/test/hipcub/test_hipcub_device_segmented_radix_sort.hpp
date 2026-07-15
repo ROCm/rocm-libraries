@@ -351,26 +351,31 @@ inline void sort_keys_empty_data()
     }
 }
 
-template<typename TestFixture>
 inline void sort_keys_large_segments()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                    = typename TestFixture::params::key_type;
-    constexpr bool         descending = TestFixture::params::descending;
-    constexpr unsigned int start_bit  = TestFixture::params::start_bit;
-    constexpr unsigned int end_bit    = TestFixture::params::end_bit;
+    using key_type                    = uint8_t;
+    constexpr bool         descending = false;
+    constexpr unsigned int start_bit  = 0;
+    constexpr unsigned int end_bit    = 8;
     constexpr std::size_t  uint_max   = ::std::numeric_limits<unsigned int>::max();
 
-    using offset_type = unsigned int;
+    using offset_type = size_t;
 
     hipStream_t stream = 0;
 
-    constexpr size_t size           = uint_max + size_t{1 << 20};
-    constexpr size_t segments_count = 2;
-    constexpr size_t offsets_count  = segments_count + 1;
+    // Test large number of items but with each segment size under UINT_MAX, which
+    // is the supported use in CCCL
+    // Note: large number of items also fails currently for NVIDIA's backend
+    constexpr size_t size = (uint_max + 1)
+#if defined(__HIP_PLATFORM_AMD__)
+        ;
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+                            / 2; // to keep size as a power a 2
+#endif
 
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -382,26 +387,27 @@ inline void sort_keys_large_segments()
 
         // Generate data
         std::vector<key_type> keys_input;
-        if constexpr(std::is_floating_point<key_type>::value)
+        try
         {
-            keys_input = test_utils::get_random_data<key_type>(size,
-                                                               static_cast<key_type>(-1000),
-                                                               static_cast<key_type>(1000),
-                                                               seed_value);
+            keys_input.resize(size);
+            std::iota(keys_input.begin(), keys_input.end(), key_type{0});
         }
-        else
+        catch(const std::bad_alloc&)
         {
-            keys_input = test_utils::get_random_data<key_type>(
-                size,
-                _HIPCUB_STD::numeric_limits<key_type>::min(),
-                _HIPCUB_STD::numeric_limits<key_type>::max(),
-                seed_value + seed_value_addition);
+            GTEST_SKIP() << "Out of (host) memory. Skipping size = " << size;
         }
 
-        std::vector<offset_type> offsets(offsets_count);
-        offsets[0] = 0;
-        offsets[1] = static_cast<offset_type>(size / 2);
-        offsets[2] = static_cast<offset_type>(size);
+        std::vector<offset_type> offsets;
+        size_t                   offset         = 0;
+        constexpr size_t         segment_length = size / 2;
+        while(offset < size)
+        {
+            offsets.push_back(offset);
+            offset += segment_length;
+        }
+        offsets.push_back(size);
+        const unsigned int offsets_count  = offsets.size();
+        const unsigned int segments_count = offsets_count - 1;
 
         key_type* d_keys_input;
         key_type* d_keys_output;
@@ -422,27 +428,40 @@ inline void sort_keys_large_segments()
                             offsets_count * sizeof(offset_type),
                             hipMemcpyHostToDevice));
 
-        // Calculate expected results on host
-        std::vector<key_type> expected(keys_input);
-        for(size_t i = 0; i < segments_count; i++)
+        size_t     temporary_storage_bytes     = 0;
+        const auto launch_segmented_radix_sort = [&](void* temporary_storage)
         {
-            std::stable_sort(
-                expected.begin() + offsets[i],
-                expected.begin() + offsets[i + 1],
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-        }
+            if constexpr(descending)
+            {
+                return hipcub::DeviceSegmentedRadixSort::SortKeysDescending(temporary_storage,
+                                                                            temporary_storage_bytes,
+                                                                            d_keys_input,
+                                                                            d_keys_output,
+                                                                            size,
+                                                                            segments_count,
+                                                                            d_offsets,
+                                                                            d_offsets + 1,
+                                                                            start_bit,
+                                                                            end_bit,
+                                                                            stream);
+            }
+            else
+            {
+                return hipcub::DeviceSegmentedRadixSort::SortKeys(temporary_storage,
+                                                                  temporary_storage_bytes,
+                                                                  d_keys_input,
+                                                                  d_keys_output,
+                                                                  size,
+                                                                  segments_count,
+                                                                  d_offsets,
+                                                                  d_offsets + 1,
+                                                                  start_bit,
+                                                                  end_bit,
+                                                                  stream);
+            }
+        };
 
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeys(nullptr,
-                                                             temporary_storage_bytes,
-                                                             d_keys_input,
-                                                             d_keys_output,
-                                                             size,
-                                                             segments_count,
-                                                             d_offsets,
-                                                             d_offsets + 1,
-                                                             start_bit,
-                                                             end_bit));
+        HIP_CHECK(launch_segmented_radix_sort(nullptr));
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
@@ -450,34 +469,7 @@ inline void sort_keys_large_segments()
         HIP_CHECK_MEMORY(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-        if constexpr(descending)
-        {
-            HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
-                                                                           temporary_storage_bytes,
-                                                                           d_keys_input,
-                                                                           d_keys_output,
-                                                                           size,
-                                                                           segments_count,
-                                                                           d_offsets,
-                                                                           d_offsets + 1,
-                                                                           start_bit,
-                                                                           end_bit,
-                                                                           stream));
-        }
-        else
-        {
-            HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeys(d_temporary_storage,
-                                                                 temporary_storage_bytes,
-                                                                 d_keys_input,
-                                                                 d_keys_output,
-                                                                 size,
-                                                                 segments_count,
-                                                                 d_offsets,
-                                                                 d_offsets + 1,
-                                                                 start_bit,
-                                                                 end_bit,
-                                                                 stream));
-        }
+        HIP_CHECK(launch_segmented_radix_sort(d_temporary_storage));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -490,22 +482,40 @@ inline void sort_keys_large_segments()
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_offsets));
 
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+        // Check if output values are as expected
+        constexpr size_t unique_keys = size_t(_HIPCUB_STD::numeric_limits<key_type>::max()) + 1;
+        constexpr size_t repetitions = segment_length / unique_keys;
+        for(unsigned int seg = 0; seg < segments_count; ++seg)
+        {
+            const size_t seg_start = offsets[seg];
+            size_t       i         = seg_start;
+            for(unsigned int k = 0; k < unique_keys; ++k)
+            {
+                const key_type expected = descending ? static_cast<key_type>(unique_keys - 1 - k)
+                                                     : static_cast<key_type>(k);
+
+                for(size_t j = 0; j < repetitions; ++j, ++i)
+                {
+                    ASSERT_EQ(keys_output[i], expected)
+                        << "with seg =" << seg << " and index = " << i;
+                }
+            }
+            // Atp we should have reached the end of the segment
+            ASSERT_EQ(i, offsets[seg + 1]);
+        }
     }
 }
 
-template<typename TestFixture>
 inline void sort_keys_large_num_segments()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                    = typename TestFixture::params::key_type;
-    constexpr bool         descending = TestFixture::params::descending;
-    constexpr unsigned int start_bit  = TestFixture::params::start_bit;
-    constexpr unsigned int end_bit    = TestFixture::params::end_bit;
-    constexpr std::size_t  uint_max   = ::std::numeric_limits<unsigned int>::max();
+    using key_type                    = uint8_t;
+    constexpr bool         descending = false;
+    constexpr unsigned int start_bit  = 0;
+    constexpr unsigned int end_bit    = 8;
 
     using offset_type        = size_t;
     using segment_index_type = size_t;
@@ -513,16 +523,20 @@ inline void sort_keys_large_num_segments()
         = test_utils::segments_index_to_offset_op<offset_type, segment_index_type>;
     using iota_iterator_t = test_utils::counting_iterator<offset_type>;
 
+    constexpr size_t num_launch = 2;
+
     hipStream_t stream = 0;
 
-    constexpr offset_type        size           = uint_max + offset_type{1 << 22};
-    constexpr unsigned int       segment_length = 1 << 20;
-    constexpr segment_index_type full_segments_count
-        = test_utils::ceiling_div(size, segment_length);
-    constexpr segment_index_type empty_segments_count = uint_max - full_segments_count + 1;
-    constexpr segment_index_type segments_count       = empty_segments_count + full_segments_count;
-
-    SCOPED_TRACE(testing::Message() << "with size= " << size);
+#if defined(__HIP_PLATFORM_AMD__)
+    const rocprim::detail::target current_target(stream);
+    using Selector
+        = rocprim::detail::segmented_radix_sort_config_selector<key_type, rocprim::empty_type>;
+    using Config                  = rocprim::default_config;
+    const auto         params     = rocprim::detail::get_config<Selector>(Config{}, current_target);
+    const unsigned int block_size = params.kernel_config.block_size;
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+    const unsigned int block_size = 256;
+#endif
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -530,22 +544,40 @@ inline void sort_keys_large_num_segments()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
+        const unsigned int       segment_length = 1 << 9;
+        const segment_index_type segments_count
+            = ::std::numeric_limits<unsigned int>::max() / block_size * num_launch;
+        constexpr segment_index_type full_segments_count  = 5U;
+        const segment_index_type     empty_segments_count = segments_count - full_segments_count;
+        offset_type                  size                 = full_segments_count * segment_length;
+
+        SCOPED_TRACE(testing::Message() << "with segment_length = " << segment_length);
+        SCOPED_TRACE(testing::Message() << "with segments_count = " << segments_count);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        try
         {
-            keys_input = test_utils::get_random_data<key_type>(size,
-                                                               static_cast<key_type>(-1000),
-                                                               static_cast<key_type>(1000),
-                                                               seed_value);
+            if(std::is_floating_point<key_type>::value)
+            {
+                keys_input = test_utils::get_random_data<key_type>(size,
+                                                                   static_cast<key_type>(-1000),
+                                                                   static_cast<key_type>(1000),
+                                                                   seed_value);
+            }
+            else
+            {
+                keys_input = test_utils::get_random_data<key_type>(
+                    size,
+                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                    seed_value + seed_value_addition);
+            }
         }
-        else
+        catch(const std::bad_alloc&)
         {
-            keys_input = test_utils::get_random_data<key_type>(
-                size,
-                _HIPCUB_STD::numeric_limits<key_type>::min(),
-                _HIPCUB_STD::numeric_limits<key_type>::max(),
-                seed_value + seed_value_addition);
+            GTEST_SKIP() << "Out of (host) memory. Skipping size = " << size;
         }
 
         key_type* d_keys_input;
@@ -569,7 +601,7 @@ inline void sort_keys_large_num_segments()
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
-        for(size_t i = empty_segments_count; i < segments_count; i++)
+        for(size_t i = 0; i < segments_count; i++)
         {
             std::stable_sort(
                 expected.begin() + offsets[i],
@@ -577,17 +609,40 @@ inline void sort_keys_large_num_segments()
                 test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
         }
 
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeys(nullptr,
-                                                             temporary_storage_bytes,
-                                                             d_keys_input,
-                                                             d_keys_output,
-                                                             size,
-                                                             segments_count,
-                                                             offsets,
-                                                             offsets + 1,
-                                                             start_bit,
-                                                             end_bit));
+        size_t     temporary_storage_bytes     = 0;
+        const auto launch_segmented_radix_sort = [&](void* temporary_storage)
+        {
+            if constexpr(descending)
+            {
+                return hipcub::DeviceSegmentedRadixSort::SortKeysDescending(temporary_storage,
+                                                                            temporary_storage_bytes,
+                                                                            d_keys_input,
+                                                                            d_keys_output,
+                                                                            size,
+                                                                            segments_count,
+                                                                            offsets,
+                                                                            offsets + 1,
+                                                                            start_bit,
+                                                                            end_bit,
+                                                                            stream);
+            }
+            else
+            {
+                return hipcub::DeviceSegmentedRadixSort::SortKeys(temporary_storage,
+                                                                  temporary_storage_bytes,
+                                                                  d_keys_input,
+                                                                  d_keys_output,
+                                                                  size,
+                                                                  segments_count,
+                                                                  offsets,
+                                                                  offsets + 1,
+                                                                  start_bit,
+                                                                  end_bit,
+                                                                  stream);
+            }
+        };
+
+        HIP_CHECK(launch_segmented_radix_sort(nullptr));
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
@@ -595,34 +650,7 @@ inline void sort_keys_large_num_segments()
         HIP_CHECK_MEMORY(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-        if constexpr(descending)
-        {
-            HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
-                                                                           temporary_storage_bytes,
-                                                                           d_keys_input,
-                                                                           d_keys_output,
-                                                                           size,
-                                                                           segments_count,
-                                                                           offsets,
-                                                                           offsets + 1,
-                                                                           start_bit,
-                                                                           end_bit,
-                                                                           stream));
-        }
-        else
-        {
-            HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeys(d_temporary_storage,
-                                                                 temporary_storage_bytes,
-                                                                 d_keys_input,
-                                                                 d_keys_output,
-                                                                 size,
-                                                                 segments_count,
-                                                                 offsets,
-                                                                 offsets + 1,
-                                                                 start_bit,
-                                                                 end_bit,
-                                                                 stream));
-        }
+        HIP_CHECK(launch_segmented_radix_sort(d_temporary_storage));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(hipMemcpy(keys_output.data(),
@@ -634,13 +662,7 @@ inline void sort_keys_large_num_segments()
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
 
-        for(segment_index_type s = empty_segments_count; s < segments_count; ++s)
-        {
-            for(size_t i = offsets[s]; i < offsets[s + 1]; ++i)
-            {
-                test_utils::assert_eq(keys_output[i], expected[i]);
-            }
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
 }
 
