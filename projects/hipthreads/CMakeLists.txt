@@ -35,6 +35,17 @@ find_package(libhipcxx REQUIRED)
 
 include(GNUInstallDirs)
 
+# ON: copy the source tree into the build folder. The TheRock tester needs this
+# so it can run the lit suite against the packaged build artifact (lit compiles
+# the test sources on the tester, so they must be present in the artifact). Set
+# by TheRock's build recipe; OFF for normal local/CI builds.
+option(HIPTHREADS_COPY_TO_BUILD
+  "Copy source tree into build folder (set by TheRock; required for the tester pipeline)." OFF)
+
+if(HIPTHREADS_COPY_TO_BUILD)
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+
 add_subdirectory(src)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   add_subdirectory(test)
