@@ -100,7 +100,7 @@ def ensurePath(path):
 def readYaml(filename):
     try:
         with open(filename, "r") as f:
-            data = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+            data = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
             return data
     except:
         str1 = "Failed to read yaml file %s"%filename

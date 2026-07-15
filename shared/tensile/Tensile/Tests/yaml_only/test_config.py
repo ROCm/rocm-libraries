@@ -102,7 +102,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+            doc = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks

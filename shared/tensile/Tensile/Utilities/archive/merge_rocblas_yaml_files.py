@@ -66,7 +66,7 @@ class LibraryLogic:
         stream = open(filename, "r")
       except IOError:
         printExit("Cannot open file: %s" % filename )
-      data = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+      data = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
 
       if isinstance(data, list):
 

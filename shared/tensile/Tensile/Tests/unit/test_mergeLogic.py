@@ -267,8 +267,8 @@ def test_removeUnusedKernels(input, expectedNumKernelRemoved):
   ["InUseForSize256", "InUseForSize128or64", "InUseForSize128or64"]),
 ])
 def test_mergeLogic(baseLogic, incLogic, expectedStats, expectedSizes, expectedSolutions):
-  baseData = yaml.load(baseLogic, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
-  incData = yaml.load(incLogic, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+  baseData = yaml.load(baseLogic, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+  incData = yaml.load(incLogic, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
 
   mergedData, *stats = mergeLogic(baseData, incData, False)
 
@@ -304,9 +304,9 @@ def test_checkUniqueSolution(input, expected):
    mfmaMergeResNotMatchingMFMA, ["MFMA_base", "VALU_base", "MFMA_inc", "VALU_inc"])
 ])
 def test_mfmaMergeLogic(baseLogic, incLogic, expectedSizesYaml, expectedSolutions):
-  baseData      = yaml.load(baseLogic, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
-  incData       = yaml.load(incLogic,  yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
-  expectedSizes = yaml.load(expectedSizesYaml, yamlLoader)[0]  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+  baseData      = yaml.load(baseLogic, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+  incData       = yaml.load(incLogic,  yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
+  expectedSizes = yaml.load(expectedSizesYaml, yamlLoader)[0]  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
 
   mergedData, _, _, _ = mergeLogic(baseData, incData, False, True, True)
 

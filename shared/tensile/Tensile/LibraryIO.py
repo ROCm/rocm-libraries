@@ -120,7 +120,7 @@ def writeSolutions(filename, problemSizes, solutions, cache=False):
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
-        data = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+        data = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
     return data
 
 

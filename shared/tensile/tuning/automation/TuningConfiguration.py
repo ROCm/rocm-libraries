@@ -123,7 +123,7 @@ class TuningConfiguration(object):
             except IOError:
                 printExit("Cannot open file: %s" % filename )
 
-            data = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
+            data = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias  # fmt: skip
 
             if CONST.GlobalParameters in data:
                 self.__globalParameters = data[CONST.GlobalParameters]
