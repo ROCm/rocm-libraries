@@ -235,7 +235,12 @@ def convertToDict(data: list | dict, filename: str) -> dict:
                     del kernel['ProblemType']
                 if k in defaultSolution.keys() and v == defaultSolution[k]:
                     del kernel[k]
-        LibraryIO.reorderSolutionsParams(rv)
+        # Sort each solution's keys (naming keys first, then Capital/_/lowercase)
+        # so the dict layout does not depend on the source file's key order.
+        rv["Solutions"] = [
+            LibraryIO.reorderSolutionDictForDictMerge(dict(kernel))
+            for kernel in rv["Solutions"]
+        ]
         return rv
     return data
 

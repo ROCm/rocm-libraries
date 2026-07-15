@@ -758,6 +758,8 @@ def parseLibraryLogicList(data, srcFile="?"):
     rv["IndexOrder"] = data[6]
     rv["ExactLogic"] = data[7]
     rv["RangeLogic"] = data[8]
+    # Tile-selection logic (list index 9); usually None in matching-table files.
+    rv["TileSelectionIndices"] = data[9] if len(data) > 9 else None
 
     # optional fields
     if len(data) > 10 and data[10]:
@@ -918,13 +920,15 @@ def createLibraryLogic(
     solutionsForDict = [
         reorderSolutionDictForDictMerge(dict(s)) for s in solutionList
     ]
+    cuCount = CUCount if architectureName == "gfx942" and CUCount and CUCount != 304 else None
     data: dict[str, Any] = {
         "MinimumRequiredVersion": __version__,
         "ScheduleName": schedulePrefix,
         "ArchitectureName": architectureName,
+        "CUCount": cuCount,
         "DeviceNames": deviceNames,
-        "DefaultSolution": fileDefaultSolution,
         "ProblemType": problemTypeForDict,
+        "DefaultSolution": fileDefaultSolution,
         "Solutions": solutionsForDict,
         "IndexOrder": indexOrder,
         "ExactLogic": exactLogicList,
@@ -933,6 +937,4 @@ def createLibraryLogic(
         "PerfMetric": perfMetric,
         "LibraryType": libraryType,
     }
-    if architectureName == "gfx942" and CUCount and CUCount != 304:
-        data["CUCount"] = CUCount
     return data

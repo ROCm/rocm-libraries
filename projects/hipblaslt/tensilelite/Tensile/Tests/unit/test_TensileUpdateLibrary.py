@@ -253,6 +253,42 @@ class TestUpdateLogic:
             assert updated_data[5][0]["ISA"] == [9, 0, 6]
             assert updated_data[5][1]["ISA"] == [10, 1, 0]
 
+    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    def test_updates_dict_format_logic(self, mock_parse):
+        """UpdateLogic should update dict-format logic in place, preserving other keys"""
+        from Tensile.TensileUpdateLibrary import UpdateLogic
+
+        mock_problem_type = self.create_mock_problem_type()
+        mock_solution = self.create_mock_solution(isa=(9, 4, 2))
+        mock_parse.return_value = (None, None, mock_problem_type, [mock_solution], None, None, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = os.path.join(tmpdir, "logic.yaml")
+            input_data = {
+                "MinimumRequiredVersion": "4.0.0",
+                "ScheduleName": "gfx942",
+                "ProblemType": {"old": "pt"},
+                "Solutions": [{"old": "sol"}],
+                "LibraryType": "GridBased",
+            }
+
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
+
+            UpdateLogic(input_file, tmpdir, "")
+
+            with open(input_file, 'r') as f:
+                updated_data = yaml.safe_load(f)
+
+            # Dict format is preserved (not turned into a list)
+            assert isinstance(updated_data, dict)
+            assert "MinimumRequiredVersion" in updated_data
+            # ProblemType/Solutions refreshed with enum values / list ISA
+            assert updated_data["ProblemType"]["DataType"] == MockDataType.Float.value
+            assert updated_data["Solutions"][0]["ISA"] == [9, 4, 2]
+            # Unrelated keys left untouched
+            assert updated_data["LibraryType"] == "GridBased"
+
 
 @pytest.mark.unit
 class TestTensileUpdateLibrary:

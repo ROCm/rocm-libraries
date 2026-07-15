@@ -320,6 +320,47 @@ def test_create_library_logic_dict_adds_cu_count_for_gfx942(
     assert out["CUCount"] == 128
 
 
+# Canonical top-level key order for dict-format library logic. Both the
+# LibraryLogic write path (``createLibraryLogic``) and the merge/convert path
+# (``parseLibraryLogicList``/``convertToDict``) must emit exactly this order.
+_CANONICAL_LOGIC_KEYS = [
+    "MinimumRequiredVersion", "ScheduleName", "ArchitectureName", "CUCount",
+    "DeviceNames", "ProblemType", "DefaultSolution", "Solutions", "IndexOrder",
+    "ExactLogic", "RangeLogic", "TileSelectionIndices", "PerfMetric", "LibraryType",
+]
+
+
+@pytest.mark.parametrize("architecture", ["gfx950", "gfx1250"])
+@patch.object(LibraryIO, "getCUCount", return_value=304)
+def test_create_library_logic_canonical_key_order(
+    _mock_cu: Any,
+    architecture: str,
+    pool_env: types.SimpleNamespace,
+) -> None:
+    """``createLibraryLogic`` emits keys in the canonical order with ``CUCount`` present."""
+    pdata, solutions = _parse_pool(pool_env)
+    logic_tuple = _logic_tuple_from_parsed_pool(pdata, solutions)
+    out = LibraryIO.createLibraryLogic(
+        pdata["ScheduleName"], architecture, pdata["DeviceNames"], "GridBased", logic_tuple
+    )
+    assert list(out.keys()) == _CANONICAL_LOGIC_KEYS
+    # Non-gfx942 architectures still carry a (null) CUCount key.
+    assert out["CUCount"] is None
+    assert out["TileSelectionIndices"] is None
+
+
+def test_parse_library_logic_list_has_tile_selection_and_canonical_order() -> None:
+    """``parseLibraryLogicList`` adds ``TileSelectionIndices`` (null) in canonical position."""
+    raw = LibraryIO.read(POOL_FILE, customizedLoader=True)
+    assert isinstance(raw, list)
+    parsed = LibraryIO.parseLibraryLogicList(copy.deepcopy(raw), POOL_FILE)
+    assert "TileSelectionIndices" in parsed
+    # ExactLogic precedes TileSelectionIndices which precedes PerfMetric/LibraryType.
+    keys = list(parsed.keys())
+    assert keys.index("ExactLogic") < keys.index("TileSelectionIndices")
+    assert keys.index("TileSelectionIndices") < keys.index("LibraryType")
+
+
 def test_prepare_library_logic_dict_gridbased() -> None:
     """``prepareLibraryLogicDict`` promotes GridBased to Matching library metadata."""
     data: dict[str, Any] = {

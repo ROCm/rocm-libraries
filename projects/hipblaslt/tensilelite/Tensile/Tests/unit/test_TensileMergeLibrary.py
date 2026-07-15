@@ -188,6 +188,44 @@ class TestLoadData:
         d = deepcopy(dict_logic)
         assert convertToDict(d, "any.yaml") is d
 
+    def test_convert_list_has_tile_selection_indices(self, list_logic: list[Any]) -> None:
+        """Converted dict carries ``TileSelectionIndices`` (null for matching-table lists)."""
+        out = convertToDict(deepcopy(list_logic), "fixture.yaml")
+        assert "TileSelectionIndices" in out
+        assert out["TileSelectionIndices"] is None
+
+    def test_convert_list_canonical_top_level_order(self, list_logic: list[Any]) -> None:
+        """Converted dict keys appear in canonical order (before Library is stripped)."""
+        out = convertToDict(deepcopy(list_logic), "fixture.yaml")
+        keys = [k for k in out.keys() if k != "Library"]
+        assert keys == [
+            "MinimumRequiredVersion", "ScheduleName", "ArchitectureName", "CUCount",
+            "DeviceNames", "ProblemType", "DefaultSolution", "Solutions", "IndexOrder",
+            "ExactLogic", "RangeLogic", "TileSelectionIndices", "PerfMetric", "LibraryType",
+        ]
+
+    def test_convert_sorts_solution_params_regardless_of_input_order(
+        self, list_logic: list[Any]
+    ) -> None:
+        """Solution keys are sorted (naming keys first) even when the input is shuffled."""
+        shuffled = deepcopy(list_logic)
+        sol = shuffled[5][0]
+        # Rebuild the first solution dict in a deliberately non-alphabetical order.
+        reordered = {}
+        tail = ["WorkGroup", "BaseName", "MacroTile0", "DepthU", "SolutionNameMin",
+                "SolutionIndex", "KernelNameMin", "_staggerStrideShift"]
+        for k in tail:
+            if k in sol:
+                reordered[k] = sol[k]
+        for k, v in sol.items():
+            reordered.setdefault(k, v)
+        shuffled[5][0] = reordered
+
+        out = convertToDict(shuffled, "fixture.yaml")
+        keys = list(out["Solutions"][0].keys())
+        assert keys[:3] == ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
+        assert keys[3:] == sorted(keys[3:])
+
 
 class TestNormalizeDictLibraryLayout:
     """Tests for ``normalizeDictLibraryLayout`` (always runs on dict input)."""

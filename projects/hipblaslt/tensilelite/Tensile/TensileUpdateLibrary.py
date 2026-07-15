@@ -101,10 +101,15 @@ def UpdateLogic(filename, logicPath, outputPath):
         solutionState["ISA"] = list(solutionState["ISA"])
         solutionList.append(solutionState)
 
-    # update yaml
-    libYaml[0] = {"MinimumRequiredVersion":__version__}
-    libYaml[4] = problemTypeState
-    libYaml[5] = solutionList
+    # update yaml (dict- or legacy list-format)
+    if isinstance(libYaml, dict):
+        libYaml["MinimumRequiredVersion"] = __version__
+        libYaml["ProblemType"] = problemTypeState
+        libYaml["Solutions"] = solutionList
+    else:
+        libYaml[0] = {"MinimumRequiredVersion":__version__}
+        libYaml[4] = problemTypeState
+        libYaml[5] = solutionList
 
     if outputPath != "":
         filename = filename.replace(logicPath, outputPath)
