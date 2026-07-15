@@ -9,6 +9,7 @@
 #include "random.hpp"
 #include "../network_data.hpp"
 
+#define _USE_MATH_DEFINES
 #include <cmath>
 #include <miopen/batch_norm.hpp>
 #include <miopen/activ.hpp>
