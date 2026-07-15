@@ -45,6 +45,7 @@ set(TEST_LINK_LIBS
 set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
+    unit/asm/ExecMaskGroupingTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
@@ -77,6 +78,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/FlattenCalleesPassTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp

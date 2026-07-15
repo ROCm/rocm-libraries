@@ -2,6 +2,11 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
+## hipTensor 2.4.0 for ROCm 7.15
+
+### Added
+* Added a host-only stub `libhiptensor`, built automatically when `GPU_TARGETS` resolves to an empty target list (or explicitly with `-DHIPTENSOR_DISABLE_DEVICE=ON`), so the package, headers, and CMake config remain available and every API call returns `HIPTENSOR_STATUS_NOT_SUPPORTED` instead of failing to link.
+
 ## hipTensor 2.3.0 for ROCm 7.14
 
 ### Added
