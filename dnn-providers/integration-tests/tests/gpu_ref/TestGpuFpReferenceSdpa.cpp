@@ -131,11 +131,11 @@ float storeProbabilityForProvider(float probability, SdpaSoftmaxProbabilityMode 
 {
     switch(mode)
     {
-    case SdpaSoftmaxProbabilityMode::Float:
+    case SdpaSoftmaxProbabilityMode::FLOAT:
         return probability;
-    case SdpaSoftmaxProbabilityMode::Bfloat16Rtne:
+    case SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE:
         return static_cast<float>(bfloat16(probability));
-    case SdpaSoftmaxProbabilityMode::Bfloat16Rtz:
+    case SdpaSoftmaxProbabilityMode::BFLOAT16_RTZ:
     {
         // Non-negative probability: clearing the low 16 mantissa bits is round-toward-zero.
         const uint32_t bits = __builtin_bit_cast(uint32_t, probability) & 0xFFFF0000U;
@@ -304,9 +304,9 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtneRoundsProbabilityBeforePv)
     v.memory().hostData()[3] = bfloat16(-500.0f);
 
     const float fp32ProbabilityExpected
-        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Float);
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::FLOAT);
     const float providerExpected
-        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
     ASSERT_GT(std::abs(providerExpected - fp32ProbabilityExpected), 0.1f);
 
     GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, float, float>(
@@ -320,7 +320,7 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtneRoundsProbabilityBeforePv)
         /*rightBound=*/-1,
         /*topLeftAlignment=*/true,
         /*lse=*/nullptr,
-        SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+        SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
 
     const float actual = oGpu.memory().hostData()[0];
     EXPECT_NEAR(actual, providerExpected, 1e-2f);
@@ -347,9 +347,9 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtzModeTruncatesProbabilityBeforePv
     v.memory().hostData()[3] = bfloat16(-500.0f);
 
     const float rtneExpected
-        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
     const float rtzExpected
-        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Bfloat16Rtz);
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::BFLOAT16_RTZ);
     ASSERT_GT(std::abs(rtneExpected - rtzExpected), 1.0f);
 
     GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, float, float>(
@@ -363,7 +363,7 @@ TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtzModeTruncatesProbabilityBeforePv
         /*rightBound=*/-1,
         /*topLeftAlignment=*/true,
         /*lse=*/nullptr,
-        SdpaSoftmaxProbabilityMode::Bfloat16Rtz);
+        SdpaSoftmaxProbabilityMode::BFLOAT16_RTZ);
 
     const float actual = oGpu.memory().hostData()[0];
     EXPECT_NEAR(actual, rtzExpected, 1e-2f);

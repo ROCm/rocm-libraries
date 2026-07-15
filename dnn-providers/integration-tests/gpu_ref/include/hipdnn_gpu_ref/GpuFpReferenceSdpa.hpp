@@ -19,9 +19,9 @@ namespace hipdnn_gpu_ref
 
 enum class SdpaSoftmaxProbabilityMode : int
 {
-    Float = 0,
-    Bfloat16Rtne = 1,
-    Bfloat16Rtz = 2,
+    FLOAT = 0,
+    BFLOAT16_RTNE = 1,
+    BFLOAT16_RTZ = 2,
 };
 
 namespace detail
@@ -76,7 +76,7 @@ public:
                       bool topLeftAlignment = true,
                       hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                       SdpaSoftmaxProbabilityMode probabilityMode
-                      = SdpaSoftmaxProbabilityMode::Float)
+                      = SdpaSoftmaxProbabilityMode::FLOAT)
     {
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
 

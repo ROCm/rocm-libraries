@@ -58,11 +58,11 @@ constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode sdpaProbabilityMode()
     if constexpr(std::is_same_v<QDataType, bfloat16> && std::is_same_v<KDataType, bfloat16>
                  && std::is_same_v<VDataType, bfloat16>)
     {
-        return hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::Bfloat16Rtne;
+        return hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE;
     }
     else
     {
-        return hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::Float;
+        return hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::FLOAT;
     }
 }
 

@@ -298,7 +298,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
         /*rightBound=*/-1,
         /*topLeftAlignment=*/true,
         /*lse=*/nullptr,
-        SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+        SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE);
 
     Tensor<bfloat16> oFloatMode(oDims);
     GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, bfloat16, float>(
@@ -324,16 +324,16 @@ TEST(TestGpuSdpaFwdPlanBuilder, ProbabilityModeKeyedOnInputsNotOutput)
     using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
 
     static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>()
-                      == SdpaSoftmaxProbabilityMode::Bfloat16Rtne,
+                      == SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE,
                   "all-bf16 must round softmax probabilities to bf16 before P@V");
     static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, float>()
-                      == SdpaSoftmaxProbabilityMode::Bfloat16Rtne,
+                      == SdpaSoftmaxProbabilityMode::BFLOAT16_RTNE,
                   "bf16 inputs with fp32 output must still round P to bf16 before P@V");
     static_assert(sdpaProbabilityMode<float, float, float, float>()
-                      == SdpaSoftmaxProbabilityMode::Float,
+                      == SdpaSoftmaxProbabilityMode::FLOAT,
                   "fp32 inputs must not round the softmax probabilities");
     static_assert(sdpaProbabilityMode<float, bfloat16, bfloat16, bfloat16>()
-                      == SdpaSoftmaxProbabilityMode::Float,
+                      == SdpaSoftmaxProbabilityMode::FLOAT,
                   "a non-bf16 P@V input must not select the bf16 P-storage cast");
 
     SUCCEED();
