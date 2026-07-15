@@ -223,6 +223,11 @@ struct _rocblaslt_matmul_desc
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
 
+    // Non-owning pointer to a composable fused-epilogue descriptor attached via
+    // ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE. nullptr means "no fused epilogue". The
+    // pointed-to object (defined at the hipBLASLt C-API layer) is owned by the caller.
+    const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
@@ -255,6 +260,7 @@ struct _rocblaslt_matmul_desc
         this->sm_count_target         = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->bias_stride             = src.bias_stride;
+        this->fused_epilogue          = src.fused_epilogue;
     }
 };
 

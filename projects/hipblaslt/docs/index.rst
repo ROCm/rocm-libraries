@@ -41,6 +41,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
     * :doc:`Use logging and heuristics <./how-to/use-logging-heuristics>`
     * :doc:`Use Stream-K with hipBLASLt <./how-to/how-to-use-streamk>`
     * :doc:`Detect NaN in GEMM output <./how-to/how-to-detect-nan>`
+    * :doc:`Build and test fused RMSNorm E2E <./how-to/how-to-build-test-fused-rmsnorm>`
 
   .. grid-item-card:: Examples
 
