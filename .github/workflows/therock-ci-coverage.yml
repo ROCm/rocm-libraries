@@ -35,7 +35,7 @@ permissions:
 jobs:
   therock-coverage-build:
     name: Build Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
-    runs-on: azure-linux-scale-rocm
+    runs-on: aws-linux-scale-rocm-prod
     permissions:
       id-token: write
     container:
