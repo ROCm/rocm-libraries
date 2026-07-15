@@ -38,78 +38,69 @@
 #endif // no system header
 
 #if THRUST_HAS_HIP_COMPILER()
-#  include <thrust/distance.h>
-#  include <thrust/swap.h>
-#  include <thrust/system/hip/detail/par_to_seq.h>
+
+#  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/transform.h>
+#  include <thrust/type_traits/is_trivially_relocatable.h>
 
 #  if _THRUST_HAS_DEVICE_SYSTEM_STD
-#    include _THRUST_STD_INCLUDE(utility)
+#    include _THRUST_LIBCXX_INCLUDE(functional)
+#    include _THRUST_STD_INCLUDE(__algorithm_)
+#    include _THRUST_STD_INCLUDE(iterator)
 #  endif
 
-#  include <iterator>
-
 THRUST_NAMESPACE_BEGIN
-
 namespace hip_rocprim
 {
-
-namespace __swap_ranges
+struct __swap_f
 {
+  template <typename T, typename U>
+  THRUST_HOST_DEVICE auto operator()(T t, U u) const -> tuple<T, U>
+  {
+    using _THRUST_STD::swap;
+    swap(t, u);
+    return tuple{t, u};
+  }
+};
 
 template <class ItemsIt1, class ItemsIt2>
-struct swap_f
+struct __swap_fallback_f
 {
   ItemsIt1 items1;
   ItemsIt2 items2;
 
-  using value1_type = thrust::detail::it_value_t<ItemsIt1>;
-  using value2_type = thrust::detail::it_value_t<ItemsIt2>;
-
-  THRUST_HIP_FUNCTION
-  swap_f(ItemsIt1 items1_, ItemsIt2 items2_)
-      : items1(items1_)
-      , items2(items2_)
-  {}
-
   template <class Size>
-  void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
+  THRUST_HOST_DEVICE void operator()(Size idx) const
   {
-    // TODO(bgruber): this should probably use _THRUST_STD::iter_swap(items1 + idx, items2 + idx);
-    value1_type item1 = items1[idx];
-    value2_type item2 = items2[idx];
-#  if _THRUST_HAS_DEVICE_SYSTEM_STD
-    using _THRUST_STD::swap;
-#  else
-    // XXX thrust::swap is buggy
-    // if reference_type of ItemIt1/ItemsIt2
-    // is a proxy reference, then KABOOM!
-    // to avoid this, just copy the value first before swap
-    // *todo* specialize on real & proxy references
-    using thrust::swap;
-#  endif
-    swap(item1, item2);
-    items1[idx] = item1;
-    items2[idx] = item2;
+    _THRUST_STD::iter_swap(items1 + idx, items2 + idx);
   }
 };
-} // namespace __swap_ranges
 
 template <class Derived, class ItemsIt1, class ItemsIt2>
-ItemsIt2 THRUST_HOST_DEVICE
+THRUST_HOST_DEVICE ItemsIt2
 swap_ranges(execution_policy<Derived>& policy, ItemsIt1 first1, ItemsIt1 last1, ItemsIt2 first2)
 {
-  using size_type = thrust::detail::it_difference_t<ItemsIt1>;
-
-  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(first1, last1));
-
-  hip_rocprim::parallel_for(policy, __swap_ranges::swap_f<ItemsIt1, ItemsIt2>(first1, first2), num_items);
-
-  return first2 + num_items;
+  if constexpr (is_indirectly_trivially_relocate_to_v<ItemsIt1, ItemsIt2>
+                && is_indirectly_trivially_relocate_to_v<ItemsIt2, ItemsIt1>)
+  {
+    return get<1>(
+      hip_rocprim::transform(
+        policy,
+        first1,
+        last1,
+        first2,
+        zip_iterator{first1, first2},
+        _THRUST_LIBCXX::proclaim_copyable_arguments(__swap_f{}))
+        .get_iterator_tuple());
+  }
+  else
+  {
+    const auto num_items = _THRUST_STD::distance(first1, last1);
+    hip_rocprim::parallel_for(policy, __swap_fallback_f<ItemsIt1, ItemsIt2>{first1, first2}, num_items);
+    return first2 + num_items;
+  }
 }
-
 } // namespace hip_rocprim
-
 THRUST_NAMESPACE_END
 #endif
