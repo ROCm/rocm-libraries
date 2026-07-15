@@ -28,7 +28,11 @@ from textwrap import dedent, indent
 import pytest
 
 import Tensile
+import Tensile.TensileLogic.HandleCustomKernel as hck_mod
 from Tensile.AddCustomConfig import (
+    _fmt_yaml_args,
+    _fmt_yaml_inline,
+    _fmt_yaml_scalar,
     _parse_tensile_yaml,
     _read_asm_file,
     build_custom_config_yaml,
@@ -37,6 +41,8 @@ from Tensile.AddCustomConfig import (
 from Tensile.Contractions import ProblemPredicate
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
 from Tensile.CustomKernels import (
+    _buildCustomKernelFromMetadata,
+    _metadataArgToCustomArg,
     getCustomKernelConfig,
     iterCustomKernelFiles,
     validateCustomKernelMetadata,
@@ -338,3 +344,452 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
     assert mi_idx < f1_idx < wf_idx
     assert "AssertFree0ElementMultiple: 256" in rendered
     assert "AssertFree1ElementMultiple: 256" in rendered
+
+
+# --------------------------------------------------------------------------- #
+# AddCustomConfig YAML formatting helpers
+# --------------------------------------------------------------------------- #
+
+
+def test_fmt_yaml_scalar_bool_none_int():
+    assert _fmt_yaml_scalar(True) == "true"
+    assert _fmt_yaml_scalar(False) == "false"
+    assert _fmt_yaml_scalar(None) == "null"
+    assert _fmt_yaml_scalar(7) == "7"
+
+
+def test_fmt_yaml_inline_list_dict_scalar_nested():
+    assert _fmt_yaml_inline([1, 2, 3]) == "[1, 2, 3]"
+    assert _fmt_yaml_inline({"a": 1, "b": True}) == "{ a: 1, b: true }"
+    assert _fmt_yaml_inline("TilesX") == "TilesX"
+    assert _fmt_yaml_inline([{"k": [1, 2]}]) == "[{ k: [1, 2] }]"
+
+
+def test_fmt_yaml_args_empty_single_multiple():
+    assert _fmt_yaml_args([]) == "args: []"
+
+    single = _fmt_yaml_args([{"type": "address", "semantic": "AddressD"}])
+    assert single == "    args: [ { type: address, semantic: AddressD } ]"
+
+    three = _fmt_yaml_args([
+        {"type": "address", "semantic": "AddressD"},
+        {"type": "uint32", "semantic": "SizeFree0"},
+        {"type": "uint32", "semantic": "SizeFree1"},
+    ])
+    lines = three.split("\n")
+    assert len(lines) == 3
+    assert lines[0].startswith("    args: [ { type: address, semantic: AddressD },")
+    assert lines[1].strip() == "{ type: uint32, semantic: SizeFree0 },"  # middle arm
+    assert lines[2].strip() == "{ type: uint32, semantic: SizeFree1 } ]"
+
+
+# --------------------------------------------------------------------------- #
+# build_custom_config_yaml variants
+# --------------------------------------------------------------------------- #
+
+
+def test_build_config_provenance_only():
+    out = build_custom_config_yaml("aiter", None, repository="http://x", version="2.0")
+    assert "Origin: aiter" in out
+    assert "Repository: http://x" in out
+    assert "Version: 2.0" in out
+    assert "SupportsBias: false" in out
+    assert "KernArgsVersion: 0" in out
+    assert "WavefrontSize: 64" in out
+    assert "ProblemType:" not in out
+    assert "CustomKernel:" not in out
+    assert "MatrixInstruction:" not in out
+
+
+def test_build_config_features_and_isp_overrides():
+    config = {
+        "Features": {"SupportsBias": True},
+        "InternalSupportParams": {"KernArgsVersion": 2, "UseUniversalArgs": True},
+        "WavefrontSize": 32,
+    }
+    out = build_custom_config_yaml("wave", config)
+    assert "SupportsBias: true" in out
+    assert "SupportsUserArgs: false" in out  # defaulted flag
+    assert "KernArgsVersion: 2" in out
+    assert "UseUniversalArgs: True" in out
+    assert "WavefrontSize: 32" in out
+
+
+def test_build_config_mi_without_macrotile_no_enable():
+    out = build_custom_config_yaml("aiter", {"MatrixInstruction": [16, 16, 16, 1]})
+    assert "MatrixInstruction: [16, 16, 16, 1]" in out
+    assert "EnableMatrixInstruction" not in out
+    assert "MIWaveTile" not in out
+
+
+def test_build_config_full_mi_emits_wavetile():
+    config = {
+        "MatrixInstruction": [16, 16, 16, 1],
+        "CustomKernel": {"macrotile": [256, 256, 64], "threads": [256, 1, 1]},
+        "WavefrontSize": 64,
+    }
+    out = build_custom_config_yaml("aiter", config)
+    assert "EnableMatrixInstruction: True" in out
+    assert "MIWaveTile:" in out
+
+
+# --------------------------------------------------------------------------- #
+# _parse_tensile_yaml error / edge branches
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_tensile_yaml_malformed_raises(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text("BenchmarkProblems: [\n")
+    with pytest.raises(RuntimeError, match="Failed to parse Tensile YAML"):
+        _parse_tensile_yaml(str(p))
+
+
+def test_parse_tensile_yaml_missing_benchmark_problems(tmp_path):
+    p = tmp_path / "nobp.yaml"
+    p.write_text("GlobalParameters: {}\n")
+    with pytest.raises(RuntimeError, match="does not contain BenchmarkProblems"):
+        _parse_tensile_yaml(str(p))
+
+
+def test_parse_tensile_yaml_no_custom_kernel(tmp_path):
+    p = tmp_path / "nock.yaml"
+    p.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - MatrixInstruction:
+                - [16, 16, 16, 1]
+        """))
+    with pytest.raises(RuntimeError, match="No CustomKernel entry found"):
+        _parse_tensile_yaml(str(p))
+
+
+def test_parse_tensile_yaml_first_kernel_with_mi_and_wavefront(tmp_path):
+    p = tmp_path / "ok.yaml"
+    p.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: first_kernel
+                  args: []
+                  macrotile: [16, 16, 16]
+                  threads: [64, 1, 1]
+                  grid: [TilesX, TilesY, Batch]
+              - MatrixInstruction:
+                - [16, 16, 16, 1]
+              - WavefrontSize:
+                - 32
+        """))
+
+    config = _parse_tensile_yaml(str(p))  # kernel_name=None -> first kernel
+
+    assert "CustomKernel" in config
+    assert "name" not in config["CustomKernel"]
+    assert config["MatrixInstruction"] == [16, 16, 16, 1]
+    assert config["WavefrontSize"] == 32
+
+
+# --------------------------------------------------------------------------- #
+# _read_asm_file detection + edges
+# --------------------------------------------------------------------------- #
+
+
+def test_read_asm_file_detects_threads_and_wavefront(tmp_path):
+    p = tmp_path / "k.s"
+    p.write_text(dedent("""\
+        .amdgpu_metadata
+        ---
+        amdhsa.kernels:
+          - .name: k
+            .reqd_workgroup_size: [256, 1, 1]
+            .wavefront_size: 64
+        ...
+        """))
+
+    info = _read_asm_file(str(p))
+
+    assert info["detected"]["threads"] == [256, 1, 1]
+    assert info["detected"]["wavefront_size"] == 64
+    assert info["has_custom_config"] is False
+    assert info["insert_idx"] is not None
+    assert info["origin"] == tmp_path.name
+
+
+def test_read_asm_file_flags_existing_custom_config(tmp_path):
+    p = tmp_path / "k.s"
+    p.write_text(dedent("""\
+        .amdgpu_metadata
+        ---
+        custom.config:
+          InternalSupportParams:
+            KernArgsVersion: 0
+        amdhsa.kernels: []
+        ...
+        """))
+
+    assert _read_asm_file(str(p))["has_custom_config"] is True
+
+
+def test_read_asm_file_no_metadata_section(tmp_path):
+    p = tmp_path / "k.s"
+    p.write_text("s_nop 0\ns_endpgm\n")
+
+    info = _read_asm_file(str(p))
+
+    assert info["insert_idx"] is None
+    assert info["detected"] == {}
+
+
+# --------------------------------------------------------------------------- #
+# inject_custom_config real write + no-section
+# --------------------------------------------------------------------------- #
+
+
+def test_inject_custom_config_writes_block(tmp_path):
+    p = tmp_path / "k.s"
+    p.write_text(dedent("""\
+        .amdgpu_metadata
+        ---
+        amdhsa.kernels: []
+        ...
+        """))
+    info = _read_asm_file(str(p))
+
+    assert inject_custom_config(info, str(p), build_custom_config_yaml("test", None))
+    assert "custom.config:" in p.read_text()
+
+
+def test_inject_custom_config_no_section_returns_false(tmp_path, capsys):
+    p = tmp_path / "k.s"
+    p.write_text("s_nop 0\n")
+    info = _read_asm_file(str(p))
+
+    assert inject_custom_config(info, str(p), "custom.config:\n  x: 1") is False
+    assert "No .amdgpu_metadata" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# CustomKernels._metadataArgToCustomArg semantic mapping
+# --------------------------------------------------------------------------- #
+
+
+def _meta_arg(name, size=4, value_kind="by_value"):
+    return {".name": name, ".size": size, ".value_kind": value_kind}
+
+
+def test_metadata_arg_global_buffer_is_address():
+    assert _metadataArgToCustomArg(_meta_arg("D", 8, "global_buffer")) == {
+        "type": "address", "semantic": "AddressD"
+    }
+
+
+def test_metadata_arg_size8_is_float64():
+    assert _metadataArgToCustomArg(_meta_arg("beta", 8)) == {
+        "type": "float64", "semantic": "Beta"
+    }
+
+
+def test_metadata_arg_default_uint32():
+    assert _metadataArgToCustomArg(_meta_arg("alpha", 4)) == {
+        "type": "uint32", "semantic": "Alpha"
+    }
+
+
+def test_metadata_arg_activation_index():
+    assert _metadataArgToCustomArg(_meta_arg("activationAlpha", 4)) == {
+        "type": "float32", "semantic": "ActivationArg"
+    }
+    assert _metadataArgToCustomArg(_meta_arg("activationBeta", 8)) == {
+        "type": "float64", "semantic": "ActivationArg", "index": 1
+    }
+
+
+def test_metadata_arg_regex_semantics():
+    assert _metadataArgToCustomArg(_meta_arg("SizesFree0"))["semantic"] == "SizeFree0"
+    assert _metadataArgToCustomArg(_meta_arg("SizesSum0"))["semantic"] == "SizeSum"
+    assert _metadataArgToCustomArg(_meta_arg("SizesSum1"))["semantic"] == "SizeSum1"
+    assert _metadataArgToCustomArg(_meta_arg("strideA0"))["semantic"] == "StrideA0"
+    assert _metadataArgToCustomArg(_meta_arg("strideMetadata0"))["semantic"] == "StrideMetadata0"
+    assert _metadataArgToCustomArg(_meta_arg("StrideE0"))["semantic"] == "StrideE0"
+
+
+def test_metadata_arg_magic_size_index():
+    a = _metadataArgToCustomArg(_meta_arg("MagicNumberSizeI"))
+    assert a["semantic"] == "MagicNumberSize" and a["index"] == 0
+    b = _metadataArgToCustomArg(_meta_arg("MagicShiftSizeJ"))
+    assert b["semantic"] == "MagicShiftSize" and b["index"] == 1
+
+
+def test_metadata_arg_missing_field_raises():
+    with pytest.raises(RuntimeError, match="missing required field"):
+        _metadataArgToCustomArg({".name": "D"})
+
+
+def test_metadata_arg_unknown_name_raises():
+    with pytest.raises(RuntimeError, match="Unknown amdgpu_metadata arg name"):
+        _metadataArgToCustomArg(_meta_arg("totallyBogusArg"))
+
+
+# --------------------------------------------------------------------------- #
+# validate_all (non-strict) + validateCustomKernelMetadataAtBuild branches
+# --------------------------------------------------------------------------- #
+
+
+def test_validate_all_non_strict_reports_warnings(tmp_path):
+    write_kernel(tmp_path / "bad.s", """\
+          Source:
+            Origin: test
+          InternalSupportParams:
+            KernArgsVersion: 0
+        """)
+
+    errors, warnings = validate_all(str(tmp_path), strict=False)
+
+    assert errors == []
+    assert len(warnings) == 1
+
+
+def test_validate_at_build_counts_issues_and_dedups(tmp_path):
+    write_kernel(tmp_path / "good.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+        """)
+    write_kernel(tmp_path / "bad.s", """\
+          InternalSupportParams: {}
+        """)
+    kernels = [
+        {"CustomKernel": {"name": "good"}},
+        {"CustomKernel": {"name": "bad"}},
+        {"CustomKernel": {"name": "good"}},  # duplicate -> validated once
+        {"SomethingElse": 1},                # no CustomKernel -> skipped
+        {"CustomKernel": {"name": ""}},      # empty name -> skipped
+    ]
+
+    assert validateCustomKernelMetadataAtBuild(kernels, str(tmp_path)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# HandleCustomKernel branch coverage
+# --------------------------------------------------------------------------- #
+
+
+def test_handle_custom_kernel_uses_mapping_name(monkeypatch):
+    monkeypatch.setattr(
+        hck_mod, "getCustomKernelConfig",
+        lambda name, isp, directory: {"MatrixInstruction": [16, 16, 16, 1]},
+    )
+    sol = {"CustomKernel": {"name": "k0"}}
+
+    out, is_custom = hck_mod.handleCustomKernel(sol, {})
+
+    assert is_custom is True
+    assert out["MatrixInstruction"] == [16, 16, 16, 1]
+
+
+def test_handle_custom_kernel_skips_on_config_error(monkeypatch, capsys):
+    def _raise(name, isp, directory):
+        raise RuntimeError("missing custom.config")
+
+    monkeypatch.setattr(hck_mod, "getCustomKernelConfig", _raise)
+    sol = {"CustomKernelName": "k0"}
+
+    out, is_custom = hck_mod.handleCustomKernel(sol, {})
+
+    assert is_custom is False
+    assert out is sol
+
+
+# --------------------------------------------------------------------------- #
+# CustomKernels._buildCustomKernelFromMetadata: grid selection + error branches
+# --------------------------------------------------------------------------- #
+
+_D_ARG = {".name": "D", ".size": 8, ".value_kind": "global_buffer"}
+_NUMWG_ARG = {".name": "numWG", ".size": 4, ".value_kind": "by_value"}
+
+
+def _kernel_yaml(args, name="k"):
+    return {"amdhsa.kernels": [{".name": name, ".max_flat_workgroup_size": 256, ".args": args}]}
+
+
+def test_build_from_metadata_no_kernels_raises():
+    with pytest.raises(RuntimeError, match="no amdhsa.kernels entries"):
+        _buildCustomKernelFromMetadata("k", {}, {"MatrixInstruction": [16, 16, 16, 1]})
+
+
+def test_build_from_metadata_no_args_raises():
+    full = {"amdhsa.kernels": [{".name": "k"}]}
+    with pytest.raises(RuntimeError, match="no .args"):
+        _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1]})
+
+
+def test_build_from_metadata_streamk_batched_grid():
+    ck = _buildCustomKernelFromMetadata(
+        "k", _kernel_yaml([_D_ARG]),
+        {"MatrixInstruction": [16, 16, 16, 1], "StreamK": 2, "ProblemType": {"Batched": True}},
+    )
+    assert ck["grid"][0] == "StreamKWithBatch"
+
+
+def test_build_from_metadata_numworkgroups_grid():
+    ck = _buildCustomKernelFromMetadata(
+        "k", _kernel_yaml([_NUMWG_ARG, _D_ARG]),
+        {"MatrixInstruction": [16, 16, 16, 1]},
+    )
+    assert ck["grid"][0] == "TilesXYBatchGSU"
+
+
+def test_build_from_metadata_default_multidim_grid():
+    ck = _buildCustomKernelFromMetadata(
+        "k", _kernel_yaml([_D_ARG]), {"MatrixInstruction": [16, 16, 16, 1]}
+    )
+    assert ck["grid"] == ["TilesX", "TilesY", "Batch"]
+
+
+def test_build_from_metadata_macrotile_name_fallback():
+    # No MatrixInstruction -> computed macrotile is 0, so it falls back to the
+    # MTxxx token parsed out of the kernel name.
+    ck = _buildCustomKernelFromMetadata("foo_MT128x256x64_bar", _kernel_yaml([_D_ARG]), {})
+    assert ck["macrotile"] == [128, 256, 64]
+
+
+# --------------------------------------------------------------------------- #
+# validateCustomKernelMetadata edge branches
+# --------------------------------------------------------------------------- #
+
+
+def test_validate_metadata_no_custom_config_reports_unreadable(tmp_path):
+    p = tmp_path / "raw.s"
+    p.write_text(".amdgpu_metadata\n---\namdhsa.kernels: []\n...\n")  # no custom.config
+
+    valid, msg = validateCustomKernelMetadata("raw", str(tmp_path))
+
+    assert not valid
+    assert "Cannot read custom.config" in msg
+
+
+def test_validate_metadata_internal_support_params_not_mapping(tmp_path):
+    write_kernel(tmp_path / "k.s", """\
+          InternalSupportParams: not_a_dict
+        """)
+
+    valid, msg = validateCustomKernelMetadata("k", str(tmp_path))
+
+    assert not valid
+    assert "InternalSupportParams (mapping)" in msg
+
+
+def test_validate_metadata_custom_kernel_not_mapping(tmp_path):
+    write_kernel(tmp_path / "k.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          CustomKernel: not_a_dict
+        """)
+
+    valid, msg = validateCustomKernelMetadata("k", str(tmp_path))
+
+    assert not valid
+    assert "CustomKernel (mapping)" in msg
