@@ -531,7 +531,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
         ldsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
-        matrixInstT      = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"])
+        matrixInstT      = (kernel["MatrixInstMEff"] if (tile01 == 0) else kernel["MatrixInstNEff"])
         matrixInstTO     = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
         matrixInstTO     = matrixInstT if ("MXS" in tc) else matrixInstTO
         numTileInInst    = matrixInstT // matrixInstTO
@@ -763,7 +763,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
 
         # parameter for get each type index
-        matrixInstT      = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"])
+        matrixInstT      = (kernel["MatrixInstMEff"] if (tile01 == 0) else kernel["MatrixInstNEff"])
         matrixInstTO     = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
         matrixInstTO     = matrixInstT if ("MXS" in tc) else matrixInstTO
         numTileInInst    = matrixInstT // matrixInstTO

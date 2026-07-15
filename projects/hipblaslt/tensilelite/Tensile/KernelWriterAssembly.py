@@ -8722,8 +8722,8 @@ class KernelWriterAssembly(KernelWriter):
     dividerFortidInK = kernel["MatrixInstN"] * kernel["MatrixInstB"]
 
     matrixInstT      = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
-    numTileInInstA   = kernel["MatrixInstM"] // matrixInstT
-    numTileInInstB   = kernel["MatrixInstN"] // matrixInstT
+    numTileInInstA   = kernel["MatrixInstMEff"] // matrixInstT
+    numTileInInstB   = kernel["MatrixInstNEff"] // matrixInstT
     numMIInputA      = kernel["MIInputPerThreadA"]
     numMIInputB      = kernel["MIInputPerThreadB"]
     numMIInputMXSA   = kernel["MIInputPerThreadMXSA"] if kernel["ProblemType"]["MXBlockA"] else 0

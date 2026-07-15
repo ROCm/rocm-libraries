@@ -711,6 +711,16 @@ class Solution(collections.abc.Mapping):
       state["MatrixInstBM"]        = state["MIBlock"][4]
       state["MatrixInstBN"]        = state["MIBlock"][5]
 
+      # Effective per-instruction M/N extents. SourceSwap on a non-square MI transposes
+      # the accumulator, so the M/N tiling extents swap; physical MatrixInstM/N stay the
+      # opcode/accumulator-layout source of truth. Tiling/layout code reads the *Eff values.
+      if state["SourceSwap"] and state["MatrixInstM"] != state["MatrixInstN"]:
+        state["MatrixInstMEff"] = state["MatrixInstN"]
+        state["MatrixInstNEff"] = state["MatrixInstM"]
+      else:
+        state["MatrixInstMEff"] = state["MatrixInstM"]
+        state["MatrixInstNEff"] = state["MatrixInstN"]
+
       state["LocalSplitU"] = state["WorkGroup"][2]
       state["NumWaveSplitK"] = 1
 
@@ -724,13 +734,20 @@ class Solution(collections.abc.Mapping):
       else:
         state["ThreadTile0"] = state["MatrixInstBM"] * state["MIWaveTile"][0] * (state["MatrixInstM"] * state["MatrixInstN"] // state["WavefrontSize"])
         state["ThreadTile1"] = state["MatrixInstBN"] * state["MIWaveTile"][1]
-        state["SubGroup0"]   = state["MIWaveGroup"][0] * (state["WavefrontSize"] // state["MatrixInstN"])
-        state["SubGroup1"]   = state["MIWaveGroup"][1] * state["MatrixInstN"]
+        state["SubGroup0"]   = state["MIWaveGroup"][0] * (state["WavefrontSize"] // state["MatrixInstNEff"])
+        state["SubGroup1"]   = state["MIWaveGroup"][1] * state["MatrixInstNEff"]
 
       #for the old Logic yaml file which does not contain keys: MIInputPerThreadA/B
       if not "MIInputPerThreadA" in state:
         state["MIInputPerThreadA"] = state["MIInputPerThread"]
         state["MIInputPerThreadB"] = state["MIInputPerThread"]
+
+      # SS1 non-square: SourceSwap feeds B into wide src0 / A into narrow src1, so swap
+      # per-thread input counts (A sized for N-side, B for M-side) to match mfmaIter;
+      # else B has too few VGPRs for src0 -> "invalid operand for instruction".
+      if state["SourceSwap"] and state["MatrixInstM"] != state["MatrixInstN"]:
+        state["MIInputPerThreadA"], state["MIInputPerThreadB"] = \
+            state["MIInputPerThreadB"], state["MIInputPerThreadA"]
 
     elif EnableMatrixInstruction == False:
       state["ThreadTile0"] = state["ThreadTile"][0]
@@ -5029,12 +5046,6 @@ class Solution(collections.abc.Mapping):
 
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
 
-    # SourceSwap
-    if state["SourceSwap"] and state["EnableMatrixInstruction"] and (state["MatrixInstM"] != state["MatrixInstN"]):
-      reject(state, printRejectionReason,
-             "SourceSwap not supported for non-square MatrixInst (%dx%d)"
-             % (state["MatrixInstM"], state["MatrixInstN"]))
-      return
     if state["StoreRemapVectorWidth"]:
       if state["SourceSwap"]:
         reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
