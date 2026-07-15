@@ -125,7 +125,8 @@ pr:
       - '*_gtest.*'
     # Unit tests are required for source code ANYWHERE in the repository — there
     # are NO folder-based exemptions. A test file may also live in any folder;
-    # it is recognised by its name (test_* / *_test.* / Test*), not its location.
+    # it is recognised by its name (test_* / *_test.* / Test* / *_gtest.*), not
+    # its location.
     # Doc/config files are still skipped by EXTENSION (they are simply not in
     # `code_extensions`), not by path.
     exempt_paths: []

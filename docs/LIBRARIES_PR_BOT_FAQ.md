@@ -204,7 +204,7 @@ PRs that change real source code must include at least one accompanying unit tes
 | `*_gtest.*` | `matmul_gtest.cpp`  |
 
 **How to fix**
-Add a unit test for the code you changed, named `test_<something>`:
+Add a unit test for the code you changed, named to match one of the patterns above (for example `test_<something>.py` or `<something>_gtest.cpp`):
 
 ```bash
 # example for Python
