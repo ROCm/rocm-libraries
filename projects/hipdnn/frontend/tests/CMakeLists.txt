@@ -60,6 +60,9 @@ add_executable(
     TestKnobUnpacker.cpp
     TestLayernormAttributes.cpp
     TestLayerNormNode.cpp
+    TestLayernormBackwardAttributes.cpp
+    TestLayernormBackwardNode.cpp
+    TestGraphLayernormBackward.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
@@ -99,7 +102,7 @@ target_link_libraries(
 )
 clang_tidy_check(hipdnn_frontend_tests)
 
-add_unit_test_target(hipdnn_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 # Runtime-load static check. Links the shipped hipdnn_frontend_dynamic target,
 # which compiles the umbrella with HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND and links
@@ -125,6 +128,6 @@ if(TARGET hipdnn_backend)
     )
 endif()
 
-add_unit_test_target(
+add_hipdnn_test(
     hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}
 )
