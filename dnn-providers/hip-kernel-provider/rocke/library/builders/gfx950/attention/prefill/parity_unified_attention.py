@@ -1280,6 +1280,7 @@ def _run_rocke(
     path: str,
     warmup: int,
     attempts: int,
+    variant: str = "prod",
     kq_swizzle: bool = False,
     kq_pad: int = 0,
     probe_occupancy: bool = False,
@@ -1328,16 +1329,17 @@ def _run_rocke(
 
     hip_stream = _bench_stream_handle()
 
-    # NOTE: the ``"2d"`` lane force-builds the hand-tuned MFMA-32x32 /
-    # half-local-PV 2D kernel directly so we can measure the *best* 2D
-    # variant for a shape (this is the aspirational ceiling for the 2D
-    # path, including the d64/b32/h64kv8 trace family). The ``"auto"``
-    # lane must instead exercise the *production* dispatcher
-    # (``run_unified_attention_torch(backend="auto")`` -> ``select_path``),
-    # otherwise we'd be reporting forced-2D timings as if they were what
-    # production launches -- which mis-measures decode shapes by ~6x
-    # (production correctly routes them to the 3D split-KV path). Keep the
-    # two lanes strictly separate.
+    # NOTE: the ``"2d"`` lane builds and launches a 2D kernel spec directly
+    # (GPU-time only, no dispatcher overhead). By default (``variant="prod"``)
+    # the spec comes from the PRODUCTION selectors (``_tiled_spec_from_problem``)
+    # for *any* cohort, so a new cohort is measured with its real geometry with
+    # no per-cohort branch here. ``--variant hlpv`` instead selects the historical
+    # hand-tuned "aspirational ceiling" (num_warps=4 + half-local-PV combo) for
+    # the d64/b32/h64kv8 trace family. The ``"auto"`` lane must still exercise the
+    # *production* dispatcher (``run_unified_attention_torch(backend="auto")`` ->
+    # ``select_path``), otherwise we'd report forced-2D timings as if they were
+    # what production launches -- which mis-measures decode shapes by ~6x
+    # (production routes them to the 3D split-KV path). Keep the lanes separate.
     if path == "2d":
         from rocke import compile_kernel
         from kernels import (
@@ -1349,163 +1351,121 @@ def _run_rocke(
             _attn_signature,
             _attn_values,
             _select_2d_compile_backend,
-            _d256_gfx950_fast,
             _tiled_spec_from_problem,
         )
         from rocke.runtime import KernelLauncher, LaunchConfig
 
-        # PR #9233 direct-launch lane: for the D256 gfx950 bf16 prefill cohort,
-        # build and launch the PRODUCTION fast spec directly (GPU-time only, no
-        # run_unified_attention_torch dispatcher overhead). --no-interleave
-        # (applied in main via a scoped patch of _tiled_spec_from_problem) makes
-        # this lane measure both the interleave fast path and the "32x32 base".
-        if _d256_gfx950_fast(problem):
+        # Spec source. DEFAULT (variant="prod"): the production selectors for any
+        # cohort -- a new cohort is measured with its real geometry with no
+        # per-cohort branch here. variant="hlpv": the hand-tuned aspirational
+        # ceiling (num_warps=4 + half-local-PV combo) for the d64/b32/h64kv8
+        # trace family (was the historical silent default; now explicit opt-in).
+        if variant == "hlpv":
+            ok, reason = supports_tiled_2d(
+                head_size=s.head_size,
+                block_size=s.block_size,
+                dtype=dtype_str,
+                num_queries_per_kv=problem.num_queries_per_kv,
+                use_alibi=problem.use_alibi,
+                use_qq_bias=problem.use_qq_bias,
+                use_fp8=problem.use_fp8,
+                q_dtype=problem.q_dtype,
+                num_warps=4,
+                kv_storage_dtype=None,
+                tile_size=2 * s.block_size,
+            )
+            if not ok:
+                raise NotImplementedError(reason)
+
+            def use_hlpv_variant() -> bool:
+                if dtype_str != "bf16":
+                    return False
+                if s.head_size != 64 or s.block_size != 32:
+                    return False
+                if s.num_query_heads != 64 or s.num_kv_heads != 8:
+                    return False
+                if (
+                    s.softcap > 0
+                    or problem.use_fp8
+                    or problem.use_alibi
+                    or problem.use_qq_bias
+                ):
+                    return False
+                if data["max_query_len"] <= 256:
+                    return False
+                # The half-local PV path regresses on the high-num-seq SW tail.
+                if (s.sliding_window or 0) > 0 and len(s.seq_lens) >= 450:
+                    return False
+                return True
+
+            use_hlpv = use_hlpv_variant()
+            # Measured best local policy for the d64/b32/h64kv8 bf16+sinks family:
+            #   * no-SW: R4_s1mask_hlpv + mask-limit + fast paged-KV + skip legacy Q
+            #   * SW:    R4_s1mask_hlpv + fast paged-KV + skip legacy Q
+            #   * SW high-num-seq tail falls back to plain R4 in use_hlpv_variant().
+            use_transposed_mask_limit = use_hlpv and (s.sliding_window or 0) == 0
+            use_mfma32_skip_legacy_qreg = use_hlpv
+            use_fast_paged_kv_desc = use_hlpv
+            # AGPR0 is still experimental and did not improve this path broadly;
+            # keep it as an explicit environment opt-in for microbench work only.
+            use_agpr_alloc_zero = (
+                use_hlpv
+                and os.environ.get("ROCKE_ATTENTION_AGPR_ALLOC_ZERO") == "1"
+            )
+            spec = UnifiedAttention2DTiledSpec(
+                head_size=s.head_size,
+                block_size=s.block_size,
+                num_query_heads=s.num_query_heads,
+                num_kv_heads=s.num_kv_heads,
+                dtype=dtype_str,
+                use_sinks=data["sinks"] is not None,
+                sliding_window=s.sliding_window or 0,
+                has_softcap=s.softcap > 0,
+                use_alibi=data["alibi_slopes"] is not None,
+                use_qq_bias=qq_bias is not None,
+                num_seqs=len(s.seq_lens),
+                num_warps=4,
+                waves_per_eu=2,
+                tile_size=2 * s.block_size,
+                block_m_per_warp=32,
+                use_mfma_32x32=True,
+                use_transposed_qk_32x32=True,
+                use_transposed_scalar_state=use_hlpv,
+                use_transposed_mask_once=use_hlpv,
+                use_transposed_half_local_pv=use_hlpv,
+                use_mfma32_skip_legacy_qreg=use_mfma32_skip_legacy_qreg,
+                use_transposed_mask_limit=use_transposed_mask_limit,
+                use_fast_paged_kv_desc=use_fast_paged_kv_desc,
+                use_agpr_alloc_zero=use_agpr_alloc_zero,
+            )
+            cache_tag = (
+                "r4_hlpv_parity",
+                use_agpr_alloc_zero,
+                use_mfma32_skip_legacy_qreg,
+                use_transposed_mask_limit,
+                use_fast_paged_kv_desc,
+            )
+        else:
             spec = _tiled_spec_from_problem(problem)
-            if kq_swizzle:
-                spec = _with_kq_xor_swizzle(spec)
-                print(
-                    "    [2d-direct] KQ XOR swizzle ON (read-only probe; "
-                    "numerics intentionally wrong)"
-                )
-            if kq_pad > 0:
-                from dataclasses import replace as _replace
+            cache_tag = ("prod_direct",)
 
-                spec = _replace(spec, use_kq_lds_pad=True, kq_lds_pad_halves=kq_pad)
-                print(
-                    f"    [2d-direct] KQ slab-gran pad ON (pad={kq_pad} halves, "
-                    "correct: numerics preserved)"
-                )
-            kernel = build_unified_attention_2d_tiled(spec)
-            if _select_2d_compile_backend(problem) == "hipcc":
-                from rocke.helpers.compile import compile_kernel_via_hipcc
-
-                artifact = compile_kernel_via_hipcc(kernel)
-            else:
-                artifact = compile_kernel(kernel, capture_ir_text=False)
-            launcher = KernelLauncher(
-                hsaco=artifact.hsaco,
-                kernel_name=artifact.kernel_name,
-                signature=_attn_signature(
-                    dtype_str, include_bt_stride=True, include_qq_bias_stride=True
-                ),
-                cache_key=("d256_fast_direct", spec.kernel_name()),
+        # Cohort-agnostic parity probes (CLI-gated; see --kq-swizzle / --kq-pad).
+        if kq_swizzle:
+            spec = _with_kq_xor_swizzle(spec)
+            print(
+                "    [2d-direct] KQ XOR swizzle ON (read-only probe; "
+                "numerics intentionally wrong)"
             )
-            if probe_occupancy:
-                from builders.common.occupancy_probe import print_occupancy
+        if kq_pad > 0:
+            from dataclasses import replace as _replace
 
-                print_occupancy(artifact.hsaco, spec.num_warps, arch="gfx950")
-            vals = _attn_values(
-                problem=problem,
-                q=q,
-                k=data["key_cache"],
-                v=data["value_cache"],
-                out=output,
-                cu_seqlens_q=data["cu_q"],
-                seqused_k=data["kv_lens"],
-                softmax_scale=data["scale"],
-                block_table=data["block_tables"],
-                softcap=float(s.softcap),
-                sinks=data["sinks"],
-                bt_stride=int(data["block_tables"].stride(0)),
-                include_bt_stride=True,
-                alibi_slopes=data["alibi_slopes"],
-                qq_bias=qq_bias,
-                qq_bias_stride_0=qq_bias_stride_0,
-                include_qq_bias_stride=True,
+            spec = _replace(spec, use_kq_lds_pad=True, kq_lds_pad_halves=kq_pad)
+            print(
+                f"    [2d-direct] KQ slab-gran pad ON (pad={kq_pad} halves, "
+                "correct: numerics preserved)"
             )
-            block_q = spec.block_q
-            total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)
-            cfg = LaunchConfig(
-                grid=(int(s.num_kv_heads), int(total_num_q_blocks), 1),
-                block=(64 * spec.num_warps, 1, 1),
-                stream=hip_stream,
-            )
-            print(f"    [2d-direct] {spec.kernel_name()}")
 
-            def call_once():
-                launcher(vals, config=cfg)
-
-            ms = _time_lane_ms(
-                call_once, warmup=warmup, attempts=attempts, stream=hip_stream
-            )
-            return output, ms
-
-        ok, reason = supports_tiled_2d(
-            head_size=s.head_size,
-            block_size=s.block_size,
-            dtype=dtype_str,
-            num_queries_per_kv=problem.num_queries_per_kv,
-            use_alibi=problem.use_alibi,
-            use_qq_bias=problem.use_qq_bias,
-            use_fp8=problem.use_fp8,
-            q_dtype=problem.q_dtype,
-            num_warps=4,
-            kv_storage_dtype=None,
-            tile_size=2 * s.block_size,
-        )
-        if not ok:
-            raise NotImplementedError(reason)
-
-        def use_hlpv_variant() -> bool:
-            if dtype_str != "bf16":
-                return False
-            if s.head_size != 64 or s.block_size != 32:
-                return False
-            if s.num_query_heads != 64 or s.num_kv_heads != 8:
-                return False
-            if (
-                s.softcap > 0
-                or problem.use_fp8
-                or problem.use_alibi
-                or problem.use_qq_bias
-            ):
-                return False
-            if data["max_query_len"] <= 256:
-                return False
-            # The half-local PV path regresses on the high-num-seq SW tail.
-            if (s.sliding_window or 0) > 0 and len(s.seq_lens) >= 450:
-                return False
-            return True
-
-        use_hlpv = use_hlpv_variant()
-        # Measured best local policy for the d64/b32/h64kv8 bf16+sinks family:
-        #   * no-SW: R4_s1mask_hlpv + mask-limit + fast paged-KV + skip legacy Q
-        #   * SW:    R4_s1mask_hlpv + fast paged-KV + skip legacy Q
-        #   * SW high-num-seq tail falls back to plain R4 in use_hlpv_variant().
-        use_transposed_mask_limit = use_hlpv and (s.sliding_window or 0) == 0
-        use_mfma32_skip_legacy_qreg = use_hlpv
-        use_fast_paged_kv_desc = use_hlpv
-        # AGPR0 is still experimental and did not improve this path broadly; keep
-        # it as an explicit environment opt-in for microbench work only.
-        use_agpr_alloc_zero = (
-            use_hlpv and os.environ.get("ROCKE_ATTENTION_AGPR_ALLOC_ZERO") == "1"
-        )
-        spec = UnifiedAttention2DTiledSpec(
-            head_size=s.head_size,
-            block_size=s.block_size,
-            num_query_heads=s.num_query_heads,
-            num_kv_heads=s.num_kv_heads,
-            dtype=dtype_str,
-            use_sinks=data["sinks"] is not None,
-            sliding_window=s.sliding_window or 0,
-            has_softcap=s.softcap > 0,
-            use_alibi=data["alibi_slopes"] is not None,
-            use_qq_bias=qq_bias is not None,
-            num_seqs=len(s.seq_lens),
-            num_warps=4,
-            waves_per_eu=2,
-            tile_size=2 * s.block_size,
-            block_m_per_warp=32,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=use_hlpv,
-            use_transposed_mask_once=use_hlpv,
-            use_transposed_half_local_pv=use_hlpv,
-            use_mfma32_skip_legacy_qreg=use_mfma32_skip_legacy_qreg,
-            use_transposed_mask_limit=use_transposed_mask_limit,
-            use_fast_paged_kv_desc=use_fast_paged_kv_desc,
-            use_agpr_alloc_zero=use_agpr_alloc_zero,
-        )
+        # Shared build / compile / launch / time (one copy for both variants).
         kernel = build_unified_attention_2d_tiled(spec)
         if _select_2d_compile_backend(problem) == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
@@ -1519,15 +1479,12 @@ def _run_rocke(
             signature=_attn_signature(
                 dtype_str, include_bt_stride=True, include_qq_bias_stride=True
             ),
-            cache_key=(
-                "r4_hlpv_parity",
-                spec.kernel_name(),
-                use_agpr_alloc_zero,
-                use_mfma32_skip_legacy_qreg,
-                use_transposed_mask_limit,
-                use_fast_paged_kv_desc,
-            ),
+            cache_key=(*cache_tag, spec.kernel_name()),
         )
+        if probe_occupancy:
+            from builders.common.occupancy_probe import print_occupancy
+
+            print_occupancy(artifact.hsaco, spec.num_warps, arch="gfx950")
         vals = _attn_values(
             problem=problem,
             q=q,
@@ -1554,6 +1511,7 @@ def _run_rocke(
             block=(64 * spec.num_warps, 1, 1),
             stream=hip_stream,
         )
+        print(f"    [2d-direct/{variant}] {spec.kernel_name()}")
 
         def call_once():
             launcher(vals, config=cfg)
@@ -1791,6 +1749,15 @@ def _main_impl() -> int:
         help="comma-separated list of paths to run: auto, 2d, 3d",
     )
     parser.add_argument(
+        "--variant",
+        choices=("prod", "hlpv"),
+        default="prod",
+        help="2D direct-launch spec source: 'prod' (default) builds from the "
+        "production selectors for any cohort; 'hlpv' builds the hand-tuned "
+        "aspirational ceiling (num_warps=4 + half-local-PV) for the "
+        "d64/b32/h64kv8 family.",
+    )
+    parser.add_argument(
         "--set",
         choices=("default", "creative", "fmha", "all"),
         default="default",
@@ -2016,6 +1983,7 @@ def _main_impl() -> int:
                             path=p,
                             warmup=args.warmup,
                             attempts=args.attempts,
+                            variant=args.variant,
                             kq_swizzle=args.kq_swizzle,
                             kq_pad=args.kq_pad,
                             probe_occupancy=args.probe_occupancy,
