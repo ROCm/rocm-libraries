@@ -195,7 +195,8 @@ def _tiled_spec_from_problem(
     subflags = _enable_transposed_subflags(problem)
     scalar_state = combo or subflags
     skip_legacy_qreg = combo or subflags
-    mask_opts = combo_no_sw or subflags
+    _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
+    mask_opts = (combo_no_sw and not _bias_active) or subflags
     # gfx950-only schedule fields: the gfx942 2D spec class does not declare
     # ``use_v_double_buffer`` / ``use_sched_barrier``, and the default gfx942
     # forward reaches this shared return (no flash opt-in). Pass them only when

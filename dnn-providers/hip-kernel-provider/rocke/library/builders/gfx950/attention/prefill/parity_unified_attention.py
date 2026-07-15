@@ -374,6 +374,36 @@ def default_scenarios() -> List[Scenario]:
             use_qq_bias=True,
             qq_bias_stride_0=256,
         ),
+        # Full-bias decode: softcap + ALiBi + QQ-bias together on the 3D
+        # split-KV path (seqlen_q=1).  qq_bias_stride_0 equals the batch
+        # size (total_q == batch for decode).
+        Scenario(
+            name="decode_bias_fp16_d128_b16",
+            seq_lens=[(1, 512), (1, 1024), (1, 2048), (1, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.float16,
+            softcap=50.0,
+            use_alibi=True,
+            use_qq_bias=True,
+            qq_bias_stride_0=4,  # == batch (number of sequences)
+        ),
+        # Same with bf16 to cover both dtypes.
+        Scenario(
+            name="decode_bias_bf16_d128_b16",
+            seq_lens=[(1, 512), (1, 1024), (1, 2048), (1, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            dtype=torch.bfloat16,
+            softcap=50.0,
+            use_alibi=True,
+            use_qq_bias=True,
+            qq_bias_stride_0=4,  # == batch (number of sequences)
+        ),
         # bf16 transposed "combo" 2D cohort (HD64/BS32/GQA-8, long prefill,
         # multi-batch). The canonical 64/8 head split exercises the full combo
         # stack incl. the fast paged-KV descriptor.
@@ -385,6 +415,22 @@ def default_scenarios() -> List[Scenario]:
             head_size=64,
             block_size=32,
             dtype=torch.bfloat16,
+        ),
+        # Same combo cohort with softcap + ALiBi + QQ-bias enabled.  max_seqlen_q
+        # == 512 > 256 keeps routing on the 2D combo path (_enable_combo_2d).
+        # qq_bias_stride_0 == batch (2 sequences).
+        Scenario(
+            name="combo_bias_bf16_d64_b32_gqa8_64x8",
+            seq_lens=[(512, 1024), (512, 1024)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.bfloat16,
+            softcap=50.0,
+            use_alibi=True,
+            use_qq_bias=True,
+            qq_bias_stride_0=2,  # == batch (number of sequences)
         ),
         # Same combo cohort by GQA-8 ratio but a tensor-parallel-sharded head
         # split (16/2). Exercises the combo stack WITHOUT the 64/8-only fast

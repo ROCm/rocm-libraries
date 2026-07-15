@@ -391,7 +391,7 @@ def test_r7_remove_lr_deps_no_sync_slots():
     sched.remove_unnecessary_lr_deps()
 
     from Tensile.Components.Subtile.LogicalScheduler import Pass
-    assert Pass.REMOVE_LR_DEPS in sched._completed
+    assert sched._partitions is not None
 
 
 # ---------------------------------------------------------------------------

@@ -89,6 +89,7 @@ option(ROCSPARSE_ENABLE_ILU0_BOOST_SIGN "Preserve the pivot sign/phase in the IL
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
 option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
+option(BUILD_WITH_U16_REMOVED "Build rocSPARSE with the deprecated rocsparse_indextype_u16 index type removed" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -192,7 +193,7 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "4.7.0")
+set(VERSION_STRING "5.0.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
