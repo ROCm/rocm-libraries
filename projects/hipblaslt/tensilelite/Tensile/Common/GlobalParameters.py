@@ -602,7 +602,7 @@ defaultBenchmarkCommonParameters = [
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
-    {"PostLoopStoreInNll": [True]},
+    {"PostLoopStoreInNll": [False]},
     {"SwapGlobalReadOrder": [0]},
     {"ScheduleGROverBarrier": [-1]},
     {"DtlPlusLdsBuf": [-1]},
