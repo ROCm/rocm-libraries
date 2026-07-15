@@ -725,10 +725,10 @@ struct hipfftHandle_t
     bool                      auto_allocate = true;
 
     // The key type for the exec_plans map is a variant of two types:
-    // - a pair of (rocfft_transform_type, rocfft_result_placement) for
-    //   single-device or multi-process usage;
-    // - a tuple of (rocfft_transform_type, hipfftXtSubFormat, hipfftXtSubFormat)
-    //   for single-process multi-device usage;
+    // - a pair of (rocfft_transform_type, rocfft_result_placement) for single-device,
+    //   multi-process, or batched single-process multi-device usage;
+    // - a tuple of (rocfft_transform_type, hipfftXtSubFormat, hipfftXtSubFormat) for unbatched
+    //   single-process multi-device usage (the I/O subformats define the slab decompositions);
     struct type_placement_key_t
     {
         rocfft_transform_type   dft_type;
@@ -751,18 +751,50 @@ struct hipfftHandle_t
     };
     using map_key_t = std::variant<type_placement_key_t, type_subformat_key_t>;
 
-    // Multi-device plans are always keyed by subformat. Extract that key, or
-    // signal an internal logic error if that invariant is ever violated.
-    static const type_subformat_key_t& subformat_key_of(const map_key_t& key)
+    // Unbatched multi-device plans are keyed by I/O subformats. Extract that key,
+    // or signal an internal logic error if that invariant is ever violated.
+    static const type_subformat_key_t& subformat_variant_of(const map_key_t& key)
     {
         if(!std::holds_alternative<type_subformat_key_t>(key))
             throw HIPFFT_INTERNAL_ERROR;
         return std::get<type_subformat_key_t>(key);
     }
+    // Other plans are keyed by placement. Extract that key, or signal an
+    // internal logic error if that invariant is ever violated.
+    static const type_placement_key_t& placement_variant_of(const map_key_t& key)
+    {
+        if(!std::holds_alternative<type_placement_key_t>(key))
+            throw HIPFFT_INTERNAL_ERROR;
+        return std::get<type_placement_key_t>(key);
+    }
+
+    // True if the field for I/O role `io` of the plan identified by `key` has a data decomposition
+    // matching sub-format `fmt`. Placement-keyed plans (batched multi-device or single-device)
+    // compare placement; sub-format-keyed plans (unbatched multi-device) compare the sub-format on
+    // the side matching `io`.
+    static bool key_matches_format(const map_key_t& key, hipfftXtSubFormat fmt, fft_io io)
+    {
+        if(std::holds_alternative<type_placement_key_t>(key))
+            return placement_from_format(fmt) == placement_variant_of(key).placement;
+        const auto& sk = subformat_variant_of(key);
+        return fmt == (io == fft_io::fft_io_in ? sk.input_format : sk.output_format);
+    }
+
+    // Return the library-defined field that stores sub-format `fmt` data for I/O role `io`.
+    const hipfft_field& field_for_format(hipfftXtSubFormat fmt, fft_io io) const
+    {
+        const auto& fields = io == fft_io::fft_io_in ? input_fields : output_fields;
+        for(const auto& [key, _] : exec_plans)
+        {
+            if(key_matches_format(key, fmt, io))
+                return fields.at(key);
+        }
+        throw HIPFFT_INVALID_PLAN; // no plan exposes this sub-format for this I/O role
+    }
 
     std::map<map_key_t, rocfft_plan_wrapper_t> exec_plans;
-    // library-defined I/O fields, mapped by corresponding possible sub-format
-    std::map<hipfftXtSubFormat, hipfft_field> input_fields, output_fields;
+    // Corresponding library-defined I/O fields
+    std::map<map_key_t, hipfft_field> input_fields, output_fields;
 #ifdef HIPFFT_MPI_ENABLE
     std::optional<hipfft_brick> mp_input_brick, mp_output_brick;
 #endif
@@ -806,22 +838,24 @@ struct hipfftHandle_t
 
         const auto desc_subformat = static_cast<hipfftXtSubFormat>(desc.subFormat);
 
-        for(const auto& [key_variant, _] : exec_plans)
+        // In-place descriptors must be able to carry both the input- and output-domain views of
+        // their buffer.
+        const std::vector<fft_io> relevant_io_field_labels
+            = placement_from_format(desc_subformat) == rocfft_placement_inplace
+                  ? std::vector<fft_io>{fft_io::fft_io_in, fft_io::fft_io_out}
+                  : std::vector<fft_io>{desc_io_label};
+
+        for(const auto& [key, _] : exec_plans)
         {
-            const auto& key = subformat_key_of(key_variant);
-            const auto& key_io_format
-                = desc_io_label == fft_io::fft_io_in ? key.input_format : key.output_format;
-            if(desc_subformat != key_io_format)
-                continue;
-            // The descriptor's intended usage was found
-            const std::vector<fft_io> relevant_io_field_labels
-                = placement_from_format(desc_subformat) == rocfft_placement_inplace
-                      ? std::vector<fft_io>{fft_io::fft_io_in, fft_io::fft_io_out}
-                      : std::vector<fft_io>{desc_io_label};
+            // The descriptor is usable by this plan if the plan exposes the descriptor's
+            // sub-format for the descriptor's I/O role; the in-place case additionally requires
+            // both domain views to fit (checked below).
+            if(!key_matches_format(key, desc_subformat, desc_io_label))
+                continue; // no match
             for(const auto io : relevant_io_field_labels)
             {
-                const auto& field = io == fft_io::fft_io_in ? input_fields.at(key.input_format)
-                                                            : output_fields.at(key.output_format);
+                const auto& field
+                    = io == fft_io::fft_io_in ? input_fields.at(key) : output_fields.at(key);
                 for(size_t brick_idx = 0; brick_idx < field.brick_count(); ++brick_idx)
                 {
                     const auto data_sz
@@ -932,10 +966,11 @@ struct hipfftHandle_t
 #endif
                 if(batch > 1)
                 {
-                    ret.insert(type_subformat_key_t{
-                        dft_type, HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_OUTPUT});
-                    ret.insert(type_subformat_key_t{
-                        dft_type, HIPFFT_XT_FORMAT_INPLACE, HIPFFT_XT_FORMAT_INPLACE});
+                    // no more than one plan per transform type + placement is supported for
+                    // multi-device batched transforms, so type_placement_key_t is the right
+                    // key type to use in this case.
+                    ret.insert(type_placement_key_t{dft_type, rocfft_placement_inplace});
+                    ret.insert(type_placement_key_t{dft_type, rocfft_placement_notinplace});
                 }
                 else
                 {
@@ -1192,24 +1227,34 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
         if(plan->device_contexts.size() > 1)
         {
-            // must be this kind of map_key for multi-device usage
-            const auto& subformat_map_key = hipfftHandle_t::subformat_key_of(map_key);
+            // Determine the sub-formats of this rocfft plan's input and output fields. Unbatched
+            // multi-device plans are keyed by explicit sub-formats; batched plans are keyed by
+            // placement, so the canonical out-of-place (INPUT/OUTPUT) or in-place (INPLACE)
+            // sub-formats are used (the batch split is sub-format independent).
+
             for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
             {
-                const auto subformat = io == fft_io::fft_io_in ? subformat_map_key.input_format
-                                                               : subformat_map_key.output_format;
-                auto&      plan_fields
+                const hipfftXtSubFormat field_fmt
+                    = std::holds_alternative<hipfftHandle_t::type_subformat_key_t>(map_key)
+                          ? (io == fft_io::fft_io_in
+                                 ? hipfftHandle_t::subformat_variant_of(map_key).input_format
+                                 : hipfftHandle_t::subformat_variant_of(map_key).output_format)
+                          : (placement == rocfft_placement_inplace
+                                 ? HIPFFT_XT_FORMAT_INPLACE
+                                 : (io == fft_io::fft_io_in ? HIPFFT_XT_FORMAT_INPUT
+                                                            : HIPFFT_XT_FORMAT_OUTPUT));
+                auto& plan_fields
                     = io == fft_io::fft_io_in ? plan->input_fields : plan->output_fields;
-                auto it = plan_fields.find(subformat);
+                auto it = plan_fields.find(map_key);
                 if(it == plan_fields.end())
                 {
                     it = plan_fields
-                             .emplace(subformat,
+                             .emplace(map_key,
                                       hipfft_field(
                                           fft_transform_type_from_rocfft_transform_type(dft_type),
                                           number_of_transforms,
                                           rm_lengths,
-                                          subformat,
+                                          field_fmt,
                                           io,
                                           plan->device_contexts))
                              .first;
@@ -2269,6 +2314,13 @@ try
                 return HIPFFT_NOT_SUPPORTED;
         }
     }
+    // allocated descriptors must cover all the relevant input/output fields
+    // for the requested sub-format:
+    const std::vector<fft_io> relevant_io_labels
+        = placement_from_format(format) == rocfft_placement_inplace
+              ? std::vector<fft_io>{fft_io::fft_io_in, fft_io::fft_io_out}
+              : std::vector<fft_io>{format == HIPFFT_XT_FORMAT_INPUT ? fft_io::fft_io_in
+                                                                     : fft_io::fft_io_out};
 
     std::unique_ptr<hipLibXtDesc, decltype(&hipfftXtFree)> lib_desc(new hipLibXtDesc, hipfftXtFree);
     std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
@@ -2292,30 +2344,19 @@ try
         }
         xt_desc->GPUs[dev_idx] = plan->device_contexts[dev_idx].device_id;
         xt_desc->size[dev_idx] = 0;
-        // If the expected field(s) is(are) not found, this is an internal/logic error:
-        // letting this accessor throw is consistent with that (HIPFFT_INTERNAL_ERROR
-        // would be eventually returned to user).
-        for(auto& [key_variant, _] : plan->exec_plans)
+        for(const auto& [key, _] : plan->exec_plans)
         {
-            const auto& key = hipfftHandle_t::subformat_key_of(key_variant);
-            if(key.input_format != format && key.output_format != format)
-                continue;
-            const auto field_label
-                = key.input_format == format ? fft_io::fft_io_in : fft_io::fft_io_out;
-            const auto& field = field_label == fft_io::fft_io_in ? plan->input_fields.at(format)
-                                                                 : plan->output_fields.at(format);
-            xt_desc->size[dev_idx] = std::max(xt_desc->size[dev_idx],
-                                              field.get_brick(dev_idx).data_byte_size(
-                                                  plan->io_type.get_hip_data_type(field_label)));
-            if(placement_from_format(format) == rocfft_placement_inplace)
+            if(std::none_of(relevant_io_labels.begin(), relevant_io_labels.end(), [&](fft_io io) {
+                   return hipfftHandle_t::key_matches_format(key, format, io);
+               }))
+                continue; // requested format not compatible with this item
+            for(auto io : relevant_io_labels)
             {
-                const auto& other_field = other(field_label) == fft_io::fft_io_in
-                                              ? plan->input_fields.at(key.input_format)
-                                              : plan->output_fields.at(key.output_format);
-                xt_desc->size[dev_idx]
-                    = std::max(xt_desc->size[dev_idx],
-                               other_field.get_brick(dev_idx).data_byte_size(
-                                   plan->io_type.get_hip_data_type(other(field_label))));
+                const auto& field      = io == fft_io::fft_io_in ? plan->input_fields.at(key)
+                                                                 : plan->output_fields.at(key);
+                xt_desc->size[dev_idx] = std::max(
+                    xt_desc->size[dev_idx],
+                    field.get_brick(dev_idx).data_byte_size(plan->io_type.get_hip_data_type(io)));
             }
         }
 
@@ -2355,13 +2396,12 @@ try
     // Given descriptor's format is considered input descriptor's format
     // for H2D and output descriptor's format for D2H
     const auto desc_io_label = h2d ? fft_io::fft_io_in : fft_io::fft_io_out;
+    const auto element_type  = plan->io_type.get_hip_data_type(desc_io_label);
     // validate user-given descriptor w.r.t. plan
     if(!plan->can_work_with(xt_desc, desc_io_label))
         return HIPFFT_INVALID_VALUE;
-    const auto  desc_format = static_cast<hipfftXtSubFormat>(xt_desc.subFormat);
-    const auto& field
-        = h2d ? plan->input_fields.at(desc_format) : plan->output_fields.at(desc_format);
-    const auto element_type = plan->io_type.get_hip_data_type(desc_io_label);
+    const auto          desc_format = static_cast<hipfftXtSubFormat>(xt_desc.subFormat);
+    const hipfft_field& field       = plan->field_for_format(desc_format, desc_io_label);
     for(size_t brick_idx = 0; brick_idx < field.brick_count(); ++brick_idx)
     {
         const auto& dev_info = plan->device_contexts[brick_idx];
@@ -2466,14 +2506,25 @@ try
     // formats' apparent placement must be reflected by argument descriptors
     if((placement_from_format(input_subformat) == rocfft_placement_inplace) != (input == output))
         return HIPFFT_INVALID_VALUE;
-    const auto output_subformat
-        = (output != input) ? static_cast<hipfftXtSubFormat>(output->subFormat)
-                            : (plan->batch > 1 ? input_subformat
-                                               : (input_subformat == HIPFFT_XT_FORMAT_INPLACE
-                                                      ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
-                                                      : HIPFFT_XT_FORMAT_INPLACE));
-    const auto plan_key
-        = hipfftHandle_t::type_subformat_key_t{dft_type, input_subformat, output_subformat};
+
+    hipfftHandle_t::map_key_t plan_key;
+    if(plan->batch > 1)
+    {
+        // Batched multi-device plans are keyed by placement.
+        plan_key = hipfftHandle_t::type_placement_key_t{dft_type,
+                                                        placement_from_format(input_subformat)};
+    }
+    else
+    {
+        // Unbatched multi-device transforms are only in-place
+        if(input != output)
+            return HIPFFT_NOT_SUPPORTED;
+        const auto output_subformat = input_subformat == HIPFFT_XT_FORMAT_INPLACE
+                                          ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+                                          : HIPFFT_XT_FORMAT_INPLACE;
+        plan_key
+            = hipfftHandle_t::type_subformat_key_t{dft_type, input_subformat, output_subformat};
+    }
 
     const auto possible_map_keys = plan->possible_exec_map_key();
     if(possible_map_keys.find(plan_key) == possible_map_keys.end())
