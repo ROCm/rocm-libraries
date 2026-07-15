@@ -758,6 +758,15 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
     },
 )
 
+// Vector ALU — VOP1 only (cross-lane swap: swaps lane i <-> i+16 between the two
+// operand VGPRs; both operands are read-written like v_swap_b32).
+DEF_T(VPermlane16SwapB32Inst, "v_permlane16_swap_b32", .format = VOP1, .logical = "VPermlane16SwapB32",
+    .operand_fields = {
+        {D0, vdst, vgpr, 32, RW},
+        {D1, src0, src_vgpr, 32, RW},
+    },
+)
+
 // Vector ALU — VOP1 only (indirect dst via M0)
 // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
 // runtime (indirect VGPR write).

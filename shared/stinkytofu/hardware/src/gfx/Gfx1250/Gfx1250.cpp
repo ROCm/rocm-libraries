@@ -322,6 +322,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"VMovB64", "v_mov_b64"},
         {"_VMovB64", "v_mov_b64"},
         {"VSwapB32", "v_swap_b32"},
+        {"VPermlane16SwapB32", "v_permlane16_swap_b32"},
         {"VBfeI32", "v_bfe_i32"},
         {"VBfeU32", "v_bfe_u32"},
         {"VBfiB32", "v_bfi_b32"},

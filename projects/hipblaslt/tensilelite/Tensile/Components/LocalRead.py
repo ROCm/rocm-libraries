@@ -27,8 +27,8 @@ from rocisa.container import DSModifiers, vgpr, sgpr, SDWAModifiers, VOP3PModifi
 from rocisa.enum import HighBitSel, SelectBit, InstType
 from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
                             VMovB32, VMovB64, VLShiftRightB32, VCvtFP8toF16, VCvtScalePkFP8toF16, VCvtFP8toF32, VCvtScaleFP8toF16, VCvtScalePkFP8toF16, \
-                            VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, SNop, VSubF32, VSwapB32, MFMAInstruction, \
-                            ECvtPkFP8toF32, ECvtF32toF16
+                            VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, VSubF32, VSwapB32, MFMAInstruction, \
+                            ECvtPkFP8toF32, ECvtF32toF16, VSubU32
 
 from ..Component import LocalRead
 
@@ -159,6 +159,43 @@ class LocalReadMFMA(LocalRead):
         offset_val = offset - num * maxLDSConstOffset
         srcAddr = vgpr("LocalReadAddr%s+%u" %(tc, num))
         return offset_val, srcAddr
+
+    @staticmethod
+    def getMxsTileSpanInfo(kernel, tc, tile01):
+        """
+        MX scale TileSpan scale-select: when MIWaveTile//VectorWidth is a positive even
+        multiple, LRA wave-splits the tile span so a single ds_load holds two scale blocks
+        (lower half-wave = block 2g, upper half-wave = partner block 2g+1). The consuming
+        WMMA then reads each block directly from that one register via the gfx1250
+        matrix_{a,b}_scale:N selector, so N scale ds_loads collapse to N/2.
+        Axis-neutral (tile01 selects the tile axis, so this serves either MX scale tensor).
+        Return tile-span layout info, or None.
+
+        Constraint: the half-wave scale-select selects lane i vs lane i+halfSpan within the
+        wave, so it only maps to this optimization when the two half-wave tile spans meet at
+        the wave midpoint, i.e. the tile-axis matrix instruction size equals WavefrontSize/2
+        (MatrixInstM for A, MatrixInstN for B).
+        """
+        if "MXS" not in tc:
+            return None
+        vectorWidth = kernel["VectorWidth%s" % tc]
+        miWaveTile = kernel["MIWaveTile"][tile01]
+        miWaveTileVectors = miWaveTile // vectorWidth
+        # The tile is handled as (miWaveTileVectors // 2) independent ratio-2 groups. Each
+        # group is one wave-split ds_load (lower half-wave = block 2g, upper half-wave grabs
+        # partner block 2g+1), so N ds_loads collapse to N/2. (ratio == 2 is the single-group
+        # special case.)
+        if miWaveTileVectors < 2 or (miWaveTileVectors % 2) != 0:
+            return None
+        matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
+        # The half-wave scale-select selects lane i vs i+halfSpan; only valid when the
+        # half-wave boundary is the wave midpoint (halfSpan == WavefrontSize/2).
+        if matrixInstT != kernel["WavefrontSize"] // 2:
+            return None
+        return {
+            "vectorWidth": vectorWidth,
+            "numGroups": miWaveTileVectors // 2,
+        }
 
     # Vreg Value layout (assuming MIInputPerThread = 8)
     # (1) local read dst
@@ -571,23 +608,35 @@ class LocalReadMFMA(LocalRead):
         tilePerRead      = stridePerRead // mxUnit
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
-
-        numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
+        tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01)
+        mxsTileSpan = tileSpanInfo is not None
+        numVectorsPerTile = tileSpanInfo["numGroups"] if mxsTileSpan else kernel["MIWaveTile"][tile01] // vectorWidth
         numReadsPerVector = int(vectorWidth // tilePerRead)
         numVgpr           = int(ceil(instruction.blockWidth))
 
         valufIdx = 0
         for vIdx in range(0, numVectorsPerTile):
+            tileSpanBaseValuiIdx = valufIdx
+            if mxsTileSpan:
+                localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, tileSpanBaseValuiIdx)))
             for eIdx in range(0, numReadsPerVector):
-                valuiIdx = int(valufIdx)
-                localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, valuiIdx)))
+                if mxsTileSpan:
+                    valuiIdx = tileSpanBaseValuiIdx + eIdx * numVgpr
+                    readModule = localReadCode
+                else:
+                    valuiIdx = int(valufIdx)
+                    readModule = imod.add(Module("LocalRead%s Valu%u"%(tc, valuiIdx)))
                 destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx), numVgpr)
 
                 # load read instruction
                 paramList = []
 
                 offset_val = eIdx * stridePerRead
-                offset_val = offset_val + vIdx * MIWaveGroupShape[tile01] * mxUnit
+                # Each tile-span group spans 2 scale blocks (the lower half-wave reads block
+                # 2*vIdx; the upper half-wave grabs partner block 2*vIdx+1 via the LRA
+                # wave-split), so the per-group stride is twice the per-vector stride.
+                blockStep = (2 * vIdx) if mxsTileSpan else vIdx
+                offset_val = offset_val + blockStep * MIWaveGroupShape[tile01] * mxUnit
                 offset_val = offset_val + tP["localReadOffset"]
                 if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                     offset_val = int(offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
@@ -603,9 +652,16 @@ class LocalReadMFMA(LocalRead):
 
                 ds = DSModifiers(na=1, offset=paramList[0])
                 LocalReadX = instruction.getInst()
-                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCode, comment=comment)
-
-                valufIdx += numVgpr
+                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=readModule, comment=comment)
+                if not mxsTileSpan:
+                    valufIdx += numVgpr
+            if mxsTileSpan:
+                # No permute: the partner block (upper half-wave of this single wave-split
+                # ds_load) is consumed directly by the WMMA via matrix_{a,b}_scale:1 (see
+                # mxsTileSpanScaleSel). Each group still owns 2*vectorWidth contiguous scale
+                # registers, but only the lower vectorWidth are loaded; the WMMA reads the
+                # upper vectorWidth blocks from the same loaded registers via scale-select.
+                valufIdx = tileSpanBaseValuiIdx + 2 * vectorWidth
 
         return imod, pack, packPre
 

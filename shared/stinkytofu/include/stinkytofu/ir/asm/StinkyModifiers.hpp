@@ -1014,6 +1014,12 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     MatrixFmt fmtB = MatrixFmt::NONE;
     MatrixScaleFmt scaleFmtA = MatrixScaleFmt::NONE;
     MatrixScaleFmt scaleFmtB = MatrixScaleFmt::NONE;
+    // gfx1250 MX scale-select (matrix_a_scale:N / matrix_b_scale:N): which MX scale
+    // slot the WMMA reads (0 = default lower half-wave, 1 = partner upper half-wave).
+    // Used by the MXS TileSpan optimization to read the partner block's scale directly
+    // from a single wave-split ds_load. 0 is the default and emitted implicitly.
+    int scaleSelA = 0;
+    int scaleSelB = 0;
 
     MatrixFmtModifiers() : TypedModifier<MatrixFmtModifiers>() {}
     MatrixFmtModifiers(MatrixFmt a, MatrixFmt b)
