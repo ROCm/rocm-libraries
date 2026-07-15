@@ -45,7 +45,15 @@ class HipModuleGuard {
 
     HipModuleGuard& operator=(HipModuleGuard&& o) noexcept {
         if (this != &o) {
-            if (_module != nullptr) hipModuleUnload(_module);
+            if (_module != nullptr) {
+                // Log unload errors on move-assignment (mirrors SdpaKernelUtils pattern)
+                const hipError_t err = hipModuleUnload(_module);
+                if (err != hipSuccess) {
+                    HIPDNN_PLUGIN_LOG_ERROR(
+                        "HipFlash2: failed to unload kernel module on move-assign: "
+                        << hipGetErrorString(err));
+                }
+            }
             _module = std::exchange(o._module, nullptr);
             _function = std::exchange(o._function, nullptr);
         }
@@ -181,11 +189,4 @@ inline const char* flash2KernelName(int headDim) {
 // =============================================================================
 // .co path helper — selects gfx942 or gfx950 based on device string
 // =============================================================================
-// flash2CoPath: resolve the directory containing the precompiled .co files.
-//
-// Resolution order (mirrors asm_sdpa_engine pattern):
-//   1. Runtime env var HIP_FLASH2_KERNEL_DIR (allows deployment overrides)
-//   2. Compile-time HIP_FLASH2_KERNEL_DIR (set to absolute install path by CMake)
-//   3. Built-in fallback (standard ROCm install location)
-//
-// The CMakeLists sets HIP_FLASH2_KERNEL_DIR vi
+// flash2CoPath: 
