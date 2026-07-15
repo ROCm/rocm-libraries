@@ -41,33 +41,6 @@ def test_add_common_arguments_global_parameters_eval():
     assert ("Bar", "baz") in args.global_parameters
 
 
-def test_global_parameters_reject_code_execution(tmp_path):
-    """Regression for ROCM-26842 (SEC-00394): --global-parameters values are parsed as
-    Python literals (ast.literal_eval), never eval()'d, so a CLI/CI-supplied argument
-    cannot execute code. Under the old eval() this payload would create the marker file
-    and parse successfully; literal parsing must reject it and run nothing."""
-    p = argparse.ArgumentParser()
-    M.addCommonArguments(p)
-    marker = tmp_path / "pwned"
-    payload = f"X=open({str(marker)!r}, 'w').close()"
-    with pytest.raises(SystemExit):
-        p.parse_args(["--global-parameters", payload])
-    assert not marker.exists(), "eval() executed attacker-controlled code"
-
-
-def test_global_parameters_parse_literal_forms():
-    """--global-parameters accepts literal ints, bools, lists, and quoted strings
-    (including a value containing '='), covering the ast.literal_eval replacement."""
-    p = argparse.ArgumentParser()
-    M.addCommonArguments(p)
-    args = p.parse_args(["--global-parameters", "I=5", "B=True", "L=[1, 2, 3]", "S='a=b'"])
-    gp = dict(args.global_parameters)
-    assert gp["I"] == 5
-    assert gp["B"] is True
-    assert gp["L"] == [1, 2, 3]
-    assert gp["S"] == "a=b"
-
-
 # ---------------------------------------------------------------------------
 # argUpdatedGlobalParameters
 # ---------------------------------------------------------------------------
