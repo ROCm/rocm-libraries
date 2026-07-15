@@ -327,10 +327,6 @@ public:
             }
             seqStride = strides.empty() ? int64_t{1} : strides[static_cast<size_t>(seqAxis)];
 
-#ifndef NDEBUG
-            validatePreconditions();
-#endif
-
             const int64_t batchCount = numBatches();
             if(isEnd)
             {
@@ -434,25 +430,6 @@ public:
             const auto bIdx = static_cast<size_t>(b);
             return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
         }
-
-#ifndef NDEBUG
-        void validatePreconditions() const
-        {
-            const auto& dims = tensor.get().dims();
-            const int64_t batchCount = numBatches();
-            assert(seqStride > 0 && "sequence stride must be positive");
-            for(int64_t b = 0; b < batchCount; ++b)
-            {
-                const auto bIdx = static_cast<size_t>(b);
-                assert(rowOffsets[bIdx + 1] >= rowOffsets[bIdx]
-                       && "ragged offsets must be monotonic non-decreasing");
-                assert((rowOffsets[bIdx + 1] - rowOffsets[bIdx]) % seqStride == 0
-                       && "per-batch block must be a whole number of sequence rows");
-                assert(seqExtent(b) <= dims[static_cast<size_t>(seqAxis)]
-                       && "per-batch sequence extent must not exceed S_max");
-            }
-        }
-#endif
     };
 
 private:

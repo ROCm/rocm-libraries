@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "TestRaggedTensor.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -12,6 +14,7 @@
 #include <vector>
 
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_ragged_test;
 
 namespace
 {
@@ -461,27 +464,10 @@ TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
 // Index-strategy selection: ragged vs dense (RaggedCompositeIndex hook)
 // ============================================================================
 
-namespace
-{
-
-std::shared_ptr<ITensor> makeRaggedOffsetAux(const std::vector<int64_t>& offsets)
-{
-    const auto count = static_cast<int64_t>(offsets.size());
-    auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{count, 1, 1, 1});
-    for(int64_t i = 0; i < count; ++i)
-    {
-        aux->setHostValue(static_cast<int32_t>(offsets[static_cast<size_t>(i)]), i, 0, 0, 0);
-    }
-    return aux;
-}
-
-} // namespace
-
 TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
 {
-    // BSHD-packed: dims [B,S,H,D]={2,3,2,2}, strides {12,4,2,1}, off[B]=20.
-    auto aux = makeRaggedOffsetAux({0, 8, 20});
-    RaggedTensor<float> tensor({2, 3, 2, 2}, {12, 4, 2, 1}, aux);
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, aux);
 
     auto it = tensor.begin();
 
@@ -505,9 +491,9 @@ TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
 TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
 {
     // Same geometry, over a borrowed buffer.
-    auto aux = makeRaggedOffsetAux({0, 8, 20});
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), {2, 3, 2, 2}, {12, 4, 2, 1}, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, aux);
 
     auto it = tensor.begin();
 

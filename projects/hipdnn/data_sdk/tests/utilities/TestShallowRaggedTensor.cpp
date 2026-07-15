@@ -15,16 +15,6 @@
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_ragged_test;
 
-namespace
-{
-
-// Same BSHD-packed geometry as the owning-tensor tests.
-const std::vector<int64_t> K_DIMS = {2, 3, 2, 2};
-const std::vector<int64_t> K_STRIDES = {12, 4, 2, 1};
-const std::vector<int64_t> K_OFFSETS = {0, 8, 20}; // off[B] = 20
-
-} // namespace
-
 // ============================================================================
 // Addressing math (parameterized over int32 / int64 aux)
 // ============================================================================

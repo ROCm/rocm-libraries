@@ -12,21 +12,11 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowRaggedTensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_ragged_test;
-
-namespace
-{
-
-// BSHD-packed geometry: dims [B, S_max, H, D], strides {S*H*D, H*D, D, 1}.
-// B=2: batch0 seq=2, batch1 seq=3, seqStride = H*D = 4.
-const std::vector<int64_t> K_DIMS = {2, 3, 2, 2};
-const std::vector<int64_t> K_STRIDES = {12, 4, 2, 1};
-const std::vector<int64_t> K_OFFSETS = {0, 8, 20}; // off[B] = 20
-
-} // namespace
 
 // ============================================================================
 // Addressing math (parameterized over int32 / int64 aux)
@@ -141,16 +131,15 @@ TEST(TestRaggedTensor, BhsdSequenceAxis)
     // B=2, H=2, S_max=3, D=2 => strides {12, 2, 4, 1}. seqStride = 4 (axis 2).
     const std::vector<int64_t> dims = {2, 2, 3, 2};
     const std::vector<int64_t> strides = {12, 2, 4, 1};
-    const std::vector<int64_t> offsets = {0, 8, 20};
 
-    auto aux = makeOffsetAux<int32_t>(offsets);
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     RaggedTensor<float> tensor(dims, strides, aux);
     tensor.fillWithValue(0.0f);
 
     EXPECT_EQ(tensor.elementCount(), 20u);
 
     // Within-batch enumeration over a physical-BSHD buffer is still contiguous.
-    checkIteration(tensor, offsets);
+    checkIteration(tensor, K_OFFSETS);
 
     // Addressing {b,h,s,d} -> readOffset(b) + h*D + s*(H*D) + d.
     // {1,1,2,1} -> 8 + 1*2 + 2*4 + 1 = 19
@@ -325,4 +314,101 @@ TEST(TestRaggedTensor, FillWithData)
     {
         EXPECT_EQ(base[i], static_cast<int>(i));
     }
+}
+
+// ============================================================================
+// Offsets wider than INT32_MAX (int64 aux) survive the type-erased read
+// ============================================================================
+
+TEST(TestRaggedTensor, LargeOffsetExceedsInt32Max)
+{
+    const int64_t largeOffset = static_cast<int64_t>(INT32_MAX) + 1; // 2^31
+
+    // B=1 with seqStride == off[B] so a single sequence row satisfies validation.
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> strides = {largeOffset, largeOffset, 1, 1};
+    auto aux = makeOffsetAux<int64_t>({0, largeOffset});
+
+    // Shallow (borrowed) so no buffer is allocated for the ~2^31 element span; only
+    // getIndex is exercised, which reads the offset without touching the backing memory.
+    float backing{};
+    const ShallowRaggedTensor<float> tensor(&backing, dims, strides, aux);
+
+    EXPECT_EQ(tensor.getIndex(1), largeOffset);
+    EXPECT_EQ(tensor.getIndex(0), 0);
+}
+
+// ============================================================================
+// Two ragged tensors sharing one ragged_offset aux
+// ============================================================================
+
+TEST(TestRaggedTensor, SharedAuxBacksTwoTensors)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+
+    const RaggedTensor<float> first(K_DIMS, K_STRIDES, aux);
+    const RaggedTensor<float> second(K_DIMS, K_STRIDES, aux);
+
+    EXPECT_EQ(first.raggedOffset(), aux.get());
+    EXPECT_EQ(second.raggedOffset(), aux.get());
+    EXPECT_GE(aux.use_count(), 3L); // caller + both tensors
+
+    EXPECT_EQ(first.getIndex(1, 2, 1, 1), 19);
+    EXPECT_EQ(second.getIndex(1, 2, 1, 1), 19);
+}
+
+// ============================================================================
+// Single batch (B == 1): batch-carry in operator++ with rowOffsets of size 2
+// ============================================================================
+
+TEST(TestRaggedTensor, SingleBatch)
+{
+    const std::vector<int64_t> dims = {1, 3, 2, 2};
+    const std::vector<int64_t> strides = {12, 4, 2, 1};
+    const std::vector<int64_t> offsets = {0, 8};
+
+    auto aux = makeOffsetAux<int32_t>(offsets);
+    RaggedTensor<float> tensor(dims, strides, aux);
+    tensor.fillWithValue(0.0f);
+
+    EXPECT_EQ(tensor.elementCount(), 8u);
+    checkAddressing(tensor, dims, strides, offsets);
+    checkIteration(tensor, offsets);
+}
+
+// ============================================================================
+// Single-row sequences (S_max == 1): one sequence row per batch
+// ============================================================================
+
+TEST(TestRaggedTensor, SingleRowSequences)
+{
+    const std::vector<int64_t> dims = {2, 1, 2, 2};
+    const std::vector<int64_t> strides = {4, 4, 2, 1};
+    const std::vector<int64_t> offsets = {0, 4, 8};
+
+    auto aux = makeOffsetAux<int32_t>(offsets);
+    RaggedTensor<float> tensor(dims, strides, aux);
+    tensor.fillWithValue(0.0f);
+
+    EXPECT_EQ(tensor.elementCount(), 8u);
+    checkAddressing(tensor, dims, strides, offsets);
+    checkIteration(tensor, offsets);
+}
+
+// ============================================================================
+// Structural/offset validation: empty dims and non-positive sequence stride
+// ============================================================================
+
+TEST(TestRaggedTensor, ValidationEmptyPaddedDimsThrows)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    EXPECT_THROW(const RaggedTensor<float> tensor({}, K_STRIDES, aux), std::invalid_argument);
+}
+
+TEST(TestRaggedTensor, ValidationNonPositiveSequenceStrideThrows)
+{
+    // All non-batch strides negative -> the sequence axis stride is negative.
+    const std::vector<int64_t> strides = {12, -1, -2, -3};
+    auto aux = makeOffsetAux<int32_t>({0, 0, 0});
+    EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, strides, aux), std::invalid_argument);
 }

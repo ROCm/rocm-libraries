@@ -17,6 +17,13 @@ namespace hipdnn_ragged_test
 
 using namespace hipdnn_data_sdk::utilities;
 
+// Canonical BSHD-packed geometry shared across the ragged-tensor and iterator tests:
+// dims [B, S_max, H, D], strides {S*H*D, H*D, D, 1}. B=2 (batch0 seq=2, batch1 seq=3),
+// seqStride = H*D = 4, off[B] = 20.
+inline const std::vector<int64_t> K_DIMS = {2, 3, 2, 2};
+inline const std::vector<int64_t> K_STRIDES = {12, 4, 2, 1};
+inline const std::vector<int64_t> K_OFFSETS = {0, 8, 20};
+
 /// Build a rank-4 ragged_offset aux (dims {B+1, 1, 1, 1}) of the given index element
 /// type and populate it with @p offsets (element units).
 template <typename IndexT>
