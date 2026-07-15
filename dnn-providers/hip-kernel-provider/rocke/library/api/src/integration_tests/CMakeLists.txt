@@ -15,7 +15,6 @@ add_executable(
     main.cpp
     TestRockeClientLoad.cpp
     TestRockeClientApplicability.cpp
-    TestRockeClientAotLoad.cpp
 )
 
 target_compile_options(rocke_client_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -35,14 +34,43 @@ target_link_libraries(
                                           hipdnn_plugin_sdk Threads::Threads
 )
 
-# Expose api/src/ so the test can include dispatcher/AotProbeMarkers.hpp and
-# dispatcher/AotBundlePaths.hpp (temporary observability; removed with the
-# markers when real plan-based execution lands -- AICK-1484).
-target_include_directories(rocke_client_integration_tests PRIVATE
+add_dependencies(rocke_client_integration_tests rocke_client)
+
+# ---------------------------------------------------------------------------
+# AOT probe integration tests: separate executable (temporary, AICK-1484)
+# ---------------------------------------------------------------------------
+# A plugin's log level is latched on first load and cannot be raised afterward.
+# TestRockeClientAotLoad raises the level to INFO (ScopedGlobalLogLevel) before
+# the first load and asserts on the AOT_PROBE_LOAD_OK/_FAILED markers that
+# loadForDevice() emits at INFO. In a shared process another test can load the
+# plugin first at the default level, latching the markers off; a dedicated
+# process keeps the AOT test the first to load, so INFO takes effect.
+add_executable(
+    rocke_client_aot_probe_tests
+    main.cpp
+    TestRockeClientAotLoad.cpp
+)
+
+target_compile_options(rocke_client_aot_probe_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
+target_compile_definitions(
+    rocke_client_aot_probe_tests
+    PRIVATE
+        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/rocke-client"
+        HIPDNN_ENABLE_SDPA
+)
+
+target_link_libraries(
+    rocke_client_aot_probe_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk
+                                        hipdnn_plugin_sdk Threads::Threads
+)
+
+# Expose api/src/ for dispatcher/AotProbeMarkers.hpp (temporary, AICK-1484).
+target_include_directories(rocke_client_aot_probe_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
-add_dependencies(rocke_client_integration_tests rocke_client)
+add_dependencies(rocke_client_aot_probe_tests rocke_client)
 
 # ---------------------------------------------------------------------------
 # Build-time test bundles (test-only; installed + relocatable)
@@ -152,12 +180,12 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
         add_custom_target(rocke_client_aot_test_bundles
             DEPENDS ${_all_bundle_outputs}
             COMMENT "Generating rocKE AOT integration-test bundles")
-        add_dependencies(rocke_client_integration_tests rocke_client_aot_test_bundles)
+        add_dependencies(rocke_client_aot_probe_tests rocke_client_aot_test_bundles)
 
         # Install the generated bundles as test-only content. This lands under
         # bin/hip_kernel_provider/tests/aot_test_bundles/ and is captured by the
         # existing hipkernelprovider [test] artifact glob
-        # (bin/hip_kernel_provider/tests/**) -- no TheRock packaging change.
+        # (bin/hip_kernel_provider/tests/**), so no TheRock packaging change.
         install(DIRECTORY "${_bundle_root}/"
                 DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider/tests/aot_test_bundles")
     else()
@@ -172,6 +200,10 @@ else()
 endif()
 
 clang_tidy_check(rocke_client_integration_tests)
+clang_tidy_check(rocke_client_aot_probe_tests)
 
 add_integration_test_target(rocke_client_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
+    LABELS quick)
+
+add_integration_test_target(rocke_client_aot_probe_tests ${CMAKE_CURRENT_BINARY_DIR}
     LABELS quick)
