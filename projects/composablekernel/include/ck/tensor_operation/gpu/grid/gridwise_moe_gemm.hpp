@@ -1156,6 +1156,13 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                BElementwiseOperation b_element_op,
                                CElementwiseOperation c_element_op)
     {
+        static_assert(ActivationOperation == Activation::gelu_and_mul ||
+                          ActivationOperation == Activation::silu_and_mul ||
+                          ActivationOperation == Activation::swiglustep_and_mul ||
+                          ActivationOperation == Activation::swiglu_oai_and_mul ||
+                          ActivationOperation == Activation::gelu_tanh_and_mul,
+                      "gridwise_moe_gemm only supports gelu_and_mul, silu_and_mul, "
+                      "swiglustep_and_mul, swiglu_oai_and_mul and gelu_tanh_and_mul.");
         ignore                           = b_element_op;
         index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
         index_t BK0Shuffled              = CalculateBK0Shuffled(problem.K);
@@ -1718,6 +1725,13 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                     BElementwiseOperation b_element_op,
                                     CElementwiseOperation c_element_op)
     {
+        static_assert(ActivationOperation == Activation::gelu_and_mul ||
+                          ActivationOperation == Activation::silu_and_mul ||
+                          ActivationOperation == Activation::swiglustep_and_mul ||
+                          ActivationOperation == Activation::swiglu_oai_and_mul ||
+                          ActivationOperation == Activation::gelu_tanh_and_mul,
+                      "gridwise_moe_gemm only supports gelu_and_mul, silu_and_mul, "
+                      "swiglustep_and_mul, swiglu_oai_and_mul and gelu_tanh_and_mul.");
         ignore                           = b_element_op;
         index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
         index_t BK0Shuffled              = CalculateBK0Shuffled(problem.K);
