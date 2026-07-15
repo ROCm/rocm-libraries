@@ -8454,6 +8454,44 @@ class KernelWriterAssembly(KernelWriter):
     return abStr
 
   ##############################################################################
+  # MXS TileSpan scale-select
+  #
+  # With the TileSpan optimization, N MXS scale ds_loads collapse to N/2 wave-split
+  # loads: within each group of 2*VW scale blocks, the lower half-wave of the single
+  # ds_load holds the first VW blocks and the upper half-wave holds the partner VW
+  # blocks. The consuming WMMA reads each block directly from that one loaded register
+  # via the gfx1250 matrix_{a,b}_scale:N select. This maps a logical scale block index
+  # to the register that actually holds it plus the scale-select (0 = lower half-wave,
+  # 1 = partner half-wave).
+  ##############################################################################
+  def mxsUsesScaleSel(self, kernel):
+    # The scale-select path is only valid where localReadMX (gfx1250 WMMA_V3 +
+    # InMemorySwizzle) produces the wave-split scale layout.
+    return (self.states.asmCaps.get("HasWMMA_V3", False)
+            and kernel.get("MXScaleFormat") == "InMemorySwizzle")
+
+  def mxsTileSpanScaleSel(self, kernel, tP, idxAB):
+    tc = tP["tensorChar"]
+    if "MXS" not in tc or not self.mxsUsesScaleSel(kernel):
+      return idxAB, 0
+    component = Component.LocalRead.find(self)
+    info = component.getMxsTileSpanInfo(kernel, tc, tP["tile01Idx"])
+    if info is None:
+      return idxAB, 0
+    vectorWidth = info["vectorWidth"]
+    groupSize   = 2 * vectorWidth
+    group       = idxAB // groupSize
+    within      = idxAB %  groupSize
+    scaleSel    = within // vectorWidth          # 0 = lower half-wave, 1 = partner half-wave
+    regInHalf   = within %  vectorWidth
+    # Only the lower half-wave of each group is loaded (LocalRead packs the loaded groups
+    # contiguously and drops the partner-half vgprs), so map the logical block to the
+    # compacted register: group g owns vectorWidth registers, not 2*vectorWidth. The partner
+    # block (scaleSel==1) shares the same loaded register and is selected by matrix_*_scale.
+    mappedIdx   = group * vectorWidth + regInHalf
+    return mappedIdx, scaleSel
+
+  ##############################################################################
   # MAC Iteration
   ##############################################################################
   def macIter(self, kernel, tPA, tPB, bufferIdx, iuiCount, useMacro, isTail=False):
@@ -9429,19 +9467,27 @@ class KernelWriterAssembly(KernelWriter):
           Str0     = aStr if tPB["tile01Idx"] else bStr
           Str1     = bStr if tPB["tile01Idx"] else aStr
 
+          mxsaScaleSel = 0
+          mxsbScaleSel = 0
           if kernel["ProblemType"]["MXBlockA"]:
-            mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, idxA)
+            mxsaIdx, mxsaScaleSel = self.mxsTileSpanScaleSel(kernel, tPA["MX"], idxA)
+            mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, mxsaIdx)
             mxsaStr = vgpr(mxsaStr_base, vgprPerInputMXSA)
           else:
             mxsaStr = vgpr("ValuMXSDummy") if kernel["ProblemType"]["MXBlockB"] == 32 else vgpr("ValuMXSDummy",2)
           if kernel["ProblemType"]["MXBlockB"]:
-            mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, idxB)
+            mxsbIdx, mxsbScaleSel = self.mxsTileSpanScaleSel(kernel, tPB["MX"], idxB)
+            mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, mxsbIdx)
             mxsbStr = vgpr(mxsbStr_base, vgprPerInputMXSB)
           else:
             mxsbStr = vgpr("ValuMXSDummy") if kernel["ProblemType"]["MXBlockA"] == 32 else vgpr("ValuMXSDummy",2)
 
           StrMX0 = mxsaStr if tPB["tile01Idx"] else mxsbStr
           StrMX1 = mxsbStr if tPB["tile01Idx"] else mxsaStr
+          # matrix_a_scale/matrix_b_scale correspond to the mxsa/mxsb operand *positions*
+          # (which follow the same tile01Idx swap as StrMX0/StrMX1).
+          scaleSelMX0 = mxsaScaleSel if tPB["tile01Idx"] else mxsbScaleSel
+          scaleSelMX1 = mxsbScaleSel if tPB["tile01Idx"] else mxsaScaleSel
 
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             idxM     = idxB if kernel["ProblemType"]["Sparse"] == 2 else idxA
@@ -9530,6 +9576,8 @@ class KernelWriterAssembly(KernelWriter):
               src1 = Str0
               srcMX0 = StrMX1
               srcMX1 = StrMX0
+              scaleSelSrc0 = scaleSelMX1
+              scaleSelSrc1 = scaleSelMX0
               miInScale0InstType = miInScaleBInstType
               miInScale1InstType = miInScaleAInstType
             else:
@@ -9537,6 +9585,8 @@ class KernelWriterAssembly(KernelWriter):
               src1 = Str1
               srcMX0 = StrMX0
               srcMX1 = StrMX1
+              scaleSelSrc0 = scaleSelMX0
+              scaleSelSrc1 = scaleSelMX1
               miInScale0InstType = miInScaleAInstType
               miInScale1InstType = miInScaleBInstType
 
@@ -9605,6 +9655,7 @@ class KernelWriterAssembly(KernelWriter):
                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                       a=src0, b=src1, **acc2_args, \
                                       mxsa=srcMX0, mxsb=srcMX1, block=block, \
+                                      mxScaleASel=scaleSelSrc0, mxScaleBSel=scaleSelSrc1, \
                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
