@@ -725,7 +725,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
                  *extra: Any, comment: str = "", sdwa: Any = None,
-                 dpp: Any = None, **kw):
+                 dpp: Any = None, vop3: Any = None, **kw):
         _ = kw
         # Native rocisa binary-VALU ctors are heterogeneous in their trailing
         # positional slots: some are (dst, src0, src1, sdwa, comment), some
@@ -747,7 +747,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
             srcs=[src0, src1],
             dpp=dpp,
             sdwa=sdwa,
-            vop3=None,
+            vop3=vop3,
             comment=comment,
         )
         self.setInst(mnemonic)
@@ -759,7 +759,19 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        # Propagate VOP3P packed modifiers (op_sel / op_sel_hi / byte_sel).
+        # e.g. GlobalWriteBatch emits ``v_pk_mul_f32 ... op_sel_hi:[0,1,1]``
+        # for the alpha-scale packed multiply; dropping op_sel_hi yields an
+        # "invalid op_sel operand" from the assembler.
+        v = getattr(self, "vop3", None)
+        if v is not None:
+            inst.set_vop3(
+                op_sel=list(getattr(v, "op_sel", None) or []),
+                op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
+                byte_sel=list(getattr(v, "byte_sel", None) or []),
+            )
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)

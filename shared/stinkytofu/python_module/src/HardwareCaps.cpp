@@ -162,6 +162,10 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 
     rv["v_prng_b32"] = hasMnemonic(m, "v_prng_b32");
 
+    // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore
+    // (mirrors rocisa hardware_caps.hpp HasMovRelsD2B32).
+    rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
+
     rv["HasAtomicAdd"] = hasAnyMnemonic(m, {"buffer_atomic_add_f32"});
 
     // Modifier caps: test the actual modifier syntax via comgr
