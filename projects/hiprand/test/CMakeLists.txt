@@ -67,7 +67,7 @@ function(add_relative_test test_name test_target)
     endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
-    if(BUILD_CODE_COVERAGE)
+    if(HIPRAND_ENABLE_COVERAGE)
         set_tests_properties(${test_name} PROPERTIES
             ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hiprand-coverage_%m.profraw"
         )
@@ -78,7 +78,7 @@ endfunction()
 # Get hipRAND tests source files
 file(GLOB hipRAND_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/test_hiprand*.cpp)
 
-if(BUILD_CODE_COVERAGE)
+if(HIPRAND_ENABLE_COVERAGE)
   add_custom_target(
     coverage_analysis
     DEPENDS hiprand
@@ -161,7 +161,7 @@ foreach(test_src ${hipRAND_TEST_SRCS})
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
     )
     add_relative_test(${test_name} ${test_name})
-    if(BUILD_CODE_COVERAGE)
+    if(HIPRAND_ENABLE_COVERAGE)
         set_tests_properties(${test_name} PROPERTIES
             ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hiprand-coverage_%m.profraw"
         )
@@ -184,7 +184,7 @@ foreach(test_src ${hipRAND_TEST_SRCS})
       endforeach( file_i )
     endif()
 
-    if (BUILD_CODE_COVERAGE)
+    if (HIPRAND_ENABLE_COVERAGE)
       add_dependencies(coverage_analysis ${test_name})
     endif()
 endforeach()

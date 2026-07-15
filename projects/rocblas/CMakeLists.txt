@@ -403,7 +403,7 @@ rocm_create_package(
 
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
-if(BUILD_CODE_COVERAGE)
+if(ROCBLAS_ENABLE_COVERAGE)
   #
   # > make coverage_cleanup (clean coverage related files.)
   #

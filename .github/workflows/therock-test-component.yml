@@ -17,6 +17,10 @@ on:
         type: string
       component:
         type: string
+      coverage_enabled:
+        description: "When true, collect llvm profraw from the test run and generate a coverage report."
+        type: boolean
+        default: false
 
 
 permissions:
@@ -119,6 +123,10 @@ jobs:
             echo "KUBE_CPU_REQUEST not set, thread limits not configured"
           fi
 
+      - name: Prepare coverage profile directory
+        if: ${{ inputs.coverage_enabled }}
+        run: mkdir -p "${GITHUB_WORKSPACE}/coverage-profraw"
+
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
         env:
@@ -132,6 +140,56 @@ jobs:
           # Run test and capture output (still display to console)
           python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
+
+      - name: Merge profraw and generate coverage report
+        if: ${{ inputs.coverage_enabled }}
+        shell: bash
+        env:
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          PROJECT: ${{ fromJSON(inputs.component).job_name }}
+          BUILD: ${{ github.workspace }}/build
+          PROFRAW_DIR: ${{ github.workspace }}/coverage-profraw
+          REPORT_DIR: ${{ github.workspace }}/coverage-report
+          LLVM_BIN: ${{ github.workspace }}/build/lib/llvm/bin
+          LD_LIBRARY_PATH: ${{ github.workspace }}/build/lib/llvm/lib:${{ github.workspace }}/build/lib
+        run: |
+          set -euo pipefail
+          mkdir -p "${REPORT_DIR}"
+          OBJECT="${BUILD}/lib/lib${PROJECT}.so"
+          PROFDATA="${REPORT_DIR}/${PROJECT}.profdata"
+
+          IGNORE_RE=""
+          CFG="$(find "${GITHUB_WORKSPACE}/rocm-libraries/projects/${PROJECT}" -name test_categories_coverage.yaml 2>/dev/null | head -1)"
+          if [[ -n "${CFG}" ]]; then
+            val="$(grep -m1 '^ignore_filename_regex:' "${CFG}" | cut -d: -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            case "${val}" in
+              \'*\') val="${val#\'}"; val="${val%\'}" ;;
+              \"*\") val="${val#\"}"; val="${val%\"}" ;;
+            esac
+            IGNORE_RE="${val}"
+          fi
+          IGNORE_ARGS=()
+          if [[ -n "${IGNORE_RE}" ]]; then IGNORE_ARGS=("-ignore-filename-regex=${IGNORE_RE}"); fi
+
+          PATHEQ="-path-equivalence=${GITHUB_WORKSPACE},${GITHUB_WORKSPACE}/rocm-libraries"
+
+          "${LLVM_BIN}/llvm-profdata" merge -sparse -o "${PROFDATA}" ${PROFRAW_DIR}/*.profraw
+          "${LLVM_BIN}/llvm-cov" report -object "${OBJECT}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            | tee "${REPORT_DIR}/code_cov_${PROJECT}.report"
+          "${LLVM_BIN}/llvm-cov" show -object "${OBJECT}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            "${PATHEQ}" -Xdemangler="${LLVM_BIN}/llvm-cxxfilt" --format=html --output-dir="${REPORT_DIR}" || true
+          "${LLVM_BIN}/llvm-cov" export -object "${OBJECT}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            --format=lcov > "${REPORT_DIR}/coverage.info"
+
+          sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
+
+          {
+            echo "### ${PROJECT} coverage (${AMDGPU_FAMILIES})"
+            echo ""
+            echo '```'
+            tail -n 3 "${REPORT_DIR}/code_cov_${PROJECT}.report"
+            echo '```'
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
