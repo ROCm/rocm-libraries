@@ -104,6 +104,14 @@ protected:
 
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
+        // Skip (or fail under --fail-on-unsupported) if no engine supports this
+        // graph, matching the rest of the suite instead of asserting a hard failure.
+        ASSERT_NO_FATAL_FAILURE(this->checkEngineSupportOrSkip(graphObj));
+        if(::testing::Test::IsSkipped())
+        {
+            return;
+        }
+
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(convTestCase.note);
 
