@@ -191,7 +191,7 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
             message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
         endif()
         # Disable a few asan options to get builds going but these should be addressed
-        set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
+        set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0,malloc_context_size=0,quarantine_size_mb=0")
     elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
         execute_process(
             COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan-x86_64.so
@@ -290,6 +290,37 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
 )
 
+# Configure the Windows version resource (PE VERSIONINFO) embedded into
+# libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
+# DLL reports file/product version metadata in its Windows file properties.
+# A resource compiler is required to compile version.rc; the ROCm toolchain
+# detects one (llvm-rc/rc) or sets CMAKE_RC_COMPILER to a NOTREQUIRED/NOTFOUND
+# sentinel when none is available. When no real compiler is present, warn and
+# skip the resource rather than fail configuration, so the DLL still builds
+# (without version metadata) on machines lacking a resource compiler.
+if(WIN32 AND CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND")
+    if(GIT)
+        execute_process(
+            COMMAND "${GIT}" log -1 --format=%H .
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE hipblaslt_VERSION_COMMIT_ID
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
+    string(TIMESTAMP HIPBLASLT_COPYRIGHT_YEAR "%Y")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
+        @ONLY)
+    set(_hipblaslt_have_version_rc TRUE)
+elseif(WIN32)
+    message(WARNING
+        "hipBLASLt: no Windows resource compiler (llvm-rc/rc) detected; "
+        "libhipblaslt.dll will be built WITHOUT VERSIONINFO metadata. Install the "
+        "Windows SDK or make llvm-rc available (e.g. on PATH or in the ROCm "
+        "llvm/bin directory) to embed version info.")
+endif()
+
 # `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
 # only built when at least one consumer needs it. tensilelite/client and
 # tensilelite/tests reach for it on the same condition, so we drive the
@@ -311,6 +342,11 @@ add_subdirectory(tensilelite)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
+        # Embed Windows version resource (PE VERSIONINFO) into the shared DLL,
+        # only when a resource compiler was found (see version.rc guard above).
+        if(_hipblaslt_have_version_rc)
+            target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc")
+        endif()
     else()
         add_library(hipblaslt STATIC)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)

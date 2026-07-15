@@ -1004,12 +1004,15 @@ def supports_tiled_2d(
             False,
             f"tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
-    block_m = 16 * num_warps
-    if block_m % num_queries_per_kv != 0:
+    if num_warps not in (1, 2, 4, 8):
         return (
             False,
-            f"tiled 2D kernel needs num_queries_per_kv to divide BLOCK_M={block_m} "
-            f"(num_warps={num_warps}, got num_queries_per_kv={num_queries_per_kv})",
+            f"tiled 2D kernel requires num_warps in {{1,2,4,8}} (got {num_warps})",
+        )
+    if block_m_per_warp not in (16, 32):
+        return (
+            False,
+            f"tiled 2D kernel requires block_m_per_warp in {{16,32}} (got {block_m_per_warp})",
         )
     # FP8 K/V cache is supported via ``kv_storage_dtype="fp8e4m3"`` plus
     # ``use_fp8=True`` (the latter is what the upstream selector flips on
@@ -1138,13 +1141,20 @@ def supports_tiled_2d(
                     f"the {arch} {_LDS_CAPACITY_BYTES} B LDS budget",
                 )
             return True, "supported"
-        _out_stripe = 32 if head_size <= 64 else head_size
-        _lds = (
-            2 * _t_eff * head_size * _BPE  # K_lds (double-buffered)
-            + _t_eff * head_size * _BPE  # V_lds
-            + _block_m * (_t_eff + 8) * _BPE  # P_lds
-            + (0 if _block_m <= 2 * _t_eff else _block_m * head_size * _BPE)  # Q_lds
-            + _block_m * _out_stripe * _BPE  # Acc_lds
+        # Default-path footprint via the shared model (single source of truth,
+        # also used by the gfx950 register-PV resolver). Conservative here:
+        # Q_lds/P_lds are staged (the register-PV path drops them).
+        from ..common.attention_unified import _tiled_2d_lds_bytes
+
+        _lds = _tiled_2d_lds_bytes(
+            tile_size=_t_eff,
+            head_size=head_size,
+            block_m=_block_m,
+            kv_elem_bytes=_BPE,
+            k_slots=2,
+            v_slots=1,
+            include_q_lds=True,
+            include_p_lds=True,
         )
         if _lds > _LDS_CAPACITY_BYTES:
             return (
@@ -1225,6 +1235,10 @@ def build_unified_attention_2d_tiled(
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
+    # Number of rows that map to complete GQA groups.  When BLOCK_M % NQK == 0
+    # this equals BLOCK_M (all rows valid).  Otherwise the last (BLOCK_M % NQK)
+    # rows would duplicate the first tokens of the NEXT CTA and must be masked.
+    VALID_ROWS = BLOCK_Q * NQK
     NUM_KV = spec.num_kv_heads
     NUM_QH = spec.num_query_heads
     SLIDING_WINDOW = spec.sliding_window
@@ -1990,8 +2004,14 @@ def build_unified_attention_2d_tiled(
             qh_t = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(Q_row, b.const_i32(NQK))
             )
-            qmask_t = b.land(
-                b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, b.const_i32(NUM_QH))
+            _qmask_inner = b.land(
+                b.cmp_lt(q_pos_t, cur_batch_q_len),
+                b.cmp_lt(qh_t, b.const_i32(NUM_QH)),
+            )
+            qmask_t = (
+                b.land(_qmask_inner, b.cmp_lt(Q_row, b.const_i32(VALID_ROWS)))
+                if VALID_ROWS < BLOCK_M
+                else _qmask_inner
             )
             q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
             qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
@@ -3674,8 +3694,14 @@ def build_unified_attention_2d_tiled(
             row = b.add(wave_row_base, _in_warp_row(reg))
         qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
-        row_ok = b.land(
-            b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+        _row_ok_inner = b.land(
+            b.cmp_lt(qp_r, cur_batch_q_len),
+            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+        )
+        row_ok = (
+            b.land(_row_ok_inner, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
+            if VALID_ROWS < BLOCK_M
+            else _row_ok_inner
         )
         causal_lim = b.add(context_len, qp_r)
         hoist_row.append(row)
@@ -3702,8 +3728,14 @@ def build_unified_attention_2d_tiled(
         st_qh = b.add(
             b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(st_q_row, b.const_i32(NQK))
         )
-        st_row_ok = b.land(
-            b.cmp_lt(st_qp, cur_batch_q_len), b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+        _st_row_ok_inner = b.land(
+            b.cmp_lt(st_qp, cur_batch_q_len),
+            b.cmp_lt(st_qh, b.const_i32(NUM_QH)),
+        )
+        st_row_ok = (
+            b.land(_st_row_ok_inner, b.cmp_lt(st_q_row, b.const_i32(VALID_ROWS)))
+            if VALID_ROWS < BLOCK_M
+            else _st_row_ok_inner
         )
         st_causal_lim = b.add(context_len, st_qp)
     else:
@@ -3784,9 +3816,17 @@ def build_unified_attention_2d_tiled(
                 b.mul(kv_head_idx, b.const_i32(NQK)),
                 b.mod(st_q_row_iter, b.const_i32(NQK)),
             )
-            st_row_ok_iter = b.land(
+            _st_row_ok_iter_inner = b.land(
                 b.cmp_lt(st_qp_iter, cur_batch_q_len),
                 b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+            )
+            st_row_ok_iter = (
+                b.land(
+                    _st_row_ok_iter_inner,
+                    b.cmp_lt(st_q_row_iter, b.const_i32(VALID_ROWS)),
+                )
+                if VALID_ROWS < BLOCK_M
+                else _st_row_ok_iter_inner
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
             if USE_ALIBI:
@@ -4149,9 +4189,17 @@ def build_unified_attention_2d_tiled(
                                         b.mul(kv_head_idx, b.const_i32(NQK)),
                                         b.mod(q_row_t, b.const_i32(NQK)),
                                     )
-                                    row_ok = b.land(
+                                    _row_ok_inner_t = b.land(
                                         b.cmp_lt(qp_r, cur_batch_q_len),
                                         b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                                    )
+                                    row_ok = (
+                                        b.land(
+                                            _row_ok_inner_t,
+                                            b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)),
+                                        )
+                                        if VALID_ROWS < BLOCK_M
+                                        else _row_ok_inner_t
                                     )
                                 col_abs = b.add(group_tile_off, k_local)
                                 if not (
@@ -5155,9 +5203,14 @@ def build_unified_attention_2d_tiled(
                 b.mul(kv_head_idx, b.const_i32(NQK)),
                 b.mod(q_row_t, b.const_i32(NQK)),
             )
-            op_mask_t = b.land(
+            _op_mask_t_inner = b.land(
                 b.cmp_lt(op_pos_t, cur_batch_q_len),
                 b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+            )
+            op_mask_t = (
+                b.land(_op_mask_t_inner, b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)))
+                if VALID_ROWS < BLOCK_M
+                else _op_mask_t_inner
             )
             out_base_t, _ = q_desc.offset(
                 b,
@@ -5203,9 +5256,14 @@ def build_unified_attention_2d_tiled(
             b.mul(kv_head_idx, b.const_i32(NQK)),
             b.mod(OUT_ROW_BASE32, b.const_i32(NQK)),
         )
-        op_mask32_base = b.land(
+        _op_mask32_inner = b.land(
             b.cmp_lt(op_pos32_base, cur_batch_q_len),
             b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+        )
+        op_mask32_base = (
+            b.land(_op_mask32_inner, b.cmp_lt(OUT_ROW_BASE32, b.const_i32(VALID_ROWS)))
+            if VALID_ROWS < BLOCK_M
+            else _op_mask32_inner
         )
         out_base32_base, _ = q_desc.offset(
             b,
@@ -5297,8 +5355,14 @@ def build_unified_attention_2d_tiled(
         b.mul(kv_head_idx, b.const_i32(NQK)),
         b.mod(OUT_ROW_BASE, b.const_i32(NQK)),
     )
-    op_mask = b.land(
-        b.cmp_lt(op_pos, cur_batch_q_len), b.cmp_lt(op_qh, b.const_i32(NUM_QH))
+    _op_mask_inner = b.land(
+        b.cmp_lt(op_pos, cur_batch_q_len),
+        b.cmp_lt(op_qh, b.const_i32(NUM_QH)),
+    )
+    op_mask = (
+        b.land(_op_mask_inner, b.cmp_lt(OUT_ROW_BASE, b.const_i32(VALID_ROWS)))
+        if VALID_ROWS < BLOCK_M
+        else _op_mask_inner
     )
     out_base, _ = q_desc.offset(
         b,

@@ -13,4 +13,5 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/error_paths_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utility_helpers_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
 )

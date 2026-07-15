@@ -6,24 +6,45 @@ tests can run without them using `--verification-mode gpu` or
 sensitive but requires data to be fetched first.
 
 Binary data is stored in S3 via [DVC](https://dvc.org) — git only tracks small
-`.dvc` pointer files.
+`.dvc` pointer files. The tree now supports both RFC 0011 bundle kinds:
+
+- **Single-graph bundles**: one `{Name}.json` plus one `{Name}.tensors.dvc`
+  pointer for that bundle's tensor blobs.
+- **Template-sweep bundles**: one `graph.template.json`, one `sweep.json`, and
+  one `golden/{CaseId}/tensors.dvc` pointer per expanded case.
 
 | Key            | Value                                |
 |----------------|--------------------------------------|
 | Remote         | `s3://therock-dvc/rocm-libraries`    |
-| Tracking       | Per-bundle `.bin` tracking — one `<Name>.tensors.dvc` per bundle (`.json` stays in git for PR review) |
+| Tracking       | Per-bundle or per-sweep-case `.dvc` tracking (`.json` stays in git for PR review) |
 | Naming spec    | [RFC 0011 Section 4.1](../../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md) |
 
 ## Folder Convention
 
+Single-graph bundle:
+
 ```
 integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
     {Name}.json              # graph description (committed to git)
-    {Name}.tensors.dvc       # DVC pointer tracking all of this bundle's .bin files (committed to git)
+    {Name}.tensors.dvc       # DVC pointer tracking all of this bundle's .bin files
     {Name}.tensor0.bin       # binary tensor data (DVC-tracked)
     {Name}.tensor1.bin
     ...
 ```
+
+Template-sweep bundle:
+
+```
+integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
+    graph.template.json      # invariant graph topology with ${case.*} placeholders
+    sweep.json               # case matrix + per-case metadata/golden paths
+    golden/{CaseId}/tensors.dvc
+    golden/{CaseId}/tensor0.bin
+    golden/{CaseId}/tensor1.bin
+    ...
+```
+
+Single-graph segments:
 
 | Segment     | Allowed values                                | Example            |
 |-------------|-----------------------------------------------|--------------------|
@@ -32,6 +53,14 @@ integration_test_bundles/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
 | `Layout`    | `nchw`, `nhwc`, `ncdhw`, `ndhwc`              | `nhwc`             |
 | `DataType`  | `fp16`, `fp32`, `bfp16`, `fp8`, `int8`        | `fp16`             |
 | `Name`      | Descriptive name (PascalCase or snake_case)   | `Small`, `resnet50_layer3` |
+
+Template-sweep segments:
+
+| Segment        | Allowed values                               | Example     |
+|----------------|----------------------------------------------|-------------|
+| `Tier`         | `quick`, `standard`, `comprehensive`, `full` | `quick`     |
+| `Operation`    | PascalCase op name                           | `BatchnormFwdInference` |
+| `TopologyName` | Stable graph skeleton name                   | `Inference` |
 
 ## Pull Data Locally
 
