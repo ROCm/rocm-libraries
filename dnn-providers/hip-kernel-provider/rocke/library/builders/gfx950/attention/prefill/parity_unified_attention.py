@@ -285,6 +285,17 @@ def default_scenarios() -> List[Scenario]:
             block_size=16,
             dtype=torch.bfloat16,
         ),
+        # bs=32 D256: takes the same fast route (T=64 forced -> 2 blocks/tile),
+        # a distinct multi-block ratio from the bs=16 (4/tile) validated points.
+        Scenario(
+            name="prefill_d256_gqa8_b32_sq4096",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=32,
+            dtype=torch.bfloat16,
+        ),
         Scenario(
             name="prefill_d128_b16",
             seq_lens=[(64, 64), (128, 256), (32, 256)],
