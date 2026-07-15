@@ -2408,24 +2408,24 @@ class TestDSStore2Instructions(unittest.TestCase):
 
 class TestDSBPermuteB32(unittest.TestCase):
     def test_construction(self):
-        inst = DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2),
+        inst = DSBPermuteB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2),
                              comment="perm")
         self.assertIn("ds_bpermute_b32", str(inst))
 
     def test_deepcopy(self):
-        inst = DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+        inst = DSBPermuteB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
         c = copy.deepcopy(inst)
         self.assertIsInstance(c, DSBPermuteB32)
         self.assertEqual(str(c), str(inst))
 
     def test_has_to_stinky_logical(self):
-        inst = DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+        inst = DSBPermuteB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
         self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
 
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_collected_by_module(self):
         m = Module()
-        m.add(DSBPermuteB32(dstAddr=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
+        m.add(DSBPermuteB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2)))
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
