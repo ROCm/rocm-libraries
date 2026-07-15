@@ -379,10 +379,11 @@ using SelectedKernel = {struct};
 #ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
 using SelectedKernel = {ns}::{struct};
 constexpr const char* KERNEL_NAME = {ns}::KERNEL_NAME;
-using ADataType   = {ns}::ADataType;
-using BDataType   = {ns}::BDataType;
-using EDataType   = {ns}::EDataType;
-using AccDataType = {ns}::AccDataType;
+using ADataType     = {ns}::ADataType;
+using BDataType     = {ns}::BDataType;
+using EDataType     = {ns}::EDataType;
+using AccDataType   = {ns}::AccDataType;
+using DBaseDataType = {ns}::DBaseDataType;
 static constexpr int CONTRACTION_KEY_NUM_D_TENSORS = {spec.num_d_tensors};
 static constexpr int CONTRACTION_KEY_NUM_DIM_G     = {spec.num_dim_g};
 static constexpr int CONTRACTION_KEY_NUM_DIM_M     = {spec.num_dim_m};

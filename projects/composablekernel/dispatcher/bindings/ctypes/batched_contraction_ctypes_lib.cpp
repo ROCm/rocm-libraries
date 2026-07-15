@@ -20,7 +20,11 @@
  * Memory model: host-pointer in. The lib owns hipMalloc/hipMemcpy/hipFree.
  * Layouts A=[G..,M..,K..], B=[G..,N..,K..], E=[G..,M..,N..], packed row-major
  * strides (matches the Old-TE profiler's HostTensorDescriptor(dims)).
- * v1 scope: NUM_D_TENSORS == 0 (PassThrough epilogue).
+ * D tensors (num_d>0) share the E shape [G..,M..,N..] and the DBaseDataType
+ * element type from codegen; the MultiDAdd/MultiDMultiply epilogue consumes them.
+ * split-K (k_batch>1) is rejected: the batched-contraction CShuffle epilogue is
+ * hard-wired to memory_operation_enum::set (no atomic accumulation across the
+ * blockIdx.z K-splits), so k_batch>1 races and is silently wrong in Old-TE too.
  */
 
 #include <hip/hip_runtime.h>
@@ -98,6 +102,8 @@ void dispatcher_cleanup() { g_initialized = false; }
 int dispatcher_run_batched_contraction(const void* A,
                                        const void* B,
                                        void* E,
+                                       const void** d_ptrs,
+                                       int num_d,
                                        const int64_t* g_dims,
                                        const int64_t* m_dims,
                                        const int64_t* n_dims,
@@ -119,17 +125,29 @@ int dispatcher_run_batched_contraction(const void* A,
         std::cerr << "dispatcher_run_batched_contraction: null pointer\n";
         return -1;
     }
-    if(CONTRACTION_KEY_NUM_D_TENSORS != 0)
+    constexpr int kNumD = CONTRACTION_KEY_NUM_D_TENSORS;
+    if(num_d != kNumD)
     {
-        std::cerr
-            << "dispatcher_run_batched_contraction: this ABI supports NUM_D_TENSORS==0 only\n";
+        std::cerr << "dispatcher_run_batched_contraction: num_d mismatch, got " << num_d
+                  << " compiled " << kNumD << "\n";
+        return -1;
+    }
+    if(kNumD > 0 && !d_ptrs)
+    {
+        std::cerr << "dispatcher_run_batched_contraction: null d_ptrs with num_d>0\n";
         return -1;
     }
     if(k_batch != 1)
     {
-        // v1 scope: split-K (k_batch > 1) is not yet numerically correct through this
-        // bridge, so reject it rather than return silently-wrong results.
-        std::cerr << "dispatcher_run_batched_contraction: only k_batch==1 is supported in v1, got "
+        // split-K (k_batch > 1) is a SHARED Old-TE kernel defect, not a bridge gap:
+        // the batched-contraction CShuffle epilogue is hard-wired to
+        // memory_operation_enum::set (no atomic accumulation), yet GridSize launches
+        // k_batch blockIdx.z K-split blocks that all write the same E tile. Driving
+        // this kernel (the exact one Old-TE compiles) at k_batch=2 faults with an
+        // illegal memory access on gfx950; k_batch=1 is correct (max_rel ~4e-4). We
+        // therefore hard-reject rather than return silently-wrong / crashing results.
+        std::cerr << "dispatcher_run_batched_contraction: only k_batch==1 is supported "
+                     "(split-K is broken in the shared Old-TE kernel), got "
                   << k_batch << "\n";
         return -1;
     }
@@ -191,13 +209,20 @@ int dispatcher_run_batched_contraction(const void* A,
     ADataType* A_dev = nullptr;
     BDataType* B_dev = nullptr;
     EDataType* E_dev = nullptr;
-    auto cleanup     = [&]() {
+    // D tensors carry the codegen DBaseDataType element type and the E shape
+    // [G..,M..,N..]. Key the device byte-sizing off DBaseDataType (not ADataType) so
+    // a future D-dtype divergence from A cannot silently under/over-allocate.
+    std::array<DBaseDataType*, kNumD> D_dev{};
+    auto cleanup = [&]() {
         if(A_dev)
             (void)hipFree(A_dev);
         if(B_dev)
             (void)hipFree(B_dev);
         if(E_dev)
             (void)hipFree(E_dev);
+        for(int i = 0; i < kNumD; ++i)
+            if(D_dev[i])
+                (void)hipFree(D_dev[i]);
     };
 
     if(hipMalloc(&A_dev, a_elems * sizeof(ADataType)) != hipSuccess)
@@ -232,19 +257,41 @@ int dispatcher_run_batched_contraction(const void* A,
         return -1;
     }
 
-    ck_tile::BatchedContractionHostArgs<CONTRACTION_KEY_NUM_D_TENSORS> args(
+    // D tensors: shape == E ([G..,M..,N..]), row-major packed strides == E_strides.
+    std::array<const void*, kNumD> ds_ptr{};
+    std::array<std::vector<ck_tile::index_t>, kNumD> Ds_dims{};
+    std::array<std::vector<ck_tile::index_t>, kNumD> Ds_strides{};
+    for(int i = 0; i < kNumD; ++i)
+    {
+        if(hipMalloc(&D_dev[i], e_elems * sizeof(DBaseDataType)) != hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
+        if(hipMemcpy(D_dev[i], d_ptrs[i], e_elems * sizeof(DBaseDataType), hipMemcpyHostToDevice) !=
+           hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
+        ds_ptr[i]     = D_dev[i];
+        Ds_dims[i]    = E_dims;
+        Ds_strides[i] = E_strides;
+    }
+
+    ck_tile::BatchedContractionHostArgs<kNumD> args(
         /*a_ptr*/ A_dev,
         /*b_ptr*/ B_dev,
-        /*ds_ptr*/ std::array<const void*, CONTRACTION_KEY_NUM_D_TENSORS>{},
+        /*ds_ptr*/ ds_ptr,
         /*e_ptr*/ E_dev,
         /*k_batch*/ static_cast<ck_tile::index_t>(k_batch),
         /*A_dims*/ A_dims,
         /*B_dims*/ B_dims,
-        /*Ds_dims*/ std::array<std::vector<ck_tile::index_t>, CONTRACTION_KEY_NUM_D_TENSORS>{},
+        /*Ds_dims*/ Ds_dims,
         /*E_dims*/ E_dims,
         /*A_strides*/ A_strides,
         /*B_strides*/ B_strides,
-        /*Ds_strides*/ std::array<std::vector<ck_tile::index_t>, CONTRACTION_KEY_NUM_D_TENSORS>{},
+        /*Ds_strides*/ Ds_strides,
         /*E_strides*/ E_strides);
 
     const bool do_time = (time_ms != nullptr);

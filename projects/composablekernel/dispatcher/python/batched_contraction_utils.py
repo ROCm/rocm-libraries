@@ -145,10 +145,23 @@ class BatchedContractionKernelConfig:
             and self.tile_k % (self.warp_k * self.warp_tile_k) == 0
         ):
             return False
-        # v1 scope: only the rcr layout compiles (col-major A/B trip kernel
-        # static_asserts) and only NUM_D_TENSORS==0 is runnable through the ABI.
-        if self.layout != "rcr" or self.num_d_tensors != 0:
+        # Only the rcr layout compiles (col-major A/B trip kernel static_asserts).
+        if self.layout != "rcr":
             return False
+        # Old-TE argparse places no upper bound on num_d_tensors (default 0); the
+        # DsDataType/DsLayout tuples and the epilogue support an arbitrary count.
+        # 0..8 comfortably spans the MultiDAdd/MultiDMultiply usage while keeping
+        # the ctypes marshalling bounded.
+        if self.num_d_tensors < 0 or self.num_d_tensors > 8:
+            return False
+        # Epilogue op must agree with the D-tensor count. num_d==0 => PassThrough
+        # (plain contraction); num_d>0 => a MultiD* op that consumes the D tensors.
+        if self.num_d_tensors == 0:
+            if self.elementwise != "PassThrough":
+                return False
+        else:
+            if self.elementwise not in ("MultiDAdd", "MultiDMultiply"):
+                return False
         # dtype -> valid MFMA warp tile (per gfx942/gfx950 XDL allow-list).
         wt = (self.warp_tile_m, self.warp_tile_n, self.warp_tile_k)
         allowed = {
@@ -212,6 +225,7 @@ class BatchedContractionResult:
     E: object
     time_ms: float
     kernel_name: str
+    Ds: Optional[List[object]] = None  # D tensors actually fed to the kernel (num_d>0)
 
 
 # =============================================================================
@@ -242,6 +256,7 @@ class BatchedContractionDispatcherLib:
         lib.dispatcher_run_batched_contraction.restype = ctypes.c_int
         lib.dispatcher_run_batched_contraction.argtypes = [
             ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_void_p), ctypes.c_int,  # d_ptrs, num_d
             ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),
             ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),
             ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
@@ -258,17 +273,26 @@ class BatchedContractionDispatcherLib:
             self._lib.dispatcher_get_num_dim_n(), self._lib.dispatcher_get_num_dim_k(),
         )
 
-    def run(self, A, B, E, prob: BatchedContractionProblem) -> float:
+    def run(self, A, B, E, prob: BatchedContractionProblem, Ds=None) -> float:
         def i64(vals):
             return (ctypes.c_int64 * len(vals))(*[int(v) for v in vals])
 
         A = np.ascontiguousarray(A)
         B = np.ascontiguousarray(B)
         E = np.ascontiguousarray(E)
+        Ds = Ds or []
+        Ds = [np.ascontiguousarray(d) for d in Ds]
+        num_d = len(Ds)
+        if num_d:
+            d_arr = (ctypes.c_void_p * num_d)(*[d.ctypes.data_as(ctypes.c_void_p) for d in Ds])
+            d_ptr = ctypes.cast(d_arr, ctypes.POINTER(ctypes.c_void_p))
+        else:
+            d_ptr = None
         tms = ctypes.c_float(0.0)
         rc = self._lib.dispatcher_run_batched_contraction(
             A.ctypes.data_as(ctypes.c_void_p), B.ctypes.data_as(ctypes.c_void_p),
             E.ctypes.data_as(ctypes.c_void_p),
+            d_ptr, num_d,
             i64(prob.g_dims), i64(prob.m_dims), i64(prob.n_dims), i64(prob.k_dims),
             len(prob.g_dims), len(prob.m_dims), len(prob.n_dims), len(prob.k_dims),
             int(prob.k_batch), ctypes.byref(tms),
@@ -293,26 +317,97 @@ class BatchedContractionDispatcherLib:
 
 
 class GpuBatchedContractionRunner:
-    def __init__(self, so_path: Path, dtype: str = "fp16"):
+    def __init__(
+        self,
+        so_path: Path,
+        dtype: str = "fp16",
+        num_d_tensors: int = 0,
+        elementwise: str = "PassThrough",
+    ):
         self._lib = BatchedContractionDispatcherLib(so_path)
         self.dtype = dtype
         self.np_dtype = _np_dtype(dtype)
+        # num_d / elementwise describe the D-tensor epilogue the compiled .so wired in.
+        # We trust the .so's compiled-in count first (it is the source of truth), then
+        # fall back to the caller-provided value.
+        so_num_d = self._lib._lib.dispatcher_get_num_d_tensors()
+        self.num_d_tensors = int(so_num_d if so_num_d >= 0 else num_d_tensors)
+        self.elementwise = elementwise if self.num_d_tensors > 0 else "PassThrough"
 
     @property
     def kernel_name(self) -> str:
         return self._lib.kernel_name()
 
-    def run(self, A, B, prob: BatchedContractionProblem) -> BatchedContractionResult:
+    def _make_ds(self, prob: BatchedContractionProblem, seed: Optional[int]) -> List[object]:
+        """Build num_d D tensors of shape [G,M,N], dtype == A/B element type.
+
+        Mirrors Old-TE's profiler which fills each D with FillUniformDistribution
+        in [-1, 1] (see batched_contraction_profiler.hpp)."""
+        rng = np.random.default_rng(seed)
+        Ds: List[object] = []
+        for _ in range(self.num_d_tensors):
+            d = rng.uniform(-1.0, 1.0, size=(prob.G, prob.M, prob.N)).astype(self.np_dtype)
+            Ds.append(d)
+        return Ds
+
+    def run(
+        self,
+        A,
+        B,
+        prob: BatchedContractionProblem,
+        Ds=None,
+        seed: Optional[int] = 0,
+    ) -> BatchedContractionResult:
         # Coerce inputs to the kernel's element type so host byte-width matches device.
         A2 = np.asarray(A).astype(self.np_dtype).reshape(prob.G, prob.M, prob.K)
         B2 = np.asarray(B).astype(self.np_dtype).reshape(prob.G, prob.N, prob.K)
         E = np.zeros((prob.G, prob.M, prob.N), dtype=self.np_dtype)
-        t = self._lib.run(A2, B2, E, prob)
-        return BatchedContractionResult(E=E, time_ms=t, kernel_name=self.kernel_name)
+
+        if self.num_d_tensors > 0:
+            if Ds is None:
+                Ds = self._make_ds(prob, seed)
+            Ds = [np.asarray(d).astype(self.np_dtype).reshape(prob.G, prob.M, prob.N) for d in Ds]
+            if len(Ds) != self.num_d_tensors:
+                raise ValueError(
+                    f"expected {self.num_d_tensors} D tensors, got {len(Ds)}"
+                )
+        else:
+            Ds = []
+
+        t = self._lib.run(A2, B2, E, prob, Ds=Ds if Ds else None)
+        return BatchedContractionResult(
+            E=E, time_ms=t, kernel_name=self.kernel_name, Ds=Ds if Ds else None
+        )
+
+    def reference(self, A, B, prob: BatchedContractionProblem, Ds=None):
+        """fp32 reference with the compiled-in D epilogue applied.
+
+        num_d==0 / PassThrough : E[g,m,n] = sum_k A[g,m,k]*B[g,n,k]
+        MultiDAdd              : E = C + D0 + D1 + ...   (elementwise, D shape==E)
+        MultiDMultiply         : E = C * D0 * D1 * ...
+        Matches ck_tile::element_wise::MultiDAdd / MultiDMultiply and the host
+        reference in reference_batched_contraction.hpp."""
+        A2 = np.asarray(A).astype(np.float32).reshape(prob.G, prob.M, prob.K)
+        B2 = np.asarray(B).astype(np.float32).reshape(prob.G, prob.N, prob.K)
+        C = np.einsum("gmk,gnk->gmn", A2, B2)
+        if self.num_d_tensors == 0 or self.elementwise == "PassThrough":
+            return C
+        if Ds is None:
+            raise ValueError("reference() with num_d>0 requires the same Ds passed to run()")
+        Ds32 = [np.asarray(d).astype(np.float32).reshape(prob.G, prob.M, prob.N) for d in Ds]
+        if self.elementwise == "MultiDAdd":
+            for d in Ds32:
+                C = C + d
+        elif self.elementwise == "MultiDMultiply":
+            for d in Ds32:
+                C = C * d
+        else:
+            raise ValueError(f"unsupported elementwise op {self.elementwise}")
+        return C
 
     @staticmethod
-    def reference(A, B, prob: BatchedContractionProblem):
-        """fp32 reference: E[g,m,n] = sum_k A[g,m,k]*B[g,n,k]."""
+    def reference_contraction(A, B, prob: BatchedContractionProblem):
+        """Plain fp32 contraction (no D epilogue): E[g,m,n] = sum_k A[g,m,k]*B[g,n,k]."""
         A2 = np.asarray(A).astype(np.float32).reshape(prob.G, prob.M, prob.K)
         B2 = np.asarray(B).astype(np.float32).reshape(prob.G, prob.N, prob.K)
         return np.einsum("gmk,gnk->gmn", A2, B2)

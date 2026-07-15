@@ -109,6 +109,81 @@ class TestValidity(unittest.TestCase):
             tile_m=48, tile_n=64, tile_k=64, warp_m=2, warp_n=2, warp_k=1,
             warp_tile_m=32, warp_tile_n=32, warp_tile_k=16).is_valid())
 
+    def _base(self, **kw):
+        base = dict(dtype="fp16", layout="rcr", tile_m=128, tile_n=128, tile_k=64,
+                    warp_m=2, warp_n=2, warp_k=1,
+                    warp_tile_m=32, warp_tile_n=32, warp_tile_k=16)
+        base.update(kw)
+        return BatchedContractionKernelConfig(**base)
+
+    def test_reject_non_rcr_layout(self):
+        # Only rcr compiles; col-major A/B trip kernel static_asserts in Old-TE.
+        for layout in ("rrr", "ccr", "crr", "rcc"):
+            self.assertFalse(self._base(layout=layout).is_valid(), layout)
+
+    def test_reject_bad_dtype(self):
+        # fp8/bf8/int8 are out of this bridge's dtype allow-list.
+        for dt in ("fp8", "bf8", "int8", "fp64"):
+            self.assertFalse(self._base(dtype=dt).is_valid(), dt)
+
+    def test_reject_bad_warp_tile(self):
+        # A warp tile not in the per-dtype MFMA allow-list must be rejected.
+        self.assertFalse(self._base(warp_tile_m=8, warp_tile_n=8, warp_tile_k=8).is_valid())
+        # fp32 does not admit the fp16 32x32x16 warp tile.
+        self.assertFalse(self._base(dtype="fp32", tile_k=64,
+                                    warp_tile_m=32, warp_tile_n=32, warp_tile_k=16).is_valid())
+
+    def test_num_d_range(self):
+        # num_d==0 => PassThrough valid; negative rejected; large rejected.
+        self.assertTrue(self._base(num_d_tensors=0, elementwise="PassThrough").is_valid())
+        self.assertFalse(self._base(num_d_tensors=-1).is_valid())
+        self.assertFalse(self._base(num_d_tensors=9, elementwise="MultiDAdd").is_valid())
+
+    def test_num_d_elementwise_consistency(self):
+        # num_d>0 requires a MultiD* op; PassThrough with D is rejected.
+        self.assertFalse(self._base(num_d_tensors=1, elementwise="PassThrough").is_valid())
+        # num_d==0 with a MultiD* op is rejected (nothing for the op to consume).
+        self.assertFalse(self._base(num_d_tensors=0, elementwise="MultiDAdd").is_valid())
+        # Valid D configs.
+        self.assertTrue(self._base(num_d_tensors=1, elementwise="MultiDAdd").is_valid())
+        self.assertTrue(self._base(num_d_tensors=2, elementwise="MultiDMultiply").is_valid())
+
+
+class TestNumDContract(unittest.TestCase):
+    """num_d>0 name + codegen-projection round-trip (CPU only)."""
+
+    def _cfg(self, num_d, ew):
+        return BatchedContractionKernelConfig(
+            dtype="fp16", layout="rcr", pipeline="compv3", epilogue="cshuffle",
+            scheduler="intrawave", tile_m=128, tile_n=128, tile_k=64,
+            warp_m=2, warp_n=2, warp_k=1, warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+            num_dim_g=1, num_dim_m=1, num_dim_n=1, num_dim_k=1,
+            num_d_tensors=num_d, elementwise=ew)
+
+    def test_name_has_d_and_op_suffix(self):
+        n = self._cfg(1, "MultiDAdd").name
+        self.assertIn("_d1_", n + "_")
+        self.assertTrue(n.endswith("_MultiDAdd"))
+        n2 = self._cfg(2, "MultiDMultiply").name
+        self.assertIn("_d2_", n2 + "_")
+        self.assertTrue(n2.endswith("_MultiDMultiply"))
+
+    def test_name_equals_codegen_name(self):
+        for num_d, ew in [(1, "MultiDAdd"), (2, "MultiDAdd"), (1, "MultiDMultiply")]:
+            cfg = self._cfg(num_d, ew)
+            spec = _spec_from_config(cfg.to_codegen_config())
+            self.assertEqual(cfg.name, spec.name, f"{num_d}/{ew}")
+
+    def test_codegen_json_projects_num_d_and_op(self):
+        j = self._cfg(2, "MultiDMultiply").to_codegen_config()
+        self.assertEqual(j["num_d_tensors"], 2)
+        self.assertEqual(j["elementwise"], "MultiDMultiply")
+
+    def test_num_d_changes_name(self):
+        self.assertNotEqual(self._cfg(1, "MultiDAdd").name, self._cfg(2, "MultiDAdd").name)
+        # Same D count but different op must still differ.
+        self.assertNotEqual(self._cfg(1, "MultiDAdd").name, self._cfg(1, "MultiDMultiply").name)
+
 
 class TestSweep(unittest.TestCase):
     def test_expand_dedup_and_valid(self):

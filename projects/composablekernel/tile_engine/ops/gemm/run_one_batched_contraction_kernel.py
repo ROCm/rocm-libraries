@@ -39,11 +39,15 @@ def main() -> int:
     verify = job.get("verify", False)
     tol = float(job.get("verify_tol", 2e-2))
     expect_name = job.get("kernel_name")
+    num_d = int(job.get("num_d_tensors", 0))
+    elementwise = job.get("elementwise", "PassThrough")
 
     out = {"so_path": so_path, "kernel_name": None, "time_ms": None,
            "status": "ok", "max_rel": None, "name_match": None}
     try:
-        runner = GpuBatchedContractionRunner(so_path, dtype=dtype)
+        runner = GpuBatchedContractionRunner(
+            so_path, dtype=dtype, num_d_tensors=num_d, elementwise=elementwise
+        )
         out["kernel_name"] = runner.kernel_name
         if expect_name is not None:
             out["name_match"] = (runner.kernel_name == expect_name)
@@ -56,7 +60,7 @@ def main() -> int:
         out["time_ms"] = res.time_ms
 
         if verify:
-            ref = GpuBatchedContractionRunner.reference(A, B, prob).astype(np.float32)
+            ref = runner.reference(A, B, prob, Ds=res.Ds).astype(np.float32)
             egpu = res.E.astype(np.float32)
             max_rel = float(np.max(np.abs(egpu - ref)) / (np.max(np.abs(ref)) + 1e-6))
             out["max_rel"] = max_rel
