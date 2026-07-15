@@ -72,7 +72,9 @@ def main() -> int:
     rows = []
     for k, so in built:
         job = {"so_path": str(so), "kernel_name": k.name, "dtype": args.dtype,
-               "problem": prob.to_dict(), "verify": args.verify, "verify_tol": args.verify_tol}
+               "problem": prob.to_dict(), "verify": args.verify, "verify_tol": args.verify_tol,
+               "num_d_tensors": int(getattr(k, "num_d_tensors", 0)),
+               "elementwise": getattr(k, "elementwise", "PassThrough")}
         r = subprocess.run([sys.executable, str(_WORKER)], input=json.dumps(job),
                            capture_output=True, text=True, timeout=600)
         try:
