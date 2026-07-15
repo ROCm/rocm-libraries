@@ -9,6 +9,7 @@ target_sources(${INTEGRATION_TESTS_EXE}
 add_subdirectory(batchnorm)
 add_subdirectory(conv)
 add_subdirectory(layernorm)
+add_subdirectory(matmul)
 add_subdirectory(reduction)
 add_subdirectory(rmsnorm)
 add_subdirectory(sdpa)
