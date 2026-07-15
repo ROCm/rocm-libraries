@@ -169,11 +169,12 @@ Claim evaluation is built on RFC 0011's existing machinery:
   `dnn-providers/integration-tests/src/harness/bundle/BundleDiscovery.hpp`) registers one test per
   single-graph `{Name}.json` and one per template-sweep `cases[].id`, already skipping companion
   `meta.json` and treating `graph.template.json` + `sweep.json` as a sweep root, not a graph. The
-  support sidecar — `{Name}.support.json` beside a single-graph bundle, or a bare `support.json`
-  beside `sweep.json` — must join those skip filters (`isGraphFile`, `isSweepTemplateFile`); it
-  annotates already-discovered bundles and must never register, remove, or be loaded as a
-  test/graph. *Acceptance:* a single-graph dir registers one test; a sweep dir exactly one per
-  `cases[].id`; the sidecar is never loaded as a graph.
+  concrete hook is `companionKinds()` (currently `{"meta"}`), which `isGraphFile()` consults:
+  adding `"support"` excludes both the single-graph `{Name}.support.json` (final dotted segment
+  `support`) and a sweep's bare `support.json` (whole stem `support`), which otherwise register as
+  spurious graph tests. The sidecar annotates already-discovered bundles and must never register,
+  remove, or be loaded as a test/graph. *Acceptance:* a single-graph dir registers one test; a
+  sweep dir exactly one per `cases[].id`; the sidecar is never loaded as a graph.
 - **The claim key is the on-disk graph**, not a content hash. For a single-graph bundle it is
   that bundle (`{Name}.json` + co-located `{Name}.support.json`); for a template sweep it is the
   **expanded case** — the `cases[].id` applied to `graph.template.json`, plus that case's verdict
@@ -615,6 +616,12 @@ the actor and cadence differ.
   and untouched engines stay byte-identical. Because engines, arches, and platforms are disjoint
   cells, separate per-engine/per-arch regenerations merge cleanly; only one binary runs at a time,
   so no multi-writer coordination is needed.
+- **Change churn is bounded and safe.** The zero-diff guarantee is for an *unchanged* run; when a
+  support value actually changes, canonical regrouping may merge or split groups, so the diff can
+  be larger than the one changed cell. Canonical formatting keeps this granular — one case id per
+  line, so a membership change reads as per-case line adds/removes — and any genuine regression (a
+  claimed `supported` becoming `declined`) surfaces independently as an enforcement FAIL (§7.1), so
+  diff churn can never silently mask a lost claim.
 - **Written at end of the run.** The tool writes each claimed graph's support sidecar directly
   after the test run completes. If a target file cannot be opened for writing (e.g. it is locked), the
   tool reports a clear error naming the file rather than silently dropping the verdict; it does
