@@ -93,7 +93,9 @@ set(rocblas_no_tensile_test_source
     blas2/symv_gtest.cpp
     # blas3 may use tensile or source gemm
     blas3/gemm_gtest.cpp
+    blas3/gemm_grouped_batched_gtest.cpp
     blas_ex/gemm_ex_gtest.cpp
+    blas_ex/gemm_grouped_batched_ex_gtest.cpp
     blas3/symm_gtest.cpp
     blas3/hemm_gtest.cpp
     blas3/trsm_gtest.cpp
