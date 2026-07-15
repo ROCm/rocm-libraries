@@ -46,6 +46,9 @@ to co-reside on a cotenant CU and run unaffected, silently under-reporting
 contention. Full-LDS reservation closes that gap; on gfx942/gfx950 it is
 permitted because a single block may take all of the per-CU LDS.
 
+Written for mi300 and mi350 architectures; it might not work
+correctly on other targets.
+
 To confirm the kernel is actually executing (not just that a GPU context
 exists), each workgroup increments a system-scope atomic counter in host-pinned
 memory at entry; the host waits until all `N` have reported, then logs `READY`.
