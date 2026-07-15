@@ -302,6 +302,24 @@ struct hipfftxt_test_params_t
         }
     }
 
+    inline hipfftType_t reciprocal_hipfft_transform_type() const
+    {
+        switch(dft_type)
+        {
+        case fft_transform_type_real_forward:
+            return precision == fft_precision_single ? HIPFFT_C2R : HIPFFT_Z2D;
+        case fft_transform_type_real_inverse:
+            return precision == fft_precision_single ? HIPFFT_R2C : HIPFFT_D2Z;
+        case fft_transform_type_complex_forward:
+            [[fallthrough]];
+        case fft_transform_type_complex_inverse:
+            return precision == fft_precision_single ? HIPFFT_C2C : HIPFFT_Z2Z;
+        default:
+            throw std::logic_error(
+                "hipfftxt_test_params_t::reciprocal_hipfft_transform_type: invalid dft_type");
+        }
+    }
+
     inline fft_result_placement placement() const
     {
         return (input_desc_format == HIPFFT_XT_FORMAT_INPLACE
@@ -790,6 +808,182 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
     }
 }
 
+// Execute the reciprocal transform of the just-executed multi-GPU transform and verify that
+// the original input is recovered (round trip usage).
+//
+// `output_desc` holds the result of the execution of the primary plan (its subFormat is
+// `params.output_desc_format()`). The reciprocal transform is executed back into the primary
+// plan's input descriptor `input_desc`, and the recovered data is compared against the
+// original reference input, accounting for the 1/total_length scaling that results from the
+// roundtrip operation.
+static void run_and_verify_roundtrip(const hipfftxt_test_params_t& params,
+                                     const hipfftHandle_wrapper_t& primary_plan,
+                                     const std::vector<int>&       gpus,
+                                     hipfftLibXtDesc_wrapper_t&    input_desc,
+                                     hipfftLibXtDesc_wrapper_t&    output_desc,
+                                     reference_fft_data_t&         reference_results)
+{
+    // Build (or reuse) the plan that performs the reciprocal transform.
+    hipfftHandle_wrapper_t reciprocal_plan;
+    hipfftResult           hipfft_rt = HIPFFT_SUCCESS;
+    if(is_complex(params.dft_type))
+    {
+        // complex plans are expected to operate in both directions
+        reciprocal_plan = hipfftHandle_wrapper_t::make_nonowned(primary_plan.get_raw());
+    }
+    else
+    {
+        if(verbose)
+            std::cout << "Creating round-trip's reciprocal plan...\n";
+        hipfft_rt = reciprocal_plan.alloc_with_err();
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "round-trip hipfftCreate failed";
+        // hipfftXtSetGPUs takes a non-const int* but only reads the GPU ids.
+        hipfft_rt = hipfftXtSetGPUs(
+            reciprocal_plan, static_cast<int>(gpus.size()), const_cast<int*>(gpus.data()));
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "round-trip hipfftXtSetGPUs failed";
+        std::vector<size_t> worksize(gpus.size(), std::numeric_limits<size_t>::max());
+
+        if(params.batch > 1)
+        {
+            std::vector<int> lengths_int(params.transform_lengths.begin(),
+                                         params.transform_lengths.end());
+            hipfft_rt = hipfftMakePlanMany(reciprocal_plan,
+                                           lengths_int.size(),
+                                           lengths_int.data(),
+                                           nullptr,
+                                           0,
+                                           0,
+                                           nullptr,
+                                           0,
+                                           0,
+                                           params.reciprocal_hipfft_transform_type(),
+                                           params.batch,
+                                           worksize.data());
+        }
+        else
+        {
+            switch(params.transform_lengths.size())
+            {
+            case 2:
+                hipfft_rt = hipfftMakePlan2d(reciprocal_plan,
+                                             params.transform_lengths[0],
+                                             params.transform_lengths[1],
+                                             params.reciprocal_hipfft_transform_type(),
+                                             worksize.data());
+                break;
+            case 3:
+                hipfft_rt = hipfftMakePlan3d(reciprocal_plan,
+                                             params.transform_lengths[0],
+                                             params.transform_lengths[1],
+                                             params.transform_lengths[2],
+                                             params.reciprocal_hipfft_transform_type(),
+                                             worksize.data());
+                break;
+            default:
+                FAIL() << "round trip only supports 2D/3D unbatched or batched transforms";
+            }
+        }
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+            << "round-trip reciprocal plan creation failed with code " << hipfft_rt << " ("
+            << hipfftResult_string(hipfft_rt) << ")";
+        ASSERT_TRUE(std::all_of(worksize.begin(), worksize.end(), [](const auto& ws) {
+            return ws < std::numeric_limits<size_t>::max();
+        }));
+        if(verbose)
+            std::cout << "Round-trip's reciprocal plan created.\n";
+    }
+
+    if(verbose)
+        std::cout << "Executing reciprocal transform...\n";
+    hipfft_rt = hipfftXtExecDescriptor(reciprocal_plan,
+                                       output_desc.get_raw(),
+                                       input_desc.get_raw(),
+                                       is_fwd(params.dft_type) ? HIPFFT_BACKWARD : HIPFFT_FORWARD);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+        << "round-trip hipfftXtExecDescriptor failed with code " << hipfft_rt << " ("
+        << hipfftResult_string(hipfft_rt) << ")";
+    if(params.placement() == fft_placement_inplace)
+    {
+        // In-place execution flips the descriptor's subFormat back to the original input format
+        // (for unbatched cases; batched cases leave it unchanged, which already matches).
+        ASSERT_EQ(static_cast<hipfftXtSubFormat>((*input_desc).subFormat), params.input_desc_format)
+            << "in-place round-trip descriptor subFormat after reciprocal execution ("
+            << fft_enum_to_string(static_cast<hipfftXtSubFormat>((*input_desc).subFormat))
+            << ") does not match the original input format ("
+            << fft_enum_to_string(params.input_desc_format) << ")";
+    }
+
+    if(verbose)
+    {
+        std::cout << "Round-trip reciprocal execution completed.\n";
+        std::cout << "Copying round-trip results device-to-host...\n";
+    }
+    std::vector<hostbuf> mgpu_roundtrip(1);
+    mgpu_roundtrip[0].alloc(params.global_byte_size(fft_io_in));
+    auto d2h_rt = hipfftXtMemcpy(reciprocal_plan,
+                                 mgpu_roundtrip[0].data(),
+                                 input_desc.get_raw(),
+                                 HIPFFT_COPY_DEVICE_TO_HOST);
+    ASSERT_EQ(d2h_rt, HIPFFT_SUCCESS) << "round-trip hipfftXtMemcpy D2H failed with code " << d2h_rt
+                                      << " (" << hipfftResult_string(d2h_rt) << ")";
+    if(verbose)
+    {
+        std::cout << "Round-trip results copied.\n";
+        std::cout << "Verifying recovery of original input data...\n";
+    }
+
+    // Compare the recovered input against the original reference input. A transform followed by
+    // its reciprocal scales the data by the total transform length, so the round-trip result
+    // is scaled by 1/total_length before comparison.
+    const auto total_length
+        = product(params.transform_lengths.begin(), params.transform_lengths.end());
+    const auto   cpu_input_norm = reference_results.get_norm<fft_io_in>(params.batch).get();
+    const double rt_linf_cutoff
+        = type_epsilon(params.precision) * cpu_input_norm.l_inf * log(total_length);
+    const auto rt_diff = distance(reference_results.get_buffers<fft_io_in>(),
+                                  mgpu_roundtrip,
+                                  params.logical_spans(fft_io_in),
+                                  params.batch,
+                                  params.precision,
+                                  reference_results.get_params().itype,
+                                  reference_results.get_params().istride,
+                                  reference_results.get_params().idist,
+                                  reference_results.get_params().itype,
+                                  params.global_strides(fft_io_in),
+                                  params.global_dist(fft_io_in),
+                                  nullptr,
+                                  rt_linf_cutoff,
+                                  {0},
+                                  {0},
+                                  1.0 / total_length);
+    if(verbose > 1)
+        std::cout << "round-trip linf: " << rt_diff.l_inf << " l2: " << rt_diff.l_2
+                  << " cutoff: " << rt_linf_cutoff << "\n";
+
+    switch(params.precision)
+    {
+    case fft_precision_single:
+        max_linf_eps_single = std::max(max_linf_eps_single,
+                                       rt_diff.l_inf / cpu_input_norm.l_inf / log(total_length));
+        max_l2_eps_single   = std::max(max_l2_eps_single,
+                                     rt_diff.l_2 / cpu_input_norm.l_2 * sqrt(log2(total_length)));
+        break;
+    case fft_precision_double:
+        max_linf_eps_double = std::max(max_linf_eps_double,
+                                       rt_diff.l_inf / cpu_input_norm.l_inf / log(total_length));
+        max_l2_eps_double   = std::max(max_l2_eps_double,
+                                     rt_diff.l_2 / cpu_input_norm.l_2 * sqrt(log2(total_length)));
+        break;
+    default:
+        throw std::logic_error("Unexpected precision in hipfftXtGeneralizedUsage round trip");
+    }
+
+    EXPECT_LE(rt_diff.l_inf, rt_linf_cutoff)
+        << "round-trip l_inf tolerance failure. cutoff: " << rt_linf_cutoff;
+    if(verbose)
+        std::cout << "Recovery of input results verified.\n";
+}
+
 // Test that hipfftXt multi-GPU transforms correctly distribute data across GPUs and produce
 // numerically accurate results.
 //
@@ -811,8 +1005,11 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
 //   8. Accuracy comparison of the multi-GPU output against a single-CPU FFTW reference,
 //      using an L-infinity norm tolerance scaled by machine epsilon, reference norm,
 //      and log(N).
+//   9. Round-trip verification (via run_and_verify_roundtrip): the reciprocal transform is
+//      executed and the results of that operation are compared against the original
+//      reference input (after 1/N scaling).
 //
-// Steps 3-8 are only reached for fully-supported, multi-dimensional (or batched)
+// Steps 3-9 are only reached for fully-supported, multi-dimensional (or batched)
 // configurations with natural output descriptor formats. The test skips early for:
 //   - non-natural explicit output descriptor formats (test infrastructure not yet extended)
 //   - HIPFFT_XT_FORMAT_OUTPUT used as input descriptor format (crashes cuFFT for some cases)
@@ -1247,7 +1444,15 @@ try
 
     EXPECT_LE(diff.l_inf, linf_cutoff) << "l_inf tolerance failure. cutoff: " << linf_cutoff;
     if(verbose)
-        std::cout << "Accuracy verified. Test completed.\n";
+        std::cout << "Accuracy verified.\n";
+
+    // Now that the forward-direction execution has been fully verified, exercise a round trip:
+    // execute its reciprocal transform and confirm the original input is recovered.
+    if(verbose)
+        std::cout << "Verifying round-trip usage...\n";
+    run_and_verify_roundtrip(params, plan, gpus, input_desc, output_desc, *reference_results);
+    if(verbose)
+        std::cout << "Test completed.\n";
 }
 ROCFFT_CATCH_TEST_EXCEPTIONS
 
@@ -1271,14 +1476,9 @@ static std::vector<hipfftxt_test_params_t> test_params_for_hipfftxt_execution_te
                     // Some test parameters have unacceptable descriptors' subformat and/or unimplemented
                     // support for it. The test consuming these parameters actually verifies that by checking
                     // the various error codes returned by hipFFT and choosing early skips when appropriate.
-                    // Note: adding HIPFFT_XT_FORMAT_OUTPUT to the scope of possible *input* descriptor's
-                    // subformat below could conceptually be used to verify that hipfftXtExecDescriptor rejects
-                    // that possible use case. However, the cufft backend's does NOT explicitly reject it; such
-                    // usage was found to actually segfault for real forward transforms though, which is why the
-                    // test suite does not cover that possible (though questionable) use case.
-                    // NOTE: the output descriptor's subformat is always derived from the input descriptor's
-                    // subformat and the transform type, so it is not explicitly parameterized here (see
-                    // hipfftxt_test_params_t::output_desc_format).
+                    // Note: The possible usage of HIPFFT_XT_FORMAT_OUTPUT as an *input* descriptor's subformat
+                    // is exercised in tests via the round-trip verifications (reached if/when the direct
+                    // operation is actually supported).
                     for(const auto& input_subformat : {HIPFFT_XT_FORMAT_INPLACE,
                                                        HIPFFT_XT_FORMAT_INPLACE_SHUFFLED,
                                                        HIPFFT_XT_FORMAT_INPUT,
