@@ -245,7 +245,7 @@ jobs:
           # Configure the superbuild with only hipdnn + samples enabled (other
           # components would require libraries not present in the base ROCm install).
           # hipdnn-tidy lints projects/hipdnn (core and samples) in one pass.
-          cmake --preset default:release -B build-hipdnn \
+          cmake --preset default:release -B build-hipdnn -G Ninja \
             -DROCM_LIBS_ENABLE_COMPONENTS='hipdnn;hipdnn-samples' \
             -DENABLE_CLANG_TIDY=ON \
             -DROCM_PATH=/opt/rocm \
