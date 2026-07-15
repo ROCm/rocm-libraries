@@ -17,14 +17,17 @@ import hipdnn_frontend as hipdnn
 
 @functools.lru_cache(maxsize=1)
 def _gpu_available():
-    """Return True if a GPU device can be allocated, False otherwise.
-
-    Probes by attempting a tiny device allocation, which performs a hipMalloc
-    and raises when no usable device is present.
-    """
+    """Return True when HIP reports at least one visible GPU device."""
     try:
-        hipdnn.DeviceBuffer(1)
-    except Exception:
+        device_count = hipdnn.hip_get_device_count()
+    except Exception as exc:
+        warnings.warn(f"HIP device probe failed: {exc!r}", stacklevel=1)
+        return False
+    if device_count <= 0:
+        warnings.warn(
+            f"HIP device probe reported {device_count} visible device(s).",
+            stacklevel=1,
+        )
         return False
     return True
 

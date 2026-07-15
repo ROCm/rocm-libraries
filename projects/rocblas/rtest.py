@@ -251,7 +251,9 @@ def run_cmd(cmd, test = False, time_limit = 0, path = "" ):
                 elif output:
                     outstring = output.strip()
                     print (outstring)
-                    error = error or re.search(r'error|fail', outstring, re.IGNORECASE)
+                    # skip output that is optional GTest summary
+                    if not re.search(r'\[ FAILED.*\]', outstring):
+                        error = error or re.search(r'error|fail', outstring, re.IGNORECASE)
             status = test_proc.poll()
             if time_limit > 0:
                 p.stop()
