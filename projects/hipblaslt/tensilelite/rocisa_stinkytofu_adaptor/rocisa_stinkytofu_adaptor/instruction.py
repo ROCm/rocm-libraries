@@ -4063,10 +4063,21 @@ def _make_tensor_load_class():
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
+        # group2/group3 are the TDM iterate-mode (TDMIterateMode) descriptors.
+        # They are None for non-iterate loads but MUST be forwarded when set,
+        # otherwise native emits a 4-operand ``tensor_load_to_lds`` while the
+        # adaptor drops to 2 operands -> wrong LDS addressing -> wrong results.
+        group2 = self.srcs[1] if len(self.srcs) > 1 else None
+        group3 = self.srcs[2] if len(self.srcs) > 2 else None
+        kwargs = {"comment": self.comment}
+        if group2 is not None:
+            kwargs["group2"] = _to_stinky_register(group2)
+        if group3 is not None:
+            kwargs["group3"] = _to_stinky_register(group3)
         return _st.TensorLoadToLds(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
-            comment=self.comment)
+            **kwargs)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
