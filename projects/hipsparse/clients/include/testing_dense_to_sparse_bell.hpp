@@ -190,7 +190,8 @@ void testing_dense_to_sparse_bell_bad_arg(const Arguments& argus)
         = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto dbell_col_ind_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(I) * safe_size), device_free};
-    auto dbell_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
+    auto dbell_val_managed
+        = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto dbuf_managed = hipsparse_unique_ptr{device_malloc(sizeof(char) * safe_size), device_free};
 
     T*    ddense_val    = (T*)ddense_val_managed.get();
@@ -205,17 +206,10 @@ void testing_dense_to_sparse_bell_bad_arg(const Arguments& argus)
 
     verify_hipsparse_status_success(
         hipsparseCreateDnMat(&matA, m, n, ld, ddense_val, dataType, order), "success");
-    verify_hipsparse_status_success(hipsparseCreateBlockedEll(&matB,
-                                                              m,
-                                                              n,
-                                                              ellBlockSize,
-                                                              ellCols,
-                                                              dbell_col_ind,
-                                                              dbell_val,
-                                                              iType,
-                                                              idxBase,
-                                                              dataType),
-                                    "success");
+    verify_hipsparse_status_success(
+        hipsparseCreateBlockedEll(
+            &matB, m, n, ellBlockSize, ellCols, dbell_col_ind, dbell_val, iType, idxBase, dataType),
+        "success");
 
     // denseToSparse buffer size
     verify_hipsparse_status_invalid_handle(
@@ -263,10 +257,10 @@ template <typename I, typename T>
 void testing_dense_to_sparse_bell(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
-    I                           m         = argus.M;
-    I                           n         = argus.N;
-    I                           blockDim  = argus.block_dim;
-    hipsparseIndexBase_t        idx_base  = argus.baseA;
+    I                           m        = argus.M;
+    I                           n        = argus.N;
+    I                           blockDim = argus.block_dim;
+    hipsparseIndexBase_t        idx_base = argus.baseA;
     hipsparseDenseToSparseAlg_t alg
         = static_cast<hipsparseDenseToSparseAlg_t>(argus.dense2sparse_alg);
     hipsparseOrder_t order = argus.orderA;
@@ -311,16 +305,15 @@ void testing_dense_to_sparse_bell(Arguments argus)
             const I    bcol = j / ellBlockSize;
             const bool nz   = block_nonzero[brow * nb + bcol] != 0;
 
-            const int64_t idx = (order == HIPSPARSE_ORDER_COL) ? (int64_t(j) * ld + i)
-                                                               : (int64_t(i) * ld + j);
-            hdense_val[idx]   = nz ? random_generator<T>() : make_DataType<T>(0);
+            const int64_t idx
+                = (order == HIPSPARSE_ORDER_COL) ? (int64_t(j) * ld + i) : (int64_t(i) * ld + j);
+            hdense_val[idx] = nz ? random_generator<T>() : make_DataType<T>(0);
         }
     }
 
     // Allocate and copy the dense matrix to the device.
-    auto ddense_managed
-        = hipsparse_unique_ptr{device_malloc(sizeof(T) * nrow * ncol), device_free};
-    T* ddense = (T*)ddense_managed.get();
+    auto ddense_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nrow * ncol), device_free};
+    T*   ddense         = (T*)ddense_managed.get();
     CHECK_HIP_ERROR(
         hipMemcpy(ddense, hdense_val.data(), sizeof(T) * nrow * ncol, hipMemcpyHostToDevice));
 
@@ -330,8 +323,16 @@ void testing_dense_to_sparse_bell(Arguments argus)
 
     // Create blocked ELL descriptor with null pointers; ellCols is discovered during analysis.
     hipsparseSpMatDescr_t matB;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateBlockedEll(
-        &matB, mb * blockDim, nb * blockDim, ellBlockSize, 0, nullptr, nullptr, typeI, idx_base, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateBlockedEll(&matB,
+                                                    mb * blockDim,
+                                                    nb * blockDim,
+                                                    ellBlockSize,
+                                                    0,
+                                                    nullptr,
+                                                    nullptr,
+                                                    typeI,
+                                                    idx_base,
+                                                    typeT));
 
     // Query DenseToSparse buffer size.
     size_t bufferSize;
@@ -381,8 +382,8 @@ void testing_dense_to_sparse_bell(Arguments argus)
         std::vector<I> hbell_col_ind(bell_col_ind_size);
         std::vector<T> hbell_val(bell_val_size);
 
-        CHECK_HIP_ERROR(
-            hipMemcpy(hbell_col_ind.data(), dcol, sizeof(I) * bell_col_ind_size, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(
+            hbell_col_ind.data(), dcol, sizeof(I) * bell_col_ind_size, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(
             hipMemcpy(hbell_val.data(), dval, sizeof(T) * bell_val_size, hipMemcpyDeviceToHost));
 

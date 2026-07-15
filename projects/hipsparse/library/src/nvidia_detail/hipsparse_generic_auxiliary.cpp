@@ -934,8 +934,8 @@ hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cooColInd,
                                           void*                 cooValues)
 {
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseCooSetPointers(
-        (cusparseSpMatDescr_t)spMatDescr, cooRowInd, cooColInd, cooValues));
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseCooSetPointers((cusparseSpMatDescr_t)spMatDescr, cooRowInd, cooColInd, cooValues));
 }
 #endif
 
