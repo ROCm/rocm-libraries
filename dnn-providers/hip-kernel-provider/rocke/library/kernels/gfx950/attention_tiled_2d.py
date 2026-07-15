@@ -1118,13 +1118,19 @@ def build_unified_attention_2d_tiled(
     KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if spec.use_kq_lds_pad else 0
     # SLAB_ROWS = rows filled by one wave's 1024-B (WAVE=64 lanes x 16 B) slab.
     KQ_SLAB_ROWS = (512 // HD) if KQ_LDS_PAD else 0
+    # The slab pad's remap is only implemented for the non-fp8 K read (see the K
+    # read path below). The async-DMA write pads whenever KQ_LDS_PAD is set, but
+    # the fp8 K read does NOT remap -- an fp8+pad combo would address different
+    # slots -> silent numeric corruption. So disable the pad under fp8 (and under
+    # unsupported geometry) so write and read stay consistent. Byte-identical for
+    # the supported bf16 D256 path (FP8_MFMA_QK is False there).
     if KQ_LDS_PAD and (
-        512 % HD != 0
+        FP8_MFMA_QK
+        or 512 % HD != 0
         or KQ_SLAB_ROWS == 0
         or T % KQ_SLAB_ROWS != 0
         or KQ_LDS_PAD % 8 != 0
     ):
-        # Unsupported geometry for the slab pad -> disable (byte-identical).
         KQ_LDS_PAD = 0
         KQ_SLAB_ROWS = 0
     KV_BYTES = 1 if KV_FP8 else 2
