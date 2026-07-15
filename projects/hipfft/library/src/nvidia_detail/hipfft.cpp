@@ -882,22 +882,8 @@ catch(...)
 hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** desc, hipfftXtSubFormat format)
 try
 {
-    if(format == HIPFFT_FORMAT_UNDEFINED)
-        return HIPFFT_INVALID_VALUE;
-
     auto cufftret = cufftXtMalloc(
         plan, reinterpret_cast<cudaLibXtDesc**>(desc), hipfftXtSubFormatTocufftXtSubFormat(format));
-
-    if(cufftret == CUFFT_SUCCESS)
-    {
-        // Verify that allocation actually occurred.
-        const int  nGPUs = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->nGPUs;
-        const auto data  = (*(*reinterpret_cast<cudaLibXtDesc**>(desc))).descriptor->data;
-        // Computation requires that at least one GPU buffer is actually allocated.
-        if(std::all_of(data, data + nGPUs, [](void* ptr) { return ptr == nullptr; }))
-            return HIPFFT_ALLOC_FAILED;
-    }
-
     return cufftResultToHipResult(cufftret);
 }
 catch(...)
