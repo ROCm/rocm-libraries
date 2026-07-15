@@ -153,6 +153,12 @@ jobs:
           # Create logs directory
           mkdir -p ./test_logs
 
+          # Direct instrumented binaries to write profraw into the container's
+          # coverage-profraw dir (consumed by the report step in this same job).
+          if [[ "${{ inputs.coverage_enabled }}" == "true" ]]; then
+            export LLVM_PROFILE_FILE="${GITHUB_WORKSPACE}/coverage-profraw/${TEST_COMPONENT}-shard${{ matrix.shard }}-%p-%m.profraw"
+          fi
+
           # Run test and capture output (still display to console)
           python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
