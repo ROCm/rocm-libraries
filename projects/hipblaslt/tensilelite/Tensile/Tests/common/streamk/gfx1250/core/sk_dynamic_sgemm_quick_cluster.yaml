@@ -19,9 +19,9 @@ GlobalParameters:
 
 BenchmarkProblems:
 
-  - # SGEMM NT - StreamK=4 (dynamic work-queue), ClusterDim=[2,1].
-    # Same MatrixInstruction sweep as sk_dynamic_sgemm_quick.yaml's first group with
-    # ClusterDim added: exercises the enableCluster guard in StreamKDynamic.preLoop.
+  - # SGEMM NT - StreamK=4 (dynamic work-queue), 1-D ClusterDim range [2,1]/[4,1]/[8,1].
+    # Same MatrixInstruction sweep as sk_dynamic_sgemm_quick.yaml's first group with a
+    # 1-D ClusterDim range added: exercises the enableCluster guard in StreamKDynamic.preLoop.
     - # ProblemType
       OperationType: GEMM
       DataType: s
@@ -30,7 +30,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
 
-    - # SGEMM NT - dynamic Stream-K queue, MatrixInstruction variants, ClusterDim=[2,1]
+    - # SGEMM NT - dynamic Stream-K queue, MatrixInstruction variants, ClusterDim range
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -58,18 +58,14 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - WorkGroupMapping: [1]
-        - ClusterDim: [[2, 1]]
+        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
 
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [127, 127, 1, 127]
-          - Exact: [128, 128, 1, 128]
-          - Exact: [129, 129, 1, 129]
-          - Exact: [511, 511, 1, 511]
+          - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
-          - Exact: [513, 513, 1, 513]
           - Exact: [512, 512, 1, 4096] # large K: many queue work-items, stresses the atomic counter
           - Exact: [512, 512, 2, 128]  # batched

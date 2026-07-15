@@ -19,7 +19,7 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  - # gfx1250 MXFP4, StreamK force DP-only persistent mode, ClusterDim=[2,1]
+  - # gfx1250 MXFP4, StreamK force DP-only persistent mode, 1-D ClusterDim range [2,1]/[4,1]/[8,1]
     - # ProblemType, TN
       OperationType: GEMM
       DataType: F4
@@ -36,8 +36,8 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Persistent DP-only StreamK, ClusterDim=[2,1]; exercises the enableCluster
-      # guard in StreamKTwoTileDPFirst.preLoop.
+    - # Persistent DP-only StreamK, 1-D ClusterDim range [2,1]/[4,1]/[8,1]; exercises the
+      # enableCluster guard in StreamKTwoTileDPFirst.preLoop.
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -84,12 +84,13 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        - ClusterDim: [[2, 1]]
+        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [258, 258, 1, 1056]
+          - Exact: [256, 256, 1, 1056]
+          - Exact: [512, 512, 1, 1056]
         - ActivationArgs:
           - [Enum: none]

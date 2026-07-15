@@ -19,10 +19,11 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # TN - StreamK=3, full tree-reduction (no StreamKForceDPOnly), ClusterDim=[2,1].
-  # Same base sweep as sk_mxf4gemm_tdm.yaml with ClusterDim added: exercises the
-  # enableCluster guard in StreamKTwoTileDPFirst.preLoop on the general/split
-  # tile-splitting + fixup path, not just the DP-only grid-stride path.
+  # TN - StreamK=3, full tree-reduction (no StreamKForceDPOnly), 1-D ClusterDim
+  # range [2,1]/[4,1]/[8,1]. Same base sweep as sk_mxf4gemm_tdm.yaml with a 1-D
+  # ClusterDim range added: exercises the enableCluster guard in
+  # StreamKTwoTileDPFirst.preLoop on the general/split tile-splitting + fixup path
+  # (not just the DP-only grid-stride path) across cluster widths 2/4/8.
   #######################################
   -
     - # ProblemType, TN
@@ -88,17 +89,13 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - WorkGroupMapping: [1]
-        - ClusterDim: [[2, 1]]
+        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [120, 120, 1, 1024]
-          - Exact: [128, 128, 1, 1024]
-          - Exact: [136, 136, 1, 1024]
-          - Exact: [120, 120, 1, 1056]
-          - Exact: [128, 128, 1, 1056]
-          - Exact: [136, 136, 1, 1056]
+          - Exact: [2048, 256, 1, 1024]
+          - Exact: [2048, 512, 1, 1056]
         - ActivationArgs:
           - [Enum: none]

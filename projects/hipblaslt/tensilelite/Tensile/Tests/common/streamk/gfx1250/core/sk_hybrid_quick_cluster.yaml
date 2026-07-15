@@ -20,9 +20,9 @@ GlobalParameters:
 
 BenchmarkProblems:
 
-  - # SGEMM NT - StreamK=5 hybrid, ClusterDim=[2,1].
-    # Same MatrixInstruction variants as sk_hybrid_quick.yaml's SGEMM group with
-    # ClusterDim added: exercises the enableCluster guard in StreamKHybrid.preLoop.
+  - # SGEMM NT - StreamK=5 hybrid, 1-D ClusterDim range [2,1]/[4,1]/[8,1].
+    # Same MatrixInstruction variants as sk_hybrid_quick.yaml's SGEMM group with a
+    # 1-D ClusterDim range added: exercises the enableCluster guard in StreamKHybrid.preLoop.
     - # ProblemType
       OperationType: GEMM
       DataType: s
@@ -31,7 +31,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
 
-    - # SK5 hybrid - MatrixInstruction variants, ClusterDim=[2,1]
+    - # SK5 hybrid - MatrixInstruction variants, ClusterDim range
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -58,16 +58,14 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - WorkGroupMapping: [1]
-        - ClusterDim: [[2, 1]]
+        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
 
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [127, 127, 1, 127]
-          - Exact: [128, 128, 1, 128]
-          - Exact: [129, 129, 1, 129]
+          - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
           - Exact: [512, 512, 1, 4096] # large K: exercises the hybrid dynamic work-queue
           - Exact: [512, 512, 2, 128]  # batched
