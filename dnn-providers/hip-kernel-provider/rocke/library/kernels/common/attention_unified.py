@@ -1686,14 +1686,13 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # mask-limit (nw4) vs the prior per-head bests: D64 13-17% faster (beats Torch
     # at S2048, ~parity elsewhere); D128 beats Torch S2048/S4096. So D64 and D128
     # prefill now share the ring path.
-    # bf16 D128 now shares the ring path: the earlier exclusion assumed the ring
-    # was grafted onto the bf16-WIDE geometry (nw=2, tile=32), which is a
-    # malformed spec on D128 (tile=32 is not a multiple of the production
-    # block_size=64, and that geometry has no cfvst, which the ring requires).
-    # The spec builder's ring branch instead uses the fp16-flash geometry
-    # (nw=4, tile=64, cfvst) -- verified numerically correct on gfx942 (max_abs
-    # 0.00049, no NaN/Inf, GQA + MHA) on both the Python and C++ engines, with
-    # the byte-identity gate GREEN. So D64 and D128 bf16 prefill share the ring.
+    # bf16 D128 now shares the ring path: the earlier exclusion attached the ring
+    # to the non-ring bf16-WIDE geometry (nw=2, no cfvst), which the ring cannot
+    # use -- the ring requires the conflict-free-V store (cfvst) and the wide nw=4
+    # flash geometry. The spec builder's ring branch instead uses the fp16-flash
+    # geometry (nw=4, tile=64, cfvst) -- verified numerically correct on gfx942
+    # (max_abs 0.00049, no NaN/Inf, GQA + MHA) on both the Python and C++ engines,
+    # with the byte-identity gate GREEN. So D64 and D128 bf16 prefill share the ring.
     if not (
         (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
         and problem.head_size in (64, 128)

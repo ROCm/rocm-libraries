@@ -189,8 +189,12 @@ def ref_paged_attn(
         # though the kernel under test is fine. A per-head-chunk loop keeps the
         # peak at chunk*Sq*Sk*4 with identical numerics.
         num_heads = q.shape[1]
-        empty_mask = torch.ones(query_len, kv_len, device=q.device)
-        mask = torch.triu(empty_mask, diagonal=kv_len - query_len + 1).bool()
+        # Build the causal mask directly as bool -- a float [q,k] tensor here
+        # would be 4x the bytes, working against this loop's peak-memory bound.
+        mask = torch.triu(
+            torch.ones(query_len, kv_len, dtype=torch.bool, device=q.device),
+            diagonal=kv_len - query_len + 1,
+        )
         head_bytes = query_len * kv_len * 4
         chunk = max(1, min(num_heads, int(4 * 1024**3) // max(1, head_bytes)))
         out_chunks = []

@@ -4,19 +4,19 @@
 """Regression tests for gfx942 bf16 D128 sharing the sliced-K ring geometry.
 
 Pure Python (no GPU / compilation). #9057 excluded D128 bf16 from the ring
-because the ring was assumed to be grafted onto the bf16-wide geometry
-(nw=2, tile=32), which is a malformed spec on D128 (tile=32 is not a multiple of
-block_size=64, and the wide path has no cfvst, which the ring requires). The fix
-routes D128 bf16 through the fp16-flash ring geometry (nw=4, tile=64, cfvst)
-instead -- verified numerically correct (max_abs 0.00049, GQA + MHA) on both the
-Python and C++ engines with the byte-identity gate GREEN.
+because the ring was attached to the non-ring bf16-wide geometry (nw=2, no
+cfvst), which the ring cannot use -- it requires the conflict-free-V store and
+the wide nw=4 flash geometry. The fix routes D128 bf16 through the fp16-flash
+ring geometry (nw=4, tile=64, cfvst) instead -- verified numerically correct
+(max_abs 0.00049, GQA + MHA) on both the Python and C++ engines with the
+byte-identity gate GREEN.
 
 These lock in:
   1. D128 bf16 prefill now enables the sliced-K ring (no longer excluded).
   2. The resulting spec is the fp16-flash geometry (nw=4, tile=64, ring, cfvst,
      mask-limit) -- i.e. identical to the fp16 D128 spec modulo dtype.
   3. _get_2d_launch_meta computes the grid/block for the ring geometry (nw=4),
-     matching the spec the launcher builds (not the stale bf16-wide nw=2).
+     matching the spec the launcher builds (not the non-ring bf16-wide nw=2).
   4. D64 bf16 and fp16 D128 are unchanged (no regression).
 """
 
@@ -39,11 +39,16 @@ def gfx942(monkeypatch):
     old_arch = au._RESOLVED_ATTENTION_ARCH
     au._RESOLVED_ATTENTION_ARCH = "gfx942"
     # Neutralize any inherited env overrides so we test the default policy.
+    # HIPDNN_GFX942_FLASH_WIDE and _K_LDSSEQ are included because they change the
+    # ring num_warps / LDS-sequence geometry these tests assert on -- a set value
+    # in a dev/CI shell would otherwise make the assertions non-deterministic.
     for var in (
         "HIPDNN_GFX942_K_SLICED_RING",
         "HIPDNN_GFX942_BF16_WIDE",
         "HIPDNN_GFX942_D128_SMALLTILE_DK",
         "HIPDNN_GFX942_FLASH_MLIM",
+        "HIPDNN_GFX942_FLASH_WIDE",
+        "HIPDNN_GFX942_K_LDSSEQ",
     ):
         monkeypatch.delenv(var, raising=False)
     try:
