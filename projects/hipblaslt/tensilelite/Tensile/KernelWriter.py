@@ -5126,6 +5126,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # (buildSubtileFusedStore). postLoopSrdDHoisted stays False so the post-loop init
       # emits the full C+D SRD compute.
 
+    # PostLoopStoreInNll: precompute the "effective alpha == 1" predicate into the
+    # persistent PostLoopAlphaIsOne SGPR BEFORE the main loop, while Alpha / ArgType /
+    # KernArgAddress are live and the fused-store guard sites are still downstream. The
+    # scalar scaleA/scaleB pointers are only materialized in the epilogue (after both
+    # guard sites), so this null-safe check reads them straight from KernArgAddress.
+    module.add(self.computePostLoopAlphaIsOne(kernel))
+
     module.add(mainLoop(self, kernel))
 
     # Deallocate offset registers
@@ -9257,6 +9264,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
+
+    # PostLoopStoreInNll: persistent predicate "effective alpha (= Alpha*scaleA*scaleB)
+    # == 1", precomputed before the main loop (see computePostLoopAlphaIsOne). The fused
+    # store's front guard / post-loop dedup read it to decide whether the epilogue alpha
+    # multiply can be skipped. Defined here (before the nonPostLoopSgpr snapshot below)
+    # so it survives endSummation and is live at BOTH guard sites. Only defined when the
+    # optimization is eligible so non-PLSIN / non-fp32-compute kernels are unaffected.
+    if kernel["PostLoopStoreInNll"] and kernel["ProblemType"]["ComputeDataType"].isSingle():
+      self.defineSgpr("PostLoopAlphaIsOne", 1)
 
     # Whole-kernel scratch for StinkyTofu SwPrefetchInsertionPass (user SGPR; pool order);
     if rocisa.isSupportedByStinkyTofu(self.states.version) and bool(kernel.get("SwInstructionPrefetch", True)):

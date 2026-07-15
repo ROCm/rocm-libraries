@@ -14280,19 +14280,23 @@ class KernelWriterAssembly(KernelWriter):
     # the SK workspace store-branches / partials / fixup — write D directly.
     savedFusedFullTile = self.states.subtileFusedFullTileStore
     self.states.subtileFusedFullTileStore = True
-    # applyAlpha=True: apply the effective alpha (= user Alpha, with scaleA*scaleB
-    # folded in for scalar UseScaleAB) to the accumulators before the paired D store.
-    # globalWriteElements does the scalar-ScaleAB->Alpha fold internally and, for
-    # StreamK, saves/restores the original Alpha around this call (see the oldAlpha
-    # save at ~L15940 and restore at endLabel ~L16314), so the later PLAIN post-loop
-    # store re-folds from the correct original Alpha (no double scaling). With
-    # applyAlpha=False the fold was computed but never applied, dropping scaleA*scaleB
-    # (and any non-unit alpha) and producing wrong D for UseScaleAB kernels. beta==0
-    # and full-tile are guaranteed by the front guard, so no C-read/edge path is added.
+    # applyAlpha: normally True -- apply the effective alpha (= user Alpha, with
+    # scaleA*scaleB folded in for scalar UseScaleAB) to the accumulators before the
+    # paired D store. globalWriteElements does the scalar-ScaleAB->Alpha fold internally
+    # and, for StreamK, saves/restores the original Alpha around this call, so the later
+    # PLAIN post-loop store re-folds from the correct original Alpha (no double scaling).
+    # With applyAlpha=False the per-element alpha multiply is dropped, which is only
+    # correct when the effective alpha is exactly 1.0 -- so this fast path is gated on
+    # the front guard having already proven that (PostLoopAlphaIsOne, checked in
+    # emitFusedStoreGuard). The internal scalar-ScaleAB->Alpha fold still runs but is a
+    # no-op there (Alpha*1*1), so skipping the ~per-element muls is the whole win. When
+    # not eligible we keep applyAlpha=True (always correct). beta==0 and full-tile are
+    # guaranteed by the front guard, so no C-read/edge path is added.
+    skipAlpha = self._plsinAlphaSkipEligible(kernel)
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
-      noGSUBranch=True, applyAlpha=True, betas=[False], edge=False)
+      noGSUBranch=True, applyAlpha=(not skipAlpha), betas=[False], edge=False)
     self.states.subtileFusedFullTileStore = savedFusedFullTile
     self.states.subtileFusedWeave = savedWeave
     module.add(storeModule)
@@ -15440,6 +15444,82 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   ##############################################################################
+  # PostLoopStoreInNll: effective-alpha==1 fast-path support
+  ##############################################################################
+  def _plsinAlphaSkipEligible(self, kernel):
+    """The fused store may skip its epilogue alpha multiply only when this returns
+    True: PostLoopStoreInNll is active and the compute type is fp32 (the scalar-scale
+    fold the epilogue applies asserts a single-register alpha). Everything else keeps
+    the always-correct applyAlpha=True path."""
+    return bool(kernel["PostLoopStoreInNll"]) and kernel["ProblemType"]["ComputeDataType"].isSingle()
+
+  def computePostLoopAlphaIsOne(self, kernel):
+    """Precompute the persistent predicate 'effective alpha == 1' into
+    PostLoopAlphaIsOne, so the fused-store guard can drop the ~per-element epilogue
+    alpha multiply on the fast path.
+
+    effective alpha = Alpha * scaleA * scaleB, where scaleA/scaleB default to 1.0 and
+    are only overridden when the caller passes a non-null AddressScaleA/B pointer (the
+    epilogue dereferences them, see the ScaleAValid/ScaleBValid asm). We use a strictly
+    CONSERVATIVE, fault-free test:
+        flag = (Alpha == 1.0) && (AddressScaleA == null) && (AddressScaleB == null)
+    A null scalar-scale pointer guarantees that scale is exactly 1.0, so flag==1 =>
+    effective alpha is bit-exactly 1.0. We deliberately do NOT dereference the pointers
+    here (a mis-derived offset could then fault the GPU); the only cost of the
+    conservative choice is that a caller passing an explicit pointer-to-1.0 falls back
+    to the (correct) PLAIN NLL store. The default is 0 (=> PLAIN NLL), so any config we
+    do not handle stays correct.
+
+    The scalar scale POINTERS are not loaded until the epilogue (after both guard
+    sites), so we read them straight from KernArgAddress using the same ArgType-aware
+    byte offsets the epilogue loader uses (packed: argLoader offset; UserArgs external
+    struct: externalArgLoader offset)."""
+    module = Module("computePostLoopAlphaIsOne")
+    if not self._plsinAlphaSkipEligible(kernel):
+      return module
+    module.addComment1("PLSIN: precompute effective-alpha==1 (Alpha & null scaleA/B) -> PostLoopAlphaIsOne")
+    flag = "PostLoopAlphaIsOne"
+    # Fail-safe default: 0 (=> PLAIN NLL). Any early return below leaves this in place.
+    module.add(SMovB32(dst=sgpr(flag), src=0, comment="default: assume effective alpha != 1"))
+
+    isScalarScale = (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
+    supportUA = kernel["ProblemType"]["SupportUserArgs"]
+    # Byte offsets of the scaleA/scaleB pointer pair within the current gemm's kernargs.
+    # These mirror loadFusedEpilogueStoreSgprs: packed -> argLoader base offset (scaleA
+    # is the first store-sgpr chunk, packedOff 0); external UserArgs struct ->
+    # externalArgLoader base offset (scaleA chunk extOff 0). Both are compile-time
+    # constants and the loaders are in their post-prologue state here.
+    packedOff = self.argLoader.getOffset() if isScalarScale else None
+    extOff = self.externalArgLoader.getOffset() if (isScalarScale and supportUA) else None
+    ptrBytes = self.states.rpga * self.states.bpr  # scaleA/scaleB are contiguous pointers
+
+    # flag = 1, then AND-in each condition via s_cselect (keep flag on true, else 0).
+    module.add(SMovB32(dst=sgpr(flag), src=1, comment="tentatively effective alpha == 1"))
+    module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
+    module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha!=1 -> not one"))
+
+    if isScalarScale:
+      with self.allocTmpSgpr(4, alignment=4, tag="plsinAlphaOne_ptr") as ptrTmp, \
+           self.allocTmpSgpr(2, tag="plsinAlphaOne_off") as offTmp:
+        ptrA = ptrTmp.idx      # scaleA pointer (2 regs, 4-aligned block)
+        ptrB = ptrTmp.idx + 2  # scaleB pointer (2 regs)
+        off = offTmp.idx
+        off2 = offTmp.idx + 1
+        module.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
+        if supportUA:
+          module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 (UserArgs external struct) ?"))
+          module.add(SCMovB32(dst=sgpr(off), src=extOff, comment="use external-struct scale offset"))
+        module.add(SAddU32(dst=sgpr(off2), src0=sgpr(off), src1=ptrBytes, comment="scaleB ptr kernarg byte offset"))
+        module.add(SLoadB64(dst=sgpr(ptrA, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off), comment="load AddressScaleA pointer"))
+        module.add(SLoadB64(dst=sgpr(ptrB, 2), base=sgpr("KernArgAddress", 2), soffset=sgpr(off2), comment="load AddressScaleB pointer"))
+        module.add(SWaitCnt(kmcnt=0, comment="wait for scale pointer loads"))
+        module.add(SCmpEQU64(src0=sgpr(ptrA, 2), src1=0, comment="AddressScaleA == null (=> scaleA==1) ?"))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleA not null -> not one"))
+        module.add(SCmpEQU64(src0=sgpr(ptrB, 2), src1=0, comment="AddressScaleB == null (=> scaleB==1) ?"))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleB not null -> not one"))
+    return module
+
+  ##############################################################################
   # checkIsBetaZero
   # tmpSgpr is one temp sgpr
   # betaLabel is label to branch to if beta != 0
@@ -15513,6 +15593,46 @@ class KernelWriterAssembly(KernelWriter):
         else:
           module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                   comment="too few K-iters -> not fused"))
+    # Small/medium-K ceiling (B4): PLSIN's win is hiding the FIXED-size epilogue
+    # store behind the terminal MFMAs. That store cost is K-independent, so as a
+    # share of runtime it vanishes as K grows, while the fused path's cost (extra
+    # register pressure -> occupancy, work woven into the now-dominant compute-bound
+    # main loop / terminal MFMA tail) does not. Past a crossover K the trade nets
+    # negative (measured: fp4 256x256 tiles regress for K >= 4k). Fall back to the
+    # PLAIN NLL + normal post-loop store for large-K problems at RUNTIME so a single
+    # kernel stays correct and optimal across the whole K range. maxK is the largest
+    # summation size (in elements) that still fuses; <= 0 disables the ceiling. The
+    # default is the production value; the env var is a TEST-ONLY tuning override
+    # (see plsinDebugEnv) and does not change the shipped kernel when unset.
+    maxK = int(plsinDebugEnv("TENSILE_PLSIN_MAX_K", "4096"))
+    if maxK > 0:
+      module.addComment1("Fused-store guard: small/medium-K only (SizesSum <= %u) else -> %s" % (maxK, targetLabel.getLabelName()))
+      # Use a plain s_cmp_gt_u32 with a 32-bit literal rather than the s_cmpk_gt_u32
+      # K-form: the K-form immediate is only 16 bits, so any maxK > 0xFFFF (e.g. a
+      # large heuristic value or the TEST env override) would fail to assemble.
+      module.add(SCmpGtU32(src0=sgpr("SizesSum+%u" % self.states.unrollIdx), src1=maxK,
+                           comment="fused guard: K (SizesSum) > maxK (large-K)?"))
+      if longBranch:
+        module.add(self.longBranchScc1(targetLabel, posNeg=1,
+                                       comment="large K -> not fused (long)"))
+      else:
+        module.add(SCBranchSCC1(labelName=targetLabel.getLabelName(),
+                                comment="large K -> not fused"))
+    # effective alpha == 1 (Alpha*scaleA*scaleB). Precomputed into PostLoopAlphaIsOne
+    # before the main loop (computePostLoopAlphaIsOne). When it does not hold, the fused
+    # store's applyAlpha=False fast path would drop a real scale -> take the PLAIN NLL +
+    # normal (applyAlpha=True) post-loop store instead. Gated on the same eligibility as
+    # the applyAlpha=False fused path, so the two decisions never diverge.
+    if self._plsinAlphaSkipEligible(kernel):
+      module.addComment1("Fused-store guard: effective alpha (Alpha*scaleA*scaleB) == 1 else -> %s" % targetLabel.getLabelName())
+      module.add(SCmpEQU32(src0=sgpr("PostLoopAlphaIsOne"), src1=1,
+                           comment="fused guard: effective alpha == 1?"))
+      if longBranch:
+        module.add(self.longBranchScc0(targetLabel, posNeg=1,
+                                       comment="effective alpha != 1 -> not fused (long)"))
+      else:
+        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
+                                comment="effective alpha != 1 -> not fused"))
     # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
     # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
     with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:

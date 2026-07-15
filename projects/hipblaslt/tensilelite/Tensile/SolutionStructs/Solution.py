@@ -4232,9 +4232,17 @@ class Solution(collections.abc.Mapping):
     _disableUnsupportedRuntimeStaggerU(state)
 
     # PostLoopStoreInNll optimization check (self-contained gate).
+    # OPT-IN: the global default is now False (see GlobalParameters.py); a solution
+    # must explicitly request PostLoopStoreInNll: True to reach this gate. B4 flipped
+    # the default from opt-out to opt-in so configs the gate does not anticipate are
+    # unaffected by the feature.
     # Scope: fp4-input (MXFP4) + UseSubtileImpl only. Fuses the 16bit paired
     # buffer_store_dwordx4 (sba=0 + sba=1) into the NLL. Auto-disable (do NOT
     # reject) whenever any precondition fails so unrelated configs are unaffected.
+    # The small/medium-K restriction is enforced at RUNTIME (emitFusedStoreGuard's
+    # SizesSum <= maxK ceiling), not here, because the summation size K is a runtime
+    # problem dimension unknown at solution-derivation time; large-K problems fall
+    # through to the plain post-loop store within the same kernel.
     if state["PostLoopStoreInNll"]:
       isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
                  state["ProblemType"]["DataTypeB"].isFloat4()
@@ -4286,9 +4294,9 @@ class Solution(collections.abc.Mapping):
       # dead input tiles to the store pool). Non-spill large tiles (e.g. MT320x128)
       # and all <=256x256 tiles are unaffected. Fall back to the normal (non-fused)
       # post-loop store for spill tiles.
-      # MIWaveTile is only present for EnableMatrixInstruction solutions; this
-      # gate runs for every solution (PLSIN defaults on), so non-MI kernels would
-      # KeyError here. Guard the lookup -- a missing/short MIWaveTile just
+      # MIWaveTile is only present for EnableMatrixInstruction solutions; a non-MI
+      # kernel that opted into PLSIN would KeyError here. Guard the lookup -- a
+      # missing/short MIWaveTile just
       # disqualifies PLSIN (non-MI kernels are already excluded via
       # EnableMatrixInstruction below).
       miwt = state.get("MIWaveTile")
