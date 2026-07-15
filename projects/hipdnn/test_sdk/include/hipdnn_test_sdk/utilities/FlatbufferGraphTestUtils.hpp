@@ -124,7 +124,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
     hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -215,7 +216,9 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormWithVarianceInferenceG
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -665,7 +668,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
 inline flatbuffers::FlatBufferBuilder
     createValidBatchnormFwdTrainingGraph(const std::vector<int64_t>& strides = {588, 196, 14, 1},
                                          const std::vector<int64_t>& dims = {1, 3, 14, 14},
-                                         bool withMeanVariance = true)
+                                         bool withMeanVariance = true,
+                                         bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -768,7 +772,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1708,7 +1714,8 @@ inline flatbuffers::FlatBufferBuilder
                                    hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                   bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -1773,7 +1780,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1887,7 +1896,8 @@ inline flatbuffers::FlatBufferBuilder
                             hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
                             = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                             hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                            bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -1951,7 +1961,9 @@ inline flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
 }
