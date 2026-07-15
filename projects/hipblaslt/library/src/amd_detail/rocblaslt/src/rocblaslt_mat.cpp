@@ -252,8 +252,11 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags = streamKFlags;
 
+    // Forward any composable fused-epilogue chain (e.g. fused RMSNorm) attached via
+    // HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE so ConstructTensileProblem can drive the
+    // TensileLite PartialRMS problem flags. Non-owning; the descriptor outlives the call.
+    problem.fused_epilogue = matmul_descr->fused_epilogue;
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    problem.fused_epilogue      = matmul_descr->fused_epilogue;
     problem.fused_a2a_world     = handle->device_comm_world;
     problem.fused_a2a_rank      = handle->device_comm_rank;
     problem.fused_a2a_peer_flag = handle->device_comm_peer_flags;
@@ -461,9 +464,10 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    // Forward the fused-epilogue chain (ext hipblaslt_ext::Gemm create path) so the cached
+    // problem drives PartialRMS solution selection, matching the C-API matmul/heuristic paths.
     problem.fused_epilogue = matmul_descr->fused_epilogue;
-
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // The all-to-all stage is available through hipblasLtMatmul only.
     RocblasltFusedEpilogueInfo fused_info;
     if(rocblaslt_resolve_fused_epilogue(problem.fused_epilogue, fused_info)
