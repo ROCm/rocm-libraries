@@ -1585,19 +1585,19 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
 
     double tolerance = 1e-6;
 
-    for(std::size_t bidx = 0; bidx < n; bidx++)
+    for(std::size_t bidx = 0; bidx < ss_n_batch; bidx++)
     { // via mini_batch
-        for(std::size_t cidx = 0; cidx < c; cidx++)
+        for(std::size_t cidx = 0; cidx < ss_channels; cidx++)
         { // via mini_batch
-            for(std::size_t row = 0; row < h; row++)
+            for(std::size_t row = 0; row < ss_height; row++)
             { // via rows
-                for(std::size_t column = 0; column < w; column++)
+                for(std::size_t column = 0; column < ss_width; column++)
                 { // via columns
-                    if(abs(dx_out(bidx, cidx, row, column)) > tolerance)
+                    if(abs(dscale(bidx, cidx, row, column)) > tolerance)
                     {
                         GTEST_FAIL()
                             << "dx_out should be zero, but found an element with an absolute value "
-                            << dx_out(bidx, cidx, row, column) << " at location[" << bidx << ", "
+                            << dscale(bidx, cidx, row, column) << " at location[" << bidx << ", "
                             << cidx << ", " << row << ", " << column
                             << "] with the tolerance set to " << tolerance
                             << ". This could be an indicator of a bug in the variance calculation";
