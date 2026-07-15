@@ -1472,6 +1472,7 @@
     'StaggerU',
     'StaggerUMapping',
     'StaggerUStride',
+    'StinkySubtile',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
