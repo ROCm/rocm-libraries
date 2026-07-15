@@ -182,6 +182,12 @@ jobs:
           ls -la "${PROFRAW_DIR}" 2>/dev/null || echo "(coverage-profraw dir missing)"
           echo "-- find *.profraw under workspace, /tmp, HOME --"
           find "${GITHUB_WORKSPACE}" /tmp "${HOME}" -name '*.profraw' 2>/dev/null | head -50 || true
+          _SO="${BUILD}/lib/lib${PROJECT}.so"
+          echo "-- instrumentation check: __llvm_profile symbol count in ${_SO} --"
+          "${LLVM_BIN}/llvm-nm" "${_SO}" 2>/dev/null | grep -c "__llvm_profile" || echo "(nm failed / lib missing)"
+          "${LLVM_BIN}/llvm-nm" "${_SO}" 2>/dev/null | grep "__llvm_profile" | head -8 || true
+          echo "-- test binaries under build --"
+          find "${GITHUB_WORKSPACE}/build" -type f -name "*${PROJECT}*test*" 2>/dev/null | head -10 || true
           echo "== end profraw discovery =="
           # --- END TEMP DEBUG ---
           mkdir -p "${REPORT_DIR}"
