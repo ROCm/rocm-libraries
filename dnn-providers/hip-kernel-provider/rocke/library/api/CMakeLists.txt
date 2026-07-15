@@ -147,7 +147,7 @@ add_subdirectory(src)
 # still fully analyzed. Remove this once rocke and hipDNN share a C++ standard.
 if(ENABLE_CLANG_TIDY)
     foreach(_rocke_tidy_target rocke_client_impl rocke_client rocke_client_tests
-                               rocke_client_integration_tests rocke_client_aot_probe_tests)
+                               rocke_client_integration_tests)
         if(TARGET ${_rocke_tidy_target})
             set_property(TARGET ${_rocke_tidy_target} APPEND PROPERTY
                          CXX_CLANG_TIDY "-header-filter=rocke/library/api")
@@ -177,8 +177,6 @@ if(ROCKE_CLIENT_ENABLE_TESTS)
             OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_tests_test")
         set_target_properties(rocke_client_integration_tests PROPERTIES
             OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_integration_tests_test")
-        set_target_properties(rocke_client_aot_probe_tests PROPERTIES
-            OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_aot_probe_tests_test")
         # Build one string: set_property(APPEND_STRING) joins multiple value
         # arguments with ";", which corrupts the generated CTestTestfile.
         set(_ROCKE_CLIENT_CTEST_ENTRIES "\n# rocke-client installed tests\n")
@@ -190,10 +188,6 @@ if(ROCKE_CLIENT_ENABLE_TESTS)
             "add_test(rocke_client_integration_tests \"../${_rocke_client_parent_prefix}_rocke_client_integration_tests_test\")\n")
         string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
             "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
-        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-            "add_test(rocke_client_aot_probe_tests \"../${_rocke_client_parent_prefix}_rocke_client_aot_probe_tests_test\")\n")
-        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-            "set_tests_properties(rocke_client_aot_probe_tests PROPERTIES LABELS \"integration_test;quick\")\n")
         set_property(GLOBAL APPEND_STRING PROPERTY
             "EXTERNAL_TEST_INSTALL_STAGING_${_rocke_client_parent_prefix}"
             "${_ROCKE_CLIENT_CTEST_ENTRIES}")
@@ -216,10 +210,6 @@ if(ROCKE_CLIENT_ENABLE_TESTS)
                    "add_test(rocke_client_integration_tests \"../rocke_client_integration_tests\")\n")
             string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
                    "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
-            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-                   "add_test(rocke_client_aot_probe_tests \"../rocke_client_aot_probe_tests\")\n")
-            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-                   "set_tests_properties(rocke_client_aot_probe_tests PROPERTIES LABELS \"integration_test;quick\")\n")
 
             set(_ROCKE_CLIENT_INSTALLED_CTEST "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
             file(WRITE "${_ROCKE_CLIENT_INSTALLED_CTEST}"

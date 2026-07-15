@@ -4,21 +4,14 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
-#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+// Plugin log capture is set up per-test via hipdnnSetUserLogCallback_ext (see
+// ScopedUserLogCallback in TestRockeClientAotLoad.cpp): plugin markers reach the
+// process only through the backend logger, so a backend user callback is the
+// reliable sink. No process-wide log recording is installed here.
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
-
-    // Register the chained recording callback: plugin logs reach both the
-    // SHARED LogRecording instance AND stderr (logChainedRecordingCallback
-    // with force=true calls simpleStderrOutputCallback regardless of
-    // HIPDNN_LOG_LEVEL). This makes testing::internal::CaptureStderr() capture
-    // the AOT_PROBE_LOAD_OK / AOT_PROBE_LOAD_FAILED markers emitted by
-    // AotCatalog::loadForDevice() — the primary observable for the AOT load
-    // integration tests.
-    hipdnn_test_sdk::utilities::initializeChainedTestLogRecordingShared(
-        hipdnn_test_sdk::utilities::simpleStderrOutputCallback);
 
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);

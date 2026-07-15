@@ -12,11 +12,14 @@
 //   hipdnnBackendFinalize -> engine heuristic -> selectInstance ->
 //   catalogForDevice(deviceId, arch) [first call, so loadForDevice runs].
 //
-// Log capture: main.cpp registers initializeChainedTestLogRecordingShared()
-//   (logChainedRecordingCallback with force=true), routing plugin logs to
-//   stderr regardless of HIPDNN_LOG_LEVEL. testing::internal::CaptureStderr()
-//   captures that output so tests can assert the stable markers emitted by
-//   loadForDevice() without GPU result validation.
+// Log capture follows the backend user-callback pattern (see
+//   backend/tests/TestUserLoggingApis.cpp). Plugin markers flow through the
+//   backend logger, not the process stderr fd, so testing::internal::
+//   CaptureStderr() cannot see them reliably (the console sink is async and
+//   races the capture window) and the data_sdk SHARED recorder is overridden by
+//   the backend's own callback registration. The fixture registers a SYNC user
+//   log callback via hipdnnSetUserLogCallback_ext into the ISOLATED
+//   LogRecording buffer, a sibling sink that receives plugin logs synchronously.
 //
 // TODO(AICK-1484): this whole test is temporary. It proves the load wiring by
 //   asserting on log markers; replace it with a real E2E test (graph submit +
@@ -32,12 +35,14 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <string>
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -99,31 +104,6 @@ public:
 
 private:
     hipStream_t _stream = nullptr;
-};
-
-// RAII: elevate the global backend log level and restore it on scope exit, so an
-// early ASSERT_* below cannot leak the elevated level into later tests.
-class ScopedGlobalLogLevel
-{
-public:
-    explicit ScopedGlobalLogLevel(hipdnnSeverity_t level)
-    {
-        EXPECT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&_original), HIPDNN_STATUS_SUCCESS);
-        EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(level), HIPDNN_STATUS_SUCCESS);
-    }
-
-    ~ScopedGlobalLogLevel()
-    {
-        EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(_original), HIPDNN_STATUS_SUCCESS);
-    }
-
-    ScopedGlobalLogLevel(const ScopedGlobalLogLevel&) = delete;
-    ScopedGlobalLogLevel& operator=(const ScopedGlobalLogLevel&) = delete;
-    ScopedGlobalLogLevel(ScopedGlobalLogLevel&&) = delete;
-    ScopedGlobalLogLevel& operator=(ScopedGlobalLogLevel&&) = delete;
-
-private:
-    hipdnnSeverity_t _original{HIPDNN_SEV_OFF};
 };
 
 // ---- Helpers ---------------------------------------------------------------
@@ -204,12 +184,61 @@ hipdnn_frontend::graph::Graph buildSdpaForwardGraph()
 }
 
 } // namespace
+// Fixture: loads the rocke-client plugin, records plugin logs via the backend
+// user-callback API (ISOLATED, sync), and restores the backend log level after
+// each test. Mirrors backend/tests/TestUserLoggingApis.cpp.
+class TestRockeClientAotLoad : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        setRockeClientPluginPath();
+        ASSERT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&_originalLogLevel), HIPDNN_STATUS_SUCCESS);
+        // Clear any user callback a prior test may have left registered.
+        clearUserLogCallback();
+    }
+
+    void TearDown() override
+    {
+        clearUserLogCallback();
+        EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(_originalLogLevel), HIPDNN_STATUS_SUCCESS);
+    }
+
+    // Register the ISOLATED recording callback (sync) and raise the backend log
+    // level to INFO so loadForDevice() emits its markers. The userHandle must be
+    // non-null and forms part of the (callback, handle) key; the ISOLATED
+    // callback ignores its value, so the fixture address is used.
+    void capturePluginLogsAtInfo()
+    {
+        ASSERT_EQ(
+            hipdnnSetUserLogCallback_ext(
+                hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+                HIPDNN_SEV_INFO,
+                HIPDNN_LOG_CALLBACK_SYNC,
+                this),
+            HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+    }
+
+    void clearUserLogCallback()
+    {
+        // SEV_OFF removes the (callback, handle) registration; status is ignored
+        // because the callback may not be registered.
+        hipdnnSetUserLogCallback_ext(
+            hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+            HIPDNN_SEV_OFF,
+            HIPDNN_LOG_CALLBACK_SYNC,
+            this);
+    }
+
+    hipdnnSeverity_t _originalLogLevel{HIPDNN_SEV_OFF};
+};
 
 // ============================================================================
 // POSITIVE: valid probe bundle -> load succeeds -> LOAD OK marker in stderr
 // ============================================================================
 
-TEST(TestRockeClientAotLoad, ValidBundleDrivesAotLoad)
+TEST_F(TestRockeClientAotLoad, ValidBundleDrivesAotLoad)
 {
     // The lazy load only fires when a HIP device is present: loadForDevice
     // returns empty immediately when no device is available.
@@ -234,12 +263,9 @@ TEST(TestRockeClientAotLoad, ValidBundleDrivesAotLoad)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
         "ROCKE_CLIENT_AOT_BUNDLE_DIR", validDir.string());
 
-    // Backend + plugin log level must be INFO so loadForDevice emits its markers;
-    // restored on scope exit even if an ASSERT below fires.
-    const ScopedGlobalLogLevel logLevel{HIPDNN_SEV_INFO};
-
-    // Load plugin DSO: plugin's log level is set to INFO at load time.
-    setRockeClientPluginPath();
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    capturePluginLogsAtInfo();
 
     hipdnnStatus_t createStatus = HIPDNN_STATUS_INTERNAL_ERROR;
     const HipdnnHandle handle{&createStatus};
@@ -248,33 +274,30 @@ TEST(TestRockeClientAotLoad, ValidBundleDrivesAotLoad)
     const HipStream stream;
     ASSERT_EQ(hipdnnSetStream(handle.get(), stream.get()), HIPDNN_STATUS_SUCCESS);
 
-    // Capture stderr around the first selection attempt. is_supported_ext drives:
-    //   hipdnnBackendFinalize -> selectInstance -> catalogForDevice (first call)
-    //   -> loadForDevice -> kpack_open -> kpack_get_kernel -> hipModuleLoadData
-    //   -> hipModuleGetFunction -> hipModuleUnload -> emits AOT_PROBE_LOAD_OK.
-    testing::internal::CaptureStderr();
-
+    // is_supported_ext drives: hipdnnBackendFinalize -> selectInstance ->
+    // catalogForDevice (first call) -> loadForDevice -> kpack_open ->
+    // kpack_get_kernel -> hipModuleLoadData -> hipModuleGetFunction ->
+    // hipModuleUnload -> emits AOT_PROBE_LOAD_OK.
     auto graph = buildSdpaForwardGraph();
     const auto result = graph.is_supported_ext(handle.get());
 
-    const std::string captured = testing::internal::GetCapturedStderr();
-
-    // The engine always declines (empty catalog, probe only); that's expected.
-    // The decisive assertion is the SUCCESS marker in the captured plugin logs.
-    ASSERT_NE(captured.find(rocke_client::dispatcher::AOT_PROBE_LOAD_OK), std::string::npos)
+    // The engine always declines (empty catalog, probe only); that is expected.
+    // The decisive assertion is the SUCCESS marker in the recorded plugin logs.
+    ASSERT_TRUE(recorder.waitForLogsContaining(
+        {std::string(rocke_client::dispatcher::AOT_PROBE_LOAD_OK)}, std::chrono::seconds(5)))
         << "loadForDevice() did not emit '" << rocke_client::dispatcher::AOT_PROBE_LOAD_OK
         << "'. Either the probe bundle was not reached (check ROCKE_CLIENT_AOT_BUNDLE_DIR) "
            "or the load path was silently skipped. Plugin log capture:\n"
-        << captured;
+        << recorder.getRecordedLogsAsString();
 
-    static_cast<void>(result); // engine declines — expected; not asserted
+    static_cast<void>(result); // engine declines, expected, not asserted
 }
 
 // ============================================================================
 // NEGATIVE: corrupt kpack -> load fails loudly -> LOAD FAILED marker in stderr
 // ============================================================================
 
-TEST(TestRockeClientAotLoad, CorruptBundleFailsLoudly)
+TEST_F(TestRockeClientAotLoad, CorruptBundleFailsLoudly)
 {
     // GPU required: without a device, loadForDevice skips the bundle entirely.
     SKIP_IF_NO_DEVICES();
@@ -296,10 +319,9 @@ TEST(TestRockeClientAotLoad, CorruptBundleFailsLoudly)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
         "ROCKE_CLIENT_AOT_BUNDLE_DIR", corruptDir.string());
 
-    // Log level INFO so loadForDevice emits its markers; restored on scope exit.
-    const ScopedGlobalLogLevel logLevel{HIPDNN_SEV_INFO};
-
-    setRockeClientPluginPath();
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    capturePluginLogsAtInfo();
 
     hipdnnStatus_t createStatus = HIPDNN_STATUS_INTERNAL_ERROR;
     const HipdnnHandle handle{&createStatus};
@@ -308,24 +330,21 @@ TEST(TestRockeClientAotLoad, CorruptBundleFailsLoudly)
     const HipStream stream;
     ASSERT_EQ(hipdnnSetStream(handle.get(), stream.get()), HIPDNN_STATUS_SUCCESS);
 
-    // Capture stderr: loadForDevice reaches kpack_open, which rejects the
-    // corrupt file (invalid KPAK magic), logs AOT_PROBE_LOAD_FAILED, and
-    // returns an empty catalog. No exception escapes (noexcept path).
-    testing::internal::CaptureStderr();
-
+    // loadForDevice reaches kpack_open, which rejects the corrupt file (invalid
+    // KPAK magic), logs AOT_PROBE_LOAD_FAILED, and returns an empty catalog. No
+    // exception escapes (noexcept path).
     auto graph = buildSdpaForwardGraph();
     const auto result = graph.is_supported_ext(handle.get());
 
-    const std::string captured = testing::internal::GetCapturedStderr();
-
-    // The FAIL marker proves the load path was executed and failed loudly —
-    // not silently skipped. loadForDevice() does NOT throw (noexcept path):
-    // the error is an ERROR-level log, not an exception.
-    ASSERT_NE(captured.find(rocke_client::dispatcher::AOT_PROBE_LOAD_FAILED), std::string::npos)
+    // The FAIL marker proves the load path was executed and failed loudly, not
+    // silently skipped. loadForDevice() does NOT throw (noexcept path): the
+    // error is an ERROR-level log, not an exception.
+    ASSERT_TRUE(recorder.waitForLogsContaining(
+        {std::string(rocke_client::dispatcher::AOT_PROBE_LOAD_FAILED)}, std::chrono::seconds(5)))
         << "loadForDevice() did not emit '" << rocke_client::dispatcher::AOT_PROBE_LOAD_FAILED
         << "'. Either the corrupt kpack was not reached (check ROCKE_CLIENT_AOT_BUNDLE_DIR) "
            "or the load path was silently skipped.\nPlugin log capture:\n"
-        << captured;
+        << recorder.getRecordedLogsAsString();
 
     static_cast<void>(result);
 }
