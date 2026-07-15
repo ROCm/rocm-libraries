@@ -6,6 +6,7 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -98,30 +99,10 @@ class AttentionModel : public CostModel {
 /// Registry key: (model, target, fidelity).
 using model_key_t = std::tuple<model_t, target_t, prediction_modes_t>;
 
-}  // namespace
-
-scored_configs_t CostModel::score_candidates(
-    const problem_t& problem,
-    const hardware_t& hardware,
-    const std::vector<config_t>& configs,
-    const std::vector<std::size_t>& survivors) const {
-  // Default: score each survivor once at full detail, dropping infeasible /
-  // disqualified configs. Single-level models (and the simulation fidelity) use
-  // this directly; leveled models override to refine internally.
-  scored_configs_t scored;
-  scored.reserve(survivors.size());
-  for (std::size_t idx : survivors) {
-    const config_t& config = configs[idx];
-    if (!feasible(problem, hardware, config)) continue;
-    const double cost = latency(problem, hardware, config);
-    if (cost != std::numeric_limits<double>::max()) scored.emplace_back(cost, idx);
-  }
-  std::stable_sort(scored.begin(), scored.end(),
-                   [](const auto& a, const auto& b) { return a.first < b.first; });
-  return scored;
-}
-
-const CostModel& get_model(model_t model, target_t target, prediction_modes_t fidelity) {
+/// Resolve a (model, target, fidelity) triple to its owned model, or nullptr if
+/// unregistered. Shared by the throwing get_model and the non-throwing has_model so
+/// the registry has a single definition.
+const CostModel* find_model(model_t model, target_t target, prediction_modes_t fidelity) {
   // Stateless, thread-safe singletons. One instance per distinct behavior is
   // shared across every (target) it applies to.
   static const GemmModel      gemm_estimation{prediction_modes_t::estimation};
@@ -153,12 +134,42 @@ const CostModel& get_model(model_t model, target_t target, prediction_modes_t fi
   }();
 
   auto it = registry.find({model, target, fidelity});
-  if (it == registry.end()) {
-    throw std::runtime_error(
-        "origami::get_model: no cost model registered for the requested "
-        "(model, target, fidelity) combination");
+  return it == registry.end() ? nullptr : it->second;
+}
+
+}  // namespace
+
+scored_configs_t CostModel::score_candidates(
+    const problem_t& problem,
+    const hardware_t& hardware,
+    const std::vector<config_t>& configs,
+    const std::vector<std::size_t>& survivors) const {
+  // Default: score each survivor once at full detail, dropping infeasible /
+  // disqualified configs. Single-level models (and the simulation fidelity) use
+  // this directly; leveled models override to refine internally.
+  scored_configs_t scored;
+  scored.reserve(survivors.size());
+  for (std::size_t idx : survivors) {
+    const config_t& config = configs[idx];
+    if (!feasible(problem, hardware, config)) continue;
+    const double cost = latency(problem, hardware, config);
+    if (cost != std::numeric_limits<double>::max()) scored.emplace_back(cost, idx);
   }
-  return *it->second;
+  std::stable_sort(scored.begin(), scored.end(),
+                   [](const auto& a, const auto& b) { return a.first < b.first; });
+  return scored;
+}
+
+const CostModel& get_model(model_t model, target_t target, prediction_modes_t fidelity) {
+  if (const CostModel* m = find_model(model, target, fidelity)) { return *m; }
+  throw std::runtime_error(
+      "origami::get_model: no cost model registered for (model=" + model_to_string(model) +
+      ", target=" + target_to_string(target) +
+      ", fidelity=" + prediction_modes_to_string(fidelity) + ")");
+}
+
+bool has_model(model_t model, target_t target, prediction_modes_t fidelity) {
+  return find_model(model, target, fidelity) != nullptr;
 }
 
 }  // namespace origami

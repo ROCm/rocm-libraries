@@ -105,4 +105,19 @@ ORIGAMI_EXPORT const CostModel& get_model(model_t model,
                                           target_t target,
                                           prediction_modes_t fidelity);
 
+/**
+ * @brief Whether a cost model is registered for a (model, target, fidelity) triple.
+ *
+ * Non-throwing companion to @ref get_model: returns false instead of throwing for
+ * unregistered combinations. Lets callers validate a pipeline's phases up front
+ * (@see make_simulation_pipeline) so misuse fails at construction rather than far
+ * downstream at ranking time.
+ *
+ * @param model Operation model (gemm or attention).
+ * @param target Target backend whose kernels are being modeled.
+ * @param fidelity Prediction fidelity (estimation or simulation).
+ * @return bool True if the combination resolves to a registered model.
+ */
+ORIGAMI_EXPORT bool has_model(model_t model, target_t target, prediction_modes_t fidelity);
+
 }  // namespace origami

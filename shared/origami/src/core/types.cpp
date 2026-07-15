@@ -11,8 +11,11 @@ namespace origami {
 
 runtime_options::runtime_options() { update_from_env(); }
 
-runtime_options::runtime_options(bool debug, bool heuristics, double variance)
-    : debug_enabled(debug), heuristics_enabled(heuristics), heuristics_variance(variance) {}
+runtime_options::runtime_options(bool debug, bool heuristics, double variance, bool leveled)
+    : debug_enabled(debug),
+      heuristics_enabled(heuristics),
+      heuristics_variance(variance),
+      leveled_estimation(leveled) {}
 
 bool runtime_options::read_debug_from_env() {
   const char* env = std::getenv("ANALYTICAL_GEMM_DEBUG");
@@ -38,10 +41,18 @@ double runtime_options::read_heuristics_variance_from_env() {
   return default_variance;
 }
 
+bool runtime_options::read_leveled_estimation_from_env() {
+  // strtol(base 0) so "1", "0x1", etc. all enable it -- matches the form the
+  // hipBLASLt caller used before this moved into origami.
+  const char* env = std::getenv("ORIGAMI_LEVELED_ESTIMATION");
+  return env != nullptr && std::strtol(env, nullptr, 0) != 0;
+}
+
 void runtime_options::update_from_env() {
   debug_enabled       = read_debug_from_env();
   heuristics_enabled  = read_heuristics_from_env();
   heuristics_variance = read_heuristics_variance_from_env();
+  leveled_estimation  = read_leveled_estimation_from_env();
 }
 
 int datatype_to_bits(data_type_t type) {
@@ -99,6 +110,33 @@ std::string datatype_to_string(data_type_t type) {
     case data_type_t::BFloat6: return "BFloat6";
     case data_type_t::Float4: return "Float4";
     default: return "Invalid";
+  }
+}
+
+std::string model_to_string(model_t model) {
+  switch (model) {
+    case model_t::gemm:      return "gemm";
+    case model_t::attention: return "attention";
+    default:                 return "unknown";
+  }
+}
+
+std::string target_to_string(target_t target) {
+  switch (target) {
+    case target_t::generic:           return "generic";
+    case target_t::tensilelite:       return "tensilelite";
+    case target_t::rocroller:         return "rocroller";
+    case target_t::triton:            return "triton";
+    case target_t::composable_kernel: return "composable_kernel";
+    default:                          return "unknown";
+  }
+}
+
+std::string prediction_modes_to_string(prediction_modes_t mode) {
+  switch (mode) {
+    case prediction_modes_t::estimation: return "estimation";
+    case prediction_modes_t::simulation: return "simulation";
+    default:                             return "unknown";
   }
 }
 

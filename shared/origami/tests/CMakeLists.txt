@@ -36,13 +36,6 @@ catch_discover_tests(origami-tests
     DISCOVERY_MODE PRE_TEST
 )
 
-# Standalone scoring/selection-time benchmark (kept out of the CTest correctness
-# run so timing never gates correctness). Build-only target.
-add_executable(origami-bench EXCLUDE_FROM_ALL)
-target_sources(origami-bench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/bench_scoring.cpp")
-target_include_directories(origami-bench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(origami-bench PRIVATE roc::origami Catch2::Catch2WithMain)
-
 # Install CTestTestfile.cmake for installed Origami tests
 set(_ctest_content [=[
 # Copyright Advanced Micro Devices, Inc., or its affiliates.

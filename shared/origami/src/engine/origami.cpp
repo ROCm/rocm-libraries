@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "origami/attention.hpp"
@@ -814,23 +816,32 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   scored_configs_t scored;
 
   if (pipeline.phases.empty()) {
-    // Single pass: score every config once with the analytical estimation model
-    // (resolved per the config's target), no pruning. Simulation is a ranking
-    // strategy: request it via a pipeline (@see make_cascade_pipeline), not a
-    // single pass.
-    scored = score_and_sort(
-        configs, all_indices(configs.size()),
-        [&](const config_t& config, std::size_t /*idx*/) -> double {
-          const CostModel& cost_model =
-              get_model(model, config.target, prediction_modes_t::estimation);
-          if (!cost_model.feasible(problem, hardware, config))
-            return std::numeric_limits<double>::max();
-          return cost_model.latency(problem, hardware, config);
-        });
+    if (runtime_options::get().leveled_estimation) {
+      // Leveled: the GEMM estimation model refines internally
+      // (score_candidates -> score_estimation_leveled, which also handles split-K).
+      // Estimation is target-agnostic, so resolve the model once; the per-config
+      // target still governs feasibility inside the cascade.
+      const CostModel& cost_model =
+          get_model(model, configs.front().target, prediction_modes_t::estimation);
+      scored = cost_model.score_candidates(problem, hardware, configs, all_indices(configs.size()));
+    } else {
+      // Flat single pass: score every config once (model resolved per the config's
+      // target), no pruning.
+      scored = score_and_sort(
+          configs, all_indices(configs.size()),
+          [&](const config_t& config, std::size_t /*idx*/) -> double {
+            const CostModel& cost_model =
+                get_model(model, config.target, prediction_modes_t::estimation);
+            if (!cost_model.feasible(problem, hardware, config))
+              return std::numeric_limits<double>::max();
+            return cost_model.latency(problem, hardware, config);
+          });
+    }
 
     // Every candidate was infeasible: rank them all at max latency rather than
     // failing, so the caller still gets a (poor but usable) result.
-    if (scored.empty()) { scored = fallback_ranking(all_indices(configs.size())); }
+    if (scored.empty()) 
+      scored = fallback_ranking(all_indices(configs.size()));
   } else {
     // Cross-model cascade: each phase runs one whole cost model over the current
     // survivors and prunes between phases. There is no per-config carry-over
@@ -925,9 +936,29 @@ prediction_result_t select_config(const problem_t& problem,
   return rank_configs(problem, hardware, configs, model, pipeline)[0];
 }
 
-ranking_pipeline_t make_cascade_pipeline(model_t model,
+// SAMPLE/EXAMPLE of how to use the multi-phase pipeline option: an
+// estimation phase followed by a simulation phase over its survivors. Callers who
+// need a different shape can build a ranking_pipeline_t directly instead.
+ranking_pipeline_t make_simulation_pipeline(model_t model,
                                          target_t target,
                                          std::size_t topk_after_estimation) {
+  // Fail fast: this factory bakes in an estimation phase and a simulation phase for
+  // (model, target). If either has no registered cost model, reject it here at
+  // construction with a clear message rather than throwing far downstream inside
+  // get_model when the pipeline is finally run (@see has_model). Simulation is
+  // currently only wired for (gemm, tensilelite).
+  for (prediction_modes_t fidelity :
+       {prediction_modes_t::estimation, prediction_modes_t::simulation}) {
+    if (!has_model(model, target, fidelity)) {
+      throw std::invalid_argument(
+          std::string("origami::make_simulation_pipeline: no ") +
+          prediction_modes_to_string(fidelity) +
+          " cost model is registered for (model=" + model_to_string(model) +
+          ", target=" + target_to_string(target) +
+          "). Simulation is currently only available for (model=gemm, target=tensilelite).");
+    }
+  }
+
   ranking_pipeline_t pipeline;
 
   // Phase 1: cheap analytical estimation, keep the best topk_after_estimation.

@@ -157,12 +157,16 @@ ORIGAMI_EXPORT std::vector<prediction_result_t> select_topk_configs(const proble
  * simulation model (no further pruning). Simulation must be registered for
  * (@p model, @p target); today that is gemm + tensilelite.
  *
+ * This factory is the canonical SAMPLE/EXAMPLE of how to use the multi-phase
+ * cascade option (an estimation phase followed by a simulation phase); callers
+ * who need a different shape can build a ranking_pipeline_t directly.
+ *
  * @param model Operation model (gemm or attention).
  * @param target Target backend whose kernels are modeled.
  * @param topk_after_estimation Survivors kept after the estimation phase.
  * @return ranking_pipeline_t The configured cascade pipeline.
  */
-ORIGAMI_EXPORT ranking_pipeline_t make_cascade_pipeline(model_t model,
+ORIGAMI_EXPORT ranking_pipeline_t make_simulation_pipeline(model_t model,
                                                         target_t target,
                                                         std::size_t topk_after_estimation);
 

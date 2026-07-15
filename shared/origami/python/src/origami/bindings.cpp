@@ -3,6 +3,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
@@ -246,12 +247,13 @@ NB_MODULE(origami, m) {
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
       .def_rw("tile_elements", &origami::gemm::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::gemm::context_t::output_tile_bytes)
-      // wgm is now lazily predicted and memoized in context_t::wgm (see get_wgm).
-      // Expose it read-only: returns the memoized mapping once the analytical path
-      // has run, otherwise the default mapping.
-      .def_prop_ro("wgm", [](const origami::gemm::context_t& c) {
-        return c.wgm.value_or(origami::workgroup_mapping_t{0, 8, 1});
-      });
+      .def_ro("wgm", &origami::gemm::context_t::wgm)
+      .def("get_wgm",
+           &origami::gemm::context_t::get_wgm,
+           nanobind::arg("problem"),
+           nanobind::arg("hardware"),
+           nanobind::arg("config"),
+           "Lazily predict (and memoize) the workgroup mapping, returning it.");
 
   nanobind::class_<origami::problem_t>(m, "problem_t")
       .def(nanobind::init<>())
@@ -355,8 +357,8 @@ NB_MODULE(origami, m) {
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
   m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
-  m.def("make_cascade_pipeline",
-        &origami::make_cascade_pipeline,
+  m.def("make_simulation_pipeline",
+        &origami::make_simulation_pipeline,
         "Build a two-phase estimation-then-simulation cascade pipeline");
   m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
 

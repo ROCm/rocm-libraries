@@ -527,6 +527,29 @@ inline double compute_memory_latency(const problem_t& problem,
 }
 
 /**
+ * @brief Context-free quick epilogue proxy: store latency of one interior tile.
+ *
+ * The cheapest possible epilogue estimate -- just the cost of storing a single
+ * MT_M x MT_N output tile -- so the coarse (context-free) scoring levels can
+ * account for the write cost before a context is built. Ignores edge/corner
+ * tiles, split-K reduction, ACC->VGPR transfer, and alignment; active CU count
+ * and bandwidth are approximated from the output-tile count.
+ *
+ * The caller supplies @p num_output_tiles, so a caller that has already derived
+ * the grid (e.g. the level-1 proxy) does not recompute it.
+ *
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param mt Macro-tile dimensions.
+ * @param d_dtype Output element data type.
+ * @param num_output_tiles grid_m * grid_n * batch.
+ * @return double Approximate tile-store latency in cycles.
+ */
+ORIGAMI_EXPORT double compute_epilogue_latency_quick(const hardware_t& hardware,
+                                                      const dim3_t& mt,
+                                                      data_type_t d_dtype,
+                                                      size_t num_output_tiles);
+
+/**
  * @brief Compute the epilogue latency for a single tile.
  *
  * Models the cost of writing output (or workspace partials) after the main loop:
@@ -543,43 +566,6 @@ ORIGAMI_EXPORT double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
                                 const context_t& context);
-
-/**
- * @brief Context-free coarse epilogue proxy: store latency of one interior tile.
- *
- * The cheapest possible epilogue estimate -- just the cost of storing a single
- * MT_M x MT_N output tile -- so the coarse (context-free) scoring levels can
- * account for the write cost before a context is built. Ignores edge/corner
- * tiles, split-K reduction, ACC->VGPR transfer, and alignment; active CU count
- * and bandwidth are approximated from the output-tile count.
- *
- * Core overload: the caller supplies @p num_output_tiles, so a caller that has
- * already derived the grid (e.g. the level-1 proxy) does not recompute it.
- *
- * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param mt Macro-tile dimensions.
- * @param d_dtype Output element data type.
- * @param num_output_tiles grid_m * grid_n * batch.
- * @return double Approximate tile-store latency in cycles.
- */
-ORIGAMI_EXPORT double compute_coarse_epilogue_latency(const hardware_t& hardware,
-                                                      const dim3_t& mt,
-                                                      data_type_t d_dtype,
-                                                      size_t num_output_tiles);
-
-/**
- * @brief Context-based overload: reuses the context's already-derived fields
- *        (exact active_cus / bandwidth, output bytes) instead of recomputing or
- *        approximating them. Used by levels that already hold a context.
- *
- * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param config Kernel configuration.
- * @param context Execution context with derived parameters.
- * @return double Approximate tile-store latency in cycles.
- */
-ORIGAMI_EXPORT double compute_coarse_epilogue_latency(const hardware_t& hardware,
-                                                      const config_t& config,
-                                                      const context_t& context);
 
 /**
  * @brief Computes the latency to compute a K-COMPLETE tile.

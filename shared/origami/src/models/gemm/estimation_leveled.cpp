@@ -59,7 +59,7 @@ struct mi_latency_cache {
 };
 
 // Context-free feasibility: tensilelite is LDS-validated upstream by the library.
-inline bool coarse_feasible(const problem_t& problem,
+inline bool feasible_quick(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config) {
   if (config.target == target_t::tensilelite) return true;
@@ -101,7 +101,7 @@ inline void log_reject(const config_t& config, int level, const char* reason) {
 // are fixed) -- without this factor the proxy penalized deep-K tiles and pruned the
 // eventual StreamK winner. The memory arm (A/B reads per block / bandwidth) is what
 // then ranks MT_K choices by their global-read reuse.
-inline double score_compute_proxy(const problem_t& problem,
+inline double score_compute_quick(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config,
                                   mi_latency_cache& lmi) {
@@ -141,7 +141,7 @@ inline double score_compute_proxy(const problem_t& problem,
       (hardware.N_CU > 0) ? math::safe_ceil_div(num_output_tiles, hardware.N_CU) : num_output_tiles;
 
   const double epilogue =
-      compute_coarse_epilogue_latency(hardware, config.mt, problem.d_dtype, num_output_tiles);
+      compute_epilogue_latency_quick(hardware, config.mt, problem.d_dtype, num_output_tiles);
   return per_block * static_cast<double>(work_per_cu) +
          epilogue * static_cast<double>(epilogue_waves);
 }
@@ -168,7 +168,7 @@ scored_configs_t score_estimation_leveled(const problem_t& problem,
   scored.reserve(survivors.size());
   for (std::size_t idx : survivors) {
     const config_t& config = configs[idx];
-    if (!coarse_feasible(problem, hardware, config)) {  // level 0
+    if (!feasible_quick(problem, hardware, config)) {  // level 0
       if (dbg) log_reject(config, 0, "infeasible");
       continue;
     }
@@ -176,7 +176,7 @@ scored_configs_t score_estimation_leveled(const problem_t& problem,
       if (dbg) log_reject(config, 0, "fast_reject");
       continue;
     }
-    const double cost = score_compute_proxy(problem, hardware, config, lmi);  // level 1
+    const double cost = score_compute_quick(problem, hardware, config, lmi);  // level 1
     if (cost != std::numeric_limits<double>::max()) {
       scored.emplace_back(cost, idx);
     } else if (dbg) {

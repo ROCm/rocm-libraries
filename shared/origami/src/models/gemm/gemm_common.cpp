@@ -88,7 +88,8 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     const auto a_bits = datatype_to_bits(problem.a_dtype);
     const auto b_bits = datatype_to_bits(problem.b_dtype);
 
-    OLOG_DEBUG("======== Origami Debug Info ========"); // This signature indicates the start of the debug information.
+    OLOG_DEBUG("======== Origami Debug Info ========");  // This signature indicates the start of
+                                                         // the debug information.
     OLOG_DEBUG("M: " << int(M));
     OLOG_DEBUG("N: " << int(N));
     OLOG_DEBUG("Batch: " << int(batch));
@@ -917,52 +918,6 @@ size_t compute_mt_compute_latency(const problem_t& problem,
   return L_MT;
 }
 
-// Context-free coarse epilogue proxy: the store latency of a single interior
-// MT_M x MT_N output tile. Deliberately ignores edge/corner tiles, split-K
-// reduction, ACC->VGPR transfer, and alignment -- it exists so the coarse
-// (context-free) scoring levels can account for the write cost without building a
-// context. active_cus and bandwidth are approximated from the output-tile count
-// (min(num_output_tiles, N_CU)), mirroring the store term of the full
-// compute_epilogue_latency.
-// Core (context-free): caller supplies num_output_tiles so no grid recompute.
-double compute_coarse_epilogue_latency(const hardware_t& hardware,
-                                       const dim3_t& mt,
-                                       data_type_t d_dtype,
-                                       size_t num_output_tiles) {
-  const double d_bytes = data_type_to_bytes(d_dtype);
-  if (d_bytes == 0.0) return 0.0;
-
-  const size_t active_cus = std::min(num_output_tiles, hardware.N_CU);
-  if (active_cus == 0) return 0.0;
-
-  const double mem_bw   = compute_mem_bw_from_occupancy(hardware, active_cus);
-  const double store_bw = hardware.mem3_perf_ratio * mem_bw;
-  if (store_bw <= 0.0) return 0.0;
-
-  const double per_cu_store_bw = store_bw / static_cast<double>(active_cus);
-  const double tile_bytes      = static_cast<double>(mt.m) * mt.n * d_bytes;
-  return tile_bytes / per_cu_store_bw;
-}
-
-// Context-based: reuse the context's exact active_cus / bandwidth / output bytes
-// (no recompute, no approximation) -- used by levels that already hold a context.
-double compute_coarse_epilogue_latency(const hardware_t& hardware,
-                                       const config_t& config,
-                                       const context_t& context) {
-  const double d_bytes = context.d_bytes;
-  if (d_bytes == 0.0) return 0.0;
-
-  const size_t active_cus = context.active_cus;
-  if (active_cus == 0) return 0.0;
-
-  const double store_bw = hardware.mem3_perf_ratio * context.mem_bw_limited;
-  if (store_bw <= 0.0) return 0.0;
-
-  const double per_cu_store_bw = store_bw / static_cast<double>(active_cus);
-  const double tile_bytes      = static_cast<double>(config.mt.m) * config.mt.n * d_bytes;
-  return tile_bytes / per_cu_store_bw;
-}
-
 /* ---------------------------------------------------------------------------------------- */
 /* Memory-related functions                                                                 */
 /* ---------------------------------------------------------------------------------------- */
@@ -1040,8 +995,9 @@ double estimate_l2_hit(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
                        const context_t& context) {
-  const size_t wgm_val = static_cast<size_t>(std::abs(context.get_wgm(problem, hardware, config).wgm));
-  auto [l2_m, l2_n]    = compute_l2_tiles(problem,
+  const size_t wgm_val =
+      static_cast<size_t>(std::abs(context.get_wgm(problem, hardware, config).wgm));
+  auto [l2_m, l2_n] = compute_l2_tiles(problem,
                                        hardware,
                                        config,
                                        context.grid_m,
@@ -1064,7 +1020,8 @@ double estimate_mall_hit(const problem_t& problem,
                          const hardware_t& hardware,
                          const config_t& config,
                          const context_t& context) {
-  const size_t wgm_val = static_cast<size_t>(std::abs(context.get_wgm(problem, hardware, config).wgm));
+  const size_t wgm_val =
+      static_cast<size_t>(std::abs(context.get_wgm(problem, hardware, config).wgm));
   auto [mall_m, mall_n] =
       compute_mall_tiles(context.grid_m, context.grid_n, context.active_cus, wgm_val);
 
@@ -1330,8 +1287,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   bool enable_batched_amp = (problem.batch > 1);
   if (enable_batched_amp && concurrent_load < l2_cap) {
     const double amp_ceiling = heuristic.l2_amp_ceiling_batched;
-    const double headroom  = 1.0 - concurrent_load / l2_cap;
-    const double amp_boost = headroom * headroom;
+    const double headroom    = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost   = headroom * headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
     l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
@@ -1343,8 +1300,8 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   bool enable_split_k_amp = (l2_tiles.k > 1 && l2_tiles.m * l2_tiles.n < 5);
   if (enable_split_k_amp && concurrent_load < l2_cap) {
     const double amp_ceiling = heuristic.l2_amp_ceiling_k_split;
-    const double headroom  = 1.0 - concurrent_load / l2_cap;
-    const double amp_boost = headroom;
+    const double headroom    = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost   = headroom;
     l2_rate_a += amp_boost * std::max(amp_ceiling - l2_rate_a, 0.0);
     l2_rate_b += amp_boost * std::max(amp_ceiling - l2_rate_b, 0.0);
   }
@@ -1579,6 +1536,33 @@ double compute_memory_latency(const problem_t& problem,
 /* ---------------------------------------------------------------------------------------- */
 /* Tile-related functions                                                                   */
 /* ---------------------------------------------------------------------------------------- */
+// Context-free coarse epilogue proxy: the store latency of a single interior
+// MT_M x MT_N output tile. Deliberately ignores edge/corner tiles, split-K
+// reduction, ACC->VGPR transfer, and alignment -- it exists so the coarse
+// (context-free) scoring levels can account for the write cost without building a
+// context. active_cus and bandwidth are approximated from the output-tile count
+// (min(num_output_tiles, N_CU)), mirroring the store term of the full
+// compute_epilogue_latency.
+// Context-free: caller supplies num_output_tiles so no grid recompute.
+double compute_epilogue_latency_quick(const hardware_t& hardware,
+                                      const dim3_t& mt,
+                                      data_type_t d_dtype,
+                                      size_t num_output_tiles) {
+  const double d_bytes = data_type_to_bytes(d_dtype);
+  if (d_bytes == 0.0) return 0.0;
+
+  const size_t active_cus = std::min(num_output_tiles, hardware.N_CU);
+  if (active_cus == 0) return 0.0;
+
+  const double mem_bw   = compute_mem_bw_from_occupancy(hardware, active_cus);
+  const double store_bw = hardware.mem3_perf_ratio * mem_bw;
+  if (store_bw <= 0.0) return 0.0;
+
+  const double per_cu_store_bw = store_bw / static_cast<double>(active_cus);
+  const double tile_bytes      = static_cast<double>(mt.m) * mt.n * d_bytes;
+  return tile_bytes / per_cu_store_bw;
+}
+
 // Determine the epilogue latency of a single tile.
 double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
@@ -1780,8 +1764,8 @@ double compute_tile_latency(const problem_t& problem,
   double L_compute = *context.L_comp_stream;
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
-  double utilization            = calculate_work_utilization(problem, config);
-  double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
+  double utilization             = calculate_work_utilization(problem, config);
+  double effective_tile_penalty  = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
   context.utilization            = utilization;
   context.effective_tile_penalty = effective_tile_penalty;
 
@@ -1789,10 +1773,10 @@ double compute_tile_latency(const problem_t& problem,
   double L_WG_setup = 1;
 
   // 3) Prologue and Epilogue latencies
-  const size_t real_occupancy   = context.real_occupancy;
+  const size_t real_occupancy = context.real_occupancy;
   // Derived lazily here (needs the heuristic); mirror into the cost record.
   const double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
-  context.occupancy_factor = occupancy_factor;
+  context.occupancy_factor      = occupancy_factor;
 
   // 3-1) Prologue
   double L_prologue = L_mem;
@@ -2081,7 +2065,8 @@ double estimation_latency_from_context(const problem_t& problem,
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);
-    OLOG_DEBUG("================================="); // This signature indicates the end of the debug information.
+    OLOG_DEBUG("=================================");  // This signature indicates the end of the
+                                                      // debug information.
   }
 
   return total_latency;

@@ -47,7 +47,7 @@ try:
         rank_configs,
         select_config_mnk,
         select_topk_configs,
-        make_cascade_pipeline,
+        make_simulation_pipeline,
         # Performance functions
         compute_perf_gflops,
         compute_total_latency,
@@ -142,7 +142,7 @@ __all__ = [
     "rank_configs",
     "select_config_mnk",
     "select_topk_configs",
-    "make_cascade_pipeline",
+    "make_simulation_pipeline",
     # Performance functions
     "compute_perf_gflops",
     "compute_total_latency",

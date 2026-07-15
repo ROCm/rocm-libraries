@@ -247,6 +247,30 @@ enum class target_t : std::uint32_t {
 };
 
 /**
+ * @brief Convert model_t to string.
+ *
+ * @param model Model type
+ * @return std::string String representation of the model
+ */
+ORIGAMI_EXPORT std::string model_to_string(model_t model);
+
+/**
+ * @brief Convert target_t to string.
+ *
+ * @param target Target backend
+ * @return std::string String representation of the target
+ */
+ORIGAMI_EXPORT std::string target_to_string(target_t target);
+
+/**
+ * @brief Convert prediction_modes_t to string.
+ *
+ * @param mode Prediction mode
+ * @return std::string String representation of the prediction mode
+ */
+ORIGAMI_EXPORT std::string prediction_modes_to_string(prediction_modes_t mode);
+
+/**
  * @brief Pruning strategy applied to the survivors of a ranking phase.
  *
  * Selects how a multi-phase ranking pipeline narrows the candidate set before
@@ -426,10 +450,16 @@ struct ORIGAMI_EXPORT runtime_options {
   /// Heuristics variance threshold (reads from ANALYTICAL_GEMM_HEURISTICS_VARIANCE env var)
   double heuristics_variance;
 
+  /// Use the leveled coarse-to-fine estimation cascade for default (no-pipeline)
+  /// ranking instead of the flat per-config pass (reads from ORIGAMI_LEVELED_ESTIMATION
+  /// env var). This makes selection strategy Origami's own decision -- callers just
+  /// ask to rank configs and never choose the mechanism.
+  bool leveled_estimation;
+
   /**
    * @brief Constructor with explicit values (does not read from environment).
    */
-  runtime_options(bool debug, bool heuristics, double variance);
+  runtime_options(bool debug, bool heuristics, double variance, bool leveled = false);
 
   /**
    * @brief Get the global runtime options instance.
@@ -459,6 +489,12 @@ struct ORIGAMI_EXPORT runtime_options {
    * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
+
+  /**
+   * @brief Read leveled-estimation setting from environment variable.
+   * @return true if ORIGAMI_LEVELED_ESTIMATION is set to a non-zero value, false otherwise
+   */
+  static bool read_leveled_estimation_from_env();
 
   /**
    * @brief Update runtime options from environment variables.

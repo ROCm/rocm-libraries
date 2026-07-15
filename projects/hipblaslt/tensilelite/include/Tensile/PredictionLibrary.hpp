@@ -27,7 +27,6 @@
 #pragma once
 
 #include <atomic>
-#include <cstdlib>
 #include <set>
 #include <vector>
 
@@ -186,37 +185,8 @@ namespace TensileLite
                 .b_mx_block_size = 0, // MX Data types come from rocroller
             };
 
-            // When ORIGAMI_LEVELED_ESTIMATION is set, route selection through the
-            // leveled coarse-to-fine cascade (a single estimation phase makes
-            // rank_configs use GemmModel::score_candidates -> score_estimation_leveled)
-            // instead of the flat per-config path.
-            static const bool use_leveled_estimation = [] {
-                const char* e = std::getenv("ORIGAMI_LEVELED_ESTIMATION");
-                return e != nullptr && std::strtol(e, nullptr, 0) != 0;
-            }();
-
-            // Split-K handling lives in Origami's leveled cascade now (it skips its
-            // coarse prune for split-K-prone shapes), so always use the leveled path.
-            std::vector<origami::prediction_result_t> prediction_result;
-            if(use_leveled_estimation)
-            {
-                origami::ranking_phase_t phase;
-                phase.model    = origami::model_t::gemm;
-                phase.target   = origami::target_t::tensilelite;
-                phase.fidelity = origami::prediction_modes_t::estimation;
-                origami::ranking_pipeline_t pipeline;
-                pipeline.phases.push_back(phase);
-                prediction_result = origami::rank_configs(origami_problem,
-                                                          analytical_hardware,
-                                                          origami_config_list,
-                                                          origami::model_t::gemm,
-                                                          pipeline);
-            }
-            else
-            {
-                prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
-            }
+            std::vector<origami::prediction_result_t> prediction_result
+                = origami::rank_configs(origami_problem, analytical_hardware, origami_config_list);
 
             for(const auto& r : prediction_result)
             {

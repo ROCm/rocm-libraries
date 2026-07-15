@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -317,7 +318,7 @@ TEST_CASE("Pipeline: estimation-then-simulation cascade", "[origami][pipeline][f
       }
 
       auto pipeline =
-          origami::make_cascade_pipeline(origami::model_t::gemm, origami::target_t::tensilelite, 2);
+          origami::make_simulation_pipeline(origami::model_t::gemm, origami::target_t::tensilelite, 2);
 
       auto staged = origami::rank_configs(problem, hardware, configs, origami::model_t::gemm, pipeline);
 
@@ -327,6 +328,35 @@ TEST_CASE("Pipeline: estimation-then-simulation cascade", "[origami][pipeline][f
       REQUIRE(staged[0].latency <= staged[1].latency);
     }
   }
+}
+
+TEST_CASE("Pipeline: make_simulation_pipeline validates the (model, target) combo",
+          "[origami][pipeline]") {
+  using Catch::Matchers::ContainsSubstring;
+
+  // (gemm, tensilelite) has both an estimation and a simulation model registered.
+  REQUIRE_NOTHROW(
+      origami::make_simulation_pipeline(origami::model_t::gemm, origami::target_t::tensilelite, 2));
+
+  // gemm simulation is only wired for tensilelite. A cascade for any other target
+  // must fail at construction -- not far downstream inside get_model at rank time.
+  for (origami::target_t target : {origami::target_t::generic,
+                                   origami::target_t::rocroller,
+                                   origami::target_t::triton,
+                                   origami::target_t::composable_kernel}) {
+    REQUIRE_THROWS_AS(origami::make_simulation_pipeline(origami::model_t::gemm, target, 2),
+                      std::invalid_argument);
+  }
+
+  // The message should name the factory and point at the unsupported combo.
+  REQUIRE_THROWS_WITH(
+      origami::make_simulation_pipeline(origami::model_t::gemm, origami::target_t::triton, 2),
+      ContainsSubstring("make_simulation_pipeline") && ContainsSubstring("triton"));
+
+  // Attention resolves both fidelities for every target, so it is never rejected --
+  // the check is precise, not blanket.
+  REQUIRE_NOTHROW(
+      origami::make_simulation_pipeline(origami::model_t::attention, origami::target_t::triton, 2));
 }
 
 TEST_CASE("Pipeline: fast-reject predicate drops configs before scoring", "[origami][pipeline]") {
@@ -391,8 +421,3 @@ TEST_CASE("Pipeline: estimation phase refines internally, matches single-pass", 
     }
   }
 }
-
-// NOTE: selection-time / scoring-latency benchmarking lives in the standalone
-// `origami-bench` target (tests/bench_scoring.cpp), which times both
-// score_candidates and the full rank_configs workflow. It is kept out of the
-// test suite so timing never runs as part of correctness CTest runs.
