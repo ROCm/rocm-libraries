@@ -1239,7 +1239,17 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         _force_triton_path("auto")
 
 
-def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
+def _run_rocke(
+    s: Scenario,
+    data,
+    *,
+    path: str,
+    warmup: int,
+    attempts: int,
+    kq_swizzle: bool = False,
+    kq_pad: int = 0,
+    probe_occupancy: bool = False,
+):
     """Run CK DSL `run_unified_attention_torch` with the requested path forced.
 
     Both backends share the default bench stream (torch's current
@@ -1312,12 +1322,12 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
 
         # PR #9233 direct-launch lane: for the D256 gfx950 bf16 prefill cohort,
         # build and launch the PRODUCTION fast spec directly (GPU-time only, no
-        # run_unified_attention_torch dispatcher overhead). Honors the
-        # PARITY_NO_INTERLEAVE monkeypatch so the same lane measures both the
-        # interleave fast path and the 32x32 base.
+        # run_unified_attention_torch dispatcher overhead). --no-interleave
+        # (applied in main via a scoped patch of _tiled_spec_from_problem) makes
+        # this lane measure both the interleave fast path and the "32x32 base".
         if _d256_gfx950_fast(problem):
             spec = _tiled_spec_from_problem(problem)
-            if os.environ.get("PARITY_KQ_SWIZZLE") == "1":
+            if kq_swizzle:
                 from dataclasses import replace as _replace
 
                 spec = _replace(spec, use_kq_xor_swizzle=True)
@@ -1325,13 +1335,12 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
                     "    [2d-direct] KQ XOR swizzle ON (read-only probe; "
                     "numerics intentionally wrong)"
                 )
-            if os.environ.get("PARITY_KQ_PAD") == "1":
+            if kq_pad > 0:
                 from dataclasses import replace as _replace
 
-                _w = int(os.environ.get("PARITY_KQ_PAD_W", "8"))
-                spec = _replace(spec, use_kq_lds_pad=True, kq_lds_pad_halves=_w)
+                spec = _replace(spec, use_kq_lds_pad=True, kq_lds_pad_halves=kq_pad)
                 print(
-                    f"    [2d-direct] KQ slab-gran pad ON (pad={_w} halves, "
+                    f"    [2d-direct] KQ slab-gran pad ON (pad={kq_pad} halves, "
                     "correct: numerics preserved)"
                 )
             kernel = build_unified_attention_2d_tiled(spec)
@@ -1349,8 +1358,10 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
                 ),
                 cache_key=("d256_fast_direct", spec.kernel_name()),
             )
-            if os.environ.get("PARITY_PROBE_OCC") == "1":
-                _probe_print_occupancy(artifact.hsaco, spec.num_warps)
+            if probe_occupancy:
+                from builders.common.occupancy_probe import print_occupancy
+
+                print_occupancy(artifact.hsaco, spec.num_warps, arch="gfx950")
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -1544,136 +1555,33 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     return output, ms
 
 
-def _probe_print_occupancy(hsaco: bytes, num_warps: int) -> None:
-    """Print VGPR/AGPR/SGPR/LDS + coarse waves-per-CU for a compiled kernel.
-
-    Reuses the static occupancy probe (llvm-readelf on the HSACO notes); no
-    kernel launch, so it is safe to call during the build step.
-    """
-    try:
-        import sys as _sys
-
-        from rocke.assets import dsl_docs_dir
-
-        probe_dir = (
-            dsl_docs_dir() / "optimization" / "utilities" / "tools" / "dsl_probes"
-        )
-        if str(probe_dir) not in _sys.path:
-            _sys.path.insert(0, str(probe_dir))
-        from probe_occupancy import (  # type: ignore
-            ARCH_GFX950,
-            estimate_occupancy,
-            parse_hsaco_notes,
-        )
-
-        notes = parse_hsaco_notes(hsaco)
-        occ = estimate_occupancy(notes=notes, waves_per_wg=num_warps, arch=ARCH_GFX950)
-        print(
-            f"    [occupancy] vgpr={notes.get('vgpr_count')} "
-            f"agpr={notes.get('agpr_count')} sgpr={notes.get('sgpr_count')} "
-            f"spill={notes.get('vgpr_spill_count')} "
-            f"lds={notes.get('lds_size')}B  "
-            f"waves/CU={occ['waves_per_cu']} wg/CU={occ['wgs_per_cu']} "
-            f"limit={occ['limited_by']}"
-        )
-    except Exception as e:  # noqa: BLE001
-        print(f"    [occupancy] unavailable: {type(e).__name__}: {e}")
-
-
 def _run_torch_flash(s: Scenario, data, *, warmup: int, attempts: int):
-    """Time torch's flash-attention (F.scaled_dot_product_attention) on the
-    same shape, as the "vs torch-flash" reference in PR #9233.
+    """Time torch flash SDPA on the same shape (the "vs torch-flash" reference).
 
-    Reconstructs the dense per-sequence causal Q/K/V from the paged KV cache
-    (so the numbers match the reference paged attention), then times F.sdpa
-    with the flash backend. Returns (out[total_q, H, D], ms).
+    Thin arch-local adapter over the shared
+    ``builders.common.torch_flash_reference.run_torch_flash`` (kept generic so
+    the gfx942/decode harnesses can reuse it). Returns (out[total_q, H, D], ms).
     """
-    import torch
-    import torch.nn.functional as F
-    from torch.nn.attention import sdpa_kernel, SDPBackend
+    from builders.common.torch_flash_reference import run_torch_flash
 
-    q = data["query"]
-    key_cache = data["key_cache"]
-    value_cache = data["value_cache"]
-    block_tables = data["block_tables"]
-    query_lens = data["query_lens"]
-    kv_lens_list = data["kv_lens_list"]
-    H = s.num_query_heads
-    Hkv = s.num_kv_heads
-    D = s.head_size
-    scale = data["scale"]
-    dev = q.device
-    nqpkv = H // Hkv
-
-    # Gather dense per-seq tensors once (outside the timed region).
-    seqs = []
-    start = 0
-    for i, (ql, kvl) in enumerate(zip(query_lens, kv_lens_list)):
-        if ql <= 0:
-            continue
-        q_i = q[start : start + ql]  # [ql, H, D]
-        start += ql
-        nblk = (kvl + s.block_size - 1) // s.block_size
-        blk = block_tables[i, :nblk]
-        k_i = key_cache[blk].reshape(-1, Hkv, D)[:kvl]  # [kvl, Hkv, D]
-        v_i = value_cache[blk].reshape(-1, Hkv, D)[:kvl]
-        # [1, H, L, D]
-        qh = q_i.permute(1, 0, 2).unsqueeze(0)
-        kh = k_i.permute(1, 0, 2).unsqueeze(0)
-        vh = v_i.permute(1, 0, 2).unsqueeze(0)
-        if nqpkv > 1:
-            kh = kh.repeat_interleave(nqpkv, dim=1)
-            vh = vh.repeat_interleave(nqpkv, dim=1)
-        seqs.append((qh, kh, vh, ql, kvl))
-
-    # Pick a working flash-first backend once.
-    backend = None
-    for be, name in (
-        (SDPBackend.FLASH_ATTENTION, "flash"),
-        (SDPBackend.EFFICIENT_ATTENTION, "efficient"),
-        (SDPBackend.MATH, "math"),
-    ):
-        try:
-            with sdpa_kernel(be):
-                _ = F.scaled_dot_product_attention(
-                    seqs[0][0][:, :, :64],
-                    seqs[0][1][:, :, :64],
-                    seqs[0][2][:, :, :64],
-                    is_causal=True,
-                    scale=scale,
-                )
-            backend = (be, name)
-            break
-        except Exception:  # noqa: BLE001
-            continue
-    if backend is None:
-        raise NotImplementedError("no working torch sdpa backend")
-    _LAST_TORCH_FLASH["backend"] = backend[1]
-
-    outs = [None] * len(seqs)
-
-    def call_once():
-        with sdpa_kernel(backend[0]):
-            for j, (qh, kh, vh, ql, kvl) in enumerate(seqs):
-                if ql == kvl:
-                    o = F.scaled_dot_product_attention(
-                        qh, kh, vh, is_causal=True, scale=scale
-                    )
-                else:
-                    # query is a suffix of the kv stream (aiter convention)
-                    mask = torch.ones(ql, kvl, device=dev, dtype=torch.bool)
-                    mask = torch.triu(mask, diagonal=kvl - ql + 1).logical_not()
-                    o = F.scaled_dot_product_attention(
-                        qh, kh, vh, attn_mask=mask, scale=scale
-                    )
-                outs[j] = o
-
-    hip_stream = _bench_stream_handle()
-    ms = _time_lane_ms(call_once, warmup=warmup, attempts=attempts, stream=hip_stream)
-
-    # Assemble [total_q, H, D] in scenario order for the correctness compare.
-    flat = [o.squeeze(0).permute(1, 0, 2) for o in outs]  # each [L, H, D]
-    out = torch.cat(flat, dim=0).to(q.dtype)
+    out, ms, backend = run_torch_flash(
+        query=data["query"],
+        key_cache=data["key_cache"],
+        value_cache=data["value_cache"],
+        block_tables=data["block_tables"],
+        query_lens=data["query_lens"],
+        kv_lens_list=data["kv_lens_list"],
+        num_query_heads=s.num_query_heads,
+        num_kv_heads=s.num_kv_heads,
+        head_size=s.head_size,
+        block_size=s.block_size,
+        scale=data["scale"],
+        warmup=warmup,
+        attempts=attempts,
+        bench_stream=_bench_stream_handle(),
+        time_lane_ms=_time_lane_ms,
+    )
+    _LAST_TORCH_FLASH["backend"] = backend
     return out, ms
 
 
@@ -1788,12 +1696,51 @@ def _row_print(label: str, out_ms, ref_out, t_out):
 
 
 def main() -> int:
+    # Guarantee any --no-interleave patch of the production
+    # _tiled_spec_from_problem is restored, even on exceptions (no global leak).
+    import kernels.common.attention_unified as _au
+
+    _orig_tiled_spec = _au._tiled_spec_from_problem
+    try:
+        return _main_impl()
+    finally:
+        _au._tiled_spec_from_problem = _orig_tiled_spec
+
+
+def _main_impl() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", default=None, action="append")
     parser.add_argument("--attempts", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--skip-ck", action="store_true")
+    parser.add_argument(
+        "--no-interleave",
+        action="store_true",
+        help="build the D256 fast spec with softmax<->MFMA interleave OFF (the "
+        "'32x32 base'); run with/without to recover the +N%% interleave delta "
+        "(was PARITY_NO_INTERLEAVE)",
+    )
+    parser.add_argument(
+        "--kq-swizzle",
+        action="store_true",
+        help="direct-launch 2D lane: KQ XOR swizzle ON (read-only probe; "
+        "numerics intentionally wrong; was PARITY_KQ_SWIZZLE)",
+    )
+    parser.add_argument(
+        "--kq-pad",
+        type=int,
+        default=0,
+        metavar="HALVES",
+        help="direct-launch 2D lane: KQ slab-granularity LDS pad width in "
+        "halves (0=off, correct; was PARITY_KQ_PAD / PARITY_KQ_PAD_W)",
+    )
+    parser.add_argument(
+        "--probe-occupancy",
+        action="store_true",
+        help="direct-launch 2D lane: print static VGPR/LDS/waves occupancy for "
+        "the built kernel (was PARITY_PROBE_OCC)",
+    )
     parser.add_argument(
         "--torch-flash",
         action="store_true",
@@ -1834,14 +1781,15 @@ def main() -> int:
         return 1
     print("device:", torch.cuda.get_device_name(0))
 
-    # PR #9233 reproduction lever: force the softmax<->MFMA interleave OFF on the
-    # production ("auto") dispatch so the D256 gfx950 fast path degrades to the
-    # "32x32 base" it is measured against. Run the harness twice (with and
-    # without this env) and take the ck-auto latency ratio to recover the
-    # "+N% over 32x32 base" number. Only the interleave codegen flags are
-    # dropped; the gated geometry (num_warps/tile_size/block_m_per_warp) is
-    # unchanged, so grid/launch-meta still agree.
-    if os.environ.get("PARITY_NO_INTERLEAVE") == "1":
+    # PR #9233 reproduction lever (--no-interleave): force the softmax<->MFMA
+    # interleave OFF on the production ("auto") dispatch AND the direct-launch
+    # lane so the D256 gfx950 fast path degrades to the "32x32 base" it is
+    # measured against. Run the harness twice (with and without) and take the
+    # latency ratio to recover the "+N% over 32x32 base" number. Only the
+    # interleave codegen flags are dropped; the gated geometry
+    # (num_warps/tile_size/block_m_per_warp) is unchanged. The patch is restored
+    # in main()'s finally (no global leak).
+    if args.no_interleave:
         from dataclasses import replace as _replace
         import kernels.common.attention_unified as _au
 
@@ -1860,8 +1808,8 @@ def main() -> int:
 
         _au._tiled_spec_from_problem = _tiled_spec_no_interleave
         print(
-            "[parity] PARITY_NO_INTERLEAVE=1: softmax<->MFMA interleave DISABLED "
-            "(auto lane -> 32x32 base)"
+            "[parity] --no-interleave: softmax<->MFMA interleave DISABLED "
+            "(auto + direct-launch -> 32x32 base)"
         )
 
     if args.set == "default":
@@ -2036,6 +1984,9 @@ def main() -> int:
                             path=p,
                             warmup=args.warmup,
                             attempts=args.attempts,
+                            kq_swizzle=args.kq_swizzle,
+                            kq_pad=args.kq_pad,
+                            probe_occupancy=args.probe_occupancy,
                         )
                     )
                     _row_print(f"ck-{path}", ck_p, ref_out, None)
