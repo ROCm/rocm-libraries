@@ -30,7 +30,13 @@
 
 #include <gtest/gtest.h>
 
-#include "rocblaslt_secure_env.hpp"
+// Included by relative path on purpose. rocblaslt_secure_env.hpp is a
+// dependency-free header (only standard headers), so a relative include keeps
+// this white-box test self-contained without adding the internal rocblaslt
+// include directory to the whole hipblaslt-test target -- doing that shadows
+// the clients' own "utility.hpp" with the library's internal one and breaks the
+// build of unrelated test sources.
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_secure_env.hpp"
 
 #include <cstdlib>
 #include <cstring>
