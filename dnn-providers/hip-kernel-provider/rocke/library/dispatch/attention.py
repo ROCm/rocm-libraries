@@ -40,7 +40,7 @@ left to the instance builder at launch time.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Optional, Sequence, Tuple
+from typing import Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
 from kernels.common.attention_unified import (
