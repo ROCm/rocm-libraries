@@ -362,7 +362,7 @@ def read(filename, customizedLoader=False):
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
-        data = yaml.load(f, StrictTypeLoader)
+        data = yaml.load(f, StrictTypeLoader)  # nosec B506 - StrictTypeLoader subclasses CSafeLoader/SafeLoader
     return data
 
 

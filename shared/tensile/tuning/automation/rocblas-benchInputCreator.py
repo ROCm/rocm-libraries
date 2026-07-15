@@ -330,7 +330,7 @@ def main():
         print(f" working on {output}")
         yamlName = os.path.join(args.libLogic,libname)
         with open(yamlName) as f:
-            logicData = yaml.load(f, yamlLoader)
+            logicData = yaml.load(f, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
 
         try:
             os.makedirs(args.outDir)

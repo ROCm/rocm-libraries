@@ -16,3 +16,15 @@ repos:
         pass_filenames: false
         verbose: true
         stages: [pre-commit]
+
+      # Blocks any new unsafe yaml.load (arbitrary-object deserialization) from
+      # landing. See ROCM-26843 / SEC-00404. Verified-safe loads are marked
+      # `# nosec B506` at their call site.
+      - id: bandit-b506
+        name: bandit (unsafe yaml.load / B506)
+        entry: bandit
+        language: python
+        additional_dependencies: [bandit]
+        args: ["-t", "B506"]
+        types: [python]
+        stages: [pre-commit]

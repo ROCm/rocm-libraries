@@ -33,6 +33,6 @@ if __name__ == "__main__":
     infile = args[0]
     outfile = args[1]
     with open(infile) as f:
-        data = yaml.load(f)
+        data = yaml.safe_load(f)
     with open(outfile, 'wb') as f:
         msgpack.dump(data, f)

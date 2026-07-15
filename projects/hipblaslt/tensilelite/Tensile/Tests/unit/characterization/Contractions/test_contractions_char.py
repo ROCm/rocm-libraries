@@ -24,7 +24,7 @@ _FIXTURE = Path(__file__).parent.parent / "LibraryIO" / "data" / "logic_gfx942_H
 
 @pytest.fixture(scope="module")
 def raw():
-    return yaml.load(_FIXTURE.read_text(), Loader=L.StrictTypeLoader)
+    return yaml.load(_FIXTURE.read_text(), Loader=L.StrictTypeLoader)  # nosec B506 - StrictTypeLoader subclasses CSafeLoader/SafeLoader
 
 
 @pytest.fixture

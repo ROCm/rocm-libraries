@@ -39,13 +39,13 @@ def merge_libraries(args):
     outFile = args[-1]
 
     with open(inFiles[0]) as inf:
-        data = yaml.load(inf)
+        data = yaml.safe_load(inf)
 
     masterLibrary = MasterSolutionLibrary.FromOriginalState(data)
 
     for inFile in Utils.tqdm(inFiles[1:], desc="Merge libraries"):
         with open(inFile) as inf:
-            data = yaml.load(inf)
+            data = yaml.safe_load(inf)
         newLibrary = MasterSolutionLibrary.FromOriginalState(data)
         masterLibrary.merge(newLibrary)
         del newLibrary
@@ -63,7 +63,7 @@ def merge_libraries(args):
 def convert_one(args):
 
     with open(args[0]) as inFile:
-        data = yaml.load(inFile)
+        data = yaml.safe_load(inFile)
 
     if True:
         masterLibrary = MasterSolutionLibrary.FromOriginalState(data)

@@ -136,7 +136,7 @@ def loadData(filename):
         print("Cannot open file: ", filename)
         sys.stdout.flush()
         sys.exit(-1)
-    data = yaml.load(stream, yamlLoader)
+    data = yaml.load(stream, yamlLoader)  # nosec B506 - safe loader (CSafeLoader/SafeLoader) via alias
     return data
 
 # this is for complying the behavior of legacy merge script, where incremental logic
