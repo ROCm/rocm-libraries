@@ -298,7 +298,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::pair<DAGNode*, int> findMostReadyWMMA();
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
     bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
-    bool dsLoadOverlapsActiveWmmaSrc(DAGNode* pickedDS) const;
+    bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
     DAGNode* extractForcedBarrier();
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> computeBarrierAfterThresholds(
@@ -470,15 +470,16 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     return node;
 }
 
-// True if issuing \p pickedDS now would risk a VALU <- VGPR <- VMEM hazard: while the
-// WMMA that opened the current latency window is still in flight, the ds_load's dest VGPRs
-// overlap that WMMA's src VGPRs, so the load could clobber a source the WMMA is still reading.
-bool CDNA5ReadyQueue::dsLoadOverlapsActiveWmmaSrc(DAGNode* pickedDS) const {
-    if (pickedDS == nullptr || activeWmmaNode_ == nullptr) return false;
+// True if issuing \p node now would risk a hazard: while the WMMA that opened the current
+// latency window is still in flight, \p node's dest VGPRs overlap that WMMA's src VGPRs, so
+// the write could clobber a source the WMMA is still reading. Applies to any writer whose
+// dest could alias the active WMMA's srcs (e.g. a ds_load dest or a VALU dest).
+bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
+    if (node == nullptr || activeWmmaNode_ == nullptr) return false;
     // Only relevant while the WMMA latency window is still active.
     if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
 
-    for (const StinkyRegister& dstReg : pickedDS->inst->getDestRegs()) {
+    for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
         if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
         const uint32_t dstLo = dstReg.reg.idx;
         const uint32_t dstHi = dstReg.reg.idx + dstReg.reg.num;  // exclusive
@@ -504,7 +505,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int kind = -1;
 
     bool dsWindowOk = pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_ &&
-                      !dsReadQueueFull() && !dsLoadOverlapsActiveWmmaSrc(pickedDS);
+                      !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -524,7 +525,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             kind = kOther;
         }
     }
-    if (!valuQueue.empty() && isValuPickable()) {
+    if (!valuQueue.empty() && isValuPickable() && !destOverlapsActiveWmmaSrc(valuQueue.top())) {
         DAGNode* t = valuQueue.top();
         if (!dsWindowOk && (!best || t->id < best->id)) {
             best = t;
