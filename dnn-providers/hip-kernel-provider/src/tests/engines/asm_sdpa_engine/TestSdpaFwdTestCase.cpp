@@ -14,8 +14,8 @@ TEST(TestSdpaFwdTestCase, ConstructorDerivesKDimsFromQAndV)
     // Expected K: [B=2, H_kv=1, S_kv=128, D_qk=128]
     SdpaFwdTestCase tc({2, 4, 256, 128}, {2, 1, 128, 64}, "gfx942");
 
-    EXPECT_EQ(tc.kDims[0], 2);   // B from Q
-    EXPECT_EQ(tc.kDims[1], 1);   // H_kv from V
+    EXPECT_EQ(tc.kDims[0], 2); // B from Q
+    EXPECT_EQ(tc.kDims[1], 1); // H_kv from V
     EXPECT_EQ(tc.kDims[2], 128); // S_kv from V
     EXPECT_EQ(tc.kDims[3], 128); // D_qk from Q
 }
