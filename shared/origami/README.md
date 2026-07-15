@@ -4,12 +4,6 @@
 
 ## Documentation
 
-Design and API references in `docs/`:
-
-- [NN API proposal](docs/nn-api-proposal.md) — `rank_options_t`, dispatch, CMake, hipBLASLt integration
-- [Sharded tilewright weights](docs/sharded-weights-design.md) — proposed dtype/transpose layout and lazy load (weights under `data/nn/tilewright/`)
-
-In-repo guide (this file):
 - [Quick Start Guide](#quick-start-guide)
   - [Prerequisites](#prerequisites)
   - [Install](#install)

@@ -38,8 +38,8 @@ hipblaslt_create_device_library(
     ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
 )
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/OrigamiNNWeights.cmake)
 if(ORIGAMI_ENABLE_NN)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/OrigamiNNWeights.cmake)
     foreach(_arch IN LISTS GPU_TARGETS)
         origami_nn_colocate_weights("${_arch}" "${HIPBLASLT_TENSILE_LIBPATH}")
     endforeach()

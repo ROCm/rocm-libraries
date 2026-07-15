@@ -49,6 +49,7 @@ namespace TensileLite
             using Library = ProblemPredictionLibrary<MyProblem, MySolution>;
             using iot     = IOTraits<IO>;
 
+#if ORIGAMI_ENABLE_NN
             static std::string logic_stem_from_path(const std::string& path)
             {
                 std::string stem = path;
@@ -68,6 +69,7 @@ namespace TensileLite
                     return ".";
                 return path.substr(0, slashPos);
             }
+#endif
 
             static void mapping(IO& io, Library& lib)
             {
