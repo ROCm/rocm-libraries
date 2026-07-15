@@ -11,6 +11,10 @@ if [ -d /workspace ] && [ -w /workspace ]; then
 fi
 
 BUILD_DIR="$HIPDNN_ROOT/build"
+PY_BINDINGS_SRC="$HIPDNN_ROOT/python/frontend_bindings"
+PY_BINDINGS_BUILD_DIR="$HIPDNN_ROOT/python/build/frontend_bindings"
+PY_WHEEL_PACKAGE_DIR="$HIPDNN_ROOT/python/frontend_wheel_package"
+PY_WHEEL_DIR="$HIPDNN_ROOT/python/build/wheel_package"
 DEFAULT_ROCM_PREFIX="/opt/rocm"
 DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-$DEFAULT_DNN_BENCH_WORKSPACE}"
 VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
@@ -573,7 +577,12 @@ install_torch() {
 }
 
 select_binding_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # An explicit --rocm-prefix wins. Otherwise the prefix follows the torch
+    # mode (where ROCm comes from), NOT whether --force-build was passed:
+    # force-build only controls *whether* hipDNN is rebuilt, not *where*. In
+    # rocm/existing-rocm mode that is the torch wheel's bundled SDK, so a forced
+    # rebuild works with no system ROCm.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
@@ -596,7 +605,11 @@ select_binding_prefix() {
 }
 
 select_provider_toolchain_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # Same rule as select_binding_prefix: the compiler/devel toolchain follows
+    # the torch mode. For rocm/existing-rocm that is the wheel's devel SDK
+    # (clang + lib/cmake/hip), which a forced rebuild must use too -- the
+    # libraries wheel ships no compiler.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
@@ -749,10 +762,12 @@ warn_no_native_engine_plugins() {
     echo "Pass --plugin-path or config plugin_path to use custom provider plugins." >&2
 }
 
-FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
-
 if [ "$FORCE_BUILD" -eq 1 ] && [ "$AUTO_YES" -eq 0 ]; then
-    read -r -p "This will build and install hipDNN to $FORCE_BUILD_PREFIX. Continue? [Y/n] " confirm
+    # The exact install prefix depends on the torch mode and is only resolved
+    # after torch is installed (rocm/existing-rocm build into the torch wheel's
+    # bundled SDK, not the system ROCm prefix), so it is reported at build time
+    # rather than named here.
+    read -r -p "This will build and install hipDNN and provider plugins from source into the selected ROCm prefix. Continue? [Y/n] " confirm
     case "$confirm" in
         [nN]) echo "Aborted."; exit 0 ;;
     esac
@@ -930,8 +945,10 @@ prepend_ld_library_path "$BINDING_PREFIX/lib"
 write_activation_local "$ROCM_PATH" "$BINDING_PREFIX/lib"
 
 
-# 6. Install hipDNN Python bindings.
-# Wipe any stale cmake build cache (can reference deleted pip temp envs).
+# 6. Build and install hipDNN Python bindings.
+# Wipe any stale CMake build cache (can reference deleted pip temp envs), build
+# the standalone nanobind extension, pack it into the frontend wheel package,
+# then install the wheel into this venv.
 if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
     PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
 fi
@@ -941,10 +958,28 @@ PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX"
 if [ "$PROVIDER_TOOLCHAIN_PREFIX" != "$BINDING_PREFIX" ]; then
     PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX;$PROVIDER_TOOLCHAIN_PREFIX"
 fi
+
+python -m pip install build
 rm -rf "$HIPDNN_ROOT/python/build"
 ROCM_PATH="$PROVIDER_TOOLCHAIN_PREFIX" \
-    CMAKE_PREFIX_PATH="$PY_BINDING_CMAKE_PREFIX_PATH" \
-    pip install -e "$HIPDNN_ROOT/python"
+    cmake -S "$PY_BINDINGS_SRC" -B "$PY_BINDINGS_BUILD_DIR" \
+        -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="$PY_BINDING_CMAKE_PREFIX_PATH" \
+        -DPython_EXECUTABLE="$(command -v python)"
+cmake --build "$PY_BINDINGS_BUILD_DIR"
+python "$PY_WHEEL_PACKAGE_DIR/pack_frontend_wheel.py" \
+    --build-dir "$PY_BINDINGS_BUILD_DIR" \
+    --wheel-dir "$PY_WHEEL_DIR"
+
+shopt -s nullglob
+HIPDNN_FRONTEND_WHEELS=("$PY_WHEEL_DIR"/hipdnn_frontend-*.whl)
+shopt -u nullglob
+if [ "${#HIPDNN_FRONTEND_WHEELS[@]}" -ne 1 ]; then
+    echo "ERROR: expected exactly one hipdnn_frontend wheel in $PY_WHEEL_DIR" >&2
+    exit 1
+fi
+python -m pip install --force-reinstall "${HIPDNN_FRONTEND_WHEELS[0]}"
 
 
 echo ""

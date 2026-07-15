@@ -202,21 +202,36 @@ namespace rocisa
     // are not printed.
     struct GLOBALModifiers : public Container
     {
-        GLOBALModifiers(int          offset = 0,
-                        TemporalHint th     = TemporalHint::TH_NONE,
-                        CacheScope   scope  = CacheScope::SCOPE_NONE)
+        GLOBALModifiers(int        offset  = 0,
+                        bool       glc     = false,
+                        bool       slc     = false,
+                        bool       dlc     = false,
+                        CacheScope scope   = CacheScope::SCOPE_NONE,
+                        bool       lds     = false,
+                        bool       isStore = false,
+                        TemporalHint th     = TemporalHint::TH_NONE)
             : Container()
             , offset(offset)
-            , th(th)
+            , glc(glc)
+            , slc(slc)
+            , dlc(dlc)
             , scope(scope)
+            , lds(lds)
+            , isStore(isStore)
+            , th(th)
         {
         }
 
         GLOBALModifiers(const GLOBALModifiers& other)
             : Container()
             , offset(other.offset)
-            , th(other.th)
+            , glc(other.glc)
+            , slc(other.slc)
+            , dlc(other.dlc)
             , scope(other.scope)
+            , lds(other.lds)
+            , isStore(other.isStore)
+            , th(other.th)
         {
         }
 
@@ -227,25 +242,48 @@ namespace rocisa
 
         std::string toString() const override
         {
+            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
+            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             std::string kStr;
             if(offset != 0)
             {
                 kStr += " offset:" + std::to_string(offset);
             }
+            if(glc)
+            {
+                kStr += " " + getGlcBitName();
+            }
+            if(slc)
+            {
+                kStr += " " + getSlcBitName();
+            }
+            if(hasDLCModifier && dlc)
+            {
+                kStr += " dlc";
+            }
+            if(hasSCOPEModifier && scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            if(lds)
+            {
+                kStr += " lds";
+            }
             if(hasTemporalHint(th))
             {
                 kStr += " th:" + rocisa::toString(th, false);
             }
-            if(scope != CacheScope::SCOPE_NONE)
-            {
-                kStr += " scope:" + rocisa::toString(scope);
-            }
             return kStr;
         }
 
-        int          offset;
+        int        offset;
+        bool       glc;
+        bool       slc;
+        bool       dlc;
+        CacheScope scope;
+        bool       lds;
+        bool       isStore;
         TemporalHint th;
-        CacheScope   scope;
     };
 
     struct MUBUFModifiers : public Container
@@ -1160,7 +1198,7 @@ namespace rocisa
                 else
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + msbStr + ":" + regType + "gpr" + regName->toString() + msbStr + "+"
+                           + regName->toString() + msbStr + ":" + macroSlash + regType + "gpr" + regName->toString() + msbStr + "+"
                            + std::to_string(regNum - 1) + "]" + absStr;
                 }
             }

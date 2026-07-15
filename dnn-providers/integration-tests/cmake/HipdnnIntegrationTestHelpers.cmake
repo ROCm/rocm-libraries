@@ -19,6 +19,9 @@
 #         PLUGIN_TARGET <target>
 #         ENGINE_NAME   <engine>
 #         [INSTALL_SUBDIR <subdir>]
+#         [TEST_CATEGORIES_YAML <path>]
+#         [INSTALL_TEST_FILE <path>]
+#         [TEST_NAME_PREFIX <prefix>]
 #         [TEST_CONFIG <path>]
 #         [REFERENCE_EXECUTOR <cpu|gpu>]
 #         [ENVIRONMENT <VAR=value>...]
@@ -65,64 +68,183 @@
 #     with ``:`` to form the final filter string passed via ``--gtest_filter``.
 #     If omitted, all tests run. Patterns can be specified one per line for
 #     readability.
-function(_stage_external_integration_test_install)
+#
+#   ``TEST_CATEGORIES_YAML``
+#     Optional path to a GTest ``test_categories.yaml``. When provided, this
+#     helper also creates category-specific CTest suites for
+#     ``hipdnn_integration_tests`` with the plugin/test-engine/test-config
+#     arguments plus generated ``--gtest_filter`` values.
+#
+#   ``INSTALL_TEST_FILE``
+#     Optional install-tree ``CTestTestfile.cmake`` staging file used with
+#     ``TEST_CATEGORIES_YAML``. The generated category suites use install-relative
+#     paths for both ``hipdnn_integration_tests`` and the plugin.
+#
+#   ``TEST_NAME_PREFIX``
+#     Optional prefix for generated category suite CTest names. Defaults to
+#     ``TARGET_NAME``.
+
+# Builds the build-tree command for an external integration test.
+#
+# Arguments:
+#   out_var - Variable to receive the command list
+# ~~~
+macro(_build_external_integration_command out_var)
+    set(${out_var}
+        $<TARGET_FILE:hipdnn_integration_tests>
+        --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
+        --test-engine ${ARG_ENGINE_NAME}
+    )
+    if(ARG_TEST_CONFIG)
+        list(APPEND ${out_var} "--test-config" "${ARG_TEST_CONFIG}")
+    endif()
+    if(ARG_REFERENCE_EXECUTOR)
+        list(APPEND ${out_var} "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+    endif()
+    if(ARG_GTEST_FILTER)
+        list(JOIN ARG_GTEST_FILTER ":" _GTEST_FILTER_STR)
+        list(APPEND ${out_var} "--gtest_filter=${_GTEST_FILTER_STR}")
+    endif()
+endmacro()
+
+# Stages the install-tree CTest entry for an external integration test.
+#
+# Uses the ARG_* variables parsed by add_external_integration_test_target().
+# ~~~
+macro(_stage_external_integration_install_test)
+    set(_install_bin "")
+    set(_install_plugin "")
+    set(_install_config "")
+    if(ARG_INSTALL_SUBDIR)
+        if(ARG_TEST_CONFIG)
+            get_filename_component(_install_config "${ARG_TEST_CONFIG}" NAME)
+            install(FILES "${ARG_TEST_CONFIG}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
+            )
+        endif()
+
+        set(_synthetic_root "/__hipdnn_install_root__")
+        set(_install_cwd_abs
+            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
+        )
+        set(_bin_abs
+            "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}"
+        )
+        set(_plugin_abs
+            "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${ARG_PLUGIN_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+        file(RELATIVE_PATH _install_bin "${_install_cwd_abs}" "${_bin_abs}")
+        file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
+
+        if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
+            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
+            if(ARG_TEST_CONFIG)
+                string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
+            endif()
+            if(ARG_REFERENCE_EXECUTOR)
+                string(APPEND _install_cmd " \"--reference-executor\" \"${ARG_REFERENCE_EXECUTOR}\"")
+            endif()
+            if(ARG_GTEST_FILTER)
+                string(APPEND _install_cmd " \"--gtest_filter=${_GTEST_FILTER_STR}\"")
+            endif()
+            string(APPEND _install_cmd ")\n")
+
+            set(_install_properties "LABELS \"${_LABELS}\"")
+            if(ARG_INSTALL_ENVIRONMENT)
+                set(_install_environment "${ARG_INSTALL_ENVIRONMENT}")
+            else()
+                set(_install_environment "${ARG_ENVIRONMENT}")
+            endif()
+            if(_install_environment)
+                string(REPLACE ";" "\\;" _install_environment_escaped "${_install_environment}")
+                string(APPEND _install_properties " ENVIRONMENT \"${_install_environment_escaped}\"")
+            endif()
+
+            string(APPEND _install_cmd
+                "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES ${_install_properties})\n"
+            )
+
+            set_property(GLOBAL APPEND_STRING
+                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
+                "${_install_cmd}"
+            )
+        endif()
+    endif()
+endmacro()
+
+# Adds category-specific GTest-filtered CTest suites.
+#
+# Uses the ARG_* variables parsed by add_external_integration_test_target().
+# ~~~
+macro(_add_external_integration_category_suites)
+    if(_GENERATE_EXTERNAL_CATEGORY_SUITES)
+        set(_category_prefix "${ARG_TARGET_NAME}")
+        if(ARG_TEST_NAME_PREFIX)
+            set(_category_prefix "${ARG_TEST_NAME_PREFIX}")
+        endif()
+
+        set(_category_command_args
+            "--test-article" "$<TARGET_FILE:${ARG_PLUGIN_TARGET}>"
+            "--test-engine" "${ARG_ENGINE_NAME}"
+        )
+        if(ARG_TEST_CONFIG)
+            list(APPEND _category_command_args "--test-config" "${ARG_TEST_CONFIG}")
+        endif()
+        if(ARG_REFERENCE_EXECUTOR)
+            list(APPEND _category_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+        endif()
+
+        set(_apply_category_args
+            TEST_NAME_PREFIX "${_category_prefix}"
+            COMMAND_ARGS ${_category_command_args}
+            ADDITIONAL_LABELS "integration_test" "slow" "external_integration_test" "${ARG_ENGINE_NAME}"
+        )
+        if(ARG_ENVIRONMENT)
+            list(APPEND _apply_category_args ENVIRONMENT ${ARG_ENVIRONMENT})
+        endif()
+
+        if(ARG_INSTALL_TEST_FILE AND _install_bin)
+            set(_category_install_command_args
+                "--test-article" "${_install_plugin}"
+                "--test-engine" "${ARG_ENGINE_NAME}"
+            )
+            if(ARG_TEST_CONFIG)
+                list(APPEND _category_install_command_args "--test-config" "${_install_config}")
+            endif()
+            if(ARG_REFERENCE_EXECUTOR)
+                list(APPEND _category_install_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+            endif()
+
+            list(APPEND _apply_category_args
+                INSTALL_TEST_FILE "${ARG_INSTALL_TEST_FILE}"
+                INSTALL_EXECUTABLE "${_install_bin}"
+                INSTALL_COMMAND_ARGS ${_category_install_command_args}
+            )
+        endif()
+
+        apply_test_category_labels(
+            hipdnn_integration_tests
+            "${ARG_TEST_CATEGORIES_YAML}"
+            "${CMAKE_CURRENT_BINARY_DIR}"
+            ${_apply_category_args}
+        )
+    endif()
+endmacro()
+
+# Adds a custom target and optional CTest entries for an external integration test.
+#
+# When TEST_CATEGORIES_YAML is provided, the base target stays CMake-only and
+# category-specific GTest-filtered suites cover the CTest surface.
+# ~~~
+function(add_external_integration_test_target)
     cmake_parse_arguments(
         ARG
         ""
-        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;GTEST_FILTER;LABELS"
-        "ENVIRONMENT"
+        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX"
+        "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT"
         ${ARGN}
     )
 
-    if(ARG_TEST_CONFIG)
-        get_filename_component(_install_config "${ARG_TEST_CONFIG}" NAME)
-        install(FILES "${ARG_TEST_CONFIG}"
-            DESTINATION "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}"
-        )
-    endif()
-
-    set(_synthetic_root "/__hipdnn_install_root__")
-    set(_install_cwd_abs "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}")
-    set(_bin_abs
-        "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}"
-    )
-    set(_plugin_abs
-        "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${ARG_PLUGIN_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    )
-    file(RELATIVE_PATH _install_bin "${_install_cwd_abs}" "${_bin_abs}")
-    file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
-
-    set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
-    if(ARG_TEST_CONFIG)
-        string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
-    endif()
-    if(ARG_REFERENCE_EXECUTOR)
-        string(APPEND _install_cmd " \"--reference-executor\" \"${ARG_REFERENCE_EXECUTOR}\"")
-    endif()
-    if(ARG_GTEST_FILTER)
-        string(APPEND _install_cmd " \"--gtest_filter=${ARG_GTEST_FILTER}\"")
-    endif()
-
-    set(_install_properties "LABELS \"${ARG_LABELS}\"")
-    if(ARG_ENVIRONMENT)
-        string(REPLACE ";" "\\;" _install_environment_escaped "${ARG_ENVIRONMENT}")
-        string(APPEND _install_properties " ENVIRONMENT \"${_install_environment_escaped}\"")
-    endif()
-
-    string(APPEND _install_cmd
-        ")\nset_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES ${_install_properties})\n"
-    )
-    set_property(GLOBAL APPEND_STRING
-        PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
-        "${_install_cmd}"
-    )
-endfunction()
-
-# Creates a test target that runs hipdnn_integration_tests against a plugin.
-function(add_external_integration_test_target)
-    cmake_parse_arguments(ARG "" "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR" "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT" ${ARGN})
-
-    # Validate required arguments
     if(NOT ARG_TARGET_NAME)
         message(FATAL_ERROR "add_external_integration_test_target: TARGET_NAME is required")
     endif()
@@ -133,22 +255,7 @@ function(add_external_integration_test_target)
         message(FATAL_ERROR "add_external_integration_test_target: ENGINE_NAME is required")
     endif()
 
-    # Build command
-    set(_CMD
-        $<TARGET_FILE:hipdnn_integration_tests>
-        --test-article $<TARGET_FILE:${ARG_PLUGIN_TARGET}>
-        --test-engine ${ARG_ENGINE_NAME}
-    )
-    if(ARG_TEST_CONFIG)
-        list(APPEND _CMD "--test-config" "${ARG_TEST_CONFIG}")
-    endif()
-    if(ARG_REFERENCE_EXECUTOR)
-        list(APPEND _CMD "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
-    endif()
-    if(ARG_GTEST_FILTER)
-        list(JOIN ARG_GTEST_FILTER ":" _GTEST_FILTER_STR)
-        list(APPEND _CMD "--gtest_filter=${_GTEST_FILTER_STR}")
-    endif()
+    _build_external_integration_command(_CMD)
 
     set(_TARGET_CMD ${_CMD})
     if(ARG_ENVIRONMENT)
@@ -163,6 +270,11 @@ function(add_external_integration_test_target)
         VERBATIM
     )
 
+    set(_GENERATE_EXTERNAL_CATEGORY_SUITES FALSE)
+    if(ARG_TEST_CATEGORIES_YAML AND COMMAND apply_test_category_labels)
+        set(_GENERATE_EXTERNAL_CATEGORY_SUITES TRUE)
+    endif()
+
     # Register with ctest so the cross-provider integration suite is picked up
     # by the calling project's `<project>-integration-check` target (which runs
     # `ctest -L integration_test`) and by direct `ctest` invocations from the
@@ -170,34 +282,21 @@ function(add_external_integration_test_target)
     # test is selected the same way as the provider's own integration tests,
     # plus an `external_integration_test` label and the engine name for filtering.
     set(_LABELS "integration_test;slow;external_integration_test;${ARG_ENGINE_NAME}")
-    add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
-    if(ARG_ENVIRONMENT)
-        set_tests_properties(${ARG_TARGET_NAME} PROPERTIES
-            LABELS "${_LABELS}"
-            ENVIRONMENT "${ARG_ENVIRONMENT}"
-        )
-    else()
-        set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")
+    if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
+        add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
+        if(ARG_ENVIRONMENT)
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES
+                LABELS "${_LABELS}"
+                ENVIRONMENT "${ARG_ENVIRONMENT}"
+            )
+        else()
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")
+        endif()
     endif()
+
     # Stage an install-tree add_test() snippet so install_provider_ctest_files
     # can include this test in the installed CTestTestfile.cmake. Required for
     # CI flows that invoke ctest from the install tree (e.g. TheRock).
-    if(ARG_INSTALL_SUBDIR)
-        if(ARG_INSTALL_ENVIRONMENT)
-            set(_install_environment "${ARG_INSTALL_ENVIRONMENT}")
-        else()
-            set(_install_environment "${ARG_ENVIRONMENT}")
-        endif()
-        _stage_external_integration_test_install(
-            TARGET_NAME ${ARG_TARGET_NAME}
-            PLUGIN_TARGET ${ARG_PLUGIN_TARGET}
-            ENGINE_NAME ${ARG_ENGINE_NAME}
-            INSTALL_SUBDIR ${ARG_INSTALL_SUBDIR}
-            TEST_CONFIG ${ARG_TEST_CONFIG}
-            REFERENCE_EXECUTOR ${ARG_REFERENCE_EXECUTOR}
-            GTEST_FILTER ${_GTEST_FILTER_STR}
-            LABELS ${_LABELS}
-            ENVIRONMENT ${_install_environment}
-        )
-    endif()
+    _stage_external_integration_install_test()
+    _add_external_integration_category_suites()
 endfunction()

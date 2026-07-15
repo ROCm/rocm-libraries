@@ -1,0 +1,17 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#ifndef ROCKE_CLIENT_VERSION_H
+#define ROCKE_CLIENT_VERSION_H
+
+// clang-format off
+// NOLINTBEGIN(modernize-macro-to-enum)
+#define ROCKE_CLIENT_VERSION_MAJOR @ROCKE_CLIENT_VERSION_MAJOR@
+#define ROCKE_CLIENT_VERSION_MINOR @ROCKE_CLIENT_VERSION_MINOR@
+#define ROCKE_CLIENT_VERSION_PATCH @ROCKE_CLIENT_VERSION_PATCH@
+#define ROCKE_CLIENT_VERSION_TWEAK "@ROCKE_CLIENT_VERSION_TWEAK@"
+#define ROCKE_CLIENT_VERSION_STRING "@ROCKE_CLIENT_VERSION_STRING@"
+// NOLINTEND(modernize-macro-to-enum)
+// clang-format on
+
+#endif // ROCKE_CLIENT_VERSION_H

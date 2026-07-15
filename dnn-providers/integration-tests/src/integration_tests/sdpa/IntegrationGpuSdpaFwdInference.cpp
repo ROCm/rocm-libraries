@@ -192,7 +192,8 @@ protected:
         this->registerValidator(outputs.o, K_BF16_PROVIDER_TOLERANCE);
 
         this->setTestCaseNote(testCase.note);
-        this->verifyGraph(graphObj, testCase.seed);
+        this->synthesis().setGlobalSeed(testCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 
