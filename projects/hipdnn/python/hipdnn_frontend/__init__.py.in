@@ -17,12 +17,13 @@ _IS_WINDOWS = platform.system() == "Windows"
 # ROCm runtime libraries to preload via rocm_sdk before importing the compiled
 # extension. On Windows every dependent DLL resolves by base name under a
 # restricted loader search, so the runtime, runtime compiler, and engine-provider
-# deps -- including hipdnn -- must all be named. On Linux the libraries prefix is
+# deps -- including hipdnn and kpack (the rocKE engine's runtime) -- must all be
+# named. On Linux the libraries prefix is
 # already on the loader path (LD_LIBRARY_PATH, via the venv), so hipDNN resolves
 # on its own; only the HIP runtime, which lives off-path in the core wheel, needs
 # preloading (amdhip64 pulls comgr/hiprtc and the sysdeps via its own runpath).
 _ROCM_WHEEL_SHORTNAMES = (
-    ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen"]
+    ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen", "kpack"]
     if _IS_WINDOWS
     else ["amd_comgr", "amdhip64", "hiprtc"]
 )
