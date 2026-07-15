@@ -508,19 +508,19 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
     def test_get_device_arch_importable(self):
         from rocke.runtime.hip_module import get_device_arch
 
-        v = get_device_arch()  # None off-GPU, "gfxNNN" on a device — never raises
+        v = get_device_arch()
         self.assertTrue(v is None or (isinstance(v, str) and v.startswith("gfx")))
 
     def test_get_device_name_importable(self):
         from rocke.runtime.hip_module import get_device_name
 
-        v = get_device_name()  # None off-GPU, marketing string on a device — never raises
+        v = get_device_name()
         self.assertTrue(v is None or (isinstance(v, str) and len(v) > 0))
 
     def test_get_device_count_importable(self):
         from rocke.runtime.hip_module import get_device_count
 
-        v = get_device_count()  # 0 off-GPU, device count on a device — never raises
+        v = get_device_count()
         self.assertIsInstance(v, int)
         self.assertGreaterEqual(v, 0)
 
