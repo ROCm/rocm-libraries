@@ -148,8 +148,8 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     const std::string& getUnsupportedReason() const
     {
-        static const std::string empty;
-        return unsupported_reason ? *unsupported_reason : empty;
+        static const std::string s_empty;
+        return unsupported_reason ? *unsupported_reason : s_empty;
     }
 
     /**

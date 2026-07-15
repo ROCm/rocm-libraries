@@ -23,7 +23,6 @@ class Graph; // reads the recorded error at node-build time; see Graph::sdpa
 template <typename Derived>
 class ErrorRecorder
 {
-protected:
     Derived& recordError(error_t err)
     {
         if(err.is_bad() && !_recordedError.has_value())
@@ -52,7 +51,11 @@ protected:
 
     std::optional<error_t> _recordedError;
 
+private:
+    friend Derived;
     friend class Graph;
+
+    ErrorRecorder() = default;
 };
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph

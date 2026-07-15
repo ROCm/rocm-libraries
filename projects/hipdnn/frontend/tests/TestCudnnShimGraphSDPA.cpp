@@ -30,7 +30,9 @@ using ::testing::_;
 TEST(TestCudnnShimGraphSDPA, ForwardConstructReturnsOutputNoStatsByDefault)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
 
     auto [o, stats] = graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_name("Sdpa"));
@@ -43,7 +45,9 @@ TEST(TestCudnnShimGraphSDPA, ForwardConstructReturnsOutputNoStatsByDefault)
 TEST(TestCudnnShimGraphSDPA, ForwardGenerateStatsProducesStatsOutput)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
 
     auto [o, stats] = graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_generate_stats(true));
@@ -57,7 +61,9 @@ TEST(TestCudnnShimGraphSDPA, DeprecatedIsInferenceMapsToGenerateStats)
 {
     // SHIM-DIVERGENCE(SEMANTIC): set_is_inference(b) == set_generate_stats(!b).
     fe::graph::Graph inferGraph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(inferGraph, q, k, v);
 
     fe::graph::SDPA_attributes inferAttrs;
@@ -77,7 +83,9 @@ TEST(TestCudnnShimGraphSDPA, DeprecatedIsInferenceMapsToGenerateStats)
 TEST(TestCudnnShimGraphSDPA, ForwardAttnScaleOverloadsConfigure)
 {
     fe::graph::Graph scalarGraph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(scalarGraph, q, k, v);
     auto [o1, s1] = scalarGraph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_attn_scale(0.125F));
     EXPECT_NE(o1, nullptr);
@@ -89,11 +97,13 @@ TEST(TestCudnnShimGraphSDPA, ForwardUnsupportedSetterSurfacesRecordedError)
     // SHIM-DIVERGENCE(MISSING): set_score_mod has no hipDNN equivalent; the
     // recorded error must drain into the graph and fail validate().
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
 
     fe::graph::SDPA_attributes attrs;
-    attrs.set_score_mod([](std::shared_ptr<fe::graph::Graph>,
+    attrs.set_score_mod([](const std::shared_ptr<fe::graph::Graph>&,
                            std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; });
     graph.sdpa(q, k, v, attrs);
 
@@ -105,7 +115,9 @@ TEST(TestCudnnShimGraphSDPA, ForwardUnsupportedSetterSurfacesRecordedError)
 TEST(TestCudnnShimGraphSDPA, BackwardConstructAndValidate)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
     auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
@@ -125,7 +137,9 @@ TEST(TestCudnnShimGraphSDPA, BackwardDeterministicRequestSurfacesRecordedError)
     // SHIM-DIVERGENCE(MISSING): determinism is correctness-critical; requesting
     // it must fail loudly rather than silently run non-deterministically.
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
     auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
@@ -145,7 +159,9 @@ TEST(TestCudnnShimGraphSDPA, BackwardDeterministicRequestSurfacesRecordedError)
 TEST(TestCudnnShimGraphSDPA, BackwardDeterministicFalseIsIgnored)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
     auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
@@ -171,7 +187,9 @@ using TestCudnnShimGraphSDPABackend = hipdnn_shim_test::ShimMockBackendFixture;
 TEST_F(TestCudnnShimGraphSDPABackend, BuildOperationGraphReachesBackend)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_name("Sdpa"));
 
@@ -187,7 +205,9 @@ TEST_F(TestCudnnShimGraphSDPABackend, BuildOperationGraphReachesBackend)
 TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeSeqLen)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
     auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
@@ -195,7 +215,7 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeSeqLen)
 
     fe::graph::SDPA_backward_attributes attrs;
     attrs
-        .set_score_mod([](std::shared_ptr<fe::graph::Graph>,
+        .set_score_mod([](const std::shared_ptr<fe::graph::Graph>&,
                           std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; })
         .set_max_total_seq_len_q(128);
     graph.sdpa_backward(q, k, v, o, dO, stats, attrs);
@@ -211,7 +231,9 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeSeqLen)
 TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
     auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
@@ -219,9 +241,8 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
 
     fe::graph::SDPA_backward_attributes attrs;
     attrs.set_max_total_seq_len_q(128).set_score_mod(
-        [](std::shared_ptr<fe::graph::Graph>, std::shared_ptr<fe::graph::Tensor_attributes> t) {
-            return t;
-        });
+        [](const std::shared_ptr<fe::graph::Graph>&,
+           std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; });
     graph.sdpa_backward(q, k, v, o, dO, stats, attrs);
 
     auto error = graph.validate();
@@ -236,7 +257,9 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
 TEST(TestCudnnShimGraphSDPA, CausalMaskGraphStillValidates)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
 
     auto [o, stats] = graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_causal_mask(true));
@@ -252,7 +275,9 @@ TEST(TestCudnnShimGraphSDPA, CausalMaskGraphStillValidates)
 TEST(TestCudnnShimGraphSDPA, BuildPlanAtInvalidIndexOnNativeGraphReportsInvalidIndex)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_name("Sdpa"));
 
@@ -271,7 +296,9 @@ TEST(TestCudnnShimGraphSDPA, BuildPlanAtInvalidIndexOnNativeGraphReportsInvalidI
 TEST(TestCudnnShimGraphSDPA, NativeGraphPlanCountZeroBeforePlansCreated)
 {
     fe::graph::Graph graph;
-    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
     addForwardInputs(graph, q, k, v);
     graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_name("Sdpa"));
 

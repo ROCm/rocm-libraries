@@ -707,9 +707,8 @@ public:
     // has no equivalent. Accepted for source compatibility, recorded as
     // unsupported so the graph fails loudly at validate(). Templated to accept
     // any callable without naming the cuDNN std::function type.
-    // NOLINTNEXTLINE(readability-identifier-naming)
     template <typename ScoreModifier>
-    SdpaAttributes& set_score_mod(ScoreModifier&& value)
+    SdpaAttributes& set_score_mod(ScoreModifier&& value) // NOLINT(readability-identifier-naming)
     {
         static_cast<void>(value);
         return recordUnsupported("SDPA score modifier is unsupported by hipDNN");

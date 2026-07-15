@@ -29,7 +29,6 @@ static_assert(std::is_same_v<cudnn_frontend::graph::Tensor_attributes,
 namespace
 {
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
-using hipdnn_shim_test::makeTensor;
 
 TEST(TestCudnnShimGraph, DefaultConstructsAndValidatesEmptyGraph)
 {
