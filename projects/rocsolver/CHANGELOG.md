@@ -7,6 +7,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 ### Changed
+
+* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage. 
+
 ### Removed
 ### Optimized
 ### Resolved issues
