@@ -107,8 +107,8 @@ jobs:
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-archives and therock-dist
-        run: cmake --build TheRock/build-coverage --target therock-archives therock-dist -- -k 0
+      - name: Build therock-artifacts and therock-dist
+        run: cmake --build TheRock/build-coverage --target therock-artifacts therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
