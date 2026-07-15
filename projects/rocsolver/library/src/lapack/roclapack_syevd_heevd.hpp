@@ -92,6 +92,9 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     rocsolver_alg_mode alg_mode;
     rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &alg_mode);
 
+    rocsolver_alg_mode hetrd_mode;
+    rocsolver_get_alg_mode(handle, rocsolver_function_hetrd, &hetrd_mode);
+
     size_t unused;
     size_t w11 = 0, w12 = 0, w13 = 0;
     size_t w21 = 0, w22 = 0, w23 = 0;
@@ -139,7 +142,10 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
     // requirements for 2-stage path (he2hb does not support batch_count > 1)
-    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
+    const bool use_2stage = batch_count == 1
+        && (hetrd_mode == rocsolver_alg_mode_2stage
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    if(use_2stage)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
@@ -270,6 +276,9 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     rocsolver_alg_mode alg_mode;
     rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &alg_mode);
 
+    rocsolver_alg_mode hetrd_mode;
+    rocsolver_get_alg_mode(handle, rocsolver_function_hetrd, &hetrd_mode);
+
     size_t unused;
     size_t w11 = 0, w12 = 0, w13 = 0;
     size_t w21 = 0, w22 = 0, w23 = 0;
@@ -316,7 +325,10 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
     // requirements for 2-stage path (he2hb does not support batch_count > 1)
-    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
+    const bool use_2stage = batch_count == 1
+        && (hetrd_mode == rocsolver_alg_mode_2stage
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    if(use_2stage)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
@@ -442,6 +454,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     rocsolver_alg_mode sterf_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &sterf_mode));
 
+    rocsolver_alg_mode hetrd_mode;
+    ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_hetrd, &hetrd_mode));
+
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
@@ -464,7 +479,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
+    const bool use_2stage = batch_count == 1
+        && (hetrd_mode == rocsolver_alg_mode_2stage
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    if(use_2stage)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
@@ -709,6 +727,9 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     rocsolver_alg_mode sterf_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &sterf_mode));
 
+    rocsolver_alg_mode hetrd_mode;
+    ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_hetrd, &hetrd_mode));
+
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
@@ -731,7 +752,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
+    const bool use_2stage = batch_count == 1
+        && (hetrd_mode == rocsolver_alg_mode_2stage
+            || (hetrd_mode == rocsolver_alg_mode_auto && n >= SYEVD_2STAGE_SWITCHSIZE));
+    if(use_2stage)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
