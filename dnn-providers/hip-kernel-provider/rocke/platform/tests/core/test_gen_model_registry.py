@@ -97,6 +97,64 @@ def test_missing_key_raises(tmp_path):
         gmr.generate(models, tmp_path / "out")
 
 
+def test_duplicate_op_arch_dtype_raises(tmp_path):
+    """Duplicate (op, arch, dtype) keys are rejected with both file paths."""
+    models = tmp_path / "models"
+    _model(
+        models,
+        "first",
+        {
+            "symbol": "rocke_score_fmha_fp16_gfx950_first",
+            "op": "fmha",
+            "arch": "gfx950",
+            "dtype": "fp16",
+            "num_features": 69,
+        },
+    )
+    _model(
+        models,
+        "second",
+        {
+            "symbol": "rocke_score_fmha_fp16_gfx950_second",
+            "op": "fmha",
+            "arch": "gfx950",
+            "dtype": "fp16",  # same (op, arch, dtype) as first
+            "num_features": 69,
+        },
+    )
+    with pytest.raises(ValueError, match=r"duplicate.*\('fmha', 'gfx950', 'fp16'\)"):
+        gmr.generate(models, tmp_path / "out")
+
+
+def test_duplicate_symbol_raises(tmp_path):
+    """Duplicate symbols are rejected with both file paths."""
+    models = tmp_path / "models"
+    _model(
+        models,
+        "first",
+        {
+            "symbol": "rocke_score_duplicate_symbol",
+            "op": "fmha",
+            "arch": "gfx950",
+            "dtype": "fp16",
+            "num_features": 69,
+        },
+    )
+    _model(
+        models,
+        "second",
+        {
+            "symbol": "rocke_score_duplicate_symbol",  # same symbol as first
+            "op": "fmha",
+            "arch": "gfx942",  # different arch
+            "dtype": "fp16",
+            "num_features": 69,
+        },
+    )
+    with pytest.raises(ValueError, match=r"duplicate symbol"):
+        gmr.generate(models, tmp_path / "out")
+
+
 def test_empty_registry_is_valid(tmp_path):
     models = tmp_path / "models"
     models.mkdir()

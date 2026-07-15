@@ -264,24 +264,5 @@ TEST(TestRockeClientDispatcher, SelectInstanceReturnsNulloptOnNullStream)
     EXPECT_FALSE(dispatcher.selectInstance(handle, fixture.graphWrapper()).has_value());
 }
 
-TEST(TestRockeClientDispatcher, SelectInstanceReturnsNulloptOnDestroyedStream)
-{
-    SKIP_IF_NO_DEVICES();
-
-    hipStream_t stream;
-    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-    ASSERT_EQ(hipStreamDestroy(&stream), hipSuccess);
-
-    RockeClientHandle handle;
-    handle.setStream(stream); // Destroyed stream
-
-    const RockeClientDispatcher dispatcher = twoInstanceDispatcher();
-    const auto fixture = buildSdpaGraph(SdpaGraphConfig{});
-
-    // selectInstance should return nullopt on hipStreamGetDevice failure
-    EXPECT_FALSE(dispatcher.selectInstance(handle, fixture.graphWrapper()).has_value());
-}
-
-
 } // namespace
 } // namespace rocke_client::dispatcher

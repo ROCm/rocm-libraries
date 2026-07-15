@@ -29,17 +29,12 @@ namespace
 
 namespace fb = hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 
-// Bare gfx arch string (e.g. "gfx942") for the stream's device, or "" when no
-// device is resolvable (e.g. host-only unit tests). Only ever called inside
-// selectInstance's try/catch, so a std::bad_alloc from the small string build
-// is handled there rather than escaping the noexcept selection path.
-std::string deviceArch(hipStream_t stream)
+// Bare gfx arch string (e.g. "gfx942") for the given device, or "" when the
+// device properties cannot be queried. Only ever called inside selectInstance's
+// try/catch, so a std::bad_alloc from the small string build is handled there
+// rather than escaping the noexcept selection path.
+std::string deviceArch(int device)
 {
-    int device = 0;
-    if(hipStreamGetDevice(stream, &device) != hipSuccess)
-    {
-        return {};
-    }
     hipDeviceProp_t props{};
     if(hipGetDeviceProperties(&props, device) != hipSuccess)
     {
@@ -236,9 +231,8 @@ std::optional<AotInstance>
     // nothing escapes this noexcept function (selectForArch is itself noexcept).
     try
     {
-        // Get the device from the stream (same device deviceArch uses).
-        // This ensures HardwareProfile::fromDevice queries the stream's device,
-        // not the current default device (which may differ in multi-GPU setups).
+        // Get the device from the stream. Query once and use consistently for both
+        // arch lookup and hardware profile to avoid mismatches in multi-GPU setups.
         int device = 0;
         hipStream_t stream = handle.getStream();
         if(hipStreamGetDevice(stream, &device) != hipSuccess)
@@ -251,7 +245,7 @@ std::optional<AotInstance>
         {
             return std::nullopt;
         }
-        problem->arch = deviceArch(stream);
+        problem->arch = deviceArch(device);
         problem->hw = HardwareProfile::fromDeviceWithSupplement(device, problem->arch);
         return select(*problem);
     }

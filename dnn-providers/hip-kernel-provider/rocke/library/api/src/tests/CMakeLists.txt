@@ -20,6 +20,7 @@ add_executable(
     TestRockeClientEngine.cpp
     TestPluginPublic.cpp
     dispatcher/TestAotCatalog.cpp
+    dispatcher/TestHardwareProfile.cpp
     dispatcher/TestRockeClientDispatcher.cpp
     dispatcher/TestSdpaGraphAdapter.cpp
     dispatcher/TestSelectionConstraints.cpp
