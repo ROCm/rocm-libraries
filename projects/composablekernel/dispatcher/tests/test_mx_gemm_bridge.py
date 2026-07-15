@@ -93,6 +93,22 @@ class TestValidity(unittest.TestCase):
         cfg.datatype = "bf16"
         self.assertFalse(cfg.is_valid())
 
+    def test_bf8_rejected(self):
+        # Old-TE argparse (choices=["fp4","fp8"]) + validate_gemm_mx never
+        # compile bf8/e5m2 for mx_gemm, so the bridge must reject it too. Assert
+        # both the config-level gate (is_valid) and, when importable, the
+        # codegen-level gate (_validate) refuse dtype="bf8".
+        cfg = default_fp8_config()
+        cfg.datatype = "bf8"
+        self.assertFalse(cfg.is_valid())
+
+        try:
+            from unified_mx_gemm_codegen import _validate  # noqa: E402
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest(f"codegen import unavailable: {exc}")
+        with self.assertRaises(Exception):
+            _validate(cfg.to_codegen_config())
+
     def test_wrong_warp_tile_rejected(self):
         cfg = default_fp8_config()
         cfg.warp_tile_k = 64

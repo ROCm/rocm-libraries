@@ -177,6 +177,23 @@ int dispatcher_run_mx_gemm(const void* A,
     constexpr ck_tile::index_t xdl_mn_thread = SelectedKernel::WarpTileM;
     constexpr ck_tile::index_t xdl_k_thread  = 64 / xdl_mn_thread;
 
+    // ---- Divisibility guard. The shuffled scale-buffer sizes below use integer
+    // division by the xdl pack factors (m/m_xdl_pack, n/n_xdl_pack,
+    // scale_k_size/k_xdl_pack). If M/N/scale_k are not exact multiples of their
+    // pack factors, that division silently truncates the shuffled buffers, so the
+    // pre-shuffle would read/write past valid data and the kernel would consume a
+    // corrupt scale layout. Fail loudly instead (matches the -1 error convention
+    // used above). ----
+    if(m % m_xdl_pack != 0 || n % n_xdl_pack != 0 || scale_k_size % k_xdl_pack != 0)
+    {
+        std::cerr << "dispatcher_run_mx_gemm: M, N, and scale_k (=K/32) must be divisible by the "
+                     "xdl pack factors (m_xdl_pack="
+                  << m_xdl_pack << ", n_xdl_pack=" << n_xdl_pack << ", k_xdl_pack=" << k_xdl_pack
+                  << ") for the selected warp tile; got M=" << m << ", N=" << n
+                  << ", scale_k=" << scale_k_size << "\n";
+        return -1;
+    }
+
     // ---- Build unshuffled scale HostTensors from the incoming raw e8m0 bytes.
     // scale_a: [M, K/32] row-major; scale_b: [N, K/32] row-major. ----
     ck_tile::HostTensor<ScaleType> scale_a_host(

@@ -75,10 +75,20 @@ _FP4_VALUE_TO_CODE = {
 
 # =============================================================================
 # fp8 (e4m3, OCP) raw-byte codec for the exact grid we test on.
-# These values are exactly representable in BOTH OCP and FNUZ e4m3, and the
-# device (gfx950) uses OCP e4m3 (bias 7). We emit OCP bytes to match device.
-# Bytes verified against pk_fp4 e2m1_to_fp8_table (OCP branch) + hand-derived
-# grid entries (sign|exp4|mant3, bias 7).
+#
+# PRECONDITION (hard): the byte codes below are OCP e4m3 (bias 7). They are ONLY
+# a valid reference for a kernel compiled with CK_TILE_USE_OCP_FP8 == 1. This is
+# the gfx950 default (see include/ck_tile/core/config.hpp: OCP is selected for
+# __gfx950__ / __gfx12__ and the bridge compiles the lib with
+# --offload-arch=gfx950 without overriding the flag). On any arch where CK
+# defaults to (or is built for) FNUZ e4m3 (bias 8), the DEVICE bytes for the same
+# float value differ, so this numpy reference would SILENTLY disagree with the
+# kernel. Callers that target a non-OCP arch must not use this codec.
+#
+# The grid values are exactly representable in BOTH OCP and FNUZ, but their
+# RAW BYTES are not the same between the two formats, which is why the codec is
+# OCP-specific. Bytes verified against pk_fp4 e2m1_to_fp8_table (OCP branch) +
+# hand-derived grid entries (sign|exp4|mant3, bias 7).
 # =============================================================================
 _FP8_OCP_VALUE_TO_BYTE = {
     0.0: 0x00, 0.5: 0x30, 1.0: 0x38, 1.5: 0x3C, 2.0: 0x40, 2.5: 0x42,
@@ -87,6 +97,36 @@ _FP8_OCP_VALUE_TO_BYTE = {
     -3.0: 0xC4, -4.0: 0xC8, -6.0: 0xCC,
 }
 _FP8_OCP_BYTE_TO_VALUE = {b: v for v, b in _FP8_OCP_VALUE_TO_BYTE.items()}
+
+
+def fp8_ocp_is_default_for_arch(arch: str) -> bool:
+    """True iff CK_TILE_USE_OCP_FP8 defaults to 1 for `arch`.
+
+    Mirrors include/ck_tile/core/config.hpp: OCP e4m3 is the device default only
+    for gfx950 and gfx12; every other arch defaults to FNUZ e4m3. The bridge
+    compiles the mx_gemm lib without an explicit -DCK_TILE_USE_OCP_FP8, so the
+    effective fp8 format is exactly this arch default. Use this to guard the fp8
+    numpy reference (see assert_fp8_ocp_supported / quantize_fp8).
+    """
+    a = (arch or "").lower()
+    return a.startswith("gfx950") or a.startswith("gfx12")
+
+
+def assert_fp8_ocp_supported(arch: str = _DEFAULT_ARCH) -> None:
+    """Fail loudly if the fp8 OCP codec would silently disagree with the device.
+
+    The fp8 quantize/dequantize helpers emit/decode OCP e4m3 bytes; that is only
+    correct when the kernel is compiled with CK_TILE_USE_OCP_FP8 == 1 (see the
+    codec precondition above). Raise instead of producing bytes that mismatch a
+    FNUZ-built kernel.
+    """
+    if not fp8_ocp_is_default_for_arch(arch):
+        raise ValueError(
+            f"fp8 mx_gemm reference is OCP e4m3 only, but arch '{arch}' defaults to "
+            "FNUZ e4m3 (CK_TILE_USE_OCP_FP8 == 0). The bridge lib is compiled without "
+            "an explicit -DCK_TILE_USE_OCP_FP8, so its device fp8 bytes would not match "
+            "this numpy reference. OCP fp8 is supported for gfx950/gfx12 only."
+        )
 
 
 def e8m0_to_float(byte) -> np.ndarray:
@@ -350,6 +390,10 @@ def quantize_fp8(vals: np.ndarray) -> np.ndarray:
 
     Values MUST come from the exact e4m3 grid (see _FP8_OCP_VALUE_TO_BYTE) so the
     mapping is lossless; that keeps the numpy reference unambiguous.
+
+    PRECONDITION: OCP e4m3 only. These bytes match the device only for a kernel
+    compiled with CK_TILE_USE_OCP_FP8 == 1 (gfx950/gfx12 default). See the codec
+    comment above and assert_fp8_ocp_supported(); GpuMxGemmRunner enforces this.
     """
     flat = vals.reshape(-1)
     out = np.empty(flat.shape, dtype=np.uint8)
@@ -442,9 +486,16 @@ def mx_gemm_reference(A_deq, B_deq, scale_a_byte, scale_b_byte, prob: MxGemmProb
 
 
 class GpuMxGemmRunner:
-    def __init__(self, so_path: Path, dtype: str = "fp8"):
+    def __init__(self, so_path: Path, dtype: str = "fp8", arch: str = _DEFAULT_ARCH):
+        # The fp8 numpy reference (quantize_fp8/dequantize_fp8) emits OCP e4m3
+        # bytes; that only matches the device when the lib was compiled with
+        # CK_TILE_USE_OCP_FP8 == 1 (the gfx950 default). Guard loudly so an
+        # FNUZ arch can't silently diverge from the reference.
+        if dtype == "fp8":
+            assert_fp8_ocp_supported(arch)
         self._lib = MxGemmDispatcherLib(so_path)
         self.dtype = dtype
+        self.arch = arch
 
     @property
     def kernel_name(self) -> str:
