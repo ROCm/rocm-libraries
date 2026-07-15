@@ -4,9 +4,15 @@
 #include <miopen/conv/solver_finders.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <numeric>
+#include <thread>
 
 #include <miopen/conv_algo_name.hpp>
+#include <miopen/handle.hpp>
+#include <miopen/hipoc_kernel.hpp>
+
+#include <hip/hip_runtime.h>
 #include <miopen/config.h>
 #include <miopen/env.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
@@ -26,7 +32,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMPILE_ONLY)
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE)
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_DISABLE_IF_ALT, true)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_TIMEOUT, true)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
@@ -202,6 +208,63 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 
 } // namespace conv
 
+/// Launch a naive solver's warmup on a disposable stream with a wall-clock
+/// budget of 3x the best non-naive time.  Returns the warmup elapsed time in
+/// ms on success, or < 0 if the kernel exceeded the budget (in which case the
+/// stream is handed to a detached thread for async cleanup).
+static float TryNaiveWithTimeout(const Handle& handle,
+                                 const Invoker& invoker,
+                                 const AnyInvokeParams& invoke_ctx,
+                                 float best_time)
+{
+    hipStream_t naive_stream = nullptr;
+    auto status = hipStreamCreateWithFlags(&naive_stream, hipStreamNonBlocking);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status, "Failed to create naive bailout stream");
+
+    const auto orig_stream = handle.GetStream();
+    handle.SetStream(naive_stream);
+    handle.EnableProfiling(false);
+
+    HipEventPtr ev_start = make_hip_event();
+    HipEventPtr ev_stop  = make_hip_event();
+    hipEventRecord(ev_start.get(), naive_stream);
+    invoker(handle, invoke_ctx);
+    hipEventRecord(ev_stop.get(), naive_stream);
+
+    const float naive_budget = best_time * 3.0f;
+    const auto deadline =
+        std::chrono::steady_clock::now() +
+        std::chrono::microseconds(static_cast<long long>(naive_budget * 1000));
+    bool finished = false;
+    while(std::chrono::steady_clock::now() < deadline)
+    {
+        if(hipEventQuery(ev_stop.get()) == hipSuccess)
+        {
+            finished = true;
+            break;
+        }
+        std::this_thread::yield();
+    }
+
+    handle.SetStream(orig_stream);
+    handle.EnableProfiling(true);
+
+    if(!finished)
+    {
+        std::thread([naive_stream]() {
+            hipStreamSynchronize(naive_stream);
+            hipStreamDestroy(naive_stream);
+        }).detach();
+        return -1.0f;
+    }
+
+    float warmup_elapsed = 0.0f;
+    hipEventElapsedTime(&warmup_elapsed, ev_start.get(), ev_stop.get());
+    hipStreamDestroy(naive_stream);
+    return warmup_elapsed;
+}
+
 /// Register invoker only for the best solution within algorithm.
 std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const std::vector<solver::ConvSolution>& solutions,
@@ -222,11 +285,11 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
         return s.solver_id.find("Naive") != std::string::npos;
     };
 
-    bool naive_disable       = env::value(MIOPEN_NAIVE_DISABLE_IF_ALT);
+    bool naive_timeout       = env::value(MIOPEN_NAIVE_TIMEOUT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
     // Defer Naive only when a non-Naive alternative exists across all algorithms or this one.
     const bool defer_naive =
-        naive_disable &&
+        naive_timeout &&
         (non_naive_succeeded || std::any_of(solutions.begin(), solutions.end(), [&](const auto& s) {
              return !is_naive_solver(s);
          }));
@@ -249,18 +312,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     {
         const auto& sol = solutions[idx];
 
-        const bool is_naive = is_naive_solver(sol);
-        if(naive_disable && is_naive)
-        {
-            if(defer_naive && non_naive_succeeded)
-            {
-                MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
-                                                       << sol.solver_id);
-                continue;
-            }
-            MIOPEN_LOG_I("Unable to Skip Naive Solver: " << algorithm_name.ToString() << ":"
-                                                         << sol.solver_id);
-        }
+        const bool is_naive     = is_naive_solver(sol);
+        const bool cutoff_naive = defer_naive && is_naive && non_naive_succeeded;
 
         if(!conv::IsEnoughWorkspace(
                "EvaluateInvokers", solver::Id{sol.solver_id}, sol.workspace_sz, &invoke_ctx))
@@ -329,6 +382,22 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             int i                           = 0;
             samples.clear();
 
+            if(cutoff_naive)
+            {
+                const float warmup =
+                    TryNaiveWithTimeout(handle, invoker, invoke_ctx,
+                                        core_result.find_search_best_time);
+                if(warmup < 0)
+                {
+                    MIOPEN_LOG_I("Timeout: Naive Solver "
+                                 << algorithm_name.ToString() << ":" << sol.solver_id
+                                 << " exceeded 3x best budget");
+                    continue;
+                }
+                first_elapsed = warmup;
+                i             = 1;
+            }
+
             while(i < N_RUNS_MAX && elapsed < TIME_MS_MAX)
             {
                 invoker(handle, invoke_ctx);
@@ -337,8 +406,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                 if(i > 0)
                 {
                     samples.push_back(handle.GetKernelTime());
-                    if(i == 1 && using_search_cutoff && samples.front() > 1.0f &&
-                       samples.front() > skip_time)
+                    if(i == 1 && using_search_cutoff &&
+                       samples.front() > 1.0f && samples.front() > skip_time)
                     {
                         MIOPEN_LOG_I("Skipping (Slow) Solver: "
                                      << algorithm_name.ToString() << ":" << sol.solver_id << " "
