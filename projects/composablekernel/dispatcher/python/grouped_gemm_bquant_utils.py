@@ -622,6 +622,95 @@ def setup_multiple_bquant_dispatchers(
 
 
 # =============================================================================
+# Sweep expansion: JSON config → list of BQuantKernelConfig
+# =============================================================================
+
+
+def expand_bquant_sweep(
+    config_path: str,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> List["BQuantKernelConfig"]:
+    """Expand a BQuant JSON sweep config into a list of BQuantKernelConfig objects.
+
+    The JSON format mirrors unified_grouped_gemm_bquant_codegen.py's _build_specs
+    so the same config files work for both codegen and Python utils. Every valid
+    (variant, layout, tile, quant_group) combination produces one BQuantKernelConfig;
+    duplicates (by .name) are collapsed.
+
+    JSON schema:
+      variant_keys:       list of dtype variants, e.g. ["fp8", "bf8"]
+      layouts:            list of layout strings, e.g. ["rcr"]
+      pipeline:           pipeline name, e.g. "compv3"
+      epilogue:           epilogue name, e.g. "cshuffle"
+      scheduler:          scheduler name, e.g. "intrawave"
+      tile_configs:       list of {tile_m, tile_n, tile_k, warp_m, warp_n, warp_k,
+                                   warp_tile_m, warp_tile_n, warp_tile_k}
+      quant_groups:       list of {quant_group_m, quant_group_n, quant_group_k}
+      pad_m/pad_n/pad_k:  bool
+      block_size:         int (default 256)
+      k_block_per_cu:     int (default 1)
+      double_smem_buffer: bool (default false)
+      preshuffle_b:       bool (default false)
+      preshuffle_bquant:  bool (default false)
+    """
+    import itertools
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    pipeline          = cfg.get("pipeline", "compv3")
+    epilogue          = cfg.get("epilogue", "cshuffle")
+    scheduler         = cfg.get("scheduler", "intrawave")
+    pad_m             = cfg.get("pad_m", False)
+    pad_n             = cfg.get("pad_n", False)
+    pad_k             = cfg.get("pad_k", True)
+    block_size        = cfg.get("block_size", 256)
+    k_block_per_cu    = cfg.get("k_block_per_cu", 1)
+    double_smem_buffer = cfg.get("double_smem_buffer", False)
+    preshuffle_b      = cfg.get("preshuffle_b", False)
+    preshuffle_bquant = cfg.get("preshuffle_bquant", False)
+
+    configs: List[BQuantKernelConfig] = []
+    seen: set = set()
+
+    for variant_key, layout, tile_dict, qg in itertools.product(
+        cfg.get("variant_keys", ["fp8"]),
+        cfg.get("layouts", ["rcr"]),
+        cfg.get("tile_configs", []),
+        cfg.get("quant_groups", [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
+    ):
+        c = BQuantKernelConfig(
+            variant_key=variant_key,
+            layout=layout,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            scheduler=scheduler,
+            tile_m=tile_dict["tile_m"],
+            tile_n=tile_dict["tile_n"],
+            tile_k=tile_dict["tile_k"],
+            warp_m=tile_dict["warp_m"],
+            warp_n=tile_dict["warp_n"],
+            warp_k=tile_dict["warp_k"],
+            warp_tile_m=tile_dict["warp_tile_m"],
+            warp_tile_n=tile_dict["warp_tile_n"],
+            warp_tile_k=tile_dict["warp_tile_k"],
+            quant_group_m=qg.get("quant_group_m", 1),
+            quant_group_n=qg.get("quant_group_n", 1),
+            quant_group_k=qg.get("quant_group_k", 128),
+            preshuffle_b=preshuffle_b,
+            preshuffle_bquant=preshuffle_bquant,
+            double_smem_buffer=double_smem_buffer,
+            k_block_per_cu=k_block_per_cu,
+            gfx_arch=gfx_arch,
+        )
+        if c.name not in seen:
+            seen.add(c.name)
+            configs.append(c)
+
+    return configs
+
+
+# =============================================================================
 # Convenience: default fp8 config (matches GemmConfigQuantDecode<fp8_t>)
 # =============================================================================
 

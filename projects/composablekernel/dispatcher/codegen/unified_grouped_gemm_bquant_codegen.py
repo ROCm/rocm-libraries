@@ -362,6 +362,7 @@ struct {struct} {{
     static constexpr ck_tile::index_t WarpTileK  = {t.warp_tile_k};
     static constexpr ck_tile::index_t BlockSize  = {spec.block_size};
     static constexpr int               kBlockPerCu = {spec.k_block_per_cu};
+    static constexpr ck_tile::index_t GroupSizeK = {spec.quant_group_k};
 
     static constexpr bool kPadM           = {pad_m};
     static constexpr bool kPadN           = {pad_n};
@@ -454,6 +455,7 @@ using CDataType   = {ck_c};
 using QDataType   = {ck_q};
 using AccDataType = {ck_acc};
 using QuantGroupSize = {ns}::QuantGroupSize;
+constexpr ck_tile::index_t GroupSizeK = {ns}::GroupSizeK;
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 

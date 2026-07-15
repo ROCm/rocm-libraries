@@ -24,10 +24,13 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <vector>
 
 #include "ck_tile/dispatcher/dispatcher.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
 #include "ck_tile/dispatcher/backends/generated_tile_backend.hpp"
+#include "ck_tile/host/tensor_shuffle_utils.hpp"
 
 // Kernel header force-included via -include compiler flag.
 // Defines: ADataType, BDataType, CDataType, QDataType, AccDataType,
@@ -68,13 +71,36 @@ int dispatcher_initialize()
     if(g_initialized)
         return 0;
 
-    // Build a minimal KernelKey so the kernel is registered and selectable.
-    // For BQuant the key is used only for registration; actual dispatch goes
-    // through SelectedKernel::launch() directly via dispatcher_run_bquant_gemm.
+    // Build KernelKey from force-included kernel's static members so the key
+    // is correct for all dtype/pipeline/padding variants, not just fp8/compv3.
     KernelKey key;
-    key.signature.dtype_a             = DataType::FP8;
-    key.signature.dtype_b             = DataType::FP8;
-    key.signature.dtype_c             = DataType::FP16;
+
+    // Derive dtype_a from the force-included ADataType alias
+    if constexpr(std::is_same_v<ADataType, ck_tile::fp8_t>)
+        key.signature.dtype_a = DataType::FP8;
+    else if constexpr(std::is_same_v<ADataType, ck_tile::bf8_t>)
+        key.signature.dtype_a = DataType::BF8;
+    else if constexpr(std::is_same_v<ADataType, ck_tile::bf16_t>)
+        key.signature.dtype_a = DataType::BF16;
+    else
+        key.signature.dtype_a = DataType::FP8; // fallback
+
+    if constexpr(std::is_same_v<BDataType, ck_tile::fp8_t>)
+        key.signature.dtype_b = DataType::FP8;
+    else if constexpr(std::is_same_v<BDataType, ck_tile::bf8_t>)
+        key.signature.dtype_b = DataType::BF8;
+    else if constexpr(std::is_same_v<BDataType, ck_tile::bf16_t>)
+        key.signature.dtype_b = DataType::BF16;
+    else
+        key.signature.dtype_b = DataType::FP8; // fallback (pk_int4, pk_fp4)
+
+    if constexpr(std::is_same_v<CDataType, ck_tile::half_t>)
+        key.signature.dtype_c = DataType::FP16;
+    else if constexpr(std::is_same_v<CDataType, ck_tile::bf16_t>)
+        key.signature.dtype_c = DataType::BF16;
+    else
+        key.signature.dtype_c = DataType::FP16; // fallback
+
     key.signature.dtype_acc           = DataType::FP32;
     key.signature.layout_a            = LayoutTag::RowMajor;
     key.signature.layout_b            = LayoutTag::ColMajor;
@@ -93,15 +119,20 @@ int dispatcher_initialize()
         SelectedKernel::WarpM, SelectedKernel::WarpN, SelectedKernel::WarpK};
     key.algorithm.warp_tile_shape = {
         SelectedKernel::WarpTileM, SelectedKernel::WarpTileN, SelectedKernel::WarpTileK};
-    key.algorithm.pipeline        = Pipeline::CompV3;
+    // WPQuantBPipelineAgBgCrV2 (preshuffleb) maps to PreShuffleV2; all others are CompV3.
+    key.algorithm.pipeline        = SelectedKernel::PreshuffleB ? Pipeline::PreShuffleV2
+                                                                 : Pipeline::CompV3;
     key.algorithm.scheduler       = Scheduler::Intrawave;
     key.algorithm.epilogue        = Epilogue::CShuffle;
     key.algorithm.block_size      = SelectedKernel::BlockSize;
-    key.algorithm.double_buffer   = false;
+    key.algorithm.double_buffer   = SelectedKernel::DoubleSmemBuffer;
     key.algorithm.persistent      = false;
     key.algorithm.preshuffle      = SelectedKernel::PreshuffleB;
     key.algorithm.transpose_c     = false;
     key.algorithm.num_wave_groups = 1;
+    key.algorithm.pad_m           = SelectedKernel::kPadM;
+    key.algorithm.pad_n           = SelectedKernel::kPadN;
+    key.algorithm.pad_k           = SelectedKernel::kPadK;
     key.gfx_arch                  = GFX_ARCH;
 
     auto kernel =
@@ -253,11 +284,35 @@ int dispatcher_run_bquant_gemm(const void* A,
         cleanup();
         return -1;
     }
-    if(hipMemcpy(BQ_dev, BQ_host, QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) !=
-       hipSuccess)
+    // Apply BQ preshuffle when required — mirrors gemm_bquant_profiler.hpp:118-121.
+    // BPreshuffleQuant reorders BQ in host memory before the device copy so the kernel
+    // finds the scale values in the interleaved layout it expects.
+    if constexpr(SelectedKernel::BPreshuffleQuant)
     {
-        cleanup();
-        return -1;
+        constexpr int block_bq_k =
+            static_cast<int>(SelectedKernel::TileK) / static_cast<int>(QuantGroupSize::kK);
+        ck_tile::HostTensor<QDataType> bq_h(
+            ck_tile::host_tensor_descriptor(static_cast<int>(QK_B),
+                                            static_cast<int>(QN_B),
+                                            static_cast<int>(QN_B),
+                                            true /*row-major*/));
+        std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
+        auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
+        if(hipMemcpy(BQ_dev, bq_shuffled.data(),
+                     QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) != hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
+    }
+    else
+    {
+        if(hipMemcpy(BQ_dev, BQ_host, QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) !=
+           hipSuccess)
+        {
+            cleanup();
+            return -1;
+        }
     }
     if(hipMemset(C_dev, 0, M * N * sizeof(CDataType)) != hipSuccess)
     {
