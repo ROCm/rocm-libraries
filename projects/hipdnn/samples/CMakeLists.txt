@@ -66,6 +66,26 @@ macro(add_hipdnn_sample NAME SOURCE)
     list(APPEND HIPDNN_ALL_SAMPLES ${NAME})
 endmacro()
 
+# Dynamic backend-loading sample. Links ONLY hipdnn_frontend_dynamic --
+# deliberately NOT hipdnn_test_sdk, which links the direct hipdnn_frontend and
+# would pull libhipdnn_backend back onto the link line.
+add_executable(hipdnn_sample_dynamic_backend_loading dynamic/DynamicBackendLoading.cpp)
+target_link_libraries(hipdnn_sample_dynamic_backend_loading
+    PRIVATE Threads::Threads hipdnn_frontend_dynamic)
+target_compile_options(hipdnn_sample_dynamic_backend_loading PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
+set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+# The dynamic sample does not link libhipdnn_backend. In build trees, point its
+# runtime search path at the backend target directory. In installed Linux/ELF
+# layouts, keep the search relative from bin/ to lib/.
+set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+    BUILD_RPATH "$<TARGET_FILE_DIR:hipdnn_backend>"
+)
+clang_tidy_check(hipdnn_sample_dynamic_backend_loading)
+list(APPEND HIPDNN_ALL_SAMPLES hipdnn_sample_dynamic_backend_loading)
+
 add_hipdnn_sample(hipdnn_sample_bn_inference batchnorm/BnInference.cpp)
 add_hipdnn_sample(hipdnn_sample_bn_inference_with_variance batchnorm/BnInferenceWithVariance.cpp)
 add_hipdnn_sample(hipdnn_sample_bn_training batchnorm/BnTraining.cpp)
@@ -158,6 +178,9 @@ add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+# Register dynamic backend-loading sample
+add_hipdnn_sample_test(hipdnn_sample_dynamic_backend_loading)
+
 # Register autotune sample
 add_hipdnn_sample_test(hipdnn_sample_autotune)
 
@@ -177,6 +200,24 @@ if(BUILD_ADDRESS_SANITIZER)
         hipdnn_sample_conv_fprop_deterministic
         hipdnn_sample_serialization_roundtrip
         PROPERTIES DISABLED TRUE
+    )
+endif()
+
+# Optional YAML-driven CTest categorization. Guarded so standalone /
+# sparse checkouts without shared/ctest still build (falls back to unlabeled
+# install). apply_ctest_category_labels() scans the add_test() names already
+# written into INSTALLED_CTEST_FILE and appends per-test
+# set_tests_properties(... LABELS ...) lines, so `ctest -L quick` works from
+# the installed bin/hipdnn_samples/ tree that TheRock CI consumes.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    apply_ctest_category_labels(
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+        "${INSTALLED_CTEST_FILE}"
     )
 endif()
 
