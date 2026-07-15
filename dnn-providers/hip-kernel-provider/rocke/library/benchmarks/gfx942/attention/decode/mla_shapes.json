@@ -1,0 +1,61 @@
+{
+  "_comment": "MLA (Multi-head Latent Attention) decode shapes for gfx942. seqlen_q=1 (decode regime). Covers DeepSeek V2/V3/V3.1/R1 (Hq=128), GLM-5 (Hq=TBD — confirm-config before bench), and Kimi-K2 (Hq=64). Canonical geometry: qk_nope=128, qk_rope=64, v_head_dim=128, kv_lora_rank=512, q_lora_rank=1536, Hkv=1. block_size=16 matches the default paged-KV cache block size.",
+  "_status": "GLM-5 Hq is pending confirmation (confirm-config task). Update num_query_heads before benchmarking.",
+  "mla_geometry": {
+    "qk_nope_dim": 128,
+    "qk_rope_dim": 64,
+    "v_head_dim": 128,
+    "kv_lora_rank": 512,
+    "q_lora_rank": 1536,
+    "num_kv_heads": 1
+  },
+  "models": [
+    {
+      "model": "DeepSeek-V3-R1",
+      "num_query_heads": 128,
+      "num_kv_heads": 1,
+      "block_size": 16,
+      "shapes": [
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 512,   "dtype": "bf16", "label": "ds_v3_b1_kv512"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 1024,  "dtype": "bf16", "label": "ds_v3_b1_kv1024"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 2048,  "dtype": "bf16", "label": "ds_v3_b1_kv2048"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 4096,  "dtype": "bf16", "label": "ds_v3_b1_kv4096"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 8192,  "dtype": "bf16", "label": "ds_v3_b1_kv8192"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 16384, "dtype": "bf16", "label": "ds_v3_b1_kv16384"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 32768, "dtype": "bf16", "label": "ds_v3_b1_kv32768"}
+      ]
+    },
+    {
+      "model": "GLM-5",
+      "_note": "num_query_heads is unconfirmed — confirm-config required before benchmarking. Assumed 128 (same as DeepSeek); update if different.",
+      "num_query_heads": 128,
+      "num_kv_heads": 1,
+      "block_size": 16,
+      "shapes": [
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 512,   "dtype": "bf16", "label": "glm5_b1_kv512"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 1024,  "dtype": "bf16", "label": "glm5_b1_kv1024"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 2048,  "dtype": "bf16", "label": "glm5_b1_kv2048"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 4096,  "dtype": "bf16", "label": "glm5_b1_kv4096"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 8192,  "dtype": "bf16", "label": "glm5_b1_kv8192"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 16384, "dtype": "bf16", "label": "glm5_b1_kv16384"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 32768, "dtype": "bf16", "label": "glm5_b1_kv32768"}
+      ]
+    },
+    {
+      "model": "Kimi-K2",
+      "_note": "Hq=64 (differs from DeepSeek/GLM-5 Hq=128); all other MLA geometry is identical.",
+      "num_query_heads": 64,
+      "num_kv_heads": 1,
+      "block_size": 16,
+      "shapes": [
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 512,   "dtype": "bf16", "label": "kimi_k2_b1_kv512"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 1024,  "dtype": "bf16", "label": "kimi_k2_b1_kv1024"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 2048,  "dtype": "bf16", "label": "kimi_k2_b1_kv2048"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 4096,  "dtype": "bf16", "label": "kimi_k2_b1_kv4096"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 8192,  "dtype": "bf16", "label": "kimi_k2_b1_kv8192"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 16384, "dtype": "bf16", "label": "kimi_k2_b1_kv16384"},
+        {"batch": 1, "seqlen_q": 1, "seqlen_k": 32768, "dtype": "bf16", "label": "kimi_k2_b1_kv32768"}
+      ]
+    }
+  ]
+}

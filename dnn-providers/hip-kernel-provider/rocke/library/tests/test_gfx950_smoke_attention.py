@@ -28,7 +28,7 @@ from pathlib import Path
 from rocke.assets import platform_root
 from rocke.runtime.hip_module import get_device_arch, get_device_name
 
-_LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
+_LIBROOT = Path(__file__).resolve().parents[1]  # tests: rocke/library
 _PY_ROOT = platform_root() / "python"
 _DEFAULT_BASELINE = (
     importlib.resources.files("rocke.golden") / "rocke_gfx950_smoke_perf.json"
