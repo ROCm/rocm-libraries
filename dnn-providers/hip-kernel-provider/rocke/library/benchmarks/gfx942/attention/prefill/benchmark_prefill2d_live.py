@@ -142,7 +142,10 @@ def _import_flydsl():
     }
     try:
         import kernels.attention.flash_attn_generic  # type: ignore  # noqa: F401
-        import kernels.attention.flash_attn_gfx950  # type: ignore  # noqa: F401
+        try:
+            import kernels.attention.flash_attn_gfx950  # type: ignore  # noqa: F401
+        except ImportError:
+            pass
         from kernels.attention.flash_attn_interface import flydsl_flash_attn_func  # type: ignore
 
         _FLYDSL_FUNC = flydsl_flash_attn_func
