@@ -206,4 +206,3 @@ For checking the rocALUTION version in an application, use pre-defined macros:
   #define __ROCALUTION_VER        // version
 
 The final ``__ROCALUTION_VER`` holds the version number as ``10000 * major + 100 * minor + patch``, as defined in ``src/base/version.hpp.in``.
-
