@@ -496,7 +496,7 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
 }
 
 // ---------------------------------------------------------------------------
-// Co-execution hazard (regression test for dsLoadOverlapsActiveWmmaSrc):
+// Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
 // a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be
 // issued inside that WMMA's latency window, because the load could clobber a
 // source register the WMMA is still reading.
@@ -553,6 +553,90 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
     EXPECT_EQ(seq, expected)
         << "hazardous ds_load must be deferred until an independent WMMA (D#100) has "
            "issued; it must not co-issue inside WMMA D#12's latency window";
+}
+
+// ---------------------------------------------------------------------------
+// Co-execution hazard, VALU variant (regression test for destOverlapsActiveWmmaSrc
+// on the VALU path): a VALU whose dest VGPR overlaps the in-flight WMMA's src VGPRs
+// must NOT be issued inside that WMMA's latency window, because it could clobber a
+// source register the WMMA is still reading.
+//
+// Unlike the ds_load variant, a VALU only becomes co-issue pickable at the positions
+// set in the WMMA's co-issue window (MXWMMA_SCALE = 0x00C0, i.e. positions 6/7). Right
+// after issue the position is 1, where isValuPickable() is already false, so extra
+// non-hazardous fillers are needed to advance the co-issue timeline into a pickable
+// position while WMMA #0 is still in flight. That is exactly the moment the hazard gate
+// must fire:
+//   - 3 non-hazardous ds_loads (v[300:], v[320:], v[340:]) fill the per-WMMA DS cap and
+//     advance positions 1 -> 4.
+//   - 3 independent scalar ops advance positions 4 -> 7; at position 6 the VALU becomes
+//     co-issue pickable while WMMA #0 (v[50:58)) is still the active window.
+//
+// With the gate the hazardous VALU (dst v52) is skipped at position 6 and deferred until
+// after every independent WMMA has issued; without it, the VALU would co-issue at
+// position 6, right inside WMMA #0's latency window, clobbering v52 mid-read.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
+    const int addrReg = 400;
+    auto createScalarOp = [&](int dst, int src0, int src1) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+        inst->addDestReg(StinkyRegister("s", dst, 1));
+        inst->addSrcReg(StinkyRegister("s", src0, 1));
+        inst->addSrcReg(StinkyRegister("s", src1, 1));
+        return inst;
+    };
+    // F8 MX WMMA fires first (Phase B). Its src VGPRs are v[50:58) (src0/src1) and
+    // v[12:20) (acc); latency=8 keeps the co-issue window open so the gate is exercised.
+    createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/50);
+    // Hazardous VALU: dst v52 overlaps the WMMA's src0 v[50:58): co-exec hazard.
+    createVAddInBlock(bb, arch, /*destReg=*/52, /*src0Reg=*/60, /*src1Reg=*/61);
+    // Non-hazardous fillers to advance the co-issue timeline into a VALU-pickable
+    // position (6) while WMMA #0 is still in flight.
+    createMovableDsLoad(/*destReg=*/300, addrReg, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/320, addrReg, /*ldsToken=*/2);
+    createMovableDsLoad(/*destReg=*/340, addrReg, /*ldsToken=*/3);
+    createScalarOp(/*dst=*/10, 11, 12);
+    createScalarOp(/*dst=*/13, 14, 15);
+    createScalarOp(/*dst=*/16, 17, 18);
+    // Independent WMMAs (registers disjoint from the hazard pair and each other) to fill
+    // the latency windows ahead of the deferred VALU.
+    for (int i = 0; i < 4; i++)
+        createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/200 + i * 16);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "hazard deferral must not drop instructions";
+
+    // Collect (mnemonic-kind, first-dest-reg) in scheduled order.
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind = mnem.find("wmma") != std::string_view::npos      ? "wmma"
+                           : mnem.find("ds_load") != std::string_view::npos ? "ds"
+                           : mnem.rfind("v_", 0) == 0                       ? "valu"
+                           : mnem.rfind("s_", 0) == 0                       ? "s"
+                                                                            : std::string(mnem);
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    // The hazardous VALU (dst v52) must be the last instruction: it is skipped at co-issue
+    // position 6 (inside WMMA #0's window) and only issues once every independent WMMA has.
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"wmma", 12}, {"ds", 300},   {"ds", 320},   {"ds", 340},   {"s", 10},     {"s", 13},
+        {"s", 16},    {"wmma", 100}, {"wmma", 116}, {"wmma", 132}, {"wmma", 148}, {"valu", 52},
+    };
+    EXPECT_EQ(seq, expected)
+        << "hazardous VALU (dst v52) must not co-issue inside WMMA D#12's latency window; "
+           "it must be deferred until every independent WMMA has issued";
 }
 
 // ---------------------------------------------------------------------------
