@@ -74,12 +74,15 @@ def build_cotenant(arch, env):
         sys.exit(f"ERROR: no prebuilt kernel and source not found ({SRC}); pass --binary PATH.")
     out = cache_dir() / "hipblaslt-cotenant-kernel"
     stamp = cache_dir() / "arch"
-    fresh = (
-        out.exists()
-        and out.stat().st_mtime >= SRC.stat().st_mtime
-        and stamp.exists()
-        and stamp.read_text().strip() == arch
-    )
+    try:
+        fresh = (
+            out.exists()
+            and out.stat().st_mtime >= SRC.stat().st_mtime
+            and stamp.exists()
+            and stamp.read_text().strip() == arch
+        )
+    except OSError:
+        fresh = False
     if fresh:
         return out
     hipcc = os.environ.get("HIPCC", "hipcc")
@@ -97,7 +100,10 @@ def build_cotenant(arch, env):
         sys.exit(f"ERROR: building hipblaslt-cotenant-kernel failed (hipcc exited {e.returncode}).")
     except OSError as e:
         sys.exit(f"ERROR: could not write {out} ({e.strerror}).")
-    stamp.write_text(arch)
+    try:
+        stamp.write_text(arch)
+    except OSError as e:
+        print(f"WARNING: could not write build cache stamp {stamp} ({e.strerror}); will rebuild next run.")
     return out
 
 
