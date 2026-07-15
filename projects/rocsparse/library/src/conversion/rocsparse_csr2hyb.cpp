@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -153,11 +153,11 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
 
     // Get number of CSR non-zeros
     rocsparse_int csr_nnz;
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         &csr_nnz, csr_row_ptr + m, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
 
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // Correct by index base
     csr_nnz -= descr->base;
@@ -228,11 +228,11 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
                                            blocks,
                                            workspace);
         // Copy ell width back to host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &hyb->ell_width, workspace, sizeof(rocsparse_int), hipMemcpyDeviceToHost, stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace, handle->stream));
     }
@@ -269,11 +269,11 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
         if(hyb->ell_nnz == 0)
         {
             hyb->coo_nnz = csr_nnz;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(workspace,
-                                               csr_row_ptr,
-                                               sizeof(rocsparse_int) * (m + 1),
-                                               hipMemcpyDeviceToDevice,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(workspace,
+                                                         csr_row_ptr,
+                                                         sizeof(rocsparse_int) * (m + 1),
+                                                         hipMemcpyDeviceToDevice,
+                                                         stream));
         }
         else
         {
@@ -309,14 +309,14 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(d_temp_storage, handle->stream));
 
             // Obtain coo nnz from workspace
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&hyb->coo_nnz,
-                                               workspace + m,
-                                               sizeof(rocsparse_int),
-                                               hipMemcpyDeviceToHost,
-                                               stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&hyb->coo_nnz,
+                                                         workspace + m,
+                                                         sizeof(rocsparse_int),
+                                                         hipMemcpyDeviceToHost,
+                                                         stream));
 
             // Wait for host transfer to finish
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
             hyb->coo_nnz -= descr->base;
         }

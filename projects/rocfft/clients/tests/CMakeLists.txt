@@ -87,14 +87,57 @@ set( rocfft-test_source
   buffer_hash_test.cpp
   validate_length_stride.cpp
   random.cpp
-  rocfft_c.c
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
   )
 
+# rocfft_c.c verifies that rocfft/rocfft.h is self-sufficient in plain C.
+# Only build it when linked rocFFT is new enough to guarantee this contract.
+set( ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION "1.0.38" )
+set( ROCFFT_LINKED_VERSION "" )
+set( ROCFFT_ENABLE_C_API_COMPILE_TEST OFF )
+if( DEFINED rocfft_VERSION AND NOT "${rocfft_VERSION}" STREQUAL "" )
+  set( ROCFFT_LINKED_VERSION "${rocfft_VERSION}" )
+elseif( DEFINED rocfft_VERSION_MAJOR
+        AND DEFINED rocfft_VERSION_MINOR
+        AND DEFINED rocfft_VERSION_PATCH )
+  set( ROCFFT_LINKED_VERSION "${rocfft_VERSION_MAJOR}.${rocfft_VERSION_MINOR}.${rocfft_VERSION_PATCH}" )
+endif()
+
+if( NOT "${ROCFFT_LINKED_VERSION}" STREQUAL ""
+    AND NOT ROCFFT_LINKED_VERSION VERSION_LESS ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION )
+  list( APPEND rocfft-test_source rocfft_c.c )
+  set( ROCFFT_ENABLE_C_API_COMPILE_TEST ON )
+else()
+  message( STATUS
+    "Skipping rocfft_c.c: linked rocFFT version '${ROCFFT_LINKED_VERSION}' is older than ${ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION}." )
+endif()
+
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
 add_executable( rtc_helper_crash rtc_helper_crash.cpp )
+
+if( NOT ROCFFT_ENABLE_C_API_COMPILE_TEST )
+  target_compile_definitions( rocfft-test PRIVATE SKIP_ROCFFT_C_TEST )
+endif()
+
+# Standalone clients builds can pick up /opt/rocm headers from transitive
+# dependencies; force the resolved rocFFT package include path to the front.
+set( ROCFFT_PACKAGE_INCLUDE_DIRS "" )
+if( TARGET roc::rocfft )
+  get_target_property( ROCFFT_PACKAGE_INCLUDE_DIRS roc::rocfft INTERFACE_INCLUDE_DIRECTORIES )
+endif()
+if( NOT ROCFFT_PACKAGE_INCLUDE_DIRS )
+  if( DEFINED rocfft_INCLUDE_DIRS )
+    set( ROCFFT_PACKAGE_INCLUDE_DIRS ${rocfft_INCLUDE_DIRS} )
+  elseif( DEFINED ROCFFT_INCLUDE_DIRS )
+    set( ROCFFT_PACKAGE_INCLUDE_DIRS ${ROCFFT_INCLUDE_DIRS} )
+  endif()
+endif()
+if( ROCFFT_PACKAGE_INCLUDE_DIRS )
+  list( REMOVE_DUPLICATES ROCFFT_PACKAGE_INCLUDE_DIRS )
+  target_include_directories( rocfft-test BEFORE PRIVATE ${ROCFFT_PACKAGE_INCLUDE_DIRS} )
+endif()
 
 # rocFFT device code builds with -O3 by default.  rocfft-test
 # contains device code for callback functions, so ensure the device
@@ -272,7 +315,7 @@ find_package( GTest QUIET )
 if( GTest_FOUND )
     target_link_libraries( rocfft-test PRIVATE GTest::gtest )
 else()
-  include( ../cmake/build-gtest.cmake )
+  include( ${PROJECT_SOURCE_DIR}/../cmake/build-gtest.cmake )
   add_dependencies( rocfft-test gtest )
   list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
@@ -443,7 +486,7 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp)
+    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp ../../shared/array_validator.cpp)
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES

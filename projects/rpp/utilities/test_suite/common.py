@@ -21,6 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
 import os
 import subprocess  # nosec
 import argparse
@@ -36,12 +37,15 @@ except ImportError:
     # Python 2 compatibility
     FileExistsError = OSError
 
+
 class TestType(Enum):
     """
     Enum representing different test types.
     """
+
     UNIT_TEST = 0
     PERFORMANCE_TEST = 1
+
 
 class BitDepthTestMode(Enum):
     """
@@ -50,35 +54,55 @@ class BitDepthTestMode(Enum):
       - The first type = input data type
       - The second type = output data type
     """
-    U8_TO_U8   = 0  # Input: U8 -> Output: U8
+
+    U8_TO_U8 = 0  # Input: U8 -> Output: U8
     F16_TO_F16 = 1  # Input: F16 -> Output: F16
     F32_TO_F32 = 2  # Input: F32 -> Output: F32
-    U8_TO_F16  = 3  # Input: U8 -> Output: F16
-    U8_TO_F32  = 4  # Input: U8 -> Output: F32
-    I8_TO_I8   = 5  # Input: I8 -> Output: I8
-    U8_TO_I8   = 6  # Input: U8 -> Output: I8
+    U8_TO_F16 = 3  # Input: U8 -> Output: F16
+    U8_TO_F32 = 4  # Input: U8 -> Output: F32
+    I8_TO_I8 = 5  # Input: I8 -> Output: I8
+    U8_TO_I8 = 6  # Input: U8 -> Output: I8
     I16_TO_I16 = 7  # Input: I16 -> Output: I16
     U16_TO_U16 = 8  # Input: U16 -> Output: U16
     I32_TO_I32 = 9  # Input: I32 -> Output: I32
-    U32_TO_U32 = 10 # Input: U32 -> Output: U32
-    I8_TO_F32  = 11 # Input: I8  -> Output: F32
-    I16_TO_F32 = 12 # Input: I16 -> Output: F32
-    U16_TO_F32 = 13 # Input: U16 -> Output: F32
-    U32_TO_F32 = 14 # Input: U32 -> Output: F32
-    I32_TO_F32 = 15 # Input: I32 -> Output: F32
+    U32_TO_U32 = 10  # Input: U32 -> Output: U32
+    I8_TO_F32 = 11  # Input: I8  -> Output: F32
+    I16_TO_F32 = 12  # Input: I16 -> Output: F32
+    U16_TO_F32 = 13  # Input: U16 -> Output: F32
+    U32_TO_F32 = 14  # Input: U32 -> Output: F32
+    I32_TO_F32 = 15  # Input: I32 -> Output: F32
 
 
+bitDepthDict = {
+    0: "_u8_",
+    1: "_f16_",
+    2: "_f32_",
+    3: "_u8_f16",
+    4: "_u8_f32_",
+    5: "_i8_",
+    6: "_u8_i8_",
+    7: "_i16_",
+    8: "_u16_",
+    9: "_i32_",
+    10: "_u32_",
+    11: "_i8_f32_",
+    12: "_i16_f32_",
+    13: "_u16_f32_",
+    14: "_u32_f32_",
+    15: "_i32_f32_",
+}
 
-bitDepthDict = {0 : "_u8_", 1 : "_f16_", 2 : "_f32_", 3: "_u8_f16", 4: "_u8_f32_", 5: "_i8_", 6: "_u8_i8_", 7: "_i16_", 8: "_u16_", 9: "_i32_", 10: "_u32_", 11: "_i8_f32_", 12: "_i16_f32_", 13: "_u16_f32_", 14: "_u32_f32_", 15: "_i32_f32_"}
 
 class OutputFormat(Enum):
     NON_TOGGLE = 0
     TOGGLE = 1
 
+
 class Layout(Enum):
     PKD3 = 0
     PLN3 = 1
     PLN1 = 2
+
 
 imageAugmentationMap = {
     0: ["brightness", "HOST", "HIP"],
@@ -150,11 +174,11 @@ imageAugmentationMap = {
     98: ["grid_dropout", "HOST", "HIP"],
     99: ["random_erase", "HOST", "HIP"],
     100: ["coarse_dropout", "HOST", "HIP"],
-    101: ["emboss","HOST","HIP"],
+    101: ["emboss", "HOST", "HIP"],
     102: ["histogram_equalize", "HOST", "HIP"],
     103: ["yuv_to_rgb", "HIP"],
     104: ["yuv_to_rgb_cubic_v", "HIP"],
-    105: ["yuv_to_rgb_linear_v", "HIP"]
+    105: ["yuv_to_rgb_linear_v", "HIP"],
 }
 
 audioAugmentationMap = {
@@ -167,7 +191,7 @@ audioAugmentationMap = {
     6: ["resample", "HOST", "HIP"],
     7: ["mel_filter_bank", "HOST", "HIP"],
     8: ["audio_tensor_add_tensor", "HOST", "HIP"],
-    9: ["audio_tensor_mul_scalar", "HOST", "HIP"]
+    9: ["audio_tensor_mul_scalar", "HOST", "HIP"],
 }
 
 voxelAugmentationMap = {
@@ -177,14 +201,14 @@ voxelAugmentationMap = {
     3: ["subtract_scalar", "HOST", "HIP"],
     4: ["flip_voxel", "HOST", "HIP"],
     5: ["multiply_scalar", "HOST", "HIP"],
-    6: ["gaussian_noise_voxel", "HOST", "HIP"]
+    6: ["gaussian_noise_voxel", "HOST", "HIP"],
 }
 
-miscAugmentationMap  = {
-    0: ["transpose","HOST", "HIP"],
+miscAugmentationMap = {
+    0: ["transpose", "HOST", "HIP"],
     1: ["normalize", "HOST", "HIP"],
     2: ["log", "HOST", "HIP"],
-    3: ["concat","HOST","HIP"],
+    3: ["concat", "HOST", "HIP"],
     4: ["log1p", "HOST", "HIP"],
     5: ["tensor_and_tensor", "HOST", "HIP"],
     6: ["tensor_or_tensor", "HOST", "HIP"],
@@ -192,63 +216,128 @@ miscAugmentationMap  = {
     8: ["tensor_add_tensor", "HOST", "HIP"],
     9: ["tensor_subtract_tensor", "HOST", "HIP"],
     10: ["tensor_multiply_tensor", "HOST", "HIP"],
-    11: ["tensor_divide_tensor", "HOST", "HIP"]
+    11: ["tensor_divide_tensor", "HOST", "HIP"],
 }
 
 # Supported test cases for single image processing
 # Only these cases are implemented in Tensor_single_image_hip.cpp and Tensor_single_image_host.cpp
-SINGLE_IMAGE_SUPPORTED_CASES = {0, 2, 20, 21, 37, 49, 51, 54}  # brightness, blend, flip, resize, crop, box_filter, median_filter, gaussian_filter
+SINGLE_IMAGE_SUPPORTED_CASES = {
+    0,
+    2,
+    20,
+    21,
+    37,
+    49,
+    51,
+    54,
+}  # brightness, blend, flip, resize, crop, box_filter, median_filter, gaussian_filter
 
 # Only homogeneous bit-depth modes are supported by the single-image API wrappers.
 # Used as an allowlist: any mode not in this set is skipped by the Python runner.
-SINGLE_IMAGE_SUPPORTED_BIT_DEPTHS = {BitDepthTestMode.U8_TO_U8, BitDepthTestMode.F16_TO_F16, BitDepthTestMode.F32_TO_F32, BitDepthTestMode.I8_TO_I8}
+SINGLE_IMAGE_SUPPORTED_BIT_DEPTHS = {
+    BitDepthTestMode.U8_TO_U8,
+    BitDepthTestMode.F16_TO_F16,
+    BitDepthTestMode.F32_TO_F32,
+    BitDepthTestMode.I8_TO_I8,
+}
 
 ImageAugmentationGroupMap = {
     "color_augmentations": [
-        "brightness", "gamma_correction", "blend", "contrast", "exposure", "color_cast", "lut", "color_twist", "hue", "saturation", "color_temperature", "color_jitter", "histogram_equalize"
+        "brightness",
+        "gamma_correction",
+        "blend",
+        "contrast",
+        "exposure",
+        "color_cast",
+        "lut",
+        "color_twist",
+        "hue",
+        "saturation",
+        "color_temperature",
+        "color_jitter",
+        "histogram_equalize",
     ],
     "effects_augmentations": [
-        "pixelate", "jitter", "noise", "fog", "rain", "water", "non_linear_blend", "erase", "glitch", "vignette", "ricap", "gridmask", "spatter", "posterize", "snow", "coarse_dropout"
+        "pixelate",
+        "jitter",
+        "noise",
+        "fog",
+        "rain",
+        "water",
+        "non_linear_blend",
+        "erase",
+        "glitch",
+        "vignette",
+        "ricap",
+        "gridmask",
+        "spatter",
+        "posterize",
+        "snow",
+        "coarse_dropout",
     ],
     "geometric_augmentations": [
-        "flip", "resize", "rotate", "warp_affine", "lens_correction", "warp_perspective", "crop_and_patch", "crop", "crop_mirror_normalize", "resize_crop_mirror", "phase", "remap", "resize_mirror_normalize", "slice", "jpeg_compression_distortion", "fisheye"
+        "flip",
+        "resize",
+        "rotate",
+        "warp_affine",
+        "lens_correction",
+        "warp_perspective",
+        "crop_and_patch",
+        "crop",
+        "crop_mirror_normalize",
+        "resize_crop_mirror",
+        "phase",
+        "remap",
+        "resize_mirror_normalize",
+        "slice",
+        "jpeg_compression_distortion",
+        "fisheye",
     ],
     "filter_augmentations": [
-        "box_filter", "median_filter", "gaussian_filter", "sobel_filter", "emboss"
+        "box_filter",
+        "median_filter",
+        "gaussian_filter",
+        "sobel_filter",
+        "emboss",
     ],
-    "morphological_operations": [
-        "erode", "dilate"
-    ],
-    "arithmetic_operations": [
-        "magnitude"
-    ],
-    "logical_operations": [
-        "bitwise_and", "bitwise_not", "bitwise_xor", "bitwise_or"
-    ],
+    "morphological_operations": ["erode", "dilate"],
+    "arithmetic_operations": ["magnitude"],
+    "logical_operations": ["bitwise_and", "bitwise_not", "bitwise_xor", "bitwise_or"],
     "data_exchange_operations": [
-        "copy", "channel_permute", "color_to_greyscale", "yuv_to_rgb"
+        "copy",
+        "channel_permute",
+        "color_to_greyscale",
+        "yuv_to_rgb",
     ],
     "statistical_operations": [
-        "threshold", "tensor_sum", "tensor_min", "tensor_max", "tensor_mean", "tensor_stddev"
-    ]
+        "threshold",
+        "tensor_sum",
+        "tensor_min",
+        "tensor_max",
+        "tensor_mean",
+        "tensor_stddev",
+    ],
 }
 
 voxelAugmentationGroupMap = {
     "arithmetic_operations": [
-        "fused_multiply_add_scalar", "add_scalar", "subtract_scalar", "multiply_scalar"
+        "fused_multiply_add_scalar",
+        "add_scalar",
+        "subtract_scalar",
+        "multiply_scalar",
     ],
-    "effects_augmentations": [
-        "gaussian_noise_voxel"
-    ],
-    "geometric_augmentations": [
-        "slice", "flip_voxel"
-    ]
+    "effects_augmentations": ["gaussian_noise_voxel"],
+    "geometric_augmentations": ["slice", "flip_voxel"],
 }
+
 
 def run_cmake_build(script_path):
     """Configure and build using Ninja generator with parallel jobs matching CPU count."""
-    subprocess.check_call(["cmake", "-GNinja", script_path])   # nosec
-    subprocess.check_call(["cmake", "--build", ".", "--parallel", str(os.cpu_count())])    # nosec
+    subprocess.check_call(["cmake", "-GNinja", script_path])  # nosec
+    subprocess.check_call(
+        ["cmake", "--build", ".", "--parallel", str(os.cpu_count())]
+    )  # nosec
+
 
 def get_case_number(map, case):
     # Check if the input is numeric (case number)
@@ -260,6 +349,7 @@ def get_case_number(map, case):
         if case.lower() == info[0].lower():
             return str(caseNum)
     raise ValueError(f"Invalid case name or number: {case}")
+
 
 StatusMap = {
     0: "RPP_SUCCESS",
@@ -289,6 +379,7 @@ StatusMap = {
     -24: "RPP_ERROR_INVALID_DST_DIMS",
 }
 
+
 # Checks if the folder path is empty, or is it a root folder, or if it exists, and remove its contents
 def validate_and_remove_files(path):
     if not path:  # check if a string is empty
@@ -310,19 +401,26 @@ def validate_and_remove_files(path):
                 if os.path.isfile(item_path):
                     os.remove(item_path)
                 elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)     # Delete the directory if it exists
+                    shutil.rmtree(item_path)  # Delete the directory if it exists
 
     else:
         print("Path is invalid or does not exist.")
         exit()
+
 
 # Check if the folder is the root folder or exists, and remove the specified subfolders
 def validate_and_remove_folders(path, folder):
     if path == "/*":  # check if the root directory is passed to the function
         print("Root folder cannot be deleted.")
         exit()
-    if path and os.path.isdir(path):  # checks if directory string is not empty and it exists
-        output_folders = [folder_name for folder_name in os.listdir(path) if folder_name.startswith(folder)]
+    if path and os.path.isdir(
+        path
+    ):  # checks if directory string is not empty and it exists
+        output_folders = [
+            folder_name
+            for folder_name in os.listdir(path)
+            if folder_name.startswith(folder)
+        ]
 
         # Loop through each directory and delete it only if it exists
         for folder_name in output_folders:
@@ -333,13 +431,14 @@ def validate_and_remove_folders(path, folder):
             else:
                 print("Directory not found:", folder_path)
 
+
 # Check if a case file exists and filter its contents based on certain conditions
 def case_file_check(CASE_FILE_PATH, TYPE, TENSOR_TYPE_LIST, new_file, d_counter):
     try:
-        case_file = open(CASE_FILE_PATH,'r')
+        case_file = open(CASE_FILE_PATH, "r")
         for line in case_file:
             print(line)
-            if not(line.startswith('"Name"')):
+            if not (line.startswith('"Name"')):
                 if TYPE in TENSOR_TYPE_LIST:
                     new_file.write(line)
                     d_counter[TYPE] = d_counter[TYPE] + 1
@@ -349,72 +448,93 @@ def case_file_check(CASE_FILE_PATH, TYPE, TENSOR_TYPE_LIST, new_file, d_counter)
         print("Unable to open case results")
         return False
 
- # Generate a directory name based on certain parameters
-def directory_name_generator(qaMode, affinity, layoutType, case, path, groupMap, func_group_finder, augMap):
+
+# Generate a directory name based on certain parameters
+def directory_name_generator(
+    qaMode, affinity, layoutType, case, path, groupMap, func_group_finder, augMap
+):
     if qaMode == 0:
         functionality_group = func_group_finder(groupMap, int(case), augMap)
-        dst_folder_temp = path + "/rpp_" + affinity + "_" + layoutType + "_" + functionality_group
+        dst_folder_temp = (
+            path + "/rpp_" + affinity + "_" + layoutType + "_" + functionality_group
+        )
     else:
         dst_folder_temp = path
 
     return dst_folder_temp
 
+
 # Process the layout based on the given parameters and generate the directory name and log file layout.
-def process_layout(layout, qaMode, case, dstPath, backend, groupMap, func_group_finder, augMap):
+def process_layout(
+    layout, qaMode, case, dstPath, backend, groupMap, func_group_finder, augMap
+):
     if layout == Layout.PKD3:
-        dstPathTemp = directory_name_generator(qaMode, backend, "pkd3", case, dstPath, groupMap, func_group_finder, augMap)
+        dstPathTemp = directory_name_generator(
+            qaMode, backend, "pkd3", case, dstPath, groupMap, func_group_finder, augMap
+        )
         log_file_layout = "pkd3"
     elif layout == Layout.PLN3:
-        dstPathTemp = directory_name_generator(qaMode, backend, "pln3", case, dstPath, groupMap, func_group_finder, augMap)
+        dstPathTemp = directory_name_generator(
+            qaMode, backend, "pln3", case, dstPath, groupMap, func_group_finder, augMap
+        )
         log_file_layout = "pln3"
     elif layout == Layout.PLN1:
-        dstPathTemp = directory_name_generator(qaMode, backend, "pln1", case, dstPath, groupMap, func_group_finder, augMap)
+        dstPathTemp = directory_name_generator(
+            qaMode, backend, "pln1", case, dstPath, groupMap, func_group_finder, augMap
+        )
         log_file_layout = "pln1"
 
     return dstPathTemp, log_file_layout
 
+
 # Validate if a path exists and is a directory
 def validate_path(input_path):
     if not os.path.exists(input_path):
-        raise ValueError("path " + input_path +" does not exist.")
+        raise ValueError("path " + input_path + " does not exist.")
     if not os.path.isdir(input_path):
         raise ValueError("path " + input_path + " is not a directory.")
 
+
 # Create layout directories within a destination path based on a layout dictionary
 def create_layout_directories(dst_path):
-    for layout in Layout:   # iterate over enum members
-        current_layout = layout.name   # get the string name like "PKD3"
+    for layout in Layout:  # iterate over enum members
+        current_layout = layout.name  # get the string name like "PKD3"
         try:
-            os.makedirs(dst_path + '/' + current_layout)
+            os.makedirs(dst_path + "/" + current_layout)
         except FileExistsError:
             pass
         folder_list = [f for f in os.listdir(dst_path) if current_layout.lower() in f]
         for folder in folder_list:
-            os.rename(dst_path + '/' + folder, dst_path + '/' + current_layout +  '/' + folder)
+            os.rename(
+                dst_path + "/" + folder, dst_path + "/" + current_layout + "/" + folder
+            )
+
 
 # Read data from the logs generated from rocprof, process the data
 # and generate performance reports based on counters and a list of types
 def generate_performance_reports(d_counter, TYPE_LIST, RESULTS_DIR):
     import pandas as pd
+
     pd.options.display.max_rows = None
     # Generate performance report
     for TYPE in TYPE_LIST:
         print("\n\n\nKernels tested - ", d_counter[TYPE], "\n\n")
         df = pd.read_csv(RESULTS_DIR + "/consolidated_results_" + TYPE + ".stats.csv")
         df["AverageMs"] = df["AverageNs"] / 1000000
-        dfPrint = df.drop(['Percentage'], axis = 1)
-        dfPrint["HIP Kernel Name"] = dfPrint.iloc[:,0].str.lstrip("Hip_")
+        dfPrint = df.drop(["Percentage"], axis=1)
+        dfPrint["HIP Kernel Name"] = dfPrint.iloc[:, 0].str.lstrip("Hip_")
         dfPrint_noIndices = dfPrint.astype(str)
-        dfPrint_noIndices.replace(['0', '0.0'], '', inplace = True)
-        dfPrint_noIndices = dfPrint_noIndices.to_string(index = False)
+        dfPrint_noIndices.replace(["0", "0.0"], "", inplace=True)
+        dfPrint_noIndices = dfPrint_noIndices.to_string(index=False)
         print(dfPrint_noIndices)
+
 
 # Read the data from QA logs, process the data and print the results as a summary
 def print_qa_tests_summary(qaFilePath, supportedCaseList, nonQACaseList, fileName):
     numLines = 0
     numPassed = 0
     resultsInfo = ""
-    with open(qaFilePath, 'r+') as f:
+    with open(qaFilePath, "r+") as f:
         for line in f:
             sys.stdout.write(line)
             sys.stdout.flush()
@@ -427,14 +547,37 @@ def print_qa_tests_summary(qaFilePath, supportedCaseList, nonQACaseList, fileNam
             if "PASSED" in line:
                 numPassed += 1
         resultsInfo = "\n\nFinal Results of Tests:"
-        resultsInfo += "\n    - Total test cases including all subvariants REQUESTED = " + str(numLines)
-        resultsInfo += "\n    - Total test cases including all subvariants PASSED = " + str(numPassed)
-        resultsInfo += "\n\nGeneral information on " + fileName + " test suite availability:"
-        resultsInfo += "\n    - Total augmentations supported in Tensor test suite = " + str(len(supportedCaseList))
-        resultsInfo += "\n    - Total augmentations with golden output QA test support = " + str(len(supportedCaseList) - len(nonQACaseList))
-        resultsInfo += "\n    - Total augmentations without golden output QA test support (due to randomization involved) = " + str(len(nonQACaseList))
+        resultsInfo += (
+            "\n    - Total test cases including all subvariants REQUESTED = "
+            + str(numLines)
+        )
+        resultsInfo += (
+            "\n    - Total test cases including all subvariants PASSED = "
+            + str(numPassed)
+        )
+        resultsInfo += (
+            "\n\nGeneral information on " + fileName + " test suite availability:"
+        )
+        resultsInfo += (
+            "\n    - Total augmentations supported in Tensor test suite = "
+            + str(len(supportedCaseList))
+        )
+        resultsInfo += (
+            "\n    - Total augmentations with golden output QA test support = "
+            + str(len(supportedCaseList) - len(nonQACaseList))
+        )
+        resultsInfo += (
+            "\n    - Total augmentations without golden output QA test support (due to randomization involved) = "
+            + str(len(nonQACaseList))
+        )
         f.write(resultsInfo)
-    print("\n---------------------------------- Summary of QA Test - " + fileName + " ----------------------------------" + resultsInfo + "\n\n-------------------------------------------------------------------")
+    print(
+        "\n---------------------------------- Summary of QA Test - "
+        + fileName
+        + " ----------------------------------"
+        + resultsInfo
+        + "\n\n-------------------------------------------------------------------"
+    )
     if numPassed != numLines:
         print(
             "ERROR: QA failures: "
@@ -447,6 +590,7 @@ def print_qa_tests_summary(qaFilePath, supportedCaseList, nonQACaseList, fileNam
             file=sys.stderr,
         )
         sys.exit(1)
+
 
 # Read the data from performance logs, process the data and print the results as a summary
 def print_performance_tests_summary(logFile, functionalityGroupList, numRuns):
@@ -485,7 +629,11 @@ def print_performance_tests_summary(logFile, functionalityGroupList, numRuns):
                 frames.append(numRuns)
                 splitWordStart = "max,min,avg wall times in ms/batch = "
                 splitWordEnd = "\n"
-                stats = line.partition(splitWordStart)[2].partition(splitWordEnd)[0].split(",")
+                stats = (
+                    line.partition(splitWordStart)[2]
+                    .partition(splitWordEnd)[0]
+                    .split(",")
+                )
                 maxVals.append(stats[0])
                 minVals.append(stats[1])
                 avgVals.append(stats[2])
@@ -500,15 +648,34 @@ def print_performance_tests_summary(logFile, functionalityGroupList, numRuns):
     # Print summary of log
     headerFormat = "{:<70} {:<15} {:<15} {:<15} {:<15}"
     rowFormat = "{:<70} {:<15} {:<15} {:<15} {:<15}"
-    print("\n" + headerFormat.format("Functionality", "Frames Count", "max(ms/batch)", "min(ms/batch)", "avg(ms/batch)") + "\n")
+    print(
+        "\n"
+        + headerFormat.format(
+            "Functionality",
+            "Frames Count",
+            "max(ms/batch)",
+            "min(ms/batch)",
+            "avg(ms/batch)",
+        )
+        + "\n"
+    )
     if len(functions) != 0:
         for i, func in enumerate(functions):
-            print(rowFormat.format(func, str(frames[i]), str(maxVals[i]), str(minVals[i]), str(avgVals[i])))
+            print(
+                rowFormat.format(
+                    func,
+                    str(frames[i]),
+                    str(maxVals[i]),
+                    str(minVals[i]),
+                    str(avgVals[i]),
+                )
+            )
     else:
         print("No variants under this category")
 
     # Closing log file
     f.close()
+
 
 # Read the standard output from subprocess and writes to log file
 def read_from_subprocess_and_write_to_log(process, logFile):
@@ -516,10 +683,13 @@ def read_from_subprocess_and_write_to_log(process, logFile):
         output = process.stdout.readline()
         if not output and process.poll() is not None:
             break
-        output = output.decode('utf-8', errors='replace').strip()  # Decode bytes to string and strip extra whitespace
+        output = output.decode(
+            "utf-8", errors="replace"
+        ).strip()  # Decode bytes to string and strip extra whitespace
         if output:
             print(output)
-            logFile.write(output + '\n')
+            logFile.write(output + "\n")
+
 
 # Returns the layout name based on layout value
 def get_layout_name(layout):
@@ -530,13 +700,14 @@ def get_layout_name(layout):
     elif layout == Layout.PLN1:
         return "PLN1"
 
+
 # Prints entire case list if user asks for help
 def print_case_list(imageAugmentationMap, backendType, parser):
-    if '--help' in sys.argv or '-h' in sys.argv:
+    if "--help" in sys.argv or "-h" in sys.argv:
         parser.print_help()
-        print("\n" + "="*30)
+        print("\n" + "=" * 30)
         print("Functionality Reference List")
-        print("="*30 + "\n")
+        print("=" * 30 + "\n")
         headerFormat = "{:<12} {:<15}"
         print(headerFormat.format("CaseNumber", "Functionality"))
         print("-" * 27)
@@ -547,17 +718,19 @@ def print_case_list(imageAugmentationMap, backendType, parser):
 
         sys.exit(0)
 
+
 def func_group_finder(groupMap, case_number, augMap):
     # get augmentation name for the given case number
     if case_number not in augMap:
         return "miscellaneous"
     aug_name = augMap[case_number][0]  # first element is the name
-    
+
     # check which group contains this name
     for key, value in groupMap.items():
         if aug_name in value:
             return key
     return "miscellaneous"
+
 
 def dataframe_to_markdown(df):
     # Calculate the maximum width of each column
@@ -569,14 +742,28 @@ def dataframe_to_markdown(df):
         column_widths[col] = max_length
 
     # Create the header row
-    md = '| ' + ' | '.join([col.ljust(column_widths[col]) for col in df.columns]) + ' |\n'
-    md += '| ' + ' | '.join(['-' * column_widths[col] for col in df.columns]) + ' |\n'
+    md = (
+        "| "
+        + " | ".join([col.ljust(column_widths[col]) for col in df.columns])
+        + " |\n"
+    )
+    md += "| " + " | ".join(["-" * column_widths[col] for col in df.columns]) + " |\n"
 
     # Create the data rows
     for i, row in df.iterrows():
-        md += '| ' + ' | '.join([str(value).ljust(column_widths[df.columns[j]]) for j, value in enumerate(row.values)]) + ' |\n'
+        md += (
+            "| "
+            + " | ".join(
+                [
+                    str(value).ljust(column_widths[df.columns[j]])
+                    for j, value in enumerate(row.values)
+                ]
+            )
+            + " |\n"
+        )
 
     return md
+
 
 def get_image_layout_type(layout, outputFormatToggle, backend):
     result = "Tensor_" + backend
@@ -593,9 +780,10 @@ def get_image_layout_type(layout, outputFormatToggle, backend):
         else:
             result += "_toPLN3"
     else:
-       result += "_PLN1"
-       result += "_toPLN1"
+        result += "_PLN1"
+        result += "_toPLN1"
     return result
+
 
 def get_misc_func_name(testCase, nDim, additionalArg):
     axisMaskCase = 0
@@ -610,11 +798,12 @@ def get_misc_func_name(testCase, nDim, additionalArg):
     axisMask = additionalParam
     permOrder = additionalParam
     result = ""
-    if (axisMaskCase):
+    if axisMaskCase:
         result = result + str(nDim) + "d" + "_axisMask" + str(axisMask)
-    if (permOrderCase):
+    if permOrderCase:
         result = result + str(nDim) + "d" + "_permOrder" + str(permOrder)
     return result
+
 
 def get_voxel_layout_type(layout, backend):
     result = "Tensor_" + backend
@@ -623,12 +812,14 @@ def get_voxel_layout_type(layout, backend):
     elif layout == Layout.PLN3:
         result += "_PLN3_toPLN3"
     else:
-       result += "_PLN1_toPLN1"
+        result += "_PLN1_toPLN1"
     return result
+
 
 def get_bit_depth(BitDepthTestMode):
     result = str(bitDepthDict[BitDepthTestMode])
     return result
+
 
 def get_signal_name_from_return_code(returnCode):
     result = ""
@@ -640,23 +831,41 @@ def get_signal_name_from_return_code(returnCode):
                 signalName = signame
                 break
         result = result + signalName + " ) "
-    elif(returnCode > 127):
+    elif returnCode > 127:
         signalNum = returnCode - 256
         if signalNum in StatusMap.keys():
             result = result + " ( " + StatusMap[signalNum] + " ) "
     return result
 
+
 def log_detected(result, errorLog, caseName, functionBitDepth, functionSpecificName):
     stdoutData, stderrData = result.communicate()
     print(stdoutData.decode())
     exitCode = result.returncode
-    if(exitCode != 0):
+    if exitCode != 0:
         if exitCode == 250:
             errorLog[0]["notExecutedFunctionality"] += 1
         else:
             if exitCode > 127:
-                errorData = "Returned non-zero exit status : " + str(exitCode - 256) + " " + stderrData.decode()
+                errorData = (
+                    "Returned non-zero exit status : "
+                    + str(exitCode - 256)
+                    + " "
+                    + stderrData.decode()
+                )
             else:
-                errorData = "Returned non-zero exit status : " + str(exitCode) + " " + stderrData.decode()
-            msg = caseName + functionBitDepth + functionSpecificName + " - " + errorData + get_signal_name_from_return_code(exitCode)
+                errorData = (
+                    "Returned non-zero exit status : "
+                    + str(exitCode)
+                    + " "
+                    + stderrData.decode()
+                )
+            msg = (
+                caseName
+                + functionBitDepth
+                + functionSpecificName
+                + " - "
+                + errorData
+                + get_signal_name_from_return_code(exitCode)
+            )
             errorLog.append(msg)

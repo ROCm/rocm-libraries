@@ -26,15 +26,11 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
-#ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
-#endif
 
 #include <Tensile/DistinctType.hpp>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -54,4 +50,3 @@ namespace std
     }
 } // namespace std
 
-TENSILE_HIDDEN_END
