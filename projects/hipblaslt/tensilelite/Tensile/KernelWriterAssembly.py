@@ -14907,6 +14907,16 @@ class KernelWriterAssembly(KernelWriter):
     assert(isinstance(isEdgeTarget, Label))
     isEdgeTargetLabel = isEdgeTarget.getLabelName()
     module = Module("checkIsEdge")
+    # SS1-TDM (non-subtile TDMStoreInst whole-MT store): the tensor_store descriptor
+    # clamps the real M/N extent via tensor_dim0/tensor_dim1 and the scratch stages the
+    # FULL MacroTile, so the kernel's inline non-subtile edge store path is both
+    # unnecessary and incompatible with the M-contiguous scratch layout (it produces a
+    # positionally-scrambled tile).  Skip the edge branch entirely: always take the
+    # non-edge full-MT staging; correctness at the M/N edge comes from the flush clamp.
+    if kernel.get("TDMStoreInst") and not kernel.get("UseSubtileImpl") \
+        and kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):
+      module.addComment1("TDMStoreInst (non-subtile): skip edge branch; tensor_dim clamp handles M/N edge")
+      return module
     dim = "N (isSize1)" if isSize1 else "M"
     module.addComment1("Edge/NonEdge store path check (%s): Size %% %d > 0 -> Edge store; else -> NonEdge store" % (dim, divisor))
     tmpS0  = tmpSgprInfo.idx
