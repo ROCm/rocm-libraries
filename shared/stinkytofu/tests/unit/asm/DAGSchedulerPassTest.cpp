@@ -844,22 +844,46 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
 }
 
-// dsReadPerWmma isolated: hold the credit pool generously large so it never
-// binds, leaving the per-WMMA-window cap (only one WMMA present) as the sole
-// active constraint.
-TEST_F(DAGSchedulerPassTest, DsReadThrottle_PerWmmaCap_RespectsCap) {
+// NOTE: the former DsReadThrottle_PerWmmaCap_RespectsCap test isolated the
+// per-WMMA-window cap with a single WMMA. That predated the ds_load in-flight
+// queue; now the cap only binds while a WMMA window is active (covered by
+// DSWindowCap_VALUInterleaveAfter3, which keeps two WMMAs pending), and the
+// no-WMMA case is bounded by the in-flight queue (covered by
+// DsReadThrottle_Depth2_RespectsQueueDepth). No standalone single-WMMA cap test
+// is kept — it would assert behavior the cap no longer has.
+
+// Regression (see image(2).png bug): with no WMMA to issue and a chain of
+// ds_loads each consumed by a VALU (RAW), the scheduler must NOT interleave
+// ds,ds,valu,ds,ds,valu — that pattern forces an s_wait_dscnt per pair and
+// tanks the kernel. Loads have their own in-flight queue, so they should drain
+// (up to queue depth) before the consumer VALUs run: the consumers RAW-depend on
+// the loads and are hazard-deferred until the load latency clears. Assert the
+// loads front-load ahead of every consumer VALU.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu) {
     BasicBlock* body = bb;
     body->addSuccessor(body);
-    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
-    for (int i = 0; i < 4; i++)
-        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
-    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+    // 6 ds_loads (movable via LDS token) on the same address register; each VALU
+    // consumes the matching load's dest (RAW), mirroring the image's
+    // ds_load_u8 -> v_lshl_or_b32 dependency chain. No WMMA in the region.
+    for (int i = 0; i < 6; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/200, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 6; i++)
+        createVAddInBlock(body, arch, /*dst=*/100 + i, /*src0=*/i * 4, /*src1=*/i * 4 + 1);
 
-    runPassWithDsReadThrottle(/*queueDepth=*/100, /*drainLatency=*/8, /*perWmma=*/2);
+    // Queue depth 6 so all loads can be in flight at once; perWmma irrelevant (no WMMA).
+    runPassWithDsReadThrottle(/*queueDepth=*/6, /*drainLatency=*/8, /*perWmma=*/100);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
-    EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
-        << "dsReadPerWmma=2: at most 2 ds_reads per WMMA window with only one WMMA present";
+    // Every ds_load must precede every v_add: find the last load and first valu.
+    int lastLoad = -1, firstValu = -1;
+    for (int i = 0; i < (int)seq.size(); i++) {
+        if (seq[i] == "ds_load_b128") lastLoad = i;
+        if (seq[i] == "v_add_f32" && firstValu < 0) firstValu = i;
+    }
+    ASSERT_GE(lastLoad, 0);
+    ASSERT_GE(firstValu, 0);
+    EXPECT_LT(lastLoad, firstValu)
+        << "no-WMMA: all ds_loads must drain before consumer VALUs (no ds,valu,ds interleave)";
 }
 
 // All instructions are preserved regardless of throttle (count invariant).

@@ -259,8 +259,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
 
-    // Per VGPR index: remaining modeled latency until ds_load result is safe for WMMA src.
+    // Per VGPR index: remaining modeled latency until ds_load result is safe for WMMA src (RAW).
     std::map<int, int> wmmaRegisterLatencyCounters;
+
+    // Per VGPR index: remaining window during which an in-flight ds_load is still
+    // reading this register as its address (WAR / type-A). Overwriting it early
+    // needs a vm_vsrc(N) wait even in expert mode, so a VALU/SALU overwriting an
+    // address here should yield to hazard-free work. Modeled with ds_load
+    // latencyCycles (uniform read latency; exact window is unknown).
+    std::map<int, int> dsAddrReadLatencyCounters;
 
     WMMAIssueConfig wmmaIssueConfig;
 
@@ -294,7 +301,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void advanceTime(int cycles);
     int computeValuAdvanceCycles(int issueCycles) const;
     void updateWMMAStatus(DAGNode* node);
-    int getMaxDsLatency(DAGNode* node);
+    int getMaxDsLatency(DAGNode* node) const;
+    bool overwritesInFlightDsAddr(DAGNode* node) const;
+    bool nonWmmaHasHazard(DAGNode* node) const;
+    DAGNode* pickFreeSmallest(const ReadySetByDAGid& queue) const;
     std::pair<DAGNode*, int> findMostReadyWMMA();
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
     bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
@@ -334,6 +344,13 @@ void CDNA5ReadyQueue::advanceTime(int cycles) {
         it->second -= cycles;
         if (it->second <= 0)
             it = wmmaRegisterLatencyCounters.erase(it);
+        else
+            ++it;
+    }
+    for (auto it = dsAddrReadLatencyCounters.begin(); it != dsAddrReadLatencyCounters.end();) {
+        it->second -= cycles;
+        if (it->second <= 0)
+            it = dsAddrReadLatencyCounters.erase(it);
         else
             ++it;
     }
@@ -393,6 +410,13 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
             for (unsigned off = 0; off < dstReg.reg.num; ++off)
                 wmmaRegisterLatencyCounters[dstReg.reg.idx + off] = node->inst->latencyCycles;
         }
+        // Type-A WAR: mark this ds_load's address src VGPRs as in-flight-read so a
+        // later VALU/SALU overwriting them yields (needs vm_vsrc even in expert mode).
+        for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
+            if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
+            for (unsigned off = 0; off < srcReg.reg.num; ++off)
+                dsAddrReadLatencyCounters[srcReg.reg.idx + off] = node->inst->latencyCycles;
+        }
         dsReadInflight_.push(dsReadDrainLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
@@ -408,7 +432,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
 
 // Scheduling rule (2): compute the maximum outstanding DS latency for a WMMA's src VGPRs.
 // Returns 0 if all src data is ready (latency-free), >0 if hardware would stall.
-int CDNA5ReadyQueue::getMaxDsLatency(DAGNode* node) {
+int CDNA5ReadyQueue::getMaxDsLatency(DAGNode* node) const {
     int maxLat = 0;
     for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
         if (!srcReg.isRegister()) continue;
@@ -418,6 +442,39 @@ int CDNA5ReadyQueue::getMaxDsLatency(DAGNode* node) {
         }
     }
     return maxLat;
+}
+
+// Type-A WAR hazard: true if node overwrites a register still being read as the
+// address of an in-flight ds_load. On gfx1250 this needs a vm_vsrc(N) wait even
+// in expert mode, so such a node should yield to other work if any is available.
+bool CDNA5ReadyQueue::overwritesInFlightDsAddr(DAGNode* node) const {
+    for (const StinkyRegister& dst : node->inst->getDestRegs()) {
+        if (!dst.isRegister() || isPseudoReg(dst)) continue;
+        for (unsigned off = 0; off < dst.reg.num; ++off) {
+            auto it = dsAddrReadLatencyCounters.find(dst.reg.idx + off);
+            if (it != dsAddrReadLatencyCounters.end() && it->second > 0) return true;
+        }
+    }
+    return false;
+}
+
+// A non-WMMA compute node has a ds hazard when either:
+//   RAW — a src consumes an in-flight ds_load result (getMaxDsLatency > 0), e.g. a
+//         VALU that pre-processes ds data before it feeds WMMA; or
+//   WAR — a dest overwrites an in-flight ds_load address (type-A, needs vm_vsrc).
+// Hazard nodes should defer to hazard-free work; the caller falls back to the
+// global oldest node (Phase G) only when nothing is hazard-free anywhere.
+bool CDNA5ReadyQueue::nonWmmaHasHazard(DAGNode* node) const {
+    return getMaxDsLatency(node) > 0 || overwritesInFlightDsAddr(node);
+}
+
+// Smallest-id hazard-free node in \p queue (iterated in DAG-id order), or nullptr
+// if every ready node still carries a ds hazard.
+DAGNode* CDNA5ReadyQueue::pickFreeSmallest(const ReadySetByDAGid& queue) const {
+    for (DAGNode* n : queue) {  // iterates smallest-id first
+        if (!nonWmmaHasHazard(n)) return n;
+    }
+    return nullptr;
 }
 
 // Find the WMMA in wmmaQueue with the smallest max DS latency (most ready).
@@ -492,6 +549,10 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
 
 // Pick minimum DAG id among ready non-WMMA nodes.
 // Queues: globalReadQueue (throttled), localReadQueue, valuQueue (co-issue gated), otherQueue.
+// SALU/other and VALU picks are hazard-aware (pickFreeSmallest): a node whose src
+// consumes an in-flight ds_load result (RAW) or whose dest overwrites an in-flight
+// ds_load address (type-A WAR) is skipped in favor of hazard-free work; when none
+// is free those queues contribute nothing and Phase G falls back to the oldest.
 // kind: 0=global, 1=local, 2=other, 3=valu.
 bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode,
                                                   int* kindOut) const {
@@ -500,8 +561,12 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
 
-    bool dsWindowOk = pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_ &&
-                      !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
+    // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
+    // co-issue window; it is meaningless when no WMMA is available to issue, so it
+    // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
+    // bounded only by the real hardware limiter dsReadQueueFull().
+    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= maxDsPerWmmaWindow_;
+    bool dsWindowOk = pickedDS && !dsCapReached && !dsReadQueueFull();
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -514,18 +579,18 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             kind = kLocalRead;
         }
     }
-    if (!otherQueue.empty()) {
-        DAGNode* t = otherQueue.top();
+    if (DAGNode* t = pickFreeSmallest(otherQueue)) {
         if (!best || t->id < best->id) {
             best = t;
             kind = kOther;
         }
     }
-    if (!valuQueue.empty() && isValuPickable() && !destOverlapsActiveWmmaSrc(valuQueue.top())) {
-        DAGNode* t = valuQueue.top();
-        if (!dsWindowOk && (!best || t->id < best->id)) {
-            best = t;
-            kind = kValu;
+    if (isValuPickable()) {
+        if (DAGNode* t = pickFreeSmallest(valuQueue)) {
+            if (!dsWindowOk && (!best || t->id < best->id)) {
+                best = t;
+                kind = kValu;
+            }
         }
     }
 
