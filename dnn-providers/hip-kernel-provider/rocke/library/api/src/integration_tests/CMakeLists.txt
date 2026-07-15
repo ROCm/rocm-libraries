@@ -15,6 +15,10 @@ add_executable(
     main.cpp
     TestRockeClientLoad.cpp
     TestRockeClientApplicability.cpp
+    # TODO(AICK-1484): temporary AOT load probe. Remove this source, the
+    # api/src include exposure below, and the test-bundle generation block with
+    # the probe scaffolding when plan-based E2E execution replaces it. The rest
+    # of this target (Load + Applicability) is permanent.
     TestRockeClientAotLoad.cpp
 )
 
@@ -46,6 +50,13 @@ add_dependencies(rocke_client_integration_tests rocke_client)
 
 # ---------------------------------------------------------------------------
 # Build-time test bundles (test-only; installed + relocatable)
+#
+# TODO(AICK-1484): temporary AOT probe scaffolding. Remove this entire block
+# (the bundle generation, the rocke_client_aot_test_bundles target, its
+# add_dependencies below, and the install()) together with
+# TestRockeClientAotLoad.cpp, the api/src include exposure above, and the
+# tests/ probe assets (probe.hip, generate_*_bundle.py) when plan-based E2E
+# execution replaces the log-marker probe.
 # ---------------------------------------------------------------------------
 # Generate per-arch valid + corrupt probe bundles beside the installed test
 # layout so the test finds them RELATIVE TO ITS OWN EXECUTABLE, both in the
