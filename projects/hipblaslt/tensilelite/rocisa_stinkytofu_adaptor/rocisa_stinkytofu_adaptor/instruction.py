@@ -3058,6 +3058,40 @@ class FlatAtomicDecU32(CommonInstruction):
         return clone
 
 
+# ==========================================================================
+# GlobalAtomicIncU32Saddr -- SADDR-returning global atomic increment (StreamK).
+# ==========================================================================
+class GlobalAtomicIncU32Saddr(CommonInstruction):
+    """``global_atomic_inc_u32 dst, vaddr, data, saddr`` -- SADDR atomic inc."""
+
+    def __init__(self, dst: Any, vaddr: Any, data: Any, saddr: Any,
+                 modifier: Any = None, comment: str = ""):
+        super().__init__(
+            instType=InstType.INST_B32,
+            dst=dst,
+            srcs=[vaddr, data, saddr],
+            dpp=None,
+            sdwa=None,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("global_atomic_inc_u32")
+        self.glob = modifier
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        dst_reg = _to_stinky_register(self.dst)
+        vaddr_reg = _to_stinky_register(self.srcs[0])
+        data_reg = _to_stinky_register(self.srcs[1])
+        saddr_reg = _to_stinky_register(self.srcs[2])
+        return _st.GlobalAtomicIncU32Saddr(dst_reg, vaddr_reg, data_reg, saddr_reg,
+                                           comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        clone = CommonInstruction.__deepcopy__(self, memo)
+        return clone
+
+
 # --- Gfx1250 vector conversions ---
 # logicalIR: VCvtPkF32toF16
 VCvtPkF32toF16 = _make_scalar_alu_class("VCvtPkF32toF16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE)
