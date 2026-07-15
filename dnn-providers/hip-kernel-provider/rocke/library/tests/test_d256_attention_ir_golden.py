@@ -125,9 +125,7 @@ def _lower(arch, build, flavor):
 
 
 def _run(flavor):
-    return {
-        cid: _lower(arch, build, flavor) for cid, (arch, build) in _cases().items()
-    }
+    return {cid: _lower(arch, build, flavor) for cid, (arch, build) in _cases().items()}
 
 
 def build_golden() -> dict:
@@ -151,7 +149,8 @@ class TestD256AttentionIrGolden(unittest.TestCase):
         flavor = _current_flavor()
         base = doc.get("flavors", {}).get(flavor)
         self.assertIsNotNone(
-            base, f"golden has no entry for flavor {flavor!r} (have {sorted(doc.get('flavors', {}))})"
+            base,
+            f"golden has no entry for flavor {flavor!r} (have {sorted(doc.get('flavors', {}))})",
         )
         cur = _run(flavor)
         self.assertEqual(

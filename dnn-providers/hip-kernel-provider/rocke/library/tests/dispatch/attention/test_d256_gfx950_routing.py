@@ -74,9 +74,7 @@ class TestD256Gfx950Routing(unittest.TestCase):
         )
 
     def test_rejects_sliding_window(self):
-        self.assertNotEqual(
-            _routed_spec_id(_d256(sliding_window=256)), "gfx950_d256"
-        )
+        self.assertNotEqual(_routed_spec_id(_d256(sliding_window=256)), "gfx950_d256")
 
 
 class TestD256Gfx950SpecOverrides(unittest.TestCase):

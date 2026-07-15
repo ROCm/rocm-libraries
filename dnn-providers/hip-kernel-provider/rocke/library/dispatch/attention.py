@@ -356,6 +356,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         assert isinstance(req, AttentionRequest)
         problem = _problem(req)
         from kernels.common.attention_unified import _d256_gfx950_spec_overrides
+
         return AttentionSpec(
             path="2d",
             head_size=problem.head_size,
