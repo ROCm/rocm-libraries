@@ -234,7 +234,8 @@ jobs:
       - setup
       - therock-ci-linux
       - therock-ci-windows
-      - therock-ci-coverage
+      # Temporarily disabled to keep coverage non-blocking until it is proven; re-enable later.
+      # - therock-ci-coverage
     runs-on: ubuntu-24.04
     steps:
       - name: Output failed jobs
