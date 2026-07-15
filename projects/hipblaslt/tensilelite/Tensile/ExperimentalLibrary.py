@@ -334,6 +334,26 @@ def augment_config(
     return config
 
 
+_PLACEHOLDER_PROBLEM_SIZES = [{"Exact": [1, 1, 1, 1]}]
+
+
+def _placeholder_problem_size_groups(config: Dict[str, Any]) -> List[int]:
+    """Indices (within ``BenchmarkProblems``) of groups whose ``ProblemSizes``
+    is still ``TensileLibLogicToYaml``'s placeholder (``[{'Exact': [1, 1, 1,
+    1]}]``), emitted when ``extract`` has no real per-size table to recover
+    from a ``Prediction``-type source and left unedited by the user.
+    """
+    placeholder_groups: List[int] = []
+    for i, group in enumerate(config.get("BenchmarkProblems") or []):
+        if not (isinstance(group, list) and len(group) >= 2 and isinstance(group[1], dict)):
+            continue
+        for params in group[1].get("BenchmarkFinalParameters") or []:
+            if isinstance(params, dict) and params.get("ProblemSizes") == _PLACEHOLDER_PROBLEM_SIZES:
+                placeholder_groups.append(i)
+                break
+    return placeholder_groups
+
+
 def merge_configs(configs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Combine several per-solution ``extract`` configs into one config.
 
@@ -454,6 +474,15 @@ def _scan_for_solutions_element(
                 for e in element
             ):
                 return i, element
+    return None
+
+
+def _library_type(raw: Any) -> Optional[str]:
+    """Read the LibraryType discriminator at position 11 of a parsed
+    ``3_LibraryLogic`` list, if present (mirrors ``LibraryIO.parseLibraryLogicList``).
+    """
+    if isinstance(raw, list) and len(raw) > 11 and raw[11]:
+        return raw[11]
     return None
 
 
@@ -583,9 +612,9 @@ def _indexed_out_path(out: str, idx: int, single: bool) -> str:
 
     A single index uses ``out`` verbatim. For multiple indices each gets a
     distinct file derived from ``out``'s stem/suffix (``base.yaml`` ->
-    ``base_<idx>.yaml``; a suffix-less ``base`` -> ``base_<idx>.yaml``). This
-    avoids the old ``str.replace('.yaml', ...)`` no-op that silently collided
-    when ``--out`` had no ``.yaml`` suffix.
+    ``base_<idx>.yaml``; a suffix-less ``base`` -> ``base_<idx>.yaml``), so a
+    suffix-less ``--out`` still yields one distinct file per index instead of
+    every index writing the same path.
     """
     if single:
         return out
@@ -598,19 +627,12 @@ def _indexed_out_path(out: str, idx: int, single: bool) -> str:
 def _extract_snippet() -> str:
     return (
         "import sys\n"
-        "from pathlib import Path\n"
         "from Tensile.TensileLibLogicToYaml import TensileLibLogicToYaml\n"
+        "from Tensile.ExperimentalLibrary import _indexed_out_path\n"
         "inp, out, skip = sys.argv[1], sys.argv[2], sys.argv[3] == '1'\n"
         "ids = [int(x.strip()) for x in sys.argv[4].split(',')]\n"
-        "def out_for(idx):\n"
-        "    if len(ids) == 1:\n"
-        "        return out\n"
-        "    p = Path(out)\n"
-        "    if p.suffix:\n"
-        "        return str(p.with_name(p.stem + '_' + str(idx) + p.suffix))\n"
-        "    return str(p.with_name(p.name + '_' + str(idx) + '.yaml'))\n"
         "for idx in ids:\n"
-        "    f = out_for(idx)\n"
+        "    f = _indexed_out_path(out, idx, len(ids) == 1)\n"
         "    res = TensileLibLogicToYaml(inp, idx, f, skip)\n"
         "    if not res:\n"
         "        raise SystemExit(f'TensileLibLogicToYaml failed for index {idx}')\n"
@@ -626,6 +648,19 @@ def cmd_extract(args: argparse.Namespace) -> int:
     ids = [s.strip() for s in args.indices.split(",") if s.strip()]
     if not ids:
         raise ExperimentalLibraryError("--indices must contain at least one index")
+
+    # A structural fact about the source file, independent of whether the
+    # subprocess actually runs, so this check applies under --dry-run too
+    # (skipped only if the file doesn't exist yet).
+    if os.path.isfile(logic) and _library_type(load_yaml(logic)) == "Prediction":
+        sys.stderr.write(
+            f"extract: warning: {logic} is a 'Prediction'-type library logic "
+            "with no real per-size table; the extracted config's ProblemSizes "
+            "will be a placeholder ([{'Exact': [1, 1, 1, 1]}]) that must be "
+            "hand-edited to real sizes before benchmarking with gen-logic. To "
+            "toggle a parameter and rebuild the same library instead, use "
+            "patch-logic.\n"
+        )
 
     cmd = [
         args.python,
@@ -673,25 +708,25 @@ def cmd_list_solutions(args: argparse.Namespace) -> int:
             "narrow --logic-src to one file."
         )
 
-    per_file: List[Tuple[str, List[Dict[str, Any]], List[int]]] = []
+    per_file: List[Tuple[str, List[Dict[str, Any]], List[int], Optional[str]]] = []
     for path in files:
         raw = load_yaml(path)
         _, states = _find_solutions_element(raw, path)
         idxs = select_indices(states, wheres)
-        per_file.append((path, states, idxs))
+        per_file.append((path, states, idxs, _library_type(raw)))
 
     if args.indices_only:
-        _, _, idxs = per_file[0]
+        _, _, idxs, _ = per_file[0]
         print(",".join(str(i) for i in idxs))
         return 0
 
-    for path, states, idxs in per_file:
-        print(f"== {path} ({len(idxs)}/{len(states)} match) ==")
+    for path, states, idxs, library_type in per_file:
+        print(f"== {path} [{library_type or 'unknown'}] ({len(idxs)}/{len(states)} match) ==")
         for i in idxs:
             print(f"{i}\t{summarize_solution(states[i])}")
 
-    total_matched = sum(len(idxs) for _, _, idxs in per_file)
-    total_states = sum(len(states) for _, states, _ in per_file)
+    total_matched = sum(len(idxs) for _, _, idxs, _ in per_file)
+    total_states = sum(len(states) for _, states, _, _ in per_file)
     if len(per_file) > 1:
         print(
             f"list-solutions: {total_matched}/{total_states} solution(s) "
@@ -801,6 +836,22 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
     if not args.dry_run:
         os.makedirs(workdir, exist_ok=True)
     feature_name = args.feature_name or "feature"
+
+    # A structural fact about the config file's contents; skipped under
+    # --dry-run when the config doesn't exist yet (e.g. a pipeline dry-run
+    # whose augment stage hasn't actually written it).
+    if os.path.isfile(config):
+        placeholder_groups = _placeholder_problem_size_groups(load_yaml(config))
+        if placeholder_groups:
+            raise ExperimentalLibraryError(
+                f"Config {config} has BenchmarkProblems group(s) "
+                f"{placeholder_groups} with an unedited placeholder "
+                "ProblemSizes ([{'Exact': [1, 1, 1, 1]}]), left over from "
+                "extracting a 'Prediction'-type source with no real per-size "
+                "table. Set real ProblemSizes for those group(s) before "
+                "benchmarking, or use patch-logic instead to toggle a "
+                "parameter and rebuild the same library without benchmarking."
+            )
 
     # Fail fast (before any kernel generation) if the target arch is not a GPU
     # present on this host. gen-logic runs REAL benchmarking so winner selection
@@ -1260,6 +1311,16 @@ def _probe_override(
 
     probe_raw = copy.deepcopy(raw)
     probe_raw[sol_pos] = [copy.deepcopy(override_state)]
+    # The truncated one-solution list invalidates any winner table that
+    # references other positions; force FreeSize's trivial [0, len(solutions)]
+    # dispatch instead of carrying over the source's real indexOrder/
+    # exactLogic/rangeLogic/LibraryType, which would otherwise be
+    # inconsistent with the truncated list.
+    for i in (6, 7, 8):  # indexOrder, exactLogic, rangeLogic
+        if i < len(probe_raw):
+            probe_raw[i] = None
+    if len(probe_raw) > 11:
+        probe_raw[11] = "FreeSize"
     logic_root = Path(probe_dir) / "logic"
     dest = _experimental_staging_path(
         str(logic_root), args.arch, args.feature_name, "probe.yaml"
