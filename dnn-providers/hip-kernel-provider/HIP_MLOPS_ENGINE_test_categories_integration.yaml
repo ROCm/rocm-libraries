@@ -22,30 +22,38 @@ _common_excludes: &common_excludes
 # CI cannot yet select tests by label, so it runs whole tiers by name. To land
 # the hip-kernel-provider mlops integration-test port without overloading the
 # pre-commit/PR jobs, the tiers are temporarily repurposed:
-#   - quick:         all Smoke GPU cases (fast pre-commit signal).
-#   - standard:      everything ("*"), i.e. what "full" used to run. The harness
-#                    auto-skips ops HIP_MLOPS_ENGINE can't service (see the
-#                    engine-support note above), so "*" is safe here.
+#   - quick:         commented out below. The standard tier now carries the
+#                    Smoke set, so a separate quick tier is redundant until
+#                    label-based selection lands.
+#   - standard:      all Smoke GPU cases ("Smoke/*"). The full "*" tier is
+#                    ~28 min, dominated by Full-tier large-shape cases, so PR
+#                    runs are trimmed to Smoke (~4-5 min). The harness auto-skips
+#                    ops HIP_MLOPS_ENGINE can't service (see the engine-support
+#                    note above), so the pattern is safe here.
 #   - comprehensive: commented out below (an empty test_patterns list no longer
 #                    validates, so the tier is commented out -> runs nothing).
 #   - full:          commented out below (same reason).
 # Once label-based selection exists, uncomment comprehensive/full and give each
 # tier its intended, distinct pattern set.
 test_categories:
-  quick:
-    description: "Smoke GPU cases (temporary: all smoke patterns until CI label support lands)"
-    test_patterns:
-      - "Smoke/*"
-    exclude: *common_excludes
-    labels:
-      - "quick"
-      - "pre-commit"
-      - "smoke"
+  # quick: commented out -- the standard tier now runs the Smoke set, so a
+  # dedicated quick tier is redundant. Uncomment and give it a distinct pattern
+  # once label-based selection lands.
+  #
+  # quick:
+  #   description: "Smoke GPU cases"
+  #   test_patterns:
+  #     - "Smoke/*"
+  #   exclude: *common_excludes
+  #   labels:
+  #     - "quick"
+  #     - "pre-commit"
+  #     - "smoke"
 
   standard:
-    description: "Full external integration coverage (temporary: runs the former full '*' tier until CI label support lands)"
+    description: "External integration coverage (temporary: runs the Smoke tier only; the full '*' tier is ~28 min, dominated by Full-tier large shapes, until CI label support lands)"
     test_patterns:
-      - "*"
+      - "Smoke/*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -78,9 +86,7 @@ execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
-    # Temporarily bumped to 20 min while quick runs the full Smoke/* set (see
-    # tier remapping above). Tracked by ROCm/rocm-libraries#6864.
-    quick: 1200
+    # standard now runs the Smoke set (~4-5 min); keep a generous ceiling.
     standard: 2700
     # comprehensive: 25200
     # full: 28800
