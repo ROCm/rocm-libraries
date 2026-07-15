@@ -141,7 +141,7 @@ function( rocblas_library_settings lib_target_ )
   endif()
 
   if(ROCBLAS_ENABLE_COVERAGE)
-    target_compile_options(${lib_target_} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_compile_options(${lib_target_} PRIVATE -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
     target_link_options(${lib_target_} PRIVATE -fprofile-instr-generate)
   endif()
 

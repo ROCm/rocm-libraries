@@ -47,7 +47,7 @@ endfunction()
 # Add code coverage flags to a library target, if enabled
 function( rocfft_add_coverage_flags target )
   if( ROCFFT_ENABLE_COVERAGE )
-    target_compile_options( ${target} PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping )
+    target_compile_options( ${target} PRIVATE -g -O0 -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping )
     target_link_options( ${target} INTERFACE -fprofile-instr-generate )
   endif()
 endfunction()
