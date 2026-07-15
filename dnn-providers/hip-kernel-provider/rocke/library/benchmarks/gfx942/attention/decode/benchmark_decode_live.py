@@ -430,6 +430,7 @@ def _import_flydsl():
     }
     try:
         import kernels.attention.flash_attn_generic  # type: ignore  # noqa: F401
+
         try:
             import kernels.attention.flash_attn_gfx950  # type: ignore  # noqa: F401
         except ImportError:
