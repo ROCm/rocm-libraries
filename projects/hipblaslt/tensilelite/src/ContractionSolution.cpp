@@ -3215,10 +3215,13 @@ namespace TensileLite
             // Keep the StreamK cluster launch grid a multiple of the cluster size C
             // even if a workspace/DP fallback above changed sk.grid, so the clustered
             // launch (gridDimX % C == 0) stays valid. In the common case sk.grid is
-            // already C * tiles (a multiple of C) so this is a no-op; when a fallback
-            // fired, per-tile correctness on any partially-filled cluster is handled by
-            // the kernel's intra_cluster runtime guard + global-flag fallback.
-            if(sizeMapping.streamKClusterReduction && sizeMapping.clusterDim.x > 1)
+            // already C * tiles (reduction) or ceil(tiles/C)*C (multicast) -- a multiple
+            // of C -- so this is a no-op; when a fallback fired (e.g. sk.grid = tiles),
+            // per-tile correctness on any partially-filled cluster is handled by the
+            // kernel's runtime guard (intra_cluster for reduction, clusterMulticastValid
+            // for multicast) + the normal (non-cooperative) load fallback.
+            if((sizeMapping.streamKClusterReduction || sizeMapping.streamKMulticast)
+               && sizeMapping.clusterDim.x > 1)
             {
                 size_t c = sizeMapping.clusterDim.x;
                 sk.grid  = ((sk.grid + c - 1) / c) * c;
@@ -4094,6 +4097,22 @@ namespace TensileLite
             if(self.sizeMapping.streamKClusterReduction && self.sizeMapping.clusterDim.x > 1)
             {
                 skGrid = static_cast<size_t>(self.sizeMapping.clusterDim.x) * tiles;
+            }
+
+            // StreamKMulticast (gfx1250): DP cooperative B-multicast. Unlike the
+            // reduction cluster (C peers per tile -> C*tiles), the multicast cluster is
+            // SPATIAL: the C peers of a cluster process C DISTINCT, M-adjacent tiles and
+            // share the B (N-block) tile. v1 is single-round, so the launched grid is
+            // `tiles` rounded UP to a multiple of C = clusterDim.x. Rounding up (rather
+            // than C*tiles) keeps every launched HW cluster full while giving each WG one
+            // tile in the single DP round; a trailing partial cluster (tiles % C != 0)
+            // has idle-but-present tail WGs whose cluster is disabled by the kernel's
+            // clusterMulticastValid runtime predicate (so a masked target is never left
+            // without a matching load). See docs/design/cluster-load-component-and-streamk-multicast.md.
+            if(self.sizeMapping.streamKMulticast && self.sizeMapping.clusterDim.x > 1)
+            {
+                size_t c = self.sizeMapping.clusterDim.x;
+                skGrid   = ((tiles + c - 1) / c) * c;
             }
 
             return skGrid;

@@ -2634,6 +2634,125 @@ class StreamKTwoTileDPFirst(StreamK):
     requiresWorkspaceReductionStorePath = True
     supportsSubtileImpl = True
 
+    def streamKMulticastMaskPredicate(self, writer, kernel):
+        """Gate the DP B-multicast on the runtime clusterMulticastValid predicate.
+
+        The B-broadcast mask value (MulticastMaskB = (1<<C)-1) is computed once at
+        kernel init from the HW cluster coords. It is only *correct* when the C
+        workgroups of this cluster genuinely co-issue the identical B load in
+        lockstep, which for the single-round DP [C,1] cluster holds iff:
+
+          1. nWG0 % C == 0  (M tiled to a multiple of C, so the C consecutive
+             tiles [cC, cC+C) of a cluster never straddle an N-block boundary and
+             are therefore M-adjacent -> share the same B), and
+          2. the cluster is fully populated: clusterBase + C <= totalTiles, where
+             clusterBase = StreamKIdx & ~(C-1) and totalTiles = nWG0*nWG1 (so no
+             peer is an idle tail workgroup with no matching load).
+
+        When either fails we rewrite MulticastMaskB to the self-only MulticastMaskA
+        so B is loaded per-workgroup (a normal load) -- correct for all sizes and,
+        critically, never leaving a masked target without a matching load (the
+        conservative full-cluster path chosen because the masked-idle-target HW
+        semantics could not be verified on silicon). Inert unless StreamKMulticast.
+        """
+        module = Module("StreamK multicast mask predicate")
+        if not kernel.get("StreamKMulticast", 0):
+            return module
+        c = kernel["ClusterDim"][0]
+        module.addComment0("StreamKMulticast: gate B-broadcast on clusterMulticastValid")
+        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
+        mcInvalid = Label(writer.labels.getNameInc("SKMC_Invalid"), "")
+        mcEnd = Label(writer.labels.getNameInc("SKMC_End"), "")
+        with writer.allocTmpSgpr(3, tag="SKMulticastPredicate") as tRes:
+            t0 = tRes.idx
+            t1 = tRes.idx + 1
+            t2 = tRes.idx + 2
+            # cond1: nWG0 % C == 0 (C is a power of two)
+            module.add(SAndB32(dst=sgpr(t0), src0=sgpr("NumWorkGroups0"), src1=hex(c - 1),
+                               comment="nWG0 %% C (C power of two)"))
+            module.add(SCmpEQU32(src0=sgpr(t0), src1=0, comment="nWG0 aligned to C?"))
+            module.add(SCBranchSCC0(labelName=mcInvalid.getLabelName(),
+                                    comment="unaligned M -> B not shared, load normally"))
+            # cond2: clusterBase + C <= totalTiles
+            sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+            module.add(SAndB32(dst=sgpr(t2), src0=sgpr(sIdx), src1=hex((~(c - 1)) & 0xFFFFFFFF),
+                               comment="clusterBase = StreamKIdx & ~(C-1)"))
+            writer.releaseStreamKConstSgpr(sIdx)
+            module.add(SAddU32(dst=sgpr(t2), src0=sgpr(t2), src1=hex(c), comment="clusterBase + C"))
+            module.add(SMulI32(dst=sgpr(t1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
+                               comment="totalTiles = nWG0 * nWG1"))
+            module.add(SCmpLeU32(src0=sgpr(t2), src1=sgpr(t1),
+                                 comment="cluster fully populated? clusterBase+C <= totalTiles"))
+            module.add(SCBranchSCC1(labelName=mcEnd.getLabelName(),
+                                    comment="valid cluster -> keep B broadcast mask"))
+            module.add(mcInvalid)
+            module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
+                               comment="invalid cluster -> B loaded normally (self-only mask)"))
+            module.add(mcEnd)
+        return module
+
+    def streamKMulticastBoundaryClear(self, writer, kernel):
+        """Clear the B-broadcast mask at the DP->SK boundary.
+
+        The B multicast mask lives in the persistent ``MulticastMaskB`` SGPR and
+        is OR'd fresh into the B TDM descriptor by ``initTDMDescriptor``
+        (``ClusterLoad.applyToDescriptor``) on *every* persistent-loop iteration.
+        Manipulating the descriptor word directly would be undone by the next
+        rebuild, so the correct lever is the mask SGPR itself.
+
+        When a workgroup transitions out of the single DP round into SK
+        partial-tile work, its cluster peers no longer co-issue the identical
+        full-K B load, so the spatial broadcast is no longer valid. We rewrite
+        ``MulticastMaskB`` to the self-only ``MulticastMaskA`` bit; from here on
+        every descriptor rebuild ORs only the self bit -> normal per-workgroup B
+        load for the remaining SK iterations. Because DP is a single round first
+        and SK is last (no return to DP), this one-shot rewrite is sufficient.
+        Inert unless StreamKMulticast.
+        """
+        module = Module("StreamK multicast DP->SK boundary clear")
+        if not kernel.get("StreamKMulticast", 0):
+            return module
+        module.addComment0("StreamKMulticast: clear B-broadcast mask at DP->SK boundary")
+        module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
+                           comment="DP->SK: drop B broadcast -> self-only (normal B load)"))
+        return module
+
+    def streamKMulticastPrologueSignal(self, writer, kernel):
+        """Elect wave 0 to arrive at the cluster split barrier once per workgroup.
+
+        The gfx1250 cluster-barrier pass emits a WAIT-only half
+        (``s_barrier_wait -3``) before the kernel's first ``tensor_load_to_lds``
+        and expects a matching prologue ``s_barrier_signal -3`` to already
+        exist. On the StreamKMulticast path (GlobalSplitU == 0) the label that
+        would otherwise anchor that prologue arrive is never emitted, so this
+        helper supplies it: one wave per workgroup arrives (the remaining waves
+        branch over the signal), pairing the pass's first-load wait so the
+        cluster-scope signal/wait counts stay balanced.
+
+        The arrive is unconditional on the StreamKMulticast path -- it is not
+        gated on the runtime clusterMulticastValid predicate -- so every cluster
+        peer participates in the barrier uniformly. Only the wave-0 election
+        gates it, matching the reduction path's clusterReduceSignal idiom.
+        Inert unless StreamKMulticast.
+        """
+        module = Module("StreamK multicast prologue signal")
+        if not kernel.get("StreamKMulticast", 0):
+            return module
+        assert writer.states.asmCaps.get("HasClusterBarrier", False), \
+            "StreamKMulticast requires the HasClusterBarrier asm capability"
+        module.addComment0("StreamKMulticast: elect wave 0 to signal the cluster barrier (pairs first-load wait)")
+        skipSignal = Label(label=writer.labels.getNameInc("SKMC_SkipSignal"), comment="")
+        elect = writer.sgprPool.checkOut(1, "SKMulticastElect")
+        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
+        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
+        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
+        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
+        module.add(skipSignal)
+        writer.sgprPool.checkIn(elect)
+        return module
+
     def preLoop(self, writer, kernel):
         module = Module("StreamK TwoTileDPFirst openLoop")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
@@ -2643,14 +2762,18 @@ class StreamKTwoTileDPFirst(StreamK):
 
         # Workaround for gfx12
         if writer.states.archCaps["WorkGroupIdFromTTM"]:
-            # Under StreamKClusterReduction the kernel-arg init already rebuilt
-            # WorkGroup0/1/2 from the cluster HW regs as the cluster-remapped
-            # GLOBAL linear index (WorkGroup0 = cluster_x*C + wg_x). The raw
-            # ttmp9 read here is only wg_x *within* the cluster, so re-applying
-            # the workaround would clobber the remap and make StreamKIdx a
-            # per-cluster local index. Keep the remapped ids so StreamKIdx is
-            # the global index the reduction/peer bookkeeping expects.
-            if not kernel.get("StreamKClusterReduction", False):
+            # Skip the ttmp9/ttmp7 reread under clustering. When ClusterDim != [1, 1]
+            # the kernel-arg init (defineAndResources) already rebuilt WorkGroup0/1/2
+            # from the cluster HW regs as the cluster-remapped GLOBAL linear index
+            # (WorkGroup0 = cluster_x*C + wg_x). The raw ttmp9 here is only wg_x
+            # *within* the cluster, so re-applying the workaround would collapse
+            # StreamKIdx to a per-cluster local index and break the global StreamK
+            # index that both StreamKClusterReduction's peer bookkeeping and
+            # StreamKMulticast's spatial tile mapping / clusterMulticastValid
+            # predicate depend on. This single clusterEnabled() gate matches the
+            # general cluster WG-id handling and subsumes the per-feature
+            # StreamKClusterReduction/StreamKMulticast checks.
+            if not clusterEnabled(kernel["ClusterDim"]):
                 module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
                 module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
                 module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
@@ -2661,6 +2784,17 @@ class StreamKTwoTileDPFirst(StreamK):
         else:
             module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
                                comment="Save original StreamK index"))
+
+        # StreamKMulticast: with StreamKIdx now known, gate the DP B-broadcast
+        # mask on the runtime clusterMulticastValid predicate (full + M-aligned
+        # cluster). No-op unless StreamKMulticast is enabled.
+        module.add(self.streamKMulticastMaskPredicate(writer, kernel))
+
+        # StreamKMulticast: arrive once per workgroup at the cluster split
+        # barrier here in the prologue, before the first tensor_load_to_lds, so
+        # it pairs the cluster-barrier pass's first-load wait. No-op unless
+        # StreamKMulticast is enabled.
+        module.add(self.streamKMulticastPrologueSignal(writer, kernel))
 
         if kernel["StreamKForceDPOnly"]:
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
@@ -2966,6 +3100,14 @@ class StreamKTwoTileDPFirst(StreamK):
             # check if this WG has no work to do
             module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTotalIters), comment="Make sure there's work to do"))
         module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+
+        # DP->SK boundary: this WG just transitioned out of the DP region, so the
+        # spatial B-broadcast mask baked into the B descriptor is no longer valid
+        # (SK partial-tile peers do not co-issue the identical full-K B load).
+        # Clear it to a normal self-only B load for the remaining SK iterations.
+        # Reached only on the DP->SK switch path (the DP-continue / SK-continue
+        # cases branch to skUpdateDone above). No-op unless StreamKMulticast.
+        module.add(self.streamKMulticastBoundaryClear(writer, kernel))
 
         # If in SK, next iteration is sTmp+2
         # Increment StreamK iteration

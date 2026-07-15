@@ -2,10 +2,16 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# gfx1250 StreamK + ClusterDim=[2,1] codegen characterization config.
-# Normal StreamK=3 (full tree-reduction). Exercises the enableCluster guard in
-# StreamKTwoTileDPFirst.preLoop. Mirrors Tests/common/streamk/gfx1250/core/
-# sk_mxf4gemm_tdm.yaml with ClusterDim added.
+# gfx1250 StreamK=3 + ClusterDim=[2,1] cooperative-load codegen characterization.
+#
+# StreamK=3 with ClusterDim != [1,1] and no StreamKClusterReduction. Under the
+# "bare StreamK cluster" collapse this AUTO-ENABLES the DP cooperative B-multicast
+# path (StreamKMulticast is a derived-only internal state; there is no bare
+# index-only StreamK cluster anymore). So this config exercises BOTH the cluster
+# WG-id decode / enableCluster guard in StreamKTwoTileDPFirst.preLoop AND the
+# auto-derived multicast masks -- with MX-FP4 (C=2), complementing the MX-FP8
+# (C=4) sibling streamk_cluster_multicast.yaml. Mirrors
+# Tests/common/streamk/gfx1250/core/sk_mxf4gemm_tdm.yaml with ClusterDim added.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -55,7 +61,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]

@@ -144,6 +144,7 @@ namespace TensileLite
         int    streamKForceDPOnly         = 0;
         int    streamKAtomic              = 0;
         int    streamKClusterReduction    = 0;
+        int    streamKMulticast           = 0;
         int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
         bool   persistentKernelAlongBatch = false;

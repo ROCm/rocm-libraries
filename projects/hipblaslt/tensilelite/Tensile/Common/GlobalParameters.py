@@ -571,6 +571,9 @@ defaultBenchmarkCommonParameters = [
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"StreamKClusterReduction": [0]},
+    # NOTE: StreamKMulticast is a derived-only internal state key (like
+    # ClusterBarrier), auto-enabled by Solution.py for StreamK==3 + ClusterDim
+    # clusters; it is deliberately NOT a benchmark/default parameter here.
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},
     {"ActivationFused": [True]},
