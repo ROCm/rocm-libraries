@@ -470,6 +470,13 @@ def _generate_bquant_kernel(
     return hpp
 
 
+def _get_dispatcher_static_lib() -> Optional[Path]:
+    """Return libck_tile_dispatcher.a from the CMake build directory, or None."""
+    dispatcher_root = _CTYPES_LIB_SRC.parent.parent.parent
+    static_lib = dispatcher_root / "build" / "libck_tile_dispatcher.a"
+    return static_lib if static_lib.exists() else None
+
+
 def _compile_bquant_kernel(
     hpp_path: Path,
     so_path: Path,
@@ -478,45 +485,96 @@ def _compile_bquant_kernel(
     extra_include_dirs: Optional[List[str]] = None,
 ) -> bool:
     """
-    Compile a generated .hpp into a .so via hipcc.
+    Compile a generated .hpp into a .so via hipcc (compile then link).
+
+    Two-step build:
+      1. Compile to a .o object file.
+      2. Link the .o + libck_tile_dispatcher.a into a shared .so.
+
+    Linking the dispatcher static library resolves Registry::instance() and
+    Dispatcher symbols that are defined in its .cpp sources (registry.cpp,
+    dispatcher.cpp) and referenced by grouped_gemm_bquant_ctypes_lib.cpp.
+    Without this, dlopen() fails with undefined symbol errors.
+
     Returns True on success.
     """
     ck_include = _get_ck_include_dir()
+    static_lib = _get_dispatcher_static_lib()
 
-    cmd = [hipcc] + _HIPCC_BASE_FLAGS + [
-        f"--offload-arch={gfx_arch}",
-        f"-DGFX_ARCH=\"{gfx_arch}\"",
-        f"-include", str(hpp_path),
-        str(_CTYPES_LIB_SRC),
-        "-o", str(so_path),
-    ]
+    # Dispatcher include: _CTYPES_LIB_SRC is dispatcher/bindings/ctypes/...cpp,
+    # so .parent.parent.parent == dispatcher/, and include/ lives directly there.
+    dispatcher_include = _CTYPES_LIB_SRC.parent.parent.parent / "include"
+
+    # -- Step 1: compile to object file --------------------------------------
+    obj_path = so_path.with_suffix(".o")
+
+    compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
+                   "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",
+                   f"--offload-arch={gfx_arch}",
+                   f"-DGFX_ARCH=\"{gfx_arch}\"",
+                   "-include", str(hpp_path),
+                   str(_CTYPES_LIB_SRC),
+                   "-o", str(obj_path)]
 
     if ck_include:
-        cmd += [f"-I{ck_include}"]
+        compile_cmd += [f"-I{ck_include}"]
 
-    # Dispatcher include
-    dispatcher_include = _CTYPES_LIB_SRC.parent.parent.parent / "dispatcher" / "include"
     if dispatcher_include.is_dir():
-        cmd += [f"-I{dispatcher_include}"]
+        compile_cmd += [f"-I{dispatcher_include}"]
 
     if extra_include_dirs:
         for d in extra_include_dirs:
-            cmd += [f"-I{d}"]
+            compile_cmd += [f"-I{d}"]
 
-    log.debug("Compiling %s:\n  %s", so_path.name, " ".join(cmd))
+    log.debug("Compiling %s:\n  %s", so_path.name, " ".join(compile_cmd))
 
     try:
         result = subprocess.run(
-            cmd,
+            compile_cmd,
             capture_output=True, text=True, timeout=600,
         )
         if result.returncode != 0:
             log.error("Compile failed for %s:\n%s", so_path.name, result.stderr[-2000:])
             return False
-        return True
     except subprocess.TimeoutExpired:
         log.error("Compile timed out for %s", so_path.name)
         return False
+
+    # -- Step 2: link into shared library ------------------------------------
+    link_cmd = [hipcc, "-shared", "-fPIC",
+                f"--offload-arch={gfx_arch}", "--hip-link",
+                str(obj_path)]
+
+    if static_lib:
+        link_cmd += [str(static_lib)]
+    else:
+        log.warning(
+            "libck_tile_dispatcher.a not found at %s; linking without it. "
+            "Registry::instance() may be an undefined symbol at dlopen time. "
+            "Build the dispatcher first: cd dispatcher/build && cmake .. && make ck_tile_dispatcher",
+            _CTYPES_LIB_SRC.parent.parent.parent / "build" / "libck_tile_dispatcher.a",
+        )
+
+    link_cmd += ["-o", str(so_path)]
+
+    log.debug("Linking %s:\n  %s", so_path.name, " ".join(link_cmd))
+
+    try:
+        result = subprocess.run(
+            link_cmd,
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            log.error("Link failed for %s:\n%s", so_path.name, result.stderr[-2000:])
+            obj_path.unlink(missing_ok=True)
+            return False
+    except subprocess.TimeoutExpired:
+        log.error("Link timed out for %s", so_path.name)
+        obj_path.unlink(missing_ok=True)
+        return False
+
+    obj_path.unlink(missing_ok=True)
+    return True
 
 
 # =============================================================================

@@ -339,7 +339,19 @@ int dispatcher_run_bquant_gemm(const void* A,
     args.stride_AQ = 0;
     args.stride_BQ = static_cast<ck_tile::index_t>(stride_BQ);
 
-    ck_tile::stream_config stream_cfg{nullptr, false, 0, 0, 1, false, false, 1};
+    const bool do_time = (time_ms != nullptr);
+    // When timing is requested use GPU timer with warmup (cold_niters=3, nrepeat=10).
+    // Otherwise run once with no overhead.
+    ck_tile::stream_config stream_cfg{
+        nullptr,   // stream_id_
+        do_time,   // time_kernel_
+        0,         // log_level_
+        do_time ? 3 : 0,   // cold_niters_
+        do_time ? 10 : 1,  // nrepeat_
+        do_time,   // is_gpu_timer_
+        false,     // flush_cache_
+        1,         // rotating_count_
+    };
 
     float exec_time = SelectedKernel::launch(args, stream_cfg);
 
