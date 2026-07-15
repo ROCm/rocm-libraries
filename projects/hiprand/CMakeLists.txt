@@ -245,7 +245,7 @@ else()
 endif()
 
 if(HIPRAND_ENABLE_COVERAGE)
-  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_compile_options(hiprand PRIVATE -g -O0 -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
   target_link_options(hiprand PUBLIC -fprofile-instr-generate)
 endif()
 
