@@ -30,7 +30,10 @@ TOOLS = ROCKE / "tools"
 # exempt). A clean run is required before the tree is dropped into another repo.
 _GUARD_SUFFIXES = {".py", ".cmake", ".toml", ".ini", ".sh", ".cfg"}
 _GUARD_NAMES = {"CMakeLists.txt"}
-_GUARD_SKIP_DIRS = {".git", ".venv", "__pycache__", "build", "dsl_docs", "examples"}
+_GUARD_SKIP_DIRS = {".git", "__pycache__", "build", "dsl_docs", "examples"}
+# Any ".venv*" dir is a local virtual environment (".venv", ".venv-torch", ...);
+# keeping side venvs around for CI parity and local dev must not trip the guard.
+_GUARD_SKIP_PREFIXES = (".venv",)
 _FORBIDDEN = [
     re.compile(r"/workspace\b"),
     re.compile(r"rocm-libraries(?:-[a-z-]+)?/"),
@@ -45,7 +48,10 @@ def relative_path_guard() -> int:
     for path in ROCKE.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in _GUARD_SKIP_DIRS for part in path.relative_to(ROCKE).parts):
+        if any(
+            part in _GUARD_SKIP_DIRS or part.startswith(_GUARD_SKIP_PREFIXES)
+            for part in path.relative_to(ROCKE).parts
+        ):
             continue
         if path.suffix not in _GUARD_SUFFIXES and path.name not in _GUARD_NAMES:
             continue

@@ -2288,6 +2288,65 @@ namespace rocisa
         }
     };
 
+    struct GlobalAtomicIncU32Saddr : public GLOBALStoreInstruction
+    {
+        GlobalAtomicIncU32Saddr(const std::shared_ptr<Container>& dst,
+                           const std::shared_ptr<Container>& vaddr,
+                           const std::shared_ptr<Container>& data,
+                           const std::shared_ptr<Container>& saddr,
+                           std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                           const std::string&                comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B32, vaddr, data, saddr, modifier, comment)
+            , dst(dst)
+        {
+            setInst("global_atomic_inc_u32");
+        }
+
+        GlobalAtomicIncU32Saddr(const GlobalAtomicIncU32Saddr& other)
+            : GLOBALStoreInstruction(other)
+            , dst(other.dst ? other.dst->clone() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicIncU32Saddr>(*this);
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::string getArgStr() const override
+        {
+            std::string kStr = dst ? dst->toString() + ", " : "";
+            return kStr + vaddr->toString() + ", " + srcData->toString() + ", " + saddr->toString();
+        }
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+
+        std::string toString() const override
+        {
+            // SADDR returning atomic: "global_atomic_inc_u32 vdst, vaddr, vsrc, saddr".
+            // th:TH_ATOMIC_RETURN is emitted unconditionally; scope: (when the ISA caps
+            // allow) is rendered first to match StinkyTofu's canonical order.
+            std::string kStr = instStr + " " + getArgStr();
+            if(modifier)
+                kStr += modifier->toString();
+            kStr += " th:TH_ATOMIC_RETURN";
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {vaddr, srcData, saddr}, dst);
+            return kStr;
+        }
+
+    private:
+        std::shared_ptr<Container> dst;
+    };
+
     struct GlobalStoreB8 : public GLOBALStoreInstruction
     {
         GlobalStoreB8(const std::shared_ptr<RegisterContainer>& vaddr,

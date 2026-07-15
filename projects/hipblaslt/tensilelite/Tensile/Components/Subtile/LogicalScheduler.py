@@ -245,6 +245,7 @@ class SchedulerConfig:
     partitionSizeN: Union[int, List[int]] = 0  # partition size(s) in N dimension (0 = full dim)
     pgr: int = 2              # Prefetch Global Read
     grPlacement: GRPlacementStrategy = GRPlacementStrategy.SPREAD
+    pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -595,6 +596,28 @@ class GRIncOp(BaseOp):
 
     def __str__(self):
         return f"gr_inc({self.tensor})"
+
+
+@dataclass
+class GL2PrefetchOp(BaseOp):
+    """Issue GL2 prefetch loads (global_prefetch_b8) for all tensors."""
+
+    def __post_init__(self):
+        self.kind = 'gl2_prefetch'
+
+    def __str__(self):
+        return "gl2_prefetch"
+
+
+@dataclass
+class GL2PrefetchIncOp(BaseOp):
+    """Increment GL2 prefetch addresses with end-of-K guard."""
+
+    def __post_init__(self):
+        self.kind = 'gl2_prefetch_inc'
+
+    def __str__(self):
+        return "gl2_prefetch_inc"
 
 
 @dataclass
@@ -2350,6 +2373,18 @@ class LogicalScheduler:
                     if first_uid != 0:
                         lr.preOps.insert(0, LRIncOp(tensor=tensor, isUnrollSwap=True, unrollId=first_uid))
 
+        # GL2 prefetch: append increment + load ops after the last GR in
+        # the schedule so they fire once per iteration after all GR_INCs.
+        if self.config.pgl > 0:
+            last_gr = None
+            for slots in self._partitions:
+                for slot in slots:
+                    for gr in slot.grs:
+                        last_gr = gr
+            if last_gr is not None:
+                last_gr.postOps.append(GL2PrefetchIncOp())
+                last_gr.postOps.append(GL2PrefetchOp())
+
         self._completed.add(Pass.GR_INC)
 
     # ── Group LR/GR chains ─────────────────────────────────────
@@ -2845,6 +2880,8 @@ class LogicalScheduler:
                     src = em.source
                     if em.opType == 'gr' and src.mtIteration == 2:
                         removed.add(em.moduleId)
+                    elif em.opType in ('gl2_prefetch', 'gl2_prefetch_inc'):
+                        removed.add(em.moduleId)
                     elif em.opType == 'wait_gr':
                         if src.wait_gr_counts is not None:
                             src.wait_gr_counts = WaitGRCounts()
@@ -2888,6 +2925,8 @@ class LogicalScheduler:
                           and self._is_multi_du()):
                         # Only multi-DU drops the MT-transition lr_inc in the NLL;
                         # single-DU PGR=2 keeps lr_inc (gr_inc is still dropped).
+                        removed.add(em.moduleId)
+                    elif em.opType in ('gl2_prefetch', 'gl2_prefetch_inc'):
                         removed.add(em.moduleId)
 
                 has_lr = any(em.opType == 'lr' and em.moduleId not in removed
@@ -3310,6 +3349,12 @@ class LogicalScheduler:
                     SkipOp(compare='LE', value=1, target='NLL'),
                 ])
         else:
+            gl2_preloop_ops = []
+            if cfg.pgl > 0:
+                gl2_preloop_ops.append(GL2PrefetchOp())
+                if cfg.pgl == 2:
+                    gl2_preloop_ops.append(GL2PrefetchIncOp())
+                    gl2_preloop_ops.append(GL2PrefetchOp())
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
             if maxUnroll > 1:
                 preloop_ops = []
@@ -3327,6 +3372,7 @@ class LogicalScheduler:
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
                     *mt1_ops,
+                    *gl2_preloop_ops,
                     SkipOp(compare='LE', value=2, target='NGLL'),
                 ])
             else:
@@ -3338,6 +3384,7 @@ class LogicalScheduler:
                     *self._make_lr_all_tensors(lr_tiles),
                     SkipOp(compare='LE', value=1, target='NLL'),
                     *self._make_preloop_mt1_grs(),
+                    *gl2_preloop_ops,
                     SkipOp(compare='LE', value=2, target='NGLL'),
                 ])
 

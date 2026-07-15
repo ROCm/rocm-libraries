@@ -3,6 +3,7 @@ TestParameters:
 
 GlobalParameters:
   SyncsPerBenchmark: 0
+  Architecture: gfx1250
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: False
@@ -50,7 +51,7 @@ BenchmarkProblems:
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [3, 4]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]
@@ -92,7 +93,7 @@ BenchmarkProblems:
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [0, 4]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]
