@@ -77,7 +77,7 @@ class segmented_radix_sort_helper
                                                                   Descending,
                                                                   key_type,
                                                                   value_type,
-                                                                  unsigned int,
+                                                                  size_t,
                                                                   TargetWaveSize>;
 
 public:
@@ -101,8 +101,8 @@ public:
               value_type * values_tmp,
               ValuesOutputIterator values_output,
               bool to_output,
-              unsigned int begin_offset,
-              unsigned int end_offset,
+              size_t begin_offset,
+              size_t end_offset,
               unsigned int bit,
               unsigned int begin_bit,
               unsigned int end_bit,
@@ -179,8 +179,8 @@ public:
               value_type * values_tmp,
               value_type * values_output,
               bool to_output,
-              unsigned int begin_offset,
-              unsigned int end_offset,
+              size_t begin_offset,
+              size_t end_offset,
               unsigned int bit,
               unsigned int begin_bit,
               unsigned int end_bit,
@@ -253,8 +253,8 @@ private:
               KeysOutputIterator keys_output,
               ValuesInputIterator values_input,
               ValuesOutputIterator values_output,
-              unsigned int begin_offset,
-              unsigned int end_offset,
+              size_t begin_offset,
+              size_t end_offset,
               unsigned int bit,
               unsigned int current_radix_bits,
               storage_type& storage)
@@ -328,8 +328,8 @@ public:
               Value*               values_tmp,
               ValuesOutputIterator values_output,
               bool                 to_output,
-              unsigned int         begin_offset,
-              unsigned int         end_offset,
+              size_t               begin_offset,
+              size_t               end_offset,
               unsigned int         begin_bit,
               unsigned int         end_bit,
               storage_type&        storage)
@@ -369,8 +369,8 @@ public:
               Value*        values_tmp,
               Value*        values_output,
               bool          to_output,
-              unsigned int  begin_offset,
-              unsigned int  end_offset,
+              size_t        begin_offset,
+              size_t        end_offset,
               unsigned int  begin_bit,
               unsigned int  end_bit,
               storage_type& storage)
@@ -395,8 +395,8 @@ public:
               KeysOutputIterator   keys_output,
               ValuesInputIterator  values_input,
               ValuesOutputIterator values_output,
-              unsigned int         begin_offset,
-              unsigned int         end_offset,
+              size_t               begin_offset,
+              size_t               end_offset,
               unsigned int         begin_bit,
               unsigned int         end_bit,
               storage_type&        storage)
@@ -494,8 +494,8 @@ public:
               KeysOutputIterator,
               ValuesInputIterator,
               ValuesOutputIterator,
-              unsigned int,
-              unsigned int,
+              size_t,
+              size_t,
               unsigned int,
               unsigned int,
               storage_type&)
@@ -649,8 +649,8 @@ public:
               KeysOutputIterator   keys_output,
               ValuesInputIterator  values_input,
               ValuesOutputIterator values_output,
-              unsigned int         begin_offset,
-              unsigned int         end_offset,
+              size_t               begin_offset,
+              size_t               end_offset,
               unsigned int         begin_bit,
               unsigned int         end_bit,
               storage_type&        storage)
@@ -703,8 +703,8 @@ public:
               Value*               values_tmp,
               ValuesOutputIterator values_output,
               bool                 to_output,
-              unsigned int         begin_offset,
-              unsigned int         end_offset,
+              size_t               begin_offset,
+              size_t               end_offset,
               unsigned int         begin_bit,
               unsigned int         end_bit,
               storage_type&        storage)
@@ -769,7 +769,7 @@ void segmented_sort(KeysInputIterator keys_input,
 
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type        = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using segment_size_type = unsigned int;
+    using segment_size_type = size_t;
 
     using single_block_helper_type = segmented_radix_sort_single_block_helper<key_type,
                                                                               value_type,
@@ -815,7 +815,6 @@ void segmented_sort(KeysInputIterator keys_input,
         return;
     }
 
-    // If not empty, a segment's size must fit into unsigned int (which we already checked during the partition phase)
     const segment_size_type segment_length
         = static_cast<segment_size_type>(end_offset - begin_offset);
 
@@ -935,8 +934,8 @@ void segmented_sort_large(KeysInputIterator keys_input,
 
     const unsigned int block_id     = ::rocprim::detail::block_id<0>();
     const segment_index_type segment_id   = segment_indices[block_id];
-    const size_t             begin_offset = begin_offsets[segment_id];
-    const size_t             end_offset   = end_offsets[segment_id];
+    const segment_index_type begin_offset = begin_offsets[segment_id];
+    const segment_index_type end_offset   = end_offsets[segment_id];
 
     // Empty segment
     if(end_offset <= begin_offset)
@@ -1049,15 +1048,15 @@ void segmented_sort_medium_or_small(KeysInputIterator keys_input,
 
     const unsigned int block_id        = ::rocprim::detail::block_id<0>();
     const unsigned int logical_warp_id = ::rocprim::detail::logical_warp_id<logical_warp_size>();
-    const unsigned int segment_index   = block_id * warps_per_block + logical_warp_id;
+    const segment_index_type segment_index = block_id * warps_per_block + logical_warp_id;
     if(static_cast<size_t>(segment_index) >= num_segments)
     {
         return;
     }
 
     const segment_index_type segment_id   = segment_indices[segment_index];
-    const size_t             begin_offset = begin_offsets[segment_id];
-    const size_t             end_offset   = end_offsets[segment_id];
+    const segment_index_type begin_offset = begin_offsets[segment_id];
+    const segment_index_type end_offset   = end_offsets[segment_id];
 
     // Empty segment
     if(end_offset <= begin_offset)
