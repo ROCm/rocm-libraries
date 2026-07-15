@@ -534,6 +534,7 @@ def _run_flydsl(shape: DecodeShape, data: dict, *, warmup: int, iters: int):
             _flydsl_swap(flydsl=False)
         return ms, kv_path
     except Exception:
+        traceback.print_exc()
         return None, None
 
 
