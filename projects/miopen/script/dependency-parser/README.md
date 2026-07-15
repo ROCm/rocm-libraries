@@ -8,10 +8,51 @@ The parser:
 - Identifies all executables in the Ninja build.
 - Maps object files to their source and header dependencies using `ninja -t deps`.
 - Constructs a reverse mapping from each file to all dependent executables.
+- Extracts all gtest fixture names from the source code.
+- Correlates modified files with executables and fixtures to produce a gtest_filter that represents the minimal amount of tests required to achieve compliance.
 - Handles multi-executable dependencies and supports parallel processing for scalability.
 - Exports results in CSV and JSON formats for integration with other tools.
 
+## MIOpen Implementation
+- Dapper configuration is driven entirely by CMake flags and integrates seamlessly with MIOpen CI. This involves several new CMake entities which execute the dapper python scripts.
+- Implementation is split into two releases: 1. Evaluation which is MIOpen CI-only, and 2. TheRock.
+- Note: the discrete gtests are currently required since the mapping requires them. This increases build time slightly. Workarounds will be considered as a followup task after the TheRock release.
+- Note: The first release includes an optional argument, `MIOPEN_DEBUG_DEV_FILTER` which is used to override the default filter in MIOpen CI. Several options have been hardcoded into the CMake, including `SHORT`, `LONGER`, and `LONG`. The latter two roughly correspond with the standardized categories 'quick' and 'standard'. It is requested these remain until TheRock portion has been finished.
+- The primary self test is `miopen_gtest_sharded_dapper`. This is a ctest which recalculates the union filter and fails if any required fixtures do not appear in the shard output files. All other failure modes cause failures in the target stages. It also verifies compliance and reports test results.
+- There is also a pre-CI facility for local testing: if, for example, you modify a gtest that is not included in the debug filter but you want to run a fast test, you can add the fixtures manually using `MIOPEN_DEBUG_DAPPER_FILTER`. See the example below.
+
+### CMake Custom File Generators:
+- miopen_dapper_mapping.json: Runs enhanced_ninja_parser.py to Detect modified source files and generate the mapping to discrete gtests.
+- miopen_dapper_fixtures.json: Runs extract_gtest_fixtures.py to interrogates gtest source files and extract all fixture names for each discrete gtest.
+- miopen_dapper_tests.json: Runs selective_test_filter.py which combines the fixtures and mapping files to produce the minimal set of fixture names required to be ran to achieve compliance. This is referred to as `union_filter` since it represents the logical union of the category/MICI gtest_filter and the dapper gtest_filter.
+
+### CMake Custom Targets:
+- `dapper_diff`: Runs the full set of build, tests, and Dapper.
+- `dapper_only_diff`: Supports fast iteration of Dapper. Runs only the Dapper chain; no builds, no tests; requires existing fixtures file and shard output.
+- `dapper_fix_diff`: Supports fast iteration of Dapper. Identical to `dapper_only_diff` but regenerates the fixtures file.
+
+## Usage Examples:
+- MICI single node:
+```
+# Generate with single-type gtest_filter, e.g. Full*FP16*:
+cmake -DMIOPEN_TEST_HALF=1 <other options>
+ninja check
+```
+- Typed Smoke test:
+```
+# Generate with single-type gtest_filter, e.g. Smoke*FP16*:
+cmake -DMIOPEN_TEST_HALF=1 -DMIOPEN_TEST_ALL=0 <other options>
+ninja check
+```
+- Standardized category 'SHORT' test (for TheRock and dapper module-level tests):
+```
+# Generate with single-type gtest_filter, e.g. Smoke*FP16*:
+cmake -DMIOPEN_DEBUG_DEV_FILTER="SHORT" -DMIOPEN_DEBUG_DAPPER_FILTER="*unary*" <other options>
+ninja check
+```
+
 ## Features
+- Note that most of the below documentation is from an older CK version of the tool and thus is partially outdated. Final update will be with TheRock release.
 
 - **Comprehensive Dependency Tracking**: Captures direct source file dependencies and, critically, all included header files via `ninja -t deps`.
 - **Executable to Object Mapping**: Parses the `build.ninja` file to understand how executables are linked from object files.
@@ -21,7 +62,7 @@ The parser:
 - **Filtering**: Option to filter out system files and focus on project-specific dependencies.
 - **Multiple Output Formats**:
     - **CSV**: `enhanced_file_executable_mapping.csv` - A comma-separated values file where each row lists a file and a semicolon-separated list of executables that depend on it.
-    - **JSON**: `enhanced_dependency_mapping.json` - A JSON file representing a dictionary where keys are file paths and values are lists of dependent executables.
+    - **JSON**: `miopen_dapper_mapping.json` - A JSON file representing a dictionary where keys are file paths and values are lists of dependent executables.
 - **Robust Error Handling**: Includes error handling for missing files and failed subprocess commands.
 
 ## Prerequisites
@@ -64,13 +105,15 @@ All features are available via the unified main.py CLI:
 python main.py parse examples/build-ninja/build.ninja --workspace-root /path/to/your/workspace
 
 # Selective test filtering
-python main.py select enhanced_dependency_mapping.json <ref1> <ref2> [--all | --test-prefix] [--output <output_json>]
+python main.py select miopen_dapper_mapping.json [<ref1> <ref2>] [--all | --test-prefix] [--output <output_json>]
+
+#
 
 # Code auditing
-python main.py audit enhanced_dependency_mapping.json
+python main.py audit miopen_dapper_mapping.json
 
 # Build optimization
-python main.py optimize enhanced_dependency_mapping.json <changed_file1> [<changed_file2> ...]
+python main.py optimize miopen_dapper_mapping.json <changed_file1> [<changed_file2> ...]
 ```
 
 **Arguments:**
@@ -139,7 +182,7 @@ Running the script will generate two files in the same directory as the input `b
     ...
     ```
 
--   **`enhanced_dependency_mapping.json`**:
+-   **`miopen_dapper_mapping.json`**:
     ```json
     {
       "/path/to/project/src/main.cpp": ["my_exe_1", "my_exe_2"],

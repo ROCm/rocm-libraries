@@ -28,8 +28,5 @@ std::vector<gpubuf> hipfft_params::externally_managed_workareas = std::vector<gp
 
 int main(int argc, char* argv[])
 {
-    return mpi_worker_main<std::array<hipfft_params, 1>, false>(
-        "hipFFT MPI worker process", argc, argv, [](const std::vector<std::string>& lib_strings) {
-            return std::array<hipfft_params, 1>();
-        });
+    return mpi_worker_main<std::array<hipfft_params, 1>>("hipFFT MPI worker process", argc, argv);
 }

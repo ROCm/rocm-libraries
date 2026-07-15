@@ -173,7 +173,7 @@ class TestPyTorchCudaExecutor:
             result = executor.benchmark(tensors, graph_name="test_conv")
 
             # Verify result
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
             assert result.kernel_timings is not None
             assert len(result.kernel_timings) == 5
             assert result.metadata is not None
@@ -207,7 +207,7 @@ class TestPyTorchCudaExecutor:
             executor.warmup(tensors)
             result = executor.benchmark(tensors, graph_name="test_matmul")
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
             assert result.kernel_timings is not None
 
     def test_full_benchmark_relu(self, sample_relu_graph):
@@ -236,15 +236,27 @@ class TestPyTorchCudaExecutor:
             executor.warmup(tensors)
             result = executor.benchmark(tensors, graph_name="test_relu")
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
     @pytest.mark.parametrize(
         "graph_name",
         [
+            "sample_conv_dgrad.json",
+            "sample_conv_wgrad.json",
             "sample_matmul_batched.json",
             "sample_matmul_broadcast.json",
+            "sample_batchnorm_training.json",
+            "sample_batchnorm_inference.json",
+            "sample_batchnorm_inference_variance.json",
+            "sample_batchnorm_backward.json",
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
+            "sample_sdpa_backward.json",
+            "sample_layernorm.json",
+            "sample_rmsnorm.json",
+            "sample_rmsnorm_backward.json",
+            "sample_reduction.json",
+            "sample_resample_fwd.json",
         ],
     )
     def test_full_benchmark_new_reference_graphs(self, graph_name):
@@ -271,7 +283,7 @@ class TestPyTorchCudaExecutor:
             executor.warmup(tensors)
             result = executor.benchmark(tensors, graph_name=graph_name)
 
-        assert len(result.e2e_timings) == 1
+        assert len(result.host_timings) == 1
 
     def test_json_export(self, sample_conv_graph, tmp_path):
         """Test that benchmark results can be exported to JSON."""
@@ -307,7 +319,7 @@ class TestPyTorchCudaExecutor:
             with open(output_path) as f:
                 data = json.load(f)
 
-            assert "e2e_timings" in data
+            assert "host_timings" in data
             assert "kernel_timings" in data
             assert "metadata" in data
             assert data["metadata"]["execution_backend"] == "pytorch"
