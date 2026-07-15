@@ -23,8 +23,9 @@
 """Tests for the Windows dependent-DLL directory resolution (_candidate_dll_dirs).
 
 These exercise the pure ordering/dedup/dirname logic directly, with synthetic
-inputs, so they run on any platform without a compiled extension, real
-directories, or os.add_dll_directory (which exists only on Windows).
+inputs -- no real directories and no os.add_dll_directory (which exists only on
+Windows), so they run on any platform. Like the sibling helper tests (see
+test_staleness.py), importing rocisa still loads the built _rocisa extension.
 """
 
 import os
