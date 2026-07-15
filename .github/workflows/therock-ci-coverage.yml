@@ -113,12 +113,13 @@ jobs:
       - name: Report
         if: ${{ !cancelled() }}
         run: |
+          set +e  # best-effort diagnostics; never fail the build on reporting
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 TheRock/build-coverage/dist/rocm
           echo "Artifact Archives:"
           echo "------------------"
-          ls -lh TheRock/build-coverage/artifacts/*.tar.xz
+          ls -lh TheRock/build-coverage/artifacts/ 2>/dev/null
           echo "Artifacts:"
           echo "----------"
           du -h -d 1 TheRock/build-coverage/artifacts
