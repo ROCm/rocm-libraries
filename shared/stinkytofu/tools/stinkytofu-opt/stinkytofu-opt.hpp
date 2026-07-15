@@ -122,23 +122,19 @@ const std::vector<PassInfo> availablePasses = {
     {"RaiseVgprMsbPass", [](const auto&) { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
+    // InsertClusterBarrierPass accepts:
+    //   --InsertClusterBarrierPass=PrefetchGlobalRead=<n>,PrefetchLocalRead=<n>
     {"InsertClusterBarrierPass",
-     [](const auto&) {
-         auto geti = [](const char* k, int d) {
-#ifdef _WIN32
-             char* v = nullptr;
-             size_t len = 0;
-             _dupenv_s(&v, &len, k);
-             int result = v != nullptr ? std::atoi(v) : d;
-             free(v);
-             return result;
-#else
-             const char* v = std::getenv(k);
-             return v != nullptr ? std::atoi(v) : d;
-#endif
+     [](const std::vector<std::string>& args) {
+         auto getArgInt = [&args](const char* k, int d) {
+             std::string prefix = std::string(k) + "=";
+             for (const auto& a : args)
+                 if (a.starts_with(prefix)) return std::atoi(a.substr(prefix.size()).c_str());
+             return d;
          };
-         return createInsertClusterBarrierPass(
-             /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));
+         return createInsertClusterBarrierPass(/*isKernelScope=*/true,
+                                               getArgInt("PrefetchGlobalRead", 1),
+                                               getArgInt("PrefetchLocalRead", 1));
      }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},

@@ -409,6 +409,18 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     // Add source registers
     std::vector<InstructionInput> srcParams = inst->getSrcParams();
 
+    // MUBUF atomics carry vdata as a read-write destination operand. rocisa
+    // keeps that register in getSrcParams() for dependency tracking, but the
+    // StinkyTofu instruction definition models D0 as RW and the assembly syntax
+    // must not print vdata a second time as S0.
+    if (dynamic_cast<const rocisa::BufferAtomicAddF32*>(inst) ||
+        dynamic_cast<const rocisa::BufferAtomicCmpswapB32*>(inst) ||
+        dynamic_cast<const rocisa::BufferAtomicCmpswapB64*>(inst)) {
+        if (!srcParams.empty()) {
+            srcParams.erase(srcParams.begin());
+        }
+    }
+
     // Adjust source parameters for VLShiftLeftAddU32 CompositeInstruction
     // VLShiftLeftAddU32 stores parameters as: {src0, src1, shift}
     // _VLShiftLeftAddU32 stores parameters as: {src0, shift, src1}
@@ -694,6 +706,18 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
         else if (auto typed = dynamic_cast<const MUBUFStoreInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
+        }
+        else if (auto typed = dynamic_cast<const GlobalAtomicIncU32Saddr*>(inst)) {
+            // GlobalAtomicIncU32Saddr carries cache scope / temporal hint / offset as rocisa
+            // GLOBALModifiers; translate so the emitter prints them (the returning-atomic
+            // th:TH_ATOMIC_RETURN is added separately by the emitter). Scoped to the atomic
+            // specifically -- the GLOBALStoreInstruction base also covers global_store_*,
+            // whose modifier handling must not change here.
+            if (typed->modifier.has_value()) {
+                const auto& gm = typed->modifier.value();
+                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(stinkytofu::GLOBALModifiers(
+                    gm.offset, convertTemporalHint(gm.th), convertMUBUFScope(gm.scope)));
+            }
         }
         else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
             [&](const auto& mod) { return convertSMEMModifiers(mod, asmCaps); })
@@ -1503,6 +1527,12 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             StinkyAsmModule::ModuleOptions moduleOptions{};
             // Sentinel: <0 means use legacy default scratch SGPR in SwPrefetchInsertionPass (102).
             moduleOptions.SwPrefetchScratchSgpr = -1;
+            // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
+            // is itself a valid (if extreme) value for the former and a valid enumerator for the
+            // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
+            // other DAG-scheduler knobs below.
+            moduleOptions.DsReadPerWmma = -1;
+            moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 

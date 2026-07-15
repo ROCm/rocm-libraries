@@ -119,6 +119,16 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         if (runScheduler) {
             passFeatureConfig.loopConfig.unrollGemm = true;
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
+            passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
+            passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
+            passFeatureConfig.dagFeatures.globalReadQueueDepth = moduleOptions.GlobalReadQueueDepth;
+            passFeatureConfig.dagFeatures.globalReadDrainLatency =
+                moduleOptions.GlobalReadDrainLatency;
+            if (moduleOptions.DsReadPerWmma >= 0)
+                passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
+            if (moduleOptions.DsReadOrder >= 0)
+                passFeatureConfig.dagFeatures.dsReadOrder =
+                    static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
         }
 
         PassManager innerPM;
