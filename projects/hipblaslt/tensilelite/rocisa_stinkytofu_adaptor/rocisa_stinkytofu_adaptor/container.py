@@ -9,6 +9,7 @@ descriptors (DS/FLAT/GLOBAL/SMEM/SDWA/DPP/VOP3P/True16) are real.
 from __future__ import annotations
 
 import math
+import re
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union
@@ -602,10 +603,28 @@ class RegisterContainer(Container):
 #
 # Parses a string-form symbolic ref back into a structured RegName.
 # Inverse of RegName.__str__. Used by Holder(name=...) ctor.
+_LEADING_INT_RE = re.compile(r"\s*([+-]?\d+)")
+
+
+def _stoi(text: str) -> int:
+    """Match C++ ``std::stoi``: parse the leading integer prefix, ignoring any
+    trailing characters (e.g. ``"3.0"`` -> ``3``).
+
+    KernelWriter sometimes builds symbolic offsets from float arithmetic
+    (``idx / 4``), producing names like ``"G2LA+3.0"``. Native rocisa parses
+    these via ``std::stoi`` which truncates at the first non-digit, so the
+    adaptor must do the same to keep parity.
+    """
+    m = _LEADING_INT_RE.match(text)
+    if not m:
+        raise ValueError(f"invalid literal for _stoi(): {text!r}")
+    return int(m.group(1))
+
+
 def _generateRegName(rawText: str) -> RegName:
     parts = rawText.split("+")
     name = parts[0]
-    offsets = [int(p) for p in parts[1:]] if len(parts) > 1 else []
+    offsets = [_stoi(p) for p in parts[1:]] if len(parts) > 1 else []
     return RegName(name, offsets)
 
 

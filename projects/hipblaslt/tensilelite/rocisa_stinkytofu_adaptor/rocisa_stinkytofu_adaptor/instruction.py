@@ -88,7 +88,11 @@ class Instruction:
         self.name: str = ""  # rocisa Item ctor uses "" (not the class name)
         self.parent: Any = None
         self.instType: Any = instType
-        self.comment: str = comment
+        # Coerce None -> "" so downstream ``inst.comment += ...`` (e.g.
+        # Activation.FuseInstruction) never hits ``NoneType += str``. A None
+        # comment only ever arises from a positional-arg mismatch against a
+        # native rocisa signature; treat it as "no comment".
+        self.comment: str = comment if comment is not None else ""
         self.instStr: str = ""
         self.outputInlineAsm: bool = False
         self.m_memToken: Any = None
@@ -276,6 +280,18 @@ class CommonInstruction(Instruction):
         clone.dpp = _deepcopy(self.dpp, memo) if self.dpp is not None else None
         clone.sdwa = _deepcopy(self.sdwa, memo) if self.sdwa is not None else None
         clone.vop3 = _deepcopy(self.vop3, memo) if self.vop3 is not None else None
+        # Dynamic factory subclasses (e.g. DS store/load, reg-jump) have no
+        # __slots__, so extra state such as ``ds`` / ``calleeFuncs`` lives in
+        # the instance __dict__. __new__ does not carry it over, so replicate
+        # any such attributes here to keep clones faithful (rocisa's copy ctor
+        # copies the whole concrete object).
+        extra = getattr(self, "__dict__", None)
+        if extra:
+            for key, value in extra.items():
+                try:
+                    setattr(clone, key, _deepcopy(value, memo))
+                except Exception:  # noqa: BLE001 (match nanobind tolerance)
+                    setattr(clone, key, value)
         return clone
 
 
@@ -696,12 +712,34 @@ class SNop(Instruction):
 # forwarding to the matching _stinkytofu.<ClassName>(dst, src0, src1, comment).
 
 
-def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"):
-    """Factory for scalar/vector ALU instruction shim classes (dst, src0, src1)."""
+def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType",
+                           base: type = None):
+    """Factory for scalar/vector ALU instruction shim classes (dst, src0, src1).
+
+    ``base`` selects the concrete parent class so ``isinstance`` checks in
+    KernelWriter (e.g. ``VCvtInstruction``) discriminate correctly; it defaults
+    to ``CommonInstruction`` to preserve behaviour for plain ALU ops.
+    """
+    if base is None:
+        base = CommonInstruction
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
-                 comment: str = "", sdwa: Any = None, dpp: Any = None, **kw):
+                 *extra: Any, comment: str = "", sdwa: Any = None,
+                 dpp: Any = None, **kw):
         _ = kw
+        # Native rocisa binary-VALU ctors are heterogeneous in their trailing
+        # positional slots: some are (dst, src0, src1, sdwa, comment), some
+        # (dst, src0, src1, comment), and e.g. VAddF32 is
+        # (dst, src0, src1, dpp, sdwa, comment). Positional callers such as
+        # Activation.FuseInstruction -- ``type(oldInst)(dst, *srcs, oldInst.sdwa)``
+        # -- are written against the *native* signature, so disambiguate any
+        # positional extras by type rather than a fixed slot: a str is the
+        # comment, any other (modifier) object is the sdwa.
+        for a in extra:
+            if isinstance(a, str):
+                comment = a
+            elif a is not None:
+                sdwa = a
         CommonInstruction.__init__(
             self,
             instType=inst_type,
@@ -726,7 +764,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__doc__": f"``{mnemonic} dst, src0, src1`` shim with stinkytofu left-path bridge.",
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
@@ -735,8 +773,15 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
     return cls
 
 
-def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstType"):
-    """Factory for scalar/vector unary instruction shim classes (dst, src) — 1 source."""
+def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstType",
+                             base: type = None):
+    """Factory for scalar/vector unary instruction shim classes (dst, src) — 1 source.
+
+    ``base`` selects the concrete parent class (see ``_make_scalar_alu_class``);
+    defaults to ``CommonInstruction``.
+    """
+    if base is None:
+        base = CommonInstruction
 
     def __init__(self, dst: Any, src: Any = None,
                  comment: str = "", sdwa: Any = None, dpp: Any = None, **kw):
@@ -767,7 +812,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__doc__": f"``{mnemonic} dst, src`` shim with stinkytofu left-path bridge.",
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
@@ -890,6 +935,10 @@ def _make_reg_jump_class(class_name: str, mnemonic: str, has_dest: bool = False)
             Instruction.__init__(self, InstType.INST_NOTYPE, comment)
             self.dst = dst
             self.src = src
+            # Mirror native rocisa SSwapPCB64::calleeFuncs (std::vector<std::string>):
+            # candidate callee names for consumers modelling s_swappc_b64 as a
+            # function call. Metadata only; does not affect emitted assembly.
+            self.calleeFuncs = []
             self.setInst(mnemonic)
 
         def getParams(self):
@@ -923,10 +972,11 @@ def _make_reg_jump_class(class_name: str, mnemonic: str, has_dest: bool = False)
             Instruction.__init__(dup, InstType.INST_NOTYPE, self.comment)
             dup.dst = copy.deepcopy(self.dst, memo)
             dup.src = copy.deepcopy(self.src, memo)
+            dup.calleeFuncs = list(getattr(self, "calleeFuncs", []))
             dup.setInst(mnemonic)
             return dup
 
-        slots = ("dst", "src")
+        slots = ("dst", "src", "calleeFuncs")
     else:
         def __init__(self, src: Any = None, comment: str = "", **kw):
             _ = kw
@@ -2490,25 +2540,34 @@ class SWaitCnt(Instruction):
         """
         import stinkytofu as _st  # noqa: WPS433
 
+        # rocisa SWaitCnt::setupInstructions treats waitAll as "wait for
+        # everything": vlcnt = vscnt = dscnt = kmcnt = 0. Mirror that here so a
+        # bare SWaitCnt(waitAll=True) lowers to the four typed gfx12 waits rather
+        # than the unsupported ``s_waitcnt 0``.
+        dscnt = 0 if self.waitAll else self.dscnt
+        kmcnt = 0 if self.waitAll else self.kmcnt
+        vlcnt = 0 if self.waitAll else self.vlcnt
+        vscnt = 0 if self.waitAll else self.vscnt
+
         insts: List[Any] = []
-        if self.dscnt != -1:
+        if dscnt != -1:
             insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.dscnt),
+                _to_stinky_register(dscnt),
                 _WAIT_MARKER_DSCNT + self.comment,
             ))
-        if self.kmcnt != -1:
+        if kmcnt != -1:
             insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.kmcnt),
+                _to_stinky_register(kmcnt),
                 _WAIT_MARKER_KMCNT + self.comment,
             ))
-        if self.vlcnt != -1:
+        if vlcnt != -1:
             insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.vlcnt),
+                _to_stinky_register(vlcnt),
                 _WAIT_MARKER_LOADCNT + self.comment,
             ))
-        if self.vscnt != -1:
+        if vscnt != -1:
             insts.append(_st.SWaitCnt(
-                _to_stinky_register(self.vscnt),
+                _to_stinky_register(vscnt),
                 _WAIT_MARKER_STORECNT + self.comment,
             ))
         if not insts:
@@ -2941,7 +3000,7 @@ def _make_cvt_scale_class(class_name: str, mnemonic: str, inst_type: "InstType")
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (VCvtInstruction,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -2950,27 +3009,31 @@ def _make_cvt_scale_class(class_name: str, mnemonic: str, inst_type: "InstType")
     return cls
 
 
-# VCvtInstruction is a base class — rarely instantiated directly by KernelWriter.
-VCvtInstruction = CommonInstruction
+# VCvtInstruction: distinct subclass of CommonInstruction so KernelWriter's
+# ``isinstance(item, VCvtInstruction)`` discrimination (e.g. the epilogue store
+# rearrange loop in globalWriteBatch) matches only genuine CVT ops -- mirrors
+# rocisa's cvt.hpp ``struct VCvtInstruction : public CommonInstruction``.
+class VCvtInstruction(CommonInstruction):
+    __slots__ = ()
 
 # --- Unary CVTs: (dst, src) → logicalIR(dst, src) ---
-VCvtF16toF32 = _make_scalar_unary_class("VCvtF16toF32", "v_cvt_f32_f16", InstType.INST_NOTYPE)
-VCvtF32toF16 = _make_scalar_unary_class("VCvtF32toF16", "v_cvt_f16_f32", InstType.INST_NOTYPE)
-VCvtF32toU32 = _make_scalar_unary_class("VCvtF32toU32", "v_cvt_u32_f32", InstType.INST_NOTYPE)
-VCvtU32toF32 = _make_scalar_unary_class("VCvtU32toF32", "v_cvt_f32_u32", InstType.INST_NOTYPE)
-VCvtI32toF32 = _make_scalar_unary_class("VCvtI32toF32", "v_cvt_f32_i32", InstType.INST_NOTYPE)
-VCvtF32toI32 = _make_scalar_unary_class("VCvtF32toI32", "v_cvt_i32_f32", InstType.INST_NOTYPE)
-VCvtFP8toF32 = _make_scalar_unary_class("VCvtFP8toF32", "v_cvt_f32_fp8", InstType.INST_NOTYPE)
-VCvtBF8toF32 = _make_scalar_unary_class("VCvtBF8toF32", "v_cvt_f32_bf8", InstType.INST_NOTYPE)
-VCvtPkFP8toF32 = _make_scalar_unary_class("VCvtPkFP8toF32", "v_cvt_pk_f32_fp8", InstType.INST_NOTYPE)
-VCvtPkBF8toF32 = _make_scalar_unary_class("VCvtPkBF8toF32", "v_cvt_pk_f32_bf8", InstType.INST_NOTYPE)
+VCvtF16toF32 = _make_scalar_unary_class("VCvtF16toF32", "v_cvt_f32_f16", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtF32toF16 = _make_scalar_unary_class("VCvtF32toF16", "v_cvt_f16_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtF32toU32 = _make_scalar_unary_class("VCvtF32toU32", "v_cvt_u32_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtU32toF32 = _make_scalar_unary_class("VCvtU32toF32", "v_cvt_f32_u32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtI32toF32 = _make_scalar_unary_class("VCvtI32toF32", "v_cvt_f32_i32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtF32toI32 = _make_scalar_unary_class("VCvtF32toI32", "v_cvt_i32_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtFP8toF32 = _make_scalar_unary_class("VCvtFP8toF32", "v_cvt_f32_fp8", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtBF8toF32 = _make_scalar_unary_class("VCvtBF8toF32", "v_cvt_f32_bf8", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtPkFP8toF32 = _make_scalar_unary_class("VCvtPkFP8toF32", "v_cvt_pk_f32_fp8", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtPkBF8toF32 = _make_scalar_unary_class("VCvtPkBF8toF32", "v_cvt_pk_f32_bf8", InstType.INST_NOTYPE, base=VCvtInstruction)
 
 # --- Binary CVTs: (dst, src0, src1) → logicalIR(dst, src0, src1) ---
-VCvtPkF32toBF8 = _make_scalar_alu_class("VCvtPkF32toBF8", "v_cvt_pk_bf8_f32", InstType.INST_NOTYPE)
-VCvtSRF32toFP8 = _make_scalar_alu_class("VCvtSRF32toFP8", "v_cvt_sr_fp8_f32", InstType.INST_NOTYPE)
-VCvtSRF32toBF8 = _make_scalar_alu_class("VCvtSRF32toBF8", "v_cvt_sr_bf8_f32", InstType.INST_NOTYPE)
-VCvtPkF32toFP8 = _make_scalar_alu_class("VCvtPkF32toFP8", "v_cvt_pk_fp8_f32", InstType.INST_NOTYPE)
-VCvtPkF32toBF16 = _make_scalar_alu_class("VCvtPkF32toBF16", "v_cvt_pk_bf16_f32", InstType.INST_NOTYPE)
+VCvtPkF32toBF8 = _make_scalar_alu_class("VCvtPkF32toBF8", "v_cvt_pk_bf8_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtSRF32toFP8 = _make_scalar_alu_class("VCvtSRF32toFP8", "v_cvt_sr_fp8_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtSRF32toBF8 = _make_scalar_alu_class("VCvtSRF32toBF8", "v_cvt_sr_bf8_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtPkF32toFP8 = _make_scalar_alu_class("VCvtPkF32toFP8", "v_cvt_pk_fp8_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
+VCvtPkF32toBF16 = _make_scalar_alu_class("VCvtPkF32toBF16", "v_cvt_pk_bf16_f32", InstType.INST_NOTYPE, base=VCvtInstruction)
 
 # --- Scale CVTs: (dst, src, scale) → logicalIR(dst, src, scale) ---
 VCvtScalePkFP8toF16 = _make_cvt_scale_class("VCvtScalePkFP8toF16", "v_cvt_scalef32_pk_f16_fp8", InstType.INST_NOTYPE)
@@ -3014,7 +3077,7 @@ def _make_cvt_scale_sr_class(class_name: str, mnemonic: str, inst_type: "InstTyp
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (VCvtInstruction,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3113,8 +3176,10 @@ VCvtFP8toF16 = _make_scalar_unary_class("VCvtFP8toF16", "v_cvt_f16_fp8", InstTyp
 # ==========================================================================
 
 
-def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for MUBUF load shims: rocisa(dst, vaddr, saddr, soffset, mubuf, comment)."""
+    if base is None:
+        base = MUBUFReadInstruction
 
     def __init__(self, dst: Any = None, vaddr: Any = None, saddr: Any = None,
                  soffset: Any = None, mubuf: Any = None, comment: str = "", **kw):
@@ -3135,8 +3200,13 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1):
             comment=self.comment)
         if self.srcs[1] is not None:
             inst.add_src(_to_stinky_register(self.srcs[1]))
-        if self.srcs[2] is not None:
-            inst.add_src(_to_stinky_register(self.srcs[2]))
+        # rocisa (mem.hpp MUBUFReadInstruction::getArgStr) renders a soffset
+        # whose operand string is "0" as ``null`` when HasMUBUFConst is false
+        # (true for gfx12+). Tensile passes literal 0 for "no scalar offset",
+        # which otherwise assembles to the invalid operand ``0``.
+        _soffset = self.srcs[2]
+        if _soffset is not None and _input_to_str(_soffset) != "0":
+            inst.add_src(_to_stinky_register(_soffset))
         elif self.srcs[1] is not None:
             inst.add_src(_st.Register("null"))
         if self.mubuf is not None:
@@ -3155,7 +3225,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3165,8 +3235,10 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for MUBUF store/atomic shims: rocisa(src, vaddr, saddr, soffset, mubuf, comment)."""
+    if base is None:
+        base = MUBUFStoreInstruction
 
     def __init__(self, src: Any = None, vaddr: Any = None, saddr: Any = None,
                  soffset: Any = None, mubuf: Any = None, comment: str = "", **kw):
@@ -3186,8 +3258,13 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1):
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
-        if self.srcs[2] is not None:
-            inst.add_src(_to_stinky_register(self.srcs[2]))
+        # rocisa (mem.hpp MUBUFReadInstruction::getArgStr) renders a soffset
+        # whose operand string is "0" as ``null`` when HasMUBUFConst is false
+        # (true for gfx12+). Tensile passes literal 0 for "no scalar offset",
+        # which otherwise assembles to the invalid operand ``0``.
+        _soffset = self.srcs[2]
+        if _soffset is not None and _input_to_str(_soffset) != "0":
+            inst.add_src(_to_stinky_register(_soffset))
         elif self.srcs[1] is not None:
             inst.add_src(_st.Register("null"))
         if self.mubuf is not None:
@@ -3206,7 +3283,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3216,8 +3293,10 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for Flat load shims: rocisa(dst, vaddr, flat, comment)."""
+    if base is None:
+        base = FLATReadInstruction
 
     def __init__(self, dst: Any = None, vaddr: Any = None,
                  flat: Any = None, comment: str = "", **kw):
@@ -3239,7 +3318,7 @@ def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3249,8 +3328,10 @@ def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for Flat store shims: rocisa(src, vaddr, flat, comment)."""
+    if base is None:
+        base = FLATStoreInstruction
 
     def __init__(self, src: Any = None, vaddr: Any = None,
                  flat: Any = None, comment: str = "", **kw):
@@ -3273,7 +3354,7 @@ def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3283,8 +3364,10 @@ def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for Flat atomic shims: rocisa(vaddr, tmp, src, flat, comment)."""
+    if base is None:
+        base = AtomicReadWriteInstruction
 
     def __init__(self, vaddr: Any = None, tmp: Any = None, src: Any = None,
                  flat: Any = None, comment: str = "", **kw):
@@ -3307,7 +3390,7 @@ def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3317,8 +3400,10 @@ def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for DS load shims: rocisa(dst, src, ds, comment)."""
+    if base is None:
+        base = DSLoadInstruction
 
     def __init__(self, dst: Any = None, src: Any = None,
                  ds: Any = None, comment: str = "", **kw):
@@ -3343,7 +3428,7 @@ def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3353,8 +3438,10 @@ def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for DS store (binary) shims: rocisa(dstAddr, src, ds, comment)."""
+    if base is None:
+        base = DSStoreInstruction
 
     def __init__(self, dstAddr: Any = None, src: Any = None,
                  ds: Any = None, comment: str = "", **kw):
@@ -3379,7 +3466,7 @@ def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3389,8 +3476,10 @@ def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for DS store2/permute (ternary) shims: rocisa(dstAddr, src0, src1, ds, comment)."""
+    if base is None:
+        base = DSStoreInstruction
 
     def __init__(self, dstAddr: Any = None, src0: Any = None, src1: Any = None,
                  ds: Any = None, comment: str = "", **kw):
@@ -3416,7 +3505,7 @@ def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3426,24 +3515,77 @@ def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
-# Base classes — aliased to CommonInstruction for isinstance checks
-ReadWriteInstruction = CommonInstruction
-GlobalReadInstruction = CommonInstruction
-FLATReadInstruction = CommonInstruction
-GLOBALLoadInstruction = CommonInstruction
-MUBUFReadInstruction = CommonInstruction
-AtomicReadWriteInstruction = CommonInstruction
+# Memory instruction category hierarchy. These MUST be distinct classes (not
+# aliases of CommonInstruction) because KernelWriter relies on ``isinstance``
+# to discriminate categories -- e.g. globalWriteBatch counts
+# ``GlobalReadInstruction`` items to seed the load waitcnt and decrements it for
+# each ``DSStoreInstruction`` / ``VCvtInstruction`` in the store rearrange loop.
+# Collapsing them to CommonInstruction made every instruction match, corrupting
+# the waitcnt counts (negative ``s_waitcnt``). Mirrors rocisa mem.hpp:
+#   ReadWriteInstruction
+#     GlobalReadInstruction (FLATReadInstruction, GLOBALLoadInstruction, MUBUFReadInstruction)
+#     AtomicReadWriteInstruction
+#     GlobalWriteInstruction (FLATStoreInstruction, MUBUFStoreInstruction)
+#     LocalReadInstruction (DSLoadInstruction)
+#     LocalWriteInstruction (DSStoreInstruction)
+class ReadWriteInstruction(CommonInstruction):
+    __slots__ = ()
+
+
+class GlobalReadInstruction(ReadWriteInstruction):
+    __slots__ = ()
+
+
+class FLATReadInstruction(GlobalReadInstruction):
+    __slots__ = ()
+
+
+class GLOBALLoadInstruction(GlobalReadInstruction):
+    __slots__ = ()
+
+
+class MUBUFReadInstruction(GlobalReadInstruction):
+    __slots__ = ()
+
+
+class AtomicReadWriteInstruction(ReadWriteInstruction):
+    __slots__ = ()
+
+
 SMemAtomicIncInstruction = make_dummy_class(f"{_P}.SMemAtomicIncInstruction")
 SMemAtomicDecInstruction = make_dummy_class(f"{_P}.SMemAtomicDecInstruction")
+
+
 # SMemLoadInstruction / SLoadB* — real classes (see above after SMovB64).
-GlobalWriteInstruction = CommonInstruction
+class GlobalWriteInstruction(ReadWriteInstruction):
+    __slots__ = ()
+
+
 SMemStoreInstruction = make_dummy_class(f"{_P}.SMemStoreInstruction")
-FLATStoreInstruction = CommonInstruction
-MUBUFStoreInstruction = CommonInstruction
-LocalReadInstruction = CommonInstruction
-DSLoadInstruction = CommonInstruction
-LocalWriteInstruction = CommonInstruction
-DSStoreInstruction = CommonInstruction
+
+
+class FLATStoreInstruction(GlobalWriteInstruction):
+    __slots__ = ()
+
+
+class MUBUFStoreInstruction(GlobalWriteInstruction):
+    __slots__ = ()
+
+
+class LocalReadInstruction(ReadWriteInstruction):
+    __slots__ = ()
+
+
+class DSLoadInstruction(LocalReadInstruction):
+    __slots__ = ()
+
+
+class LocalWriteInstruction(ReadWriteInstruction):
+    __slots__ = ()
+
+
+class DSStoreInstruction(LocalWriteInstruction):
+    __slots__ = ()
 
 # --- Buffer Load (MUBUF): rocisa(dst, vaddr, saddr, soffset, mubuf, comment) ---
 BufferLoadU8 = _make_buffer_load_class("BufferLoadU8", "buffer_load_u8")
@@ -3483,8 +3625,10 @@ FlatLoadB128 = _make_flat_load_class("FlatLoadB128", "flat_load_b128")
 # logicalIR: FlatLoadB192
 FlatLoadB192 = _make_flat_load_class("FlatLoadB192", "flat_load_b192")
 # --- Global Load: rocisa(dst, vaddr, saddr, modifier, comment) ---
-def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for Global load shims: rocisa(dst, vaddr, saddr, modifier, comment)."""
+    if base is None:
+        base = GLOBALLoadInstruction
 
     def __init__(self, dst: Any = None, vaddr: Any = None,
                  saddr: Any = None, modifier: Any = None, comment: str = "", **kw):
@@ -3507,7 +3651,7 @@ def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3529,8 +3673,10 @@ GlobalLoadD16HIU8 = _make_global_load_class("GlobalLoadD16HIU8", "global_load_d1
 
 
 # --- Global Store: rocisa(vaddr, src, saddr, modifier, comment) ---
-def _make_global_store_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_global_store_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for Global store shims: rocisa(vaddr, src, saddr, modifier, comment)."""
+    if base is None:
+        base = GlobalWriteInstruction
 
     def __init__(self, vaddr: Any = None, src: Any = None,
                  saddr: Any = None, modifier: Any = None, comment: str = "", **kw):
@@ -3553,7 +3699,7 @@ def _make_global_store_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3667,8 +3813,10 @@ DSLoadB64TrB8 = _make_ds_load_class("DSLoadB64TrB8", "ds_load_tr8_b64")
 DSLoadB128 = _make_ds_load_class("DSLoadB128", "ds_load_b128", latency=2)
 # logicalIR: DSLoadB192
 DSLoadB192 = _make_ds_load_class("DSLoadB192", "ds_load_b192", latency=2)
-def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for DS load2 (dual-address): rocisa(dst, src, ds, comment) → logicalIR 3 args."""
+    if base is None:
+        base = DSLoadInstruction
 
     def __init__(self, dst: Any = None, src: Any = None,
                  ds: Any = None, comment: str = "", **kw):
@@ -3701,7 +3849,7 @@ def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1):
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3737,14 +3885,17 @@ DSStore2B32 = _make_ds_store2_class("DSStore2B32", "ds_store2_b32", latency=3)
 DSStore2B64 = _make_ds_store2_class("DSStore2B64", "ds_store2_b64", latency=3)
 
 
-def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1):
+def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for DS permute: rocisa(dst, src0, src1, ds, comment) → logicalIR 2 args."""
+    if base is None:
+        # rocisa mem.hpp: DSBPermuteB32 : public DSStoreInstruction.
+        base = DSStoreInstruction
 
-    def __init__(self, dstAddr: Any = None, src0: Any = None, src1: Any = None,
+    def __init__(self, dst: Any = None, src0: Any = None, src1: Any = None,
                  ds: Any = None, comment: str = "", **kw):
         _ = kw
         CommonInstruction.__init__(
-            self, instType=InstType.INST_NOTYPE, dst=dstAddr,
+            self, instType=InstType.INST_NOTYPE, dst=dst,
             srcs=[src0, src1], dpp=None, sdwa=None, vop3=None, comment=comment)
         self.setInst(mnemonic)
         self.ds = ds
@@ -3752,15 +3903,22 @@ def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        # gfx1250 ds_bpermute_b32 needs 3 operands: vdst, addr(src0), data0(src1).
+        # data0 defaults to dst when the caller omits it (matches native rocisa).
+        data0 = self.srcs[1] if len(self.srcs) > 1 and self.srcs[1] is not None else self.dst
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(data0),
             comment=self.comment)
+        if self.ds is not None:
+            inst.set_ds(offset=getattr(self.ds, "offset", 0))
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
 
-    cls = type(class_name, (CommonInstruction,), {
+    cls = type(class_name, (base,), {
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
@@ -3970,6 +4128,87 @@ def _inst_type_to_str(it: Any) -> str:
     return s
 
 
+# InstType values that lower to the unified f8f6f4 WMMA opcode regardless of K
+# (rocisa mfma.hpp:typeConvert F6/BF6/F6_B6/B6_F6 and every mixed low-precision
+# combination). The actual input format is carried by matrix_a_fmt/matrix_b_fmt.
+_WMMA_F8F6F4_ALWAYS = frozenset({
+    InstType.INST_F6, InstType.INST_BF6, InstType.INST_F6_B6, InstType.INST_B6_F6,
+    InstType.INST_F8_F4, InstType.INST_F4_F8, InstType.INST_F6_F4, InstType.INST_F4_F6,
+    InstType.INST_F8_F6, InstType.INST_F6_F8, InstType.INST_F8_B6, InstType.INST_B6_F8,
+    InstType.INST_B8_F4, InstType.INST_F4_B8, InstType.INST_B6_F4, InstType.INST_F4_B6,
+    InstType.INST_B8_F6, InstType.INST_F6_B8, InstType.INST_B8_B6, InstType.INST_B6_B8,
+})
+
+# Per-matrix input format tokens for the f8f6f4-family WMMA (rocisa mfma.hpp
+# getArgStr, HasWMMA_f8f6f4 branch). Emitted only when the K/tile condition holds.
+_WMMA_MATRIX_FMT: Dict[Any, Any] = {}
+
+
+def _init_wmma_matrix_fmt() -> None:
+    if _WMMA_MATRIX_FMT:
+        return
+    _WMMA_MATRIX_FMT.update({
+        InstType.INST_F8: ("MATRIX_FMT_FP8", "MATRIX_FMT_FP8"),
+        InstType.INST_BF8: ("MATRIX_FMT_BF8", "MATRIX_FMT_BF8"),
+        InstType.INST_F8_BF8: ("MATRIX_FMT_FP8", "MATRIX_FMT_BF8"),
+        InstType.INST_BF8_F8: ("MATRIX_FMT_BF8", "MATRIX_FMT_FP8"),
+        InstType.INST_F6: ("MATRIX_FMT_FP6", "MATRIX_FMT_FP6"),
+        InstType.INST_BF6: ("MATRIX_FMT_BF6", "MATRIX_FMT_BF6"),
+        InstType.INST_F6_B6: ("MATRIX_FMT_FP6", "MATRIX_FMT_BF6"),
+        InstType.INST_B6_F6: ("MATRIX_FMT_BF6", "MATRIX_FMT_FP6"),
+        InstType.INST_F8_F4: ("MATRIX_FMT_FP8", "MATRIX_FMT_FP4"),
+        InstType.INST_F4_F8: ("MATRIX_FMT_FP4", "MATRIX_FMT_FP8"),
+        InstType.INST_F6_F4: ("MATRIX_FMT_FP6", "MATRIX_FMT_FP4"),
+        InstType.INST_F4_F6: ("MATRIX_FMT_FP4", "MATRIX_FMT_FP6"),
+        InstType.INST_F8_F6: ("MATRIX_FMT_FP8", "MATRIX_FMT_FP6"),
+        InstType.INST_F6_F8: ("MATRIX_FMT_FP6", "MATRIX_FMT_FP8"),
+        InstType.INST_F8_B6: ("MATRIX_FMT_FP8", "MATRIX_FMT_BF6"),
+        InstType.INST_B6_F8: ("MATRIX_FMT_BF6", "MATRIX_FMT_FP8"),
+        InstType.INST_B8_F4: ("MATRIX_FMT_BF8", "MATRIX_FMT_FP4"),
+        InstType.INST_F4_B8: ("MATRIX_FMT_FP4", "MATRIX_FMT_BF8"),
+        InstType.INST_B6_F4: ("MATRIX_FMT_BF6", "MATRIX_FMT_FP4"),
+        InstType.INST_F4_B6: ("MATRIX_FMT_FP4", "MATRIX_FMT_BF6"),
+        InstType.INST_B8_F6: ("MATRIX_FMT_BF8", "MATRIX_FMT_FP6"),
+        InstType.INST_F6_B8: ("MATRIX_FMT_FP6", "MATRIX_FMT_BF8"),
+        InstType.INST_B8_B6: ("MATRIX_FMT_BF8", "MATRIX_FMT_BF6"),
+        InstType.INST_B6_B8: ("MATRIX_FMT_BF6", "MATRIX_FMT_BF8"),
+    })
+
+
+def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> str:
+    """Port of rocisa ``MFMAInstruction::typeConvert`` for the low-precision
+    (f8f6f4-family) inputs. Standard types defer to :func:`_inst_type_to_str`."""
+    f8f6f4_k = 128 if has_wmma_v3 else 64
+    f4_t = 32 if has_wmma_v3 else 0
+    if it in _WMMA_F8F6F4_ALWAYS:
+        return "f8f6f4"
+    if it == InstType.INST_F8:
+        return "f8f6f4" if k >= f8f6f4_k else "fp8_fp8"
+    if it == InstType.INST_BF8:
+        return "f8f6f4" if k >= f8f6f4_k else "bf8_bf8"
+    if it == InstType.INST_F8_BF8:
+        return "f8f6f4" if k >= f8f6f4_k else "fp8_bf8"
+    if it == InstType.INST_BF8_F8:
+        return "f8f6f4" if k >= f8f6f4_k else "bf8_fp8"
+    if it == InstType.INST_F4:
+        return "f8f6f4" if (m < f4_t and n < f4_t) else "f4"
+    return _inst_type_to_str(it)
+
+
+def _wmma_matrix_fmts(it: Any, m: int, n: int, k: int, has_wmma_v3: bool):
+    """Port of rocisa ``getArgStr`` (HasWMMA_f8f6f4 branch): the matrix_*_fmt
+    tokens, gated by the same K/tile condition rocisa uses."""
+    _init_wmma_matrix_fmt()
+    f4_t = 32 if has_wmma_v3 else 0
+    if it == InstType.INST_F4:
+        if m < f4_t and n < f4_t:
+            return ("MATRIX_FMT_FP4", "MATRIX_FMT_FP4")
+        return ("", "")
+    if it in _WMMA_MATRIX_FMT and k > 64:
+        return _WMMA_MATRIX_FMT[it]
+    return ("", "")
+
+
 class MFMAInstruction(Instruction):
     """``v_mfma_*`` shim (rocisa ``MFMAInstruction``)."""
 
@@ -3994,23 +4233,55 @@ class MFMAInstruction(Instruction):
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
+        from .base import getAsmCaps
         m = self.variant[0] if len(self.variant) > 0 else 0
         n = self.variant[1] if len(self.variant) > 1 else 0
         k = self.variant[2] if len(self.variant) > 2 else 0
         blocks = self.variant[3] if len(self.variant) > 3 else 1
+
+        caps = getAsmCaps()
+        has_wmma_v3 = bool(caps.get("HasWMMA_V3", 0))
+        has_wmma_f8f6f4 = bool(caps.get("HasWMMA_f8f6f4", 0))
+        is_wmma = not bool(caps.get("HasMFMA", 0))
+        try:
+            from . import rocIsa  # noqa: WPS433
+            isa = tuple(rocIsa.getInstance().getKernel().isa)
+        except Exception:  # noqa: BLE001 — best effort; fall back to no scaling
+            isa = ()
+
+        # rocisa MFMAInstruction::typeConvert + forceScaledWMMA (mfma.hpp).
+        # gfx1250 low-precision (f8f6f4/f4) WMMA uses the v_wmma_scale_* encoding
+        # with zero scales, plus per-matrix input formats.
+        type_str = _wmma_type_convert(self.instType, m, n, k, has_wmma_v3)
+        # forceScaledWMMA() gates only the mnemonic (isaVersion, not caps).
+        scaled = is_wmma and isa == (12, 5, 0) and type_str in ("f8f6f4", "f4")
+        # rocisa emits the ", 0, 0" scale operands and matrix_*_fmt only inside
+        # the HasWMMA_f8f6f4 getArgStr branch, so both are caps-gated.
+        scale_operands = scaled and has_wmma_f8f6f4
+        matrix_a_fmt = ""
+        matrix_b_fmt = ""
+        if has_wmma_f8f6f4:
+            matrix_a_fmt, matrix_b_fmt = _wmma_matrix_fmts(
+                self.instType, m, n, k, has_wmma_v3)
+
         acc2_reg = None
         if self.acc2_imm is not None:
             acc2_reg = _to_stinky_register(self.acc2_imm)
         elif self.acc2 is not None:
             acc2_reg = _to_stinky_register(self.acc2)
         return _st.MFMA(
-            _inst_type_to_str(self.instType),
+            type_str,
             _inst_type_to_str(self.accType),
-            m, n, k, blocks, self.neg,
+            m, n, k, blocks, self.mfma1k,
             _to_stinky_register(self.acc),
             _to_stinky_register(self.a),
             _to_stinky_register(self.b),
             acc2=acc2_reg,
+            neg=self.neg,
+            matrixAFmt=matrix_a_fmt,
+            matrixBFmt=matrix_b_fmt,
+            scaled=scaled,
+            scaleOperands=scale_operands,
             comment=self.comment)
 
     def getParams(self):

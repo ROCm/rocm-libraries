@@ -30,6 +30,7 @@
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 // Per-arch logical name -> ASM mnemonic (same data as Rocisa LogicalToArchMap; gives correct
 // ds_read vs ds_load etc.)
@@ -52,7 +53,8 @@ using namespace stinkytofu;
  * RDNA (gfx1250): v_wmma_{accType}_{m}x{n}x{k}_{instType}[_1k]
  */
 std::string generateMFMAMnemonic(const std::string& accType, int m, int n, int k, int blocks,
-                                 const std::string& instType, bool mfma1k, GfxArchID arch) {
+                                 const std::string& instType, bool mfma1k, GfxArchID arch,
+                                 bool scaled = false) {
     std::string variantStr = std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
 
     // RDNA architectures (gfx12+) use v_wmma instead of v_mfma
@@ -60,9 +62,12 @@ std::string generateMFMAMnemonic(const std::string& accType, int m, int n, int k
     bool isRDNA = (archInfo && archInfo->major >= 12);
 
     if (isRDNA) {
-        // RDNA: v_wmma_{accType}_{m}x{n}x{k}_{instType}[_1k]
+        // RDNA: v_wmma[_scale]_{accType}_{m}x{n}x{k}_{instType}[_1k]
+        // gfx1250 forceScaledWMMA emits the scale-instruction encoding for
+        // low-precision (f8f6f4/f4) WMMA (rocisa mfma.hpp:forceScaledWMMA()).
+        std::string wmmaPrefix = scaled ? "v_wmma_scale_" : "v_wmma_";
         std::string mfma1kSuffix = mfma1k ? "_1k" : "";
-        return "v_wmma_" + accType + "_" + variantStr + "_" + instType + mfma1kSuffix;
+        return wmmaPrefix + accType + "_" + variantStr + "_" + instType + mfma1kSuffix;
     } else {
         // CDNA: v_mfma_{accType}_{m}x{n}x{k}[_{blocks}b]_{instType}[_1k]
         std::string blocksSuffix = (blocks > 1) ? std::to_string(blocks) + "b_" : "";
@@ -119,7 +124,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             return nullptr;
         }
         mnemonic = generateMFMAMnemonic(data->accType, data->m, data->n, data->k, data->blocks,
-                                        data->instType, data->mfma1k, arch);
+                                        data->instType, data->mfma1k, arch, data->scaled);
     } else if (irInst->getOpcode() == logical::SMFMA) {
         const SMFMAData* data = irInst->asSMFMA();
         if (!data) {
@@ -187,6 +192,16 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
 
     // Get the ISA opcode for this mnemonic on the target architecture
     isaOpcode = getMnemonicToIsaOpcode(mnemonic, arch);
+    if (isaOpcode == GFX::INVALID) {
+        // getMCIDByIsaOp indexes the MCID table directly, so an INVALID opcode
+        // would read out of bounds and yield a non-null bogus pointer that the
+        // !desc check below cannot catch (this used to segfault). Fail cleanly.
+        STINKY_UNREACHABLE(
+            ("ToStinkyAsmPass: No ISA opcode for mnemonic '" + mnemonic +
+             "' on this architecture (missing hardware .def entry or wrong mnemonic).")
+                .c_str());
+        return nullptr;
+    }
     const HwInstDesc* desc = getMCIDByIsaOp(isaOpcode, arch);
 
     if (!desc) {
@@ -230,6 +245,18 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         }
     }
 
+    // gfx1250 forceScaledWMMA: the scale-instruction encoding (v_wmma_scale_*)
+    // carries two extra scale source operands. rocisa emits them as literal 0
+    // (no actual scaling), matching MXWMMA_SCALE fields S3/S4. Append them so
+    // the operand list becomes acc, a, b, acc2, 0, 0.
+    if (irInst->getOpcode() == logical::MFMA) {
+        const MFMAData* mfmaData = irInst->asMFMA();
+        if (mfmaData && mfmaData->scaleOperands) {
+            asmInst->addSrcReg(StinkyRegister(0));
+            asmInst->addSrcReg(StinkyRegister(0));
+        }
+    }
+
     // Copy comment
     if (!irInst->comment.empty()) {
         asmInst->addModifier(CommentData(irInst->comment));
@@ -262,6 +289,14 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             if (data && data->neg) {
                 mod.negBits.negLo = {1, 1, 0};
                 mod.negBits.numSrcs = 2;
+            }
+            // gfx1250 f8f6f4-family WMMA carries per-matrix input formats
+            // (matrix_a_fmt:MATRIX_FMT_FP6 ...). Emit them via MatrixFmtModifiers.
+            if (data && (!data->matrixAFmt.empty() || !data->matrixBFmt.empty())) {
+                MatrixFmtModifiers fmts;
+                if (!data->matrixAFmt.empty()) fmts.fmtA = parseMatrixFmt(data->matrixAFmt);
+                if (!data->matrixBFmt.empty()) fmts.fmtB = parseMatrixFmt(data->matrixBFmt);
+                asmInst->addModifier<MatrixFmtModifiers>(fmts);
             }
         } else if (irInst->getOpcode() == logical::SMFMA) {
             const SMFMAData* data = irInst->asSMFMA();
@@ -313,6 +348,10 @@ class ToStinkyAsmPassImpl : public Pass {
 
    private:
     void lowerToAsm(BasicBlock& bb, GfxArchID arch) {
+        // Builder used to legalize instructions that have no direct hardware
+        // encoding on the target arch (e.g. ds_*_b192 on gfx1250).
+        AsmIRBuilder irBuilder(bb, arch);
+
         // Use iterators to allow insertion/removal during traversal
         auto it = bb.begin();
         while (it != bb.end()) {
@@ -334,6 +373,18 @@ class ToStinkyAsmPassImpl : public Pass {
                     bb.removeIR(&(*toRemove));
 
                     logicalInst->safeErase();
+
+                    // gfx1250 (and other RDNA) have no ds_*_b192 encoding. Match
+                    // rocisa's DSStoreB192/DSLoadB192::toString(), which always splits
+                    // into a b128 + b64 pair. The rocisa->stinky conversion path handles
+                    // this in ToStinkyTofuUtils::legalizeInstruction; the logical->asm
+                    // path (adaptor / PyLogicalModule) must do the same here. VGPR MSB
+                    // is materialized later by InsertVgprMsbPass, so pass hasVgprMsb=false.
+                    if (asmInst->getUnifiedOpcode() == GFX::ds_store_b192) {
+                        legalizeDSStoreB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::ds_load_b192) {
+                        legalizeDSLoadB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                    }
                     continue;
                 }
             }

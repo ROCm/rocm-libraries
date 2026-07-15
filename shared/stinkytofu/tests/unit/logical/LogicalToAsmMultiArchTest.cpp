@@ -359,7 +359,7 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
         case logical::PVCvtBF16toFP32:
             return PVCvtBF16toFP32(vgpr(0), vgpr(1));
         case logical::DSBPermuteB32:
-            return DSBPermuteB32(vgpr(0), vgpr(1));
+            return DSBPermuteB32(vgpr(0), vgpr(1), vgpr(2));
         case logical::DSLoadU8:
             return DSLoadU8(vgpr(0), vgpr(1));
         case logical::DSLoadI8:

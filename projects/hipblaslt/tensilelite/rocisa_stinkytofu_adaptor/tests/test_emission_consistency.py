@@ -1557,6 +1557,44 @@ class TestDSStoreB96Emission(unittest.TestCase, _ThreePathEqualityCase):
     """)
 
 
+class TestWmmaF6Gfx1250Scaled(unittest.TestCase):
+    """gfx1250 F6 WMMA lowers to the forceScaledWMMA form.
+
+    Three-path equality is *not* usable here: native rocisa probes the
+    assembler for ``HasWMMA_f8f6f4`` / ``HasWMMA_V3`` and reports 0 in a
+    container without a gfx1250 assembler, whereas stinkytofu reports the
+    static gfx1250 truth (1). Under those true caps rocisa's
+    ``getArgStr`` emits the scale operands + matrix formats; we assert the
+    adapter (path 3, which uses stinkytofu caps) reproduces that exact
+    byte-for-byte form (rocisa ``MFMAInstruction::preStr``/``getArgStr``)."""
+
+    ARCH_TUPLE = (12, 5, 0)
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.instruction import MFMAInstruction
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        module = Module("k")
+        module.add(MFMAInstruction(
+            instType=InstType.INST_F6, accType=InstType.INST_F32,
+            variant=[16, 16, 128, 1], mfma1k=False,
+            acc=vgpr(0, 8), a=vgpr(8, 8), b=vgpr(16, 8), acc2=vgpr(0, 8),
+            neg=False, comment="wmma f6 probe"))
+    """)
+
+    EXPECTED = (
+        "v_wmma_scale_f32_16x16x128_f8f6f4 v[0:7], v[8:15], v[16:23], v[0:7], "
+        "0, 0 matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
+        " // wmma f6 probe\n"
+    )
+
+    @unittest.skipUnless(_STINKY_OK, "needs the stinkytofu Python binding")
+    def test_adapter_emits_forced_scaled_wmma(self):
+        got = emit_path3_adapter_logical(
+            self.BUILD_MODULE_SNIPPET, arch_tuple=self.ARCH_TUPLE)
+        self.assertEqual(got, self.EXPECTED, f"\n[adapter] {got!r}")
+
+
 ## DSBPermuteB32 emission consistency is skipped: native rocisa path-1 toString()
 ## and path-2 toStinkyTofuModule produce different asm for this instruction
 ## (mismatch unrelated to our adaptor), so three-path equality is not achievable.

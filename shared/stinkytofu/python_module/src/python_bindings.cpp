@@ -638,15 +638,19 @@ NB_MODULE(_stinkytofu, m) {
         "MFMA",
         [](const std::string& instType, const std::string& accType, int m, int n, int k, int blocks,
            bool mfma1k, const StinkyRegister& acc, const StinkyRegister& a, const StinkyRegister& b,
-           std::optional<StinkyRegister> acc2, bool neg, const std::string& comment) {
+           std::optional<StinkyRegister> acc2, bool neg, const std::string& matrixAFmt,
+           const std::string& matrixBFmt, bool scaled, bool scaleOperands,
+           const std::string& comment) {
             return makeLogicalInstructionShared(MFMA(instType, accType, m, n, k, blocks, mfma1k,
                                                      acc, a, b, acc2 ? &(*acc2) : nullptr, neg,
+                                                     matrixAFmt, matrixBFmt, scaled, scaleOperands,
                                                      comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("m"), nb::arg("n"), nb::arg("k"),
         nb::arg("blocks"), nb::arg("mfma1k"), nb::arg("acc"), nb::arg("a"), nb::arg("b"),
-        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("comment") = "",
-        "Create an MFMA instruction");
+        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("matrixAFmt") = "",
+        nb::arg("matrixBFmt") = "", nb::arg("scaled") = false, nb::arg("scaleOperands") = false,
+        nb::arg("comment") = "", "Create an MFMA instruction");
 
     // MXMFMA - Mixed-precision Matrix Fused Multiply-Add
     m.def(

@@ -1607,7 +1607,7 @@
 
                                     {"DSBPermuteB32",
              "DSBPermuteB32",
-             1,
+             2,
              true,
              "Memory Shift",
              false,

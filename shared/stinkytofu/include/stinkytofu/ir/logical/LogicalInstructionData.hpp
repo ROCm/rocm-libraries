@@ -39,8 +39,24 @@ struct MFMAData {
     bool mfma1k;           ///< Whether this is a _1k variant
     bool neg;              ///< Negate operands
 
+    /// Per-matrix input format tokens for gfx1250 f8f6f4-family WMMA, e.g.
+    /// "MATRIX_FMT_FP6" (empty when the instruction needs no matrix_*_fmt).
+    std::string matrixAFmt;
+    std::string matrixBFmt;
+
+    /// gfx1250 forceScaledWMMA workaround: emit the scale-instruction mnemonic
+    /// (v_wmma_scale_*). rocisa gates this only on isaVersion (mfma.hpp
+    /// forceScaledWMMA()), independent of the assembler f8f6f4 capability.
+    bool scaled;
+
+    /// Append the two trailing zero scale source operands (", 0, 0"). rocisa
+    /// only emits these under the HasWMMA_f8f6f4 branch of getArgStr, so this
+    /// is tracked separately from `scaled` (which controls only the mnemonic).
+    bool scaleOperands;
+
     MFMAData(const std::string& instType_, const std::string& accType_, int m_, int n_, int k_,
-             int blocks_, bool mfma1k_, bool neg_ = false)
+             int blocks_, bool mfma1k_, bool neg_ = false, const std::string& matrixAFmt_ = "",
+             const std::string& matrixBFmt_ = "", bool scaled_ = false, bool scaleOperands_ = false)
         : instType(instType_),
           accType(accType_),
           m(m_),
@@ -48,7 +64,11 @@ struct MFMAData {
           k(k_),
           blocks(blocks_),
           mfma1k(mfma1k_),
-          neg(neg_) {}
+          neg(neg_),
+          matrixAFmt(matrixAFmt_),
+          matrixBFmt(matrixBFmt_),
+          scaled(scaled_),
+          scaleOperands(scaleOperands_) {}
 };
 
 /**

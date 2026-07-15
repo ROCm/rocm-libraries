@@ -1045,13 +1045,19 @@ class Module(Item):
     See module-level docstring for the architectural picture.
     """
 
-    __slots__ = ("itemList", "tempVgpr", "_isNoOpt")
+    __slots__ = ("itemList", "tempVgpr", "_isNoOpt", "isCallable", "callableName")
 
     def __init__(self, name: str = ""):
         super().__init__(name=name)
         self.itemList: List[Any] = []
         self.tempVgpr: Any = None
         self._isNoOpt: bool = False
+        # Mirror native rocisa Module::isCallable (bool, default false) and
+        # callableName (str, default ""): mark a module as a callable function
+        # body (e.g. activation func-call target for s_swappc_b64) and record
+        # its label. Metadata only; consumed by KernelWriter.
+        self.isCallable: bool = False
+        self.callableName: str = ""
 
     # ------------------------------------------------------------------ add
     def add(self, item: Any, pos: int = -1) -> Any:
@@ -1320,6 +1326,8 @@ class Module(Item):
         clone = Module(self.name)
         memo[id(self)] = clone
         clone._isNoOpt = self._isNoOpt
+        clone.isCallable = self.isCallable
+        clone.callableName = self.callableName
         # rocisa clones tempVgpr via Container::clone(); here we deepcopy so
         # value-typed wrappers stay independent. Non-deepcopyable objects
         # (rare) fall through to a shallow copy to match nanobind tolerance.
@@ -1628,6 +1636,8 @@ class StructuredModule(Module):
         # --- Step 1: Module(other) equivalent (clone itemList). ----------
         Module.__init__(clone, self.name)
         clone._isNoOpt = self._isNoOpt
+        clone.isCallable = self.isCallable
+        clone.callableName = self.callableName
         if self.tempVgpr is not None:
             try:
                 clone.tempVgpr = _copy.deepcopy(self.tempVgpr, memo)
