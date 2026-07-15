@@ -52,37 +52,37 @@ void LogConvolutionExecution(const Handle& handle,
 // integration-test scope. The tests below validate that the conditions behave correctly
 // under the relevant environment variables, and therefore that the early-exit guard works.
 
-TEST(LogConvolutionExecution, LoggingDisabledAtLevelZero)
+TEST(CPU_LogConvolutionExecution_NONE, LoggingDisabledAtLevelZero)
 {
     ScopedEnvironment<std::string> log_level(MIOPEN_LOG_LEVEL, "0");
     EXPECT_FALSE(miopen::IsLogging(miopen::LoggingLevel::Info));
 }
 
-TEST(LogConvolutionExecution, LoggingEnabledAtInfoLevel)
+TEST(CPU_LogConvolutionExecution_NONE, LoggingEnabledAtInfoLevel)
 {
     ScopedEnvironment<std::string> log_level(MIOPEN_LOG_LEVEL, "5"); // LoggingLevel::Info
     EXPECT_TRUE(miopen::IsLogging(miopen::LoggingLevel::Info));
 }
 
-TEST(LogConvolutionExecution, LoggingDisabledBelowInfoLevel)
+TEST(CPU_LogConvolutionExecution_NONE, LoggingDisabledBelowInfoLevel)
 {
     ScopedEnvironment<std::string> log_level(MIOPEN_LOG_LEVEL, "4"); // LoggingLevel::Warning
     EXPECT_FALSE(miopen::IsLogging(miopen::LoggingLevel::Info));
 }
 
-TEST(LogConvolutionExecution, LogBufferOffWhenSizeIsZero)
+TEST(CPU_LogConvolutionExecution_NONE, LogBufferOffWhenSizeIsZero)
 {
     ScopedEnvironment<std::string> buffer_size(MIOPEN_LOG_BUFFER_SIZE, "0");
     EXPECT_FALSE(miopen::IsLogBufferOn());
 }
 
-TEST(LogConvolutionExecution, LogBufferOnWhenSizeIsNonZero)
+TEST(CPU_LogConvolutionExecution_NONE, LogBufferOnWhenSizeIsNonZero)
 {
     ScopedEnvironment<std::string> buffer_size(MIOPEN_LOG_BUFFER_SIZE, "128");
     EXPECT_TRUE(miopen::IsLogBufferOn());
 }
 
-TEST(LogConvolutionExecution, EarlyExitConditionHoldsWhenBothDisabled)
+TEST(CPU_LogConvolutionExecution_NONE, EarlyExitConditionHoldsWhenBothDisabled)
 {
     // Reproduces the exact combined check in LogConvolutionExecution.
     ScopedEnvironment<std::string> log_level(MIOPEN_LOG_LEVEL, "0");
