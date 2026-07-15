@@ -1008,7 +1008,7 @@ class Solution(collections.abc.Mapping):
     # too small (FP4: 0.5B -> 0.125 dw; FP6: 0.75B -> 0.1875 dw), so bump GRVW
     # to the minimum that yields an integer byte count: FP4 -> 2 (1 byte),
     # FP6 -> 4 (3 bytes = exactly 4 packed 6-bit elements).
-    usesTDM = tc in ("A", "B", "MXSA", "MXSB") and state["TDMInst"] == 3
+    usesTDM = tc in ("A", "B", "MXSA", "MXSB") and state.get("TDMInst", 0) == 3
     if usesTDM:
       tdmGrvw = 1
       if tc in ("A", "B"):
