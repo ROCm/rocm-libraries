@@ -9,8 +9,8 @@
 #include "random.hpp"
 #include "../network_data.hpp"
 
-#define _USE_MATH_DEFINES
 #include <cmath>
+#include <numbers>
 #include <miopen/batch_norm.hpp>
 #include <miopen/activ.hpp>
 
@@ -1664,9 +1664,12 @@ public:
             auto u1 = prng::gen_descreet_unsigned<float>(1.0 / range, range);
             auto u2 = prng::gen_descreet_unsigned<float>(1.0 / range, range);
 
-            input[2 * i] = sigma * sqrt(-2 * log(u1 + 1e-7)) * cos(2 * M_PI * u2) + mu;
+            input[2 * i] =
+                sigma * sqrt(-2 * log(u1 + 1e-7)) * cos(2 * std::numbers::pi_v<float> * u2) + mu;
             if(2 * i + 1 < input.GetSize())
-                input[2 * i + 1] = sigma * sqrt(-2 * log(u1 + 1e-7)) * sin(2 * M_PI * u2) + mu;
+                input[2 * i + 1] =
+                    sigma * sqrt(-2 * log(u1 + 1e-7)) * sin(2 * std::numbers::pi_v<float> * u2) +
+                    mu;
         }
 
         auto&& handle = get_handle();
