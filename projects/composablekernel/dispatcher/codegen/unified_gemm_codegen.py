@@ -701,7 +701,7 @@ using CLayout = {ns_name}::CLayout;
 
         // Workspace allocated internally (dispatcher idiom, mirrors grouped_conv stream-K).
         const std::size_t ws_size = kargs.size() * sizeof(ck_tile::GemmTransKernelArg<>);
-        DeviceMem workspace_dev(ws_size);
+        ck_tile::DeviceMem workspace_dev(ws_size);
         HIP_CHECK_ERROR(hipMemcpyWithStream(workspace_dev.GetDeviceBuffer(),
                                             kargs.data(),
                                             ws_size,
