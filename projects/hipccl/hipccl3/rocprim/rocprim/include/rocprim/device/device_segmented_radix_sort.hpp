@@ -120,34 +120,35 @@ struct Partitioner
 // if that happens we need to do launch the segments in batches.
 // Use this function to reduce code duplication for the iterative launching procedure
 template<typename Launcher>
-hipError_t launch_segmented_radix_sort_kernel(size_t      segment_type_grid_size,
-                                              size_t      segments_limit,
+hipError_t launch_segmented_radix_sort_kernel(size_t      segments_to_launch,
+                                              size_t      grid_size_limit,
                                               const char* segment_type_str,
                                               hipStream_t stream,
                                               bool        debug_synchronous,
+                                              size_t      segments_per_block,
                                               Launcher&&  launch_fn)
 {
-    const size_t num_launch = ceiling_div(segment_type_grid_size, segments_limit);
+    const size_t num_launch = ceiling_div(segments_to_launch, grid_size_limit);
 
     for(size_t launch = 0, segments_offset = 0; launch < num_launch;
-        ++launch, segments_offset += segments_limit)
+        ++launch, segments_offset += grid_size_limit)
     {
-        const unsigned int current_segments = static_cast<unsigned int>(
-            std::min<size_t>(segment_type_grid_size - segments_offset, segments_limit));
+        const unsigned int current_grid_size = static_cast<unsigned int>(
+            std::min<size_t>(segments_to_launch - segments_offset, grid_size_limit));
 
         std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
         {
             std::cout << "segments type:    " << segment_type_str << '\n';
             std::cout << "launch:           " << launch << '\n';
-            std::cout << "current_segments: " << current_segments << '\n';
+            std::cout << "current_grid_size: " << current_grid_size << '\n';
             std::cout << "segments_offset:  " << segments_offset << '\n';
             start = std::chrono::steady_clock::now();
         }
 
-        ROCPRIM_RETURN_ON_ERROR(launch_fn(current_segments, segments_offset));
+        ROCPRIM_RETURN_ON_ERROR(launch_fn(current_grid_size, segments_offset * segments_per_block));
 
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(segment_type_str, current_segments, start);
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(segment_type_str, current_grid_size, start);
     }
     return hipSuccess;
 }
@@ -180,7 +181,7 @@ inline hipError_t segmented_radix_sort_impl(
 {
     using key_type               = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type             = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using segment_size_type      = unsigned int;
+    using segment_size_type      = size_t;
     using segment_index_type     = size_t;
     using segment_index_iterator = counting_iterator<size_t>;
 
@@ -214,7 +215,6 @@ inline hipError_t segmented_radix_sort_impl(
     const segment_index_type medium_segments_per_block
         = params.warp_sort_config.block_size_medium
           / params.warp_sort_config.logical_warp_size_medium;
-    const size_t segments_limit = static_cast<size_t>(params.kernel_config.size_limit);
 
     const bool  three_way_partitioning = max_small_segment_length < max_medium_segment_length;
     Partitioner partitioner(three_way_partitioning);
@@ -387,13 +387,16 @@ inline hipError_t segmented_radix_sort_impl(
         }
         if(large_segment_count > 0)
         {
+            const size_t grid_size_limit = static_cast<size_t>(params.kernel_config.size_limit)
+                                           / static_cast<size_t>(params.kernel_config.block_size);
             ROCPRIM_RETURN_ON_ERROR(launch_segmented_radix_sort_kernel(
                 large_segment_count,
-                segments_limit,
+                grid_size_limit,
                 "segmented_sort:large_segments",
                 stream,
                 debug_synchronous,
-                [&](unsigned int current_segments, size_t offset)
+                1 /*segments_per_block*/,
+                [&](unsigned int current_grid_size, size_t offset)
                 {
                     auto segmented_sort_large_kernel = [=](auto target_config)
                     {
@@ -406,8 +409,8 @@ inline hipError_t segmented_radix_sort_impl(
                             values_output,
                             to_output,
                             large_segment_indices_output + offset,
-                            begin_offsets + offset,
-                            end_offsets + offset,
+                            begin_offsets,
+                            end_offsets,
                             iterations,
                             begin_bit,
                             end_bit);
@@ -416,7 +419,7 @@ inline hipError_t segmented_radix_sort_impl(
                     ROCPRIM_RETURN_ON_ERROR(
                         execute_launch_plan<Config, Selector>(current_target,
                                                               segmented_sort_large_kernel,
-                                                              dim3(current_segments),
+                                                              dim3(current_grid_size),
                                                               dim3(params.kernel_config.block_size),
                                                               0,
                                                               stream));
@@ -425,15 +428,19 @@ inline hipError_t segmented_radix_sort_impl(
         }
         if(three_way_partitioning && medium_segment_count > 0)
         {
+            const size_t grid_size_limit
+                = static_cast<size_t>(params.kernel_config.size_limit)
+                  / static_cast<size_t>(params.warp_sort_config.block_size_medium);
             const size_t medium_segment_grid_size
                 = ::rocprim::detail::ceiling_div(medium_segment_count, medium_segments_per_block);
             ROCPRIM_RETURN_ON_ERROR(launch_segmented_radix_sort_kernel(
                 medium_segment_grid_size,
-                segments_limit,
+                grid_size_limit,
                 "segmented_sort:medium_segments",
                 stream,
                 debug_synchronous,
-                [&](unsigned int current_segments, size_t offset)
+                medium_segments_per_block,
+                [&](unsigned int current_grid_size, size_t offset)
                 {
                     auto segmented_sort_medium_kernel = [=](auto target_config)
                     {
@@ -447,8 +454,8 @@ inline hipError_t segmented_radix_sort_impl(
                             is_result_in_output,
                             medium_segment_count - offset,
                             medium_segment_indices_output + offset,
-                            begin_offsets + offset,
-                            end_offsets + offset,
+                            begin_offsets,
+                            end_offsets,
                             begin_bit,
                             end_bit);
                     };
@@ -460,7 +467,7 @@ inline hipError_t segmented_radix_sort_impl(
                             segmented_radix_sort_warp_sort_medium_config_static_selector>(
                             current_target,
                             segmented_sort_medium_kernel,
-                            dim3(current_segments),
+                            dim3(current_grid_size),
                             dim3(params.warp_sort_config.block_size_medium),
                             0,
                             stream));
@@ -469,16 +476,20 @@ inline hipError_t segmented_radix_sort_impl(
         }
         if(small_segment_count > 0)
         {
+            const size_t grid_size_limit
+                = static_cast<size_t>(params.kernel_config.size_limit)
+                  / static_cast<size_t>(params.warp_sort_config.block_size_small);
             const size_t small_segment_grid_size
                 = ::rocprim::detail::ceiling_div(small_segment_count, small_segments_per_block);
 
             ROCPRIM_RETURN_ON_ERROR(launch_segmented_radix_sort_kernel(
                 small_segment_grid_size,
-                segments_limit,
+                grid_size_limit,
                 "segmented_sort:small_segments",
                 stream,
                 debug_synchronous,
-                [&](unsigned int current_segments, size_t offset)
+                small_segments_per_block,
+                [&](unsigned int current_grid_size, size_t offset)
                 {
                     auto segmented_sort_small_kernel = [=](auto target_config)
                     {
@@ -492,8 +503,8 @@ inline hipError_t segmented_radix_sort_impl(
                             is_result_in_output,
                             small_segment_count - offset,
                             small_segment_indices_output + offset,
-                            begin_offsets + offset,
-                            end_offsets + offset,
+                            begin_offsets,
+                            end_offsets,
                             begin_bit,
                             end_bit);
                     };
@@ -505,7 +516,7 @@ inline hipError_t segmented_radix_sort_impl(
                             segmented_radix_sort_warp_sort_small_config_static_selector>(
                             current_target,
                             segmented_sort_small_kernel,
-                            dim3(current_segments),
+                            dim3(current_grid_size),
                             dim3(params.warp_sort_config.block_size_small),
                             0,
                             stream));
@@ -516,35 +527,42 @@ inline hipError_t segmented_radix_sort_impl(
     }
     else
     {
-        std::chrono::steady_clock::time_point start;
-        if(debug_synchronous)
-        {
-            start = std::chrono::steady_clock::now();
-        }
-        auto segmented_sort_kernel = [=](auto target_config)
-        {
-            segmented_sort<decltype(target_config), Descending>(keys_input,
-                                                                keys_tmp,
-                                                                keys_output,
-                                                                values_input,
-                                                                values_tmp,
-                                                                values_output,
-                                                                to_output,
-                                                                begin_offsets,
-                                                                end_offsets,
-                                                                iterations,
-                                                                begin_bit,
-                                                                end_bit);
-        };
+        const size_t grid_size_limit = static_cast<size_t>(params.kernel_config.size_limit)
+                                       / static_cast<size_t>(params.kernel_config.block_size);
+        ROCPRIM_RETURN_ON_ERROR(launch_segmented_radix_sort_kernel(
+            segments,
+            grid_size_limit,
+            "segmented_sort",
+            stream,
+            debug_synchronous,
+            1 /*segments_per_block*/,
+            [&](unsigned int current_grid_size, size_t offset)
+            {
+                auto segmented_sort_kernel = [=](auto target_config)
+                {
+                    segmented_sort<decltype(target_config), Descending>(keys_input,
+                                                                        keys_tmp,
+                                                                        keys_output,
+                                                                        values_input,
+                                                                        values_tmp,
+                                                                        values_output,
+                                                                        to_output,
+                                                                        begin_offsets + offset,
+                                                                        end_offsets + offset,
+                                                                        iterations,
+                                                                        begin_bit,
+                                                                        end_bit);
+                };
 
-        ROCPRIM_RETURN_ON_ERROR(
-            execute_launch_plan<Config, Selector>(current_target,
-                                                  segmented_sort_kernel,
-                                                  dim3(segments),
-                                                  dim3(params.kernel_config.block_size),
-                                                  0,
-                                                  stream));
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start);
+                ROCPRIM_RETURN_ON_ERROR(
+                    execute_launch_plan<Config, Selector>(current_target,
+                                                          segmented_sort_kernel,
+                                                          dim3(current_grid_size),
+                                                          dim3(params.kernel_config.block_size),
+                                                          0,
+                                                          stream));
+                return hipSuccess;
+            }));
     }
     return hipSuccess;
 }
@@ -607,10 +625,6 @@ inline hipError_t segmented_radix_sort_impl(
 /// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
@@ -746,10 +760,6 @@ inline hipError_t segmented_radix_sort_keys(void*              temporary_storage
 /// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
@@ -890,10 +900,6 @@ inline hipError_t segmented_radix_sort_keys_desc(void*              temporary_st
 /// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
@@ -1048,10 +1054,6 @@ inline hipError_t segmented_radix_sort_pairs(void*                temporary_stor
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
-///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
 ///
@@ -1195,10 +1197,6 @@ inline hipError_t segmented_radix_sort_pairs_desc(void*                temporary
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
-///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
 ///
@@ -1335,10 +1333,6 @@ inline hipError_t segmented_radix_sort_keys(void*               temporary_storag
 /// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
@@ -1480,10 +1474,6 @@ inline hipError_t segmented_radix_sort_keys_desc(void*               temporary_s
 /// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
@@ -1636,10 +1626,6 @@ inline hipError_t segmented_radix_sort_pairs(void*                 temporary_sto
 /// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \par Note
-/// Even though the total amount of elements can fit into a size_t, each of the segments must not
-/// be larger than what can fit into a 32bit unsigned integer.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
