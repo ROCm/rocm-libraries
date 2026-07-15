@@ -213,6 +213,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if state.get("LDSSegmentInterleave") == 1:
     requiredParametersTemp.add("LDSSegmentInterleave")
 
+  # Multicast is a tri-state derivation knob (-1 auto / 0 off / 1 on) that does
+  # not alter the emitted assembly, so it is intentionally excluded from the
+  # kernel name to keep names byte-identical to develop (no _M token).
+  requiredParametersTemp.discard("Multicast")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernelName":
       continue

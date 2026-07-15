@@ -612,6 +612,9 @@ defaultBenchmarkCommonParameters = [
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    # Multicast tri-state (see ValidParameters). Default -1 = legacy auto, so
+    # every existing YAML (which omits Multicast) derives identically to before.
+    {"Multicast": [-1]},
     {"HalfPLR": [0]},
     {"TDMIterateMode": [0]}
 ]

@@ -47,6 +47,11 @@ def _reset(state):
     """Clear derivation-done flags so static methods re-run from scratch."""
     state["AssignedProblemIndependentDerivedParameters"] = False
     state["AssignedDerivedParameters"] = False
+    # Multicast is a tri-state derived param (-1 auto / 0 off / 1 on). The vendored
+    # fixture states are already fully derived, so Multicast carries a concrete
+    # 0/1; restore the -1 auto sentinel a fresh (pre-derivation) config would have,
+    # so re-derivation exercises the legacy ClusterDim-coupled auto path.
+    state["Multicast"] = -1
     return state
 
 
@@ -378,7 +383,7 @@ def test_piap_cluster_dim_non_default_sets_multicast(isa_info_map, hss_state):
     state["ClusterBarrier"] = False
     state = _reset(state)
     _piap(state, isa_info_map)
-    assert state.get("Multicast") is True
+    assert state.get("Multicast") == 1
 
 
 def test_piap_cluster_dim_default_multicast_false(isa_info_map, hss_state):
@@ -388,7 +393,7 @@ def test_piap_cluster_dim_default_multicast_false(isa_info_map, hss_state):
     state["ClusterBarrier"] = False
     state = _reset(state)
     _piap(state, isa_info_map)
-    assert state.get("Multicast") is False
+    assert state.get("Multicast") == 0
 
 
 def test_piap_cluster_barrier_no_cluster_dim_cleared(isa_info_map, hss_state):
@@ -408,7 +413,7 @@ def test_piap_cluster_barrier_no_cluster_dim_cleared(isa_info_map, hss_state):
     _piap(state, isa_info_map)
     assert state.get("Valid") is not False
     assert state.get("ClusterBarrier") is False
-    assert state.get("Multicast") is False
+    assert state.get("Multicast") == 0
 
 
 def test_piap_cluster_barrier_no_tdm_cleared(isa_info_map, hss_state):
@@ -427,7 +432,7 @@ def test_piap_cluster_barrier_no_tdm_cleared(isa_info_map, hss_state):
     _piap(state, isa_info_map)
     assert state.get("Valid") is not False
     assert state.get("ClusterBarrier") is False
-    assert state.get("Multicast") is True
+    assert state.get("Multicast") == 1
 
 
 # ---------------------------------------------------------------------------

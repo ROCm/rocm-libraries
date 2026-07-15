@@ -1432,6 +1432,7 @@
     'MaxOccupancy',
     'MbskPrefetchMethod',
     'MinGRIncPerMfma',
+    'Multicast',
     'NoReject',
     'NonTemporal',
     'NonTemporalA',
@@ -2172,6 +2173,15 @@
         2,
       ]),
       'len': 10,
+      'type': 'list',
+    }),
+    'Multicast': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'NoReject': dict({
