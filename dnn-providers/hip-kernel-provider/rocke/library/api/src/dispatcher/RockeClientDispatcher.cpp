@@ -81,8 +81,17 @@ FmhaFeatures featurizeFmha(const SdpaProblem& problem, const AotInstance& inst)
         : static_cast<double>(cs.blockSizeQ);
 
     c.tm0 = block_m_per_warp;
-    c.tn0 = static_cast<double>(cs.tileSize); // 2D tile width T
-    c.num_warps = num_warps;
+    // Only override tn0 if tileSize is set (>0). When 0 (unset), keep the
+    // FmhaConfigInputs struct default to avoid passing 0 as a real tile size.
+    if(cs.tileSize > 0)
+    {
+        c.tn0 = static_cast<double>(cs.tileSize);
+    }
+    // Only override num_warps if set (>0). When 0, keep the struct default (1).
+    if(cs.numWarps > 0)
+    {
+        c.num_warps = num_warps;
+    }
     // tk0/tn1/tk1/tk0max default from head_size/tn0 inside the featurizer (0 ->
     // derived), matching extract()'s defaults. Variant flags (mask/bias/...) are
     // not carried per-instance yet; they keep featurizer defaults (mask=0 etc.),
