@@ -21,6 +21,7 @@ add_executable(
     TestPluginPublic.cpp
     dispatcher/TestAotCatalog.cpp
     dispatcher/TestHardwareProfile.cpp
+    dispatcher/TestModelScorer.cpp
     dispatcher/TestRockeClientDispatcher.cpp
     dispatcher/TestSdpaGraphAdapter.cpp
     dispatcher/TestSelectionConstraints.cpp
