@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -372,41 +373,67 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 }
 
 // ============================================================================
-// RFC-0016 §4.2 serialized-graph reader-version guard.
+// RFC-0016 §4.2 serialized-graph min-required-engine-API-version guard.
 //
-// deserializeGraph() must reject a serialized Graph whose min_reader_version
-// exceeds what this build understands (K_GRAPH_READER_VERSION == 1), and must
-// accept versions 0 and 1. Exercised through the public C API
-// hipdnnBackendCreateAndDeserializeGraph_ext, which surfaces the guard's
-// HipdnnException as HIPDNN_STATUS_NOT_SUPPORTED.
+// deserializeGraph() must reject a serialized Graph whose
+// min_required_engine_api_version exceeds what this build understands
+// (the ceiling is K_PASS_BY_VALUE_MIN_API_VERSION == "1.2.0", the highest
+// version constant any graph feature can currently gate on), and must accept
+// the baseline "1.0.0" and the ceiling "1.2.0". An unstamped field (a graph a
+// writer never populated, e.g. a hand-built fixture) is treated as "1.0.0".
+// Exercised through the public C API hipdnnBackendCreateAndDeserializeGraph_ext,
+// which surfaces the guard's HipdnnException as HIPDNN_STATUS_NOT_SUPPORTED.
 //
 // Complementary contract: a graph built via the backend API stamps
-// min_reader_version == 1 iff some tensor is runtime pass-by-value, else 0.
+// min_required_engine_api_version == "1.2.0" iff some tensor is runtime
+// pass-by-value, else "1.0.0" -- see
+// hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(), the single
+// shared graph -> required-version mapping used by both this guard and
+// EnginePluginResourceManager's plugin applicability filter.
 // ============================================================================
 
 namespace
 {
-// Serialize an otherwise-valid reduction graph whose min_reader_version is
-// forced to `readerVersion`. Round-trips through GraphT so the field is stamped
-// regardless of the flatbuffer default-elision behavior.
-flatbuffers::DetachedBuffer serializeReductionGraphWithReaderVersion(uint32_t readerVersion)
+// Serialize an otherwise-valid reduction graph whose min_required_engine_api_version
+// is forced to `major.minor.patch`. Round-trips through GraphT so the field is
+// stamped regardless of the flatbuffer default-elision behavior.
+flatbuffers::DetachedBuffer
+    serializeReductionGraphWithVersion(uint32_t major, uint32_t minor, uint32_t patch)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
     graphFb->UnPackTo(&graphT);
-    graphT.min_reader_version = readerVersion;
+    graphT.min_required_engine_api_version
+        = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
+            major, minor, patch);
 
     flatbuffers::FlatBufferBuilder rebuilder;
     rebuilder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(rebuilder, &graphT));
     return rebuilder.Release();
 }
 
-// Read back the stamped min_reader_version from a graph built and serialized
-// through the backend C API. `runtimePassByValue` toggles the runtime flag on
-// the reduction input tensor.
-uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
+// Serialize an otherwise-valid reduction graph with min_required_engine_api_version
+// left unstamped (null), simulating a writer that never populated the field.
+flatbuffers::DetachedBuffer serializeReductionGraphWithUnstampedVersion()
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    const auto* graphFb
+        = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
+    graphFb->UnPackTo(&graphT);
+    graphT.min_required_engine_api_version.reset();
+
+    flatbuffers::FlatBufferBuilder rebuilder;
+    rebuilder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(rebuilder, &graphT));
+    return rebuilder.Release();
+}
+
+// Read back the stamped min_required_engine_api_version from a graph built and
+// serialized through the backend C API. `runtimePassByValue` toggles the
+// runtime flag on the reduction input tensor.
+hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassByValue)
 {
     const std::vector<int64_t> inDims = {4, 8};
     const std::vector<int64_t> inStrides = {8, 1};
@@ -429,7 +456,7 @@ uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
     if(::testing::Test::HasFatalFailure())
     {
         cleanup();
-        return 0;
+        return hipdnn_data_sdk::utilities::Version{0, 0, 0};
     }
     if(runtimePassByValue)
     {
@@ -492,7 +519,7 @@ uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
     if(::testing::Test::HasFatalFailure() || size == 0)
     {
         cleanup();
-        return 0;
+        return hipdnn_data_sdk::utilities::Version{0, 0, 0};
     }
 
     std::vector<uint8_t> buffer(size);
@@ -501,18 +528,19 @@ uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
 
     const auto* graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer.data());
     EXPECT_NE(graphFb, nullptr);
-    const uint32_t stamped = graphFb != nullptr ? graphFb->min_reader_version() : 0;
+    const auto stamped = hipdnn_plugin_sdk::fromEngineApiVersion(
+        graphFb != nullptr ? graphFb->min_required_engine_api_version() : nullptr);
 
     cleanup();
     return stamped;
 }
 } // namespace
 
-// A serialized graph demanding a reader newer than this build (min_reader_version
-// == 2 > K_GRAPH_READER_VERSION == 1) must be rejected, not silently accepted.
-TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureReaderVersion)
+// A serialized graph demanding a newer engine plugin API version than this
+// build's ceiling (1.2.0) must be rejected, not silently accepted.
+TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureApiVersion)
 {
-    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithReaderVersion(2);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 3, 0);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
@@ -521,10 +549,10 @@ TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureReaderVersion)
     EXPECT_EQ(descriptor, nullptr);
 }
 
-// min_reader_version == 1 sits at this build's ceiling and must deserialize.
-TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsReaderVersionOne)
+// "1.2.0" sits at this build's ceiling and must deserialize.
+TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsCeilingApiVersion)
 {
-    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithReaderVersion(1);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 2, 0);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
@@ -534,10 +562,10 @@ TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsReaderVersionOne)
     hipdnnBackendDestroyDescriptor(descriptor);
 }
 
-// min_reader_version == 0 is the legacy/default floor and must deserialize.
-TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsReaderVersionZero)
+// "1.0.0" is the legacy/default floor and must deserialize.
+TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsBaselineApiVersion)
 {
-    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithReaderVersion(0);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 0, 0);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
@@ -547,20 +575,38 @@ TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsReaderVersionZero)
     hipdnnBackendDestroyDescriptor(descriptor);
 }
 
-// A graph carrying a runtime pass-by-value tensor stamps min_reader_version == 1
-// so that older readers refuse it (mirrors the guard rejection above).
-TEST_F(IntegrationGraphDescriptorApi, StampsMinReaderVersionOneForRuntimePassByValue)
+// An unstamped field (a writer that never populated it) reads as "1.0.0" and
+// must deserialize, exactly like the legacy min_reader_version's implicit 0.
+TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsUnstampedApiVersion)
 {
-    const uint32_t stamped = buildAndReadStampedReaderVersion(/*runtimePassByValue=*/true);
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    EXPECT_EQ(stamped, 1u);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithUnstampedVersion();
+
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &descriptor, serialized.data(), serialized.size()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_NE(descriptor, nullptr);
+    hipdnnBackendDestroyDescriptor(descriptor);
 }
 
-// A graph with only ordinary/compile-time tensors stamps min_reader_version == 0
-// so legacy readers still accept it.
-TEST_F(IntegrationGraphDescriptorApi, StampsMinReaderVersionZeroForOrdinaryGraph)
+// A graph carrying a runtime pass-by-value tensor stamps "1.2.0" so that
+// pre-1.2.0 readers/plugins refuse it (mirrors the guard rejection above).
+TEST_F(IntegrationGraphDescriptorApi, StampsPassByValueVersionForRuntimePassByValue)
 {
-    const uint32_t stamped = buildAndReadStampedReaderVersion(/*runtimePassByValue=*/false);
+    const auto stamped = buildAndReadStampedVersion(/*runtimePassByValue=*/true);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    EXPECT_EQ(stamped, 0u);
+    EXPECT_EQ(
+        stamped,
+        hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION});
+}
+
+// A graph with only ordinary/compile-time tensors stamps the baseline "1.0.0"
+// so legacy readers/plugins still accept it.
+TEST_F(IntegrationGraphDescriptorApi, StampsBaselineVersionForOrdinaryGraph)
+{
+    const auto stamped = buildAndReadStampedVersion(/*runtimePassByValue=*/false);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    EXPECT_EQ(stamped,
+              hipdnn_data_sdk::utilities::Version{
+                  hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE});
 }

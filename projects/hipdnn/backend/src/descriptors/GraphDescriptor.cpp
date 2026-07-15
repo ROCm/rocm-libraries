@@ -12,21 +12,13 @@
 
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <logging/GraphLogger.hpp>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
 namespace hipdnn_backend
 {
-
-// Reader-version stamped into serialized graphs. A newer writer bumps this when
-// it emits features an older reader cannot interpret; a reader rejects graphs
-// whose stamped version exceeds the version it supports. Runtime pass-by-value
-// tensors (RFC 0016) require reader version >= 1.
-namespace
-{
-constexpr uint32_t K_GRAPH_READER_VERSION = 1;
-} // namespace
 
 void GraphDescriptor::invalidateCache()
 {
@@ -99,12 +91,18 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
         graph->nodes.push_back(op->buildNode());
     }
 
-    // Stamp the reader version: a graph with any runtime pass-by-value tensor
-    // requires reader version 1; otherwise 0 keeps older readers compatible.
+    // Stamp the minimum engine plugin API version this graph requires, from the
+    // single shared graph -> version mapping (see PluginVersionConstants.hpp).
+    // A newer writer can therefore emit graphs an older reader must reject --
+    // deserializeGraph() enforces the ceiling below.
     const bool anyRuntimePassByValue
         = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
             graph->tensors, [](const auto& tensor) { return tensor.get(); });
-    graph->min_reader_version = anyRuntimePassByValue ? K_GRAPH_READER_VERSION : 0;
+    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        _isOverrideShapeEnabled, anyRuntimePassByValue);
+    graph->min_required_engine_api_version
+        = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
+            hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
 
     return graph;
 }
@@ -395,9 +393,13 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
 
-    THROW_IF_TRUE(graph->min_reader_version > K_GRAPH_READER_VERSION,
-                  HIPDNN_STATUS_NOT_SUPPORTED,
-                  "Serialized graph requires a newer reader version than this build supports.");
+    const auto requiredVersion
+        = hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version.get());
+    THROW_IF_TRUE(
+        requiredVersion > hipdnn_data_sdk::utilities::
+                Version{hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION},
+        HIPDNN_STATUS_NOT_SUPPORTED,
+        "Serialized graph requires a newer engine plugin API version than this build supports.");
 
     // Extract graph-level attributes
     _computeDataType = graph->compute_data_type;
@@ -405,6 +407,8 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
     _isOverrideShapeEnabled = graph->is_override_shape_enabled;
+    _isRuntimePassByValueEnabled = requiredVersion >= hipdnn_data_sdk::utilities::Version{
+                                       hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
     _name = graph->name;
 
     // Populate _operations from the deserialized graph nodes
@@ -429,6 +433,10 @@ void GraphDescriptor::buildSerializedGraph()
     THROW_IF_NULL(graph,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "GraphDescriptor::buildSerializedGraph: graph is null");
+    _isRuntimePassByValueEnabled
+        = hipdnn_plugin_sdk::fromEngineApiVersion(*graph->min_required_engine_api_version)
+          >= hipdnn_data_sdk::utilities::Version{
+              hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
 
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
@@ -518,6 +526,11 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
 bool GraphDescriptor::isOverrideShapeEnabled() const
 {
     return _isOverrideShapeEnabled;
+}
+
+bool GraphDescriptor::isRuntimePassByValueEnabled() const
+{
+    return _isRuntimePassByValueEnabled;
 }
 
 std::string GraphDescriptor::toString() const

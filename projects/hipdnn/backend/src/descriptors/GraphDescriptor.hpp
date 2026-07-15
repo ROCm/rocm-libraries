@@ -57,6 +57,13 @@ private:
     // Opt-in flag for overridable tensor shapes (RFC 0008).
     bool _isOverrideShapeEnabled = false;
 
+    // Cached "does this graph have any runtime pass-by-value tensor" flag (RFC 0016).
+    // Derived from min_required_engine_api_version at the same time
+    // _graphSerializedBuffer is (re)built -- see buildSerializedGraph()/
+    // deserializeGraph() -- so callers of isRuntimePassByValueEnabled() get an
+    // O(1) cached answer instead of re-scanning every tensor in the serialized graph.
+    bool _isRuntimePassByValueEnabled = false;
+
     // Optional human-readable name for the graph, empty when unset.
     std::string _name;
 
@@ -138,6 +145,10 @@ public:
 
     virtual hipdnnHandle_t getHandle() const;
     virtual bool isOverrideShapeEnabled() const;
+
+    /// Returns true if any tensor in this graph is a runtime pass-by-value scalar
+    /// (RFC 0016). Cached at build/deserialize time -- see _isRuntimePassByValueEnabled.
+    virtual bool isRuntimePassByValueEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

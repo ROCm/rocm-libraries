@@ -74,7 +74,5 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
 using hipdnn_plugin_sdk::makeScalarOperand;
 using hipdnn_plugin_sdk::resolveScalarOperand;
 using hipdnn_plugin_sdk::ScalarOperand;
-using hipdnn_plugin_sdk::ScalarValue;
-using hipdnn_plugin_sdk::toDouble;
 
 } // namespace hip_kernel_provider::core::utils

@@ -539,8 +539,9 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnFinalize)
 
 // Pass-by-value scalar round-trips through createOrFindTensorDesc for every
 // supported ValueVariant type. Verifies the six standard tensor attributes and
-// the runtime pass-by-value flag (via expectTensorSetAttributes) plus the
-// VALUE_EXT wire encoding (HIPDNN_TYPE_CHAR, sizeof(T) count, raw bytes).
+// the (clear) runtime pass-by-value flag (via expectTensorSetAttributes) --
+// set_value() bakes a compile-time constant -- plus the VALUE_EXT wire
+// encoding (HIPDNN_TYPE_CHAR, sizeof(T) count, raw bytes).
 // set_value() resets dims/strides to {1}, so scalar dimensions are expected.
 template <typename T>
 class DescriptorHelpersPassByValueTyped : public TestDescriptorHelpers
@@ -564,7 +565,7 @@ TYPED_TEST(DescriptorHelpersPassByValueTyped, EnsureTensorDescSetsPassByValue)
 
     this->expectCreateAndDestroyDescriptor();
     this->expectTensorSetAttributes(
-        K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
+        K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ false);
 
     EXPECT_CALL(*this->_mockBackend,
                 backendSetAttribute(_,

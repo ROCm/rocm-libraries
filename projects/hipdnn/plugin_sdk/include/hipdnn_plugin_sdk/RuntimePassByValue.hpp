@@ -42,6 +42,10 @@ namespace hipdnn_plugin_sdk
 
 /// A pass-by-value scalar carried without widening: one arm per DataType the SDK
 /// resolves. `double` is first so a default-constructed ScalarValue holds 0.0.
+/// Supported dtypes are DOUBLE, FLOAT, HALF, BFLOAT16, INT32, INT64, and BOOLEAN --
+/// a narrower set than the frontend/flatbuffer TensorValue union (which also allows
+/// UINT8, INT8, and the FP8/FP6/FP4 families). makeScalarOperand() throws
+/// HIPDNN_PLUGIN_STATUS_BAD_PARAM at plan-build time for any dtype outside this set.
 using ScalarValue = std::variant<double, // DataType::DOUBLE
                                  float, // DataType::FLOAT
                                  hipdnn_data_sdk::types::half, // DataType::HALF

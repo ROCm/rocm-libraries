@@ -91,13 +91,14 @@ public:
     TensorAttributes() = default;
 
     /**
-     * @brief Construct a runtime-with-default pass-by-value tensor from a scalar
+     * @brief Construct a compile-time-constant pass-by-value tensor from a scalar
      * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
-     * @param scalar The scalar value to store as the baked default
+     * @param scalar The scalar value to bake into the tensor
      *
-     * Runtime-with-default (cuDNN plain-scalar parity); floors the provider at
-     * 1.2.0. See RFC 0016 §4.3. Use set_compile_time_constant() for a
-     * baseline-1.0.0 baked constant.
+     * Delegates to set_value(), which bakes a baseline-1.0.0 compile-time
+     * constant. See RFC 0016 §4.3. Use the (scalar, ScalarType::RUNTIME_PARAM)
+     * constructor, set_as_runtime_parameter(), or set_is_pass_by_value(true)
+     * for a runtime-with-default scalar that floors the provider at 1.2.0.
      */
     template <typename T>
     TensorAttributes(const T& scalar)
@@ -115,9 +116,9 @@ public:
     TensorAttributes(const T& scalar, ScalarType type)
     {
         set_value(scalar);
-        if(type == ScalarType::COMPILE_TIME_CONST)
+        if(type == ScalarType::RUNTIME_PARAM)
         {
-            _isRuntimePassByValue = false;
+            _isRuntimePassByValue = true;
         }
     }
 
@@ -208,14 +209,16 @@ public:
     }
 
     /**
-     * @brief Set a runtime-with-default pass-by-value scalar in this tensor
+     * @brief Set a compile-time-constant scalar in this tensor
      * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
-     * @param v The scalar value stored as the baked default
+     * @param v The scalar value to bake into the tensor
      * @return Reference to this for method chaining
      *
-     * Sets the runtime pass-by-value flag (matching cuDNN's plain scalar path),
-     * so the tensor floors the provider at 1.2.0. Use set_compile_time_constant()
-     * for a baseline-1.0.0 baked constant.
+     * Bakes a baseline-1.0.0 compile-time constant (clears the runtime
+     * pass-by-value flag). Use set_as_runtime_parameter(),
+     * set_is_pass_by_value(true), or the (scalar, ScalarType::RUNTIME_PARAM)
+     * constructor for a runtime-with-default scalar that floors the provider
+     * at 1.2.0.
      */
     template <typename T>
     TensorAttributes& set_value(T v) // NOLINT(readability-identifier-naming)
@@ -231,7 +234,7 @@ public:
                                          std::is_same<T, bool>>,
                       "Unsupported type for Tensor_attributes::set_value");
         _value = v;
-        _isRuntimePassByValue = true;
+        _isRuntimePassByValue = false;
         _dataType = getDataTypeEnumFromType<T>();
         _dim = _stride = {1};
         return *this;
@@ -262,9 +265,10 @@ public:
      * @return Reference to this for method chaining
      *
      * Delegates to the typed set_value (via std::visit) so the per-scalar data
-     * type is derived from the active alternative, then clears the runtime flag
-     * to mark the value as a baseline-1.0.0 baked constant. A std::monostate
-     * (empty) variant is a no-op guarded here.
+     * type is derived from the active alternative; set_value() itself bakes a
+     * baseline-1.0.0 compile-time constant, so this is now a thin cuDNN-parity
+     * alias with an ergonomic pass_by_values_t-variant signature. A
+     * std::monostate (empty) variant is a no-op guarded here.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     TensorAttributes& set_compile_time_constant(const pass_by_values_t& v)
@@ -274,7 +278,6 @@ public:
                 if constexpr(!std::is_same_v<std::decay_t<decltype(scalar)>, std::monostate>)
                 {
                     set_value(scalar);
-                    _isRuntimePassByValue = false;
                 }
             },
             v);
@@ -284,6 +287,12 @@ public:
     /**
      * @brief Mark this tensor as a runtime pass-by-value parameter, clearing any stored value
      * @return Reference to this for method chaining
+     *
+     * Plugin-side resolution (hipdnn_plugin_sdk::ScalarOperand/resolveScalarOperand) supports
+     * DOUBLE, FLOAT, HALF, BFLOAT16, INT32, INT64, and BOOLEAN. UINT8, INT8, and the FP8/FP6/FP4
+     * families are accepted by the frontend/flatbuffer value union but are not yet wired into
+     * the plugin SDK's scalar resolution; a runtime pass-by-value tensor set to one of those
+     * types throws HIPDNN_PLUGIN_STATUS_BAD_PARAM at plan-build time.
      */
     TensorAttributes& set_as_runtime_parameter() // NOLINT(readability-identifier-naming)
     {

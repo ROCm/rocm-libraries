@@ -73,27 +73,28 @@ void expectRuntimeRoundTrip(const T value)
 }
 } // namespace
 
-// --- Runtime-with-default default paths (plain ctor / set_value; flag true) ---
-// Per RFC-0016 §4.3, the plain constructor and set_value bake a default AND set
-// the runtime flag (cuDNN parity), so they are runtime-with-default, not
-// compile-time constants.
+// --- Compile-time-constant default paths (plain ctor / set_value; flag false) ---
+// Per RFC-0016 §4.3, the plain constructor and set_value bake a baseline-1.0.0
+// compile-time constant (runtime flag clear); use the (scalar,
+// ScalarType::RUNTIME_PARAM) constructor or set_as_runtime_parameter() for a
+// runtime-with-default scalar.
 
-TEST(TestTensorValueAttributes, PlainConstructorIsRuntimeWithDefault)
+TEST(TestTensorValueAttributes, PlainConstructorIsCompileTimeConstant)
 {
     const TensorAttributes tensor(PI_FLOAT);
     expectFloatState(tensor,
                      /*isPassByValue*/ true,
-                     /*passByValue*/ PI_FLOAT,
-                     /*compileTimeConstant*/ std::nullopt,
-                     /*hasCompileTimeConstant*/ false,
-                     /*isRuntimePassByValue*/ true);
+                     /*passByValue*/ std::nullopt,
+                     /*compileTimeConstant*/ PI_FLOAT,
+                     /*hasCompileTimeConstant*/ true,
+                     /*isRuntimePassByValue*/ false);
 }
 
-TEST(TestTensorValueAttributes, SetValueIsRuntimeWithDefault)
+TEST(TestTensorValueAttributes, SetValueIsCompileTimeConstant)
 {
     TensorAttributes tensor;
     tensor.set_value(PI_FLOAT);
-    expectFloatState(tensor, true, PI_FLOAT, std::nullopt, false, true);
+    expectFloatState(tensor, true, std::nullopt, PI_FLOAT, true, false);
 }
 
 // --- Compile-time-constant creation paths (flag false, value present) --------
@@ -148,7 +149,7 @@ TEST(TestTensorValueAttributes, SetIsPassByValueFlipsCompileTimeConstantToRuntim
 
 TEST(TestTensorValueAttributes, SetAsRuntimeParameterClearsValue)
 {
-    TensorAttributes tensor(PI_FLOAT); // start as runtime-with-default (plain ctor sets the flag)
+    TensorAttributes tensor(PI_FLOAT, ScalarType::RUNTIME_PARAM); // start as runtime-with-default
     tensor.set_as_runtime_parameter();
     expectFloatState(tensor, true, std::nullopt, std::nullopt, false, true);
 }
@@ -161,14 +162,14 @@ TEST(TestTensorValueAttributes, ClearValueOnRuntimeDefaultBecomesUserSupplied)
     expectFloatState(tensor, true, std::nullopt, std::nullopt, false, true);
 }
 
-// --- set_value sets the runtime flag regardless of prior flag state ----------
+// --- set_value always bakes a compile-time constant, regardless of prior flag state ---
 
-TEST(TestTensorValueAttributes, SetValueAfterSetIsPassByValueIsRuntimeWithDefault)
+TEST(TestTensorValueAttributes, SetValueAfterSetIsPassByValueIsCompileTimeConstant)
 {
     TensorAttributes tensor;
     tensor.set_is_pass_by_value(true);
-    tensor.set_value(PI_FLOAT); // set_value bakes a default and sets the runtime flag
-    expectFloatState(tensor, true, PI_FLOAT, std::nullopt, false, true);
+    tensor.set_value(PI_FLOAT); // set_value bakes a compile-time constant, clearing the flag
+    expectFloatState(tensor, true, std::nullopt, PI_FLOAT, true, false);
 }
 
 // --- Ordinary (not by-value) -------------------------------------------------

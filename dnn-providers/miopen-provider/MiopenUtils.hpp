@@ -191,8 +191,6 @@ std::string getDeviceArch(hipStream_t stream);
 using hipdnn_plugin_sdk::makeScalarOperand;
 using hipdnn_plugin_sdk::resolveScalarOperand;
 using hipdnn_plugin_sdk::ScalarOperand;
-using hipdnn_plugin_sdk::ScalarValue;
-using hipdnn_plugin_sdk::toDouble;
 
 using hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;

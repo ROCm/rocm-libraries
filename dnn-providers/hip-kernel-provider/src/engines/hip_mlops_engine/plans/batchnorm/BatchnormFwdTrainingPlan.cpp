@@ -109,7 +109,8 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
 double BatchnormFwdTrainingParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                                 uint32_t numDeviceBuffers) const
 {
-    return toDouble(resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
+    return hipdnn_plugin_sdk::toDouble(
+        resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
@@ -149,7 +150,13 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
 double BatchnormFwdTrainingParams::momentumValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                                  uint32_t numDeviceBuffers) const
 {
-    return toDouble(resolveScalarOperand(_momentum.value(), deviceBuffers, numDeviceBuffers));
+    if(!_momentum.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "momentumValue() called but momentum was not set");
+    }
+    return hipdnn_plugin_sdk::toDouble(
+        resolveScalarOperand(*_momentum, deviceBuffers, numDeviceBuffers));
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
