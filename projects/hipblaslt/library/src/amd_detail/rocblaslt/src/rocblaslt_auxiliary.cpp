@@ -532,6 +532,12 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
         problem.alpha = alphaTmp;
     }
 
+    // Forward any composable fused-epilogue chain so the heuristic/solution-selection path
+    // (ConstructTensileProblem -> setUsePartialRMS) routes fused-RMSNorm problems to the
+    // PartialRMS solution. Without this, hipblasLtMatmulAlgoGetHeuristic would select a normal
+    // GEMM solution and the fused epilogue would be silently dropped. Non-owning pointer.
+    problem.fused_epilogue = matmul_descr->fused_epilogue;
+
     return problem;
 }
 
@@ -1537,6 +1543,18 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                // Stores a non-owning pointer to a hipblasLtFusedEpilogueDescriptor. The
+                // handle's contents are validated at the hipBLASLt C-API layer before the
+                // pointer reaches here.
+                if(sizeof(void*) <= sizeInBytes)
+                    memcpy(&matmulDesc->fused_epilogue, buf, sizeof(void*));
+                else
+                {
+                    log_error(__func__, "invalid fused epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1883,6 +1901,16 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 memcpy(buf, &matmulDesc->uniform_summation_order, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(void*);
+                if(sizeInBytes < sizeof(void*))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->fused_epilogue, sizeof(void*));
                 break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);

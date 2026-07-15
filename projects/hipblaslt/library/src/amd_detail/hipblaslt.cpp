@@ -32,12 +32,14 @@
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
 
+#include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <iostream>
 #include <rocblaslt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <vector>
 
 #include "Debug.hpp"
 
@@ -411,6 +413,359 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+// Per-call handoff from the RMSNorm producer GEMM (K1) to the cross-tile reduction (K2).
+// K1 writes partialBuf through the normal Tensile problem inputs; K2 consumes that buffer plus
+// the by-value arguments below. Full RMSNorm reduces and applies immediately, while the
+// decomposed flow has K2 write the final row scale into the descriptor below for GEMM2.
+struct RmsNormHandoff
+{
+    void*   partialBuf = nullptr; // f32 partial sums, row-major [M_padded, nTilesN]
+    int32_t M          = 0;       // logical rows; padded rows in partialBuf are ignored
+    int32_t N          = 0;       // feature dimension reduced by RMSNorm
+    int32_t nTilesN    = 0;       // columns of partialBuf, ceil(N / MacroTile1)
+    float   invD       = 0.f;     // 1 / N
+    float   eps        = 0.f;     // RMSNorm epsilon
+};
+
+// Cross-call state for the decomposed RMSNorm flow. The producer reduction materializes the
+// finalized rstd here, and the later GEMM2 scale-apply epilogue consumes it. The full flow never
+// creates this handle because its reduction applies rstd to D in the same matmul call.
+struct hipblasLtFusedEpilogueRMSNormDescriptor
+{
+    // FP32 rstd, tightly packed [M * batch]. M and batch are implicit in the consumer GEMM2
+    // problem, which must match the producer for the decomposed flow.
+    void* per_row_scale = nullptr;
+    // Set after the producer reduction has populated per_row_scale.
+    bool populated = false;
+    // True when the library allocated per_row_scale (producer path) and must free it on destroy.
+    // False when a caller/test provided the buffer via the test-only hook.
+    bool owns_scale = false;
+};
+
+// Definition of the opaque handle declared in hipblaslt.h. Owns the composed list of
+// epilogue stages plus their parameters. Attached, non-owning, to a matmul descriptor via
+// HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE.
+struct hipblasLtFusedEpilogueDescriptor
+{
+    std::vector<hipblasLtFuseableEpilogue_t> stages;
+
+    // Residual-add parameters. residual_output is optional; if unset, the residual input
+    // tensor is updated in place with the post-add residual stream.
+    void* residual        = nullptr;
+    void* residual_output = nullptr;
+
+    // RMSNorm parameters (shared by the full RMSNorm and partial-RMSNorm-stats stages).
+    void* rmsnorm_gamma = nullptr;
+    float rmsnorm_eps   = 0.f;
+    bool  eps_set       = false;
+
+    // Decomposed-flow handoff descriptor, set on both the producer and consumer handles.
+    hipblasLtFusedEpilogueRMSNormDescriptor* rmsnorm_stats = nullptr;
+
+    // Requant parameters and policy.
+    void*                              requant_scale        = nullptr;
+    void*                              requant_amax         = nullptr;
+    hipblasLtRequantScaleComputeMode_t requant_compute_mode = HIPBLASLT_REQUANT_SCALE_STATIC;
+    hipblasLtRequantScaleGranularity_t requant_granularity  = HIPBLASLT_REQUANT_SCALE_PER_TENSOR;
+};
+
+namespace
+{
+    // Supported RMSNorm-chain rank. A legal chain is an order-preserving subsequence of the
+    // supported order
+    //   residual add -> {RMSNorm | partial RMSNorm stats | RMSNorm scale-apply} -> AMax -> requant
+    // with each stage appearing at most once. The three normalization stages share rank 1 so
+    // that at most one of them can appear in a single chain (full vs decomposed are mutually
+    // exclusive). Returns -1 for unrecognized stages or stages reserved for other epilogue
+    // families (e.g. SwiGLU).
+    int rmsnorm_chain_rank(hipblasLtFuseableEpilogue_t e)
+    {
+        switch(e)
+        {
+        case HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD:
+            return 0;
+        case HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM:
+        case HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS:
+        case HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY:
+            return 1;
+        case HIPBLASLT_FUSEABLE_EPILOGUE_AMAX:
+            return 2;
+        case HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT:
+            return 3;
+        default:
+            return -1;
+        }
+    }
+
+    // Classify a stage into a chain family so full and decomposed stages cannot be mixed in a
+    // single chain (section 4.3): 0 = shared/neutral, 1 = full RMSNorm family, 2 = decomposed.
+    // Requant is neutral: full RMSNorm uses it as an output epilogue, while the decomposed
+    // producer can use it for the CODA dynamic-quantized handoff.
+    int rmsnorm_chain_family(hipblasLtFuseableEpilogue_t e)
+    {
+        switch(e)
+        {
+        case HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM:
+        case HIPBLASLT_FUSEABLE_EPILOGUE_AMAX:
+            return 1;
+        case HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS:
+        case HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY:
+            return 2;
+        default:
+            return 0;
+        }
+    }
+
+    bool fused_epilogue_has_stage(const hipblasLtFusedEpilogueDescriptor* d,
+                                  hipblasLtFuseableEpilogue_t             e)
+    {
+        for(auto s : d->stages)
+            if(s == e)
+                return true;
+        return false;
+    }
+
+    bool requant_compute_mode_valid(hipblasLtRequantScaleComputeMode_t mode)
+    {
+        return mode == HIPBLASLT_REQUANT_SCALE_STATIC
+               || mode == HIPBLASLT_REQUANT_SCALE_DYNAMIC_FROM_AMAX;
+    }
+
+    bool requant_granularity_valid(hipblasLtRequantScaleGranularity_t granularity)
+    {
+        return granularity == HIPBLASLT_REQUANT_SCALE_PER_TENSOR
+               || granularity == HIPBLASLT_REQUANT_SCALE_PER_ROW;
+    }
+}
+
+// Resolve the opaque fused-epilogue handle into the layer-visible POD declared in
+// rocblaslt-types.h. Defined here because the handle definition is private to this
+// translation unit; the rocblaslt / TensileLite layers only see the forward declaration.
+// The enclosing public API in this file is extern "C"; this helper is declared with C++
+// linkage (it lives among C++ types in rocblaslt-types.h), so force C++ linkage here to
+// match the declaration.
+extern "C++" bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* desc,
+                                                   RocblasltFusedEpilogueInfo&             out)
+{
+    if(desc == nullptr)
+        return false;
+    out.hasResidualAdd
+        = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD);
+    out.hasRMSNorm = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM);
+    out.hasPartialRMSStats
+        = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS);
+    out.hasRMSNormScaleApply
+        = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY);
+    out.hasRequant = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT);
+    out.rmsnormGamma   = desc->rmsnorm_gamma;
+    out.rmsnormEps     = desc->rmsnorm_eps;
+    out.residual       = desc->residual;
+    out.residualOutput = desc->residual_output;
+    out.requantScale       = desc->requant_scale;
+    out.requantAmax        = desc->requant_amax;
+    out.requantComputeMode = desc->requant_compute_mode;
+    out.requantGranularity = desc->requant_granularity;
+    if(desc->rmsnorm_stats != nullptr)
+    {
+        out.perRowScale       = desc->rmsnorm_stats->per_row_scale;
+        out.rmsStatsPopulated = desc->rmsnorm_stats->populated;
+    }
+    return true;
+}
+
+// Test-only: inject a caller-provided device rstd buffer into the decomposed handoff so the
+// consumer (Kernel 3 RstdScale) path can be exercised independently of the producer.
+// Not part of the public API.
+extern "C++" HIPBLASLT_EXPORT bool rocblaslt_rmsnorm_handoff_set_scale_for_testing(
+    hipblasLtFusedEpilogueRMSNormDescriptor* desc, void* per_row_scale)
+{
+    if(desc == nullptr)
+        return false;
+    if(desc->owns_scale && desc->per_row_scale != nullptr && desc->per_row_scale != per_row_scale)
+        static_cast<void>(hipFree(desc->per_row_scale));
+    desc->per_row_scale = per_row_scale;
+    desc->populated     = (per_row_scale != nullptr);
+    desc->owns_scale    = false;
+    return true;
+}
+
+hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc)
+try
+{
+    if(desc == nullptr)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    *desc = new hipblasLtFusedEpilogueDescriptor();
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtFusedEpilogueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
+                                          hipblasLtFuseableEpilogue_t        epilogue)
+try
+{
+    if(desc == nullptr)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    const int rank = rmsnorm_chain_rank(epilogue);
+    if(rank < 0)
+        return HIPBLAS_STATUS_INVALID_VALUE; // unrecognized or unsupported epilogue
+
+    // Reject duplicates and out-of-order additions: the accumulated chain must stay an
+    // order-preserving subsequence of the supported RMSNorm chain.
+    if(!desc->stages.empty())
+    {
+        const int prev_rank = rmsnorm_chain_rank(desc->stages.back());
+        if(rank <= prev_rank)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+
+    // Reject mixing full and decomposed RMSNorm stages in one chain: a single chain
+    // uses either HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM or the decomposed producer/consumer
+    // stages, never both.
+    if(epilogue == HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT
+       && fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY))
+        return HIPBLAS_STATUS_INVALID_VALUE; // requant is producer/full-flow only
+
+    const int family = rmsnorm_chain_family(epilogue);
+    if(family != 0)
+    {
+        for(auto s : desc->stages)
+        {
+            const int existing = rmsnorm_chain_family(s);
+            if(existing != 0 && existing != family)
+                return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+    }
+
+    desc->stages.push_back(epilogue);
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescriptor_t desc,
+                                                   hipblasLtFusedEpilogueAttribute_t  attr,
+                                                   const void*                        value,
+                                                   size_t                             sizeInBytes)
+try
+{
+    if(desc == nullptr || value == nullptr)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    switch(attr)
+    {
+    case HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->rmsnorm_gamma, value, sizeof(void*));
+        if(desc->rmsnorm_gamma == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS:
+        if(sizeInBytes < sizeof(float))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->rmsnorm_eps, value, sizeof(float));
+        desc->eps_set = true;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_POINTER:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->residual, value, sizeof(void*));
+        if(desc->residual == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->residual_output, value, sizeof(void*));
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->rmsnorm_stats, value, sizeof(void*));
+        if(desc->rmsnorm_stats == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_POINTER:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_scale, value, sizeof(void*));
+        if(desc->requant_scale == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_AMAX_POINTER:
+        if(sizeInBytes < sizeof(void*))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_amax, value, sizeof(void*));
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_COMPUTE_MODE:
+        if(sizeInBytes < sizeof(hipblasLtRequantScaleComputeMode_t))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_compute_mode, value, sizeof(hipblasLtRequantScaleComputeMode_t));
+        if(!requant_compute_mode_valid(desc->requant_compute_mode))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    case HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY:
+        if(sizeInBytes < sizeof(hipblasLtRequantScaleGranularity_t))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        memcpy(&desc->requant_granularity, value, sizeof(hipblasLtRequantScaleGranularity_t));
+        if(!requant_granularity_valid(desc->requant_granularity))
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        break;
+    default:
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t desc)
+try
+{
+    delete desc;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t
+    hipblasLtFusedEpilogueRMSNormDescriptorCreate(hipblasLtFusedEpilogueRMSNormDescriptor_t* desc)
+try
+{
+    if(desc == nullptr)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    *desc = new hipblasLtFusedEpilogueRMSNormDescriptor();
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t
+    hipblasLtFusedEpilogueRMSNormDescriptorDestroy(hipblasLtFusedEpilogueRMSNormDescriptor_t desc)
+try
+{
+    if(desc != nullptr && desc->owns_scale && desc->per_row_scale != nullptr)
+        static_cast<void>(hipFree(desc->per_row_scale));
+    delete desc;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtMatmulDescSetAttribute(hipblasLtMatmulDesc_t           matmulDesc,
                                                 hipblasLtMatmulDescAttributes_t matmulAttr,
                                                 const void*                     buf,
@@ -418,6 +773,68 @@ hipblasStatus_t hipblasLtMatmulDescSetAttribute(hipblasLtMatmulDesc_t           
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescSetAttribute");
+
+    // Validate a fused-epilogue handle before it is attached to the matmul descriptor.
+    // This is the API-call-time gate for stage-specific required inputs.
+    if(matmulAttr == HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE)
+    {
+        if(buf == nullptr || sizeInBytes < sizeof(void*))
+        {
+            rocblaslt::Debug::Instance().markerStop();
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+        hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
+        memcpy(&fused, buf, sizeof(void*));
+        if(fused != nullptr
+           && fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD)
+           && fused->residual == nullptr)
+        {
+            rocblaslt::Debug::Instance().markerStop();
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+        // gamma and eps back both the full RMSNorm stage and the decomposed producer
+        // (partial RMSNorm stats) stage.
+        if(fused != nullptr
+           && (fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM)
+               || fused_epilogue_has_stage(fused,
+                                           HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS)))
+        {
+            if(fused->rmsnorm_gamma == nullptr || !fused->eps_set)
+            {
+                rocblaslt::Debug::Instance().markerStop();
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+        }
+        // Both decomposed stages require the opaque RMSNorm handoff descriptor to be set so
+        // the producer and consumer calls share the same object.
+        if(fused != nullptr
+           && (fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS)
+               || fused_epilogue_has_stage(fused,
+                                           HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY))
+           && fused->rmsnorm_stats == nullptr)
+        {
+            rocblaslt::Debug::Instance().markerStop();
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+        if(fused != nullptr && fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT))
+        {
+            if(fused->requant_scale == nullptr
+               || !requant_compute_mode_valid(fused->requant_compute_mode)
+               || !requant_granularity_valid(fused->requant_granularity))
+            {
+                rocblaslt::Debug::Instance().markerStop();
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+            if(fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS)
+               && (fused->requant_compute_mode != HIPBLASLT_REQUANT_SCALE_DYNAMIC_FROM_AMAX
+                   || fused->requant_granularity != HIPBLASLT_REQUANT_SCALE_PER_ROW))
+            {
+                rocblaslt::Debug::Instance().markerStop();
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+        }
+    }
+
     auto status = RocBlasLtStatusToHIPStatus(
         rocblaslt_matmul_desc_set_attribute((rocblaslt_matmul_desc)matmulDesc,
                                             (rocblaslt_matmul_desc_attributes)matmulAttr,
@@ -589,6 +1006,81 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmul");
     hipblasStatus_t return_status = HIPBLAS_STATUS_SUCCESS;
+
+    // Fused-epilogue guard. Wired for gfx950:
+    //   - full RMSNorm (single-call producer K1 + reduce-and-apply row_div),
+    //   - the decomposed producer (PARTIAL_RMSNORM_STATS / K1 + row_rstd reduce-and-return), and
+    //   - the decomposed consumer (RMSNORM_SCALE_APPLY / Kernel 3 RstdScale).
+    // Any other fused chain has no matching kernel yet, so reject with NOT_SUPPORTED before launch.
+    if(auto* desc = (rocblaslt_matmul_desc)matmul_descr)
+    {
+        if(desc->fused_epilogue != nullptr)
+        {
+            const auto* fused = desc->fused_epilogue;
+            const bool  fullRmsNorm
+                = fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM);
+            const bool scaleApply
+                = fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY);
+            const bool partialStats
+                = fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS);
+            const bool requant
+                = fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT);
+            if(!fullRmsNorm && !scaleApply && !partialStats)
+            {
+                rocblaslt::Debug::Instance().markerStop();
+                return HIPBLAS_STATUS_NOT_SUPPORTED;
+            }
+            if(fullRmsNorm && requant)
+            {
+                const auto* aLayout = (rocblaslt_matrix_layout)matA;
+                const auto* bLayout = (rocblaslt_matrix_layout)matB;
+                if(aLayout == nullptr || bLayout == nullptr || aLayout->type != HIP_R_16BF
+                   || bLayout->type != HIP_R_16BF)
+                {
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_NOT_SUPPORTED;
+                }
+            }
+            if(scaleApply
+               && (fused->rmsnorm_stats == nullptr || !fused->rmsnorm_stats->populated
+                   || fused->rmsnorm_stats->per_row_scale == nullptr))
+            {
+                rocblaslt::Debug::Instance().markerStop();
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+            // Decomposed producer: the library owns the per-row rstd handoff buffer. Allocate it
+            // (FP32 [rows*batch], rows rounded up so the consumer's padded rstd read stays in
+            // bounds) on the first producer call if the caller has not provided one; the producer's
+            // row_rstd reduction fills it and the consumer GEMM2 reads it. Freed on descriptor
+            // destroy.
+            if(partialStats && fused->rmsnorm_stats != nullptr
+               && fused->rmsnorm_stats->per_row_scale == nullptr)
+            {
+                auto*          dlay       = (rocblaslt_matrix_layout)matD;
+                const uint64_t rows       = dlay ? dlay->m : 0;
+                const int32_t  batch      = dlay ? dlay->batch_count : 1;
+                const uint64_t paddedRows = ((rows + 255) / 256) * 256;
+                void*          scale      = nullptr;
+                if(dlay == nullptr || paddedRows == 0 || batch <= 0)
+                {
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
+                if(hipMalloc(&scale, paddedRows * static_cast<size_t>(batch) * sizeof(float))
+                   == hipSuccess)
+                {
+                    fused->rmsnorm_stats->per_row_scale = scale;
+                    fused->rmsnorm_stats->populated     = true;
+                    fused->rmsnorm_stats->owns_scale    = true;
+                }
+                else
+                {
+                    rocblaslt::Debug::Instance().markerStop();
+                    return HIPBLAS_STATUS_ALLOC_FAILED;
+                }
+            }
+        }
+    }
 
     return_status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul((rocblaslt_handle)handle,
                                                                 (rocblaslt_matmul_desc)matmul_descr,

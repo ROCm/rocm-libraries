@@ -109,6 +109,85 @@ typedef enum {
 } hipblasLtEpilogue_t;
 
 /*! \ingroup types_module
+ *  \brief Components that can be composed into a fused epilogue chain.
+ *
+ *  \details
+ *  Unlike the flat ``hipblasLtEpilogue_t`` enum, these values name composable epilogue
+ *  stages that are accumulated into a ``hipblasLtFusedEpilogueDescriptor_t`` via
+ *  ``hipblasLtFusedEpilogueAdd`` and attached to a matmul descriptor through
+ *  ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``.
+ */
+typedef enum {
+  HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD          = 0, /**<Add a residual tensor to the GEMM result. Requires a residual pointer attribute.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM               = 1, /**<Full per-row RMSNorm (``x * rsqrt(mean(x^2) + eps) * gamma``), realized internally as a producer plus a reduce-and-apply kernel. Requires gamma and eps attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS = 2, /**<Decomposed flow (GEMM1 producer): emits the tile-local ``h1 * gamma`` value plus per-row RMSNorm statistics into an RMSNorm handoff descriptor. Requires gamma, eps, and stats attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY   = 3, /**<Decomposed flow (GEMM2 consumer): applies the deferred per-row RMSNorm scale carried in the handoff descriptor. Requires the stats attribute.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_AMAX                  = 4, /**<Capture the result AMax (maximum absolute value) as a side output.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT               = 5, /**<Requantize the result to a narrow output type (chosen by D's data type, e.g. FP8). In a decomposed producer chain after partial RMSNorm stats, this writes the dynamic-quantized producer output while the RMSNorm handoff carries the composed consumer scale. Configured by the requant scale, amax, compute-mode, and granularity attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_SWIGLU                = 6, /**<Reserved epilogue family: SwiGLU gated linear unit.*/
+} hipblasLtFuseableEpilogue_t;
+
+/*! \ingroup types_module
+ *  \brief How the requant output scale is obtained.
+ *
+ *  \details
+ *  Selects whether the fused ``HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT`` stage consumes a
+ *  caller-provided scale or derives one from the result ``amax`` while writing the quantized
+ *  output. This is independent of the narrow output format (FP8, FP4, ...), which is chosen by
+ *  D's data type.
+ */
+typedef enum {
+  HIPBLASLT_REQUANT_SCALE_STATIC            = 0, /**<Use a fixed caller-provided scale. The scale pointer is read-only and no amax reduction is required in the epilogue.*/
+  HIPBLASLT_REQUANT_SCALE_DYNAMIC_FROM_AMAX = 1, /**<Derive the scale from the result amax computed in the epilogue and write it to the scale pointer.*/
+} hipblasLtRequantScaleComputeMode_t;
+
+/*! \ingroup types_module
+ *  \brief Granularity (shape) of the requant scale, and of any amax side output.
+ *
+ *  \details
+ *  Determines how many scale/amax values are shared across the ``[M,N]`` result. Per-tensor uses a
+ *  single value; per-row uses one value per output row (``[M]``). Block granularities can be added
+ *  later when there is a concrete model and kernel requirement.
+ */
+typedef enum {
+  HIPBLASLT_REQUANT_SCALE_PER_TENSOR    = 0, /**<One scalar scale for the whole result tensor. Scale/amax shape ``[1]``.*/
+  HIPBLASLT_REQUANT_SCALE_PER_ROW       = 1, /**<One scale per output row/token. Scale/amax shape ``[M]``.*/
+} hipblasLtRequantScaleGranularity_t;
+
+/*! \ingroup types_module
+ *  \brief Attributes settable on a fused epilogue descriptor.
+ */
+typedef enum {
+  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA = 0, /**<Non-null device pointer to the RMSNorm gamma (per-channel scale) vector of length N. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``void*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS   = 1, /**<Epsilon added inside the RMSNorm reciprocal square root. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``float``.*/
+  HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_POINTER = 2, /**<Non-null device pointer to the residual input tensor. The tensor has the same logical shape, layout, and data type as D. Data type: ``void*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER = 3, /**<Optional device pointer that receives the updated residual stream after the residual add. If NULL or unset, the residual input tensor is updated in place. Data type: ``void*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS = 4, /**<Opaque RMSNorm handoff descriptor linking the decomposed producer (partial RMSNorm stats) and consumer (RMSNorm scale-apply) matmul calls. The same object must be set on both handles. The carried consumer scale is rstd for the ordinary decomposed flow, or the composed RMSNorm-output dequant scale for the dynamic-quantized decomposed producer. Data type: ``hipblasLtFusedEpilogueRMSNormDescriptor_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_POINTER = 5, /**<Device pointer to the requant dequant scale. In static mode it is read-only input; in dynamic mode it receives the derived scale. For the dynamic-quantized decomposed producer, this receives the logical RMSNorm-output dequant scale consumed by GEMM2. Its element count follows the scale granularity. Data type: ``void*`` (f32 elements).*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_AMAX_POINTER = 6, /**<Optional device pointer that receives the result amax side output, with the same granularity as the scale. If unset in dynamic mode, amax is computed internally only to derive the scale. Data type: ``void*`` (f32 elements).*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_COMPUTE_MODE = 7, /**<How the output scale is obtained (static vs dynamic-from-amax). Defaults to static. Data type: ``hipblasLtRequantScaleComputeMode_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY = 8, /**<Shape shared by the scale and amax outputs (per-tensor or per-row). Defaults to per-tensor. Data type: ``hipblasLtRequantScaleGranularity_t``.*/
+} hipblasLtFusedEpilogueAttribute_t;
+
+/*! \ingroup types_module
+ *  \brief Opaque handle representing a composed (fused) epilogue chain.
+ */
+typedef struct hipblasLtFusedEpilogueDescriptor* hipblasLtFusedEpilogueDescriptor_t;
+
+/*! \ingroup types_module
+ *  \brief Opaque, library-populated handoff descriptor for the decomposed RMSNorm flow.
+ *
+ *  \details
+ *  Used only by the decomposed flow: the producer stage
+ *  (``HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS``) writes the finalized consumer scale,
+ *  and the consumer stage (``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY``) reads it in the
+ *  GEMM2 epilogue. The caller creates one descriptor, sets the same handle on both fused-epilogue
+ *  chains through ``HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS``, and destroys it after both calls.
+ *  The full ``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM`` flow does not use this descriptor.
+ */
+typedef struct hipblasLtFusedEpilogueRMSNormDescriptor* hipblasLtFusedEpilogueRMSNormDescriptor_t;
+
+/*! \ingroup types_module
  *  \brief Specify the batch mode of the matrices.
  */
 
@@ -254,6 +333,7 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,      /**<Select the hipBLASLt StreamK tile scheduling mode for StreamK=5 hybrid kernels (static SK3 vs dynamic SK4 work-queue sub-paths). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtStreamKTileSchedulingMode_t``: ``0`` (``OFF``, default) uses the SK3 static sub-path; when ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is set to a positive value the library heuristic still runs per launch to pick SK4 when appropriate; ``1`` (``ON``) always requests the SK4 dynamic work-queue sub-path when the selected kernel supports it; ``2`` (``AUTO``) always lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105, /**<Request a uniform summation order across the M dimension. Provided as an ``_EXT`` attribute. When enabled, hipBLASLt guarantees that if every row of matrix A is the identical vector, every row of the output matrix D is bitwise identical. This is uniformity across the M dimension within a single run; it is **not** run-to-run determinism. ``0`` (default) inherits the handle-level request (``hipblasLtSetUniformSummationOrder``); ``1`` enables this GEMM. Other values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Enabling the mode restricts kernel selection and the launch configuration, so it can reduce performance, and hipblasLtMatmul() returns ``HIPBLAS_STATUS_INVALID_VALUE`` when no uniform-safe configuration exists for the resolved launch rather than silently producing a non-uniform result. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a composable fused epilogue chain to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` handle built with ``hipblasLtFusedEpilogueCreate``/``...Add``/``...SetAttribute``. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -786,6 +866,111 @@ hipblasStatus_t hipblasLtMatmulDescCreate(hipblasLtMatmulDesc_t* matmulDesc,
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtMatmulDescDestroy(const hipblasLtMatmulDesc_t matmulDesc);
+
+/*! \ingroup library_module
+ *  \brief Create a fused (composable) epilogue descriptor.
+ *
+ *  \details
+ *  Allocates an opaque handle that accumulates composable epilogue stages (see
+ *  \ref hipblasLtFuseableEpilogue_t). Build the chain with \ref hipblasLtFusedEpilogueAdd
+ *  and \ref hipblasLtFusedEpilogueSetAttribute, then attach it to a matmul descriptor via
+ *  the \ref HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE attribute. Destroy with
+ *  \ref hipblasLtFusedEpilogueDestroy.
+ *
+ *  @param[out]
+ *  desc  Pointer that receives the newly created handle.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the handle was created.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p desc is NULL.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc);
+
+/*! \ingroup library_module
+ *  \brief Append an epilogue stage to a fused epilogue descriptor.
+ *
+ *  \details
+ *  Stages are accumulated in call order. An unrecognized or unsupported epilogue, a
+ *  duplicate stage, or a stage that breaks the supported ordering is rejected.
+ *
+ *  @param[in]
+ *  desc  A handle created by \ref hipblasLtFusedEpilogueCreate.
+ *  @param[in]
+ *  epilogue  The stage to append. See \ref hipblasLtFuseableEpilogue_t.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the stage was appended.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p desc is NULL, the epilogue is unrecognized or
+ *  unsupported for the current chain family, or the resulting chain is not a legal ordering.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
+                                          hipblasLtFuseableEpilogue_t        epilogue);
+
+/*! \ingroup library_module
+ *  \brief Set an attribute (e.g. RMSNorm gamma pointer or eps) on a fused epilogue descriptor.
+ *
+ *  @param[in]
+ *  desc  A handle created by \ref hipblasLtFusedEpilogueCreate.
+ *  @param[in]
+ *  attr  The attribute to set. See \ref hipblasLtFusedEpilogueAttribute_t.
+ *  @param[in]
+ *  value  Pointer to the value to set.
+ *  @param[in]
+ *  sizeInBytes  Size of \p value in bytes, for verification.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the attribute was set.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p desc or \p value is NULL, the attribute is
+ *  unrecognized, or \p sizeInBytes is too small.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescriptor_t desc,
+                                                   hipblasLtFusedEpilogueAttribute_t  attr,
+                                                   const void*                        value,
+                                                   size_t                             sizeInBytes);
+
+/*! \ingroup library_module
+ *  \brief Destroy a fused epilogue descriptor.
+ *
+ *  @param[in]
+ *  desc  A handle created by \ref hipblasLtFusedEpilogueCreate.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the handle was destroyed.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t desc);
+
+/*! \ingroup library_module
+ *  \brief Create an opaque RMSNorm handoff descriptor for the decomposed RMSNorm flow.
+ *
+ *  \details
+ *  Allocates the library-populated object that links the decomposed producer
+ *  (\ref HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS) and consumer
+ *  (\ref HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY) matmul calls. Set the returned handle
+ *  on both fused-epilogue handles via \ref HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS, keep it alive
+ *  across the producer and consumer matmul calls, and destroy it with
+ *  \ref hipblasLtFusedEpilogueRMSNormDescriptorDestroy.
+ *
+ *  @param[out]
+ *  desc  Pointer that receives the newly created handle.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the handle was created.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p desc is NULL.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t
+    hipblasLtFusedEpilogueRMSNormDescriptorCreate(hipblasLtFusedEpilogueRMSNormDescriptor_t* desc);
+
+/*! \ingroup library_module
+ *  \brief Destroy an RMSNorm handoff descriptor.
+ *
+ *  @param[in]
+ *  desc  A handle created by \ref hipblasLtFusedEpilogueRMSNormDescriptorCreate.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS If the handle was destroyed.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t
+    hipblasLtFusedEpilogueRMSNormDescriptorDestroy(hipblasLtFusedEpilogueRMSNormDescriptor_t desc);
 
 /*! \ingroup library_module
  *  \brief  Set attribute to a matrix multiply descriptor.

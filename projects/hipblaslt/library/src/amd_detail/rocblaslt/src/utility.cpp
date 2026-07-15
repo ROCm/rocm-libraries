@@ -280,6 +280,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT";
     case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
         return "MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT";
+    case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+        return "MATMUL_DESC_FUSED_EPILOGUE";
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
     case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:

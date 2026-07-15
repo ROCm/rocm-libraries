@@ -18,6 +18,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronizer_size_check_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_epilogue_chain.cpp
 )
 
 # NOTE: secure_env_gtest.cpp (ROCM-26729) intentionally includes the header-only
