@@ -10,6 +10,8 @@ Install rocALUTION
 You can install rocALUTION as part of the AMD ROCm software stack or `HIP SDK <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/>`__ for Windows, or you can build it directly from source.
 The installation method you choose depends on your operating system and whether you need a custom configuration, such as multi-node execution.
 
+.. _linux-installation:
+
 Install on Linux
 --------------------------------
 
@@ -117,6 +119,8 @@ These steps assume that rocALUTION was built with client applications enabled (t
       ./cg gr_30_30.mtx
 
 If the installation is successful, the solver prints iteration and residual information and converges without errors.
+
+.. _windows-installation:
 
 Install on Windows
 --------------------------------
