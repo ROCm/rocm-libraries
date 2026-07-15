@@ -87,6 +87,35 @@ void HIPOCKernelInvoke::run(void* args, std::size_t size) const
         MIOPEN_THROW("MIOPEN_DEVICE_ARCH used, escaping launching kernel");
     }
 
+    // Validate the launch geometry before calling into HIP. hipExtModuleLaunchKernel() takes
+    // the global work sizes as uint32_t and the hardware caps gridDim.x at 2^31-1 and
+    // gridDim.y/z at 65535. A solver can compute an out-of-range geometry - e.g. the naive
+    // convolution solver sets g_wk[0] = grid_size * block_size (= n*k*256 for NCHW), which
+    // silently overflows 32 bits once the batch N is large enough. Passing such a value would
+    // truncate to a wrong (possibly zero) grid and make HIP raise an asynchronous
+    // "invalid configuration argument" that corrupts the whole context, turning a later
+    // unrelated HIP call fatal. Throwing here (before any HIP call) lets Find/EvaluateInvokers
+    // reject this candidate cleanly and fall back to a valid solver without a mislaunch.
+    for(std::size_t i = 0; i < 3; ++i)
+    {
+        if(gdims[i] >= (1ULL << 32))
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Invalid launch: global_work_dim[" + std::to_string(i) +
+                             "] = " + std::to_string(gdims[i]) + " exceeds the 32-bit limit of " +
+                             "hipExtModuleLaunchKernel");
+    }
+    if(ldims[0] != 0 && ldims[1] != 0 && ldims[2] != 0)
+    {
+        const auto grid_x = gdims[0] / ldims[0];
+        const auto grid_y = gdims[1] / ldims[1];
+        const auto grid_z = gdims[2] / ldims[2];
+        if(grid_x > 0x7fffffffULL || grid_y > 0xffffULL || grid_z > 0xffffULL)
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "Invalid launch: gridDim {" + std::to_string(grid_x) + ", " +
+                             std::to_string(grid_y) + ", " + std::to_string(grid_z) +
+                             "} exceeds HIP limits {2^31-1, 65535, 65535}");
+    }
+
     MIOPEN_HANDLE_LOCK
 
     auto status = hipExtModuleLaunchKernel(fun,
