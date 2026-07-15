@@ -536,6 +536,20 @@ class IRBuilder:
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
 
+    def exp2_fast(self, a: Value) -> Value:
+        """Native single-instruction base-2 exp: ``llvm.amdgcn.exp2.f32`` -> one
+        ``v_exp_f32``. Unlike ``exp2`` (``llvm.exp2.f32``), it emits NO
+        overflow/underflow guard (the ~5-VALU range-reduction clamp), so the
+        caller must guarantee the argument stays in the hardware's valid range.
+
+        Safe for softmax where the argument is always <= 0 (``s - m_new`` and
+        ``m_i - m_new``): no overflow, and ``v_exp_f32`` already flushes large
+        negatives to 0. Matches FlyDSL's ``rocdl.exp2`` emission. f32 only.
+        """
+        return self._op(
+            "math.exp2_fast", [a], [a.type], result_name_hint="exp2f"
+        ).result
+
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
 
@@ -3551,6 +3565,7 @@ PURE_OP_NAMES = {
     "arith.sitofp_f32",
     "arith.cvt_fp8_to_f32",
     "math.exp2",
+    "math.exp2_fast",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",

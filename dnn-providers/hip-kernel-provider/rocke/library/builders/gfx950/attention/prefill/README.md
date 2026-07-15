@@ -1,0 +1,79 @@
+# Dense flash-attention prefill (gfx950 / MI355X)
+
+Productized dense causal flash-attention prefill kernel for gfx950, authored in the
+rocke IR DSL. Forward-only, bf16/fp16, head_dim 64/128, MHA or GQA.
+
+- Kernel: [`kernels/gfx950/attention_dense.py`](../../../../kernels/gfx950/attention_dense.py)
+  (`AttentionDenseSpec`, `build_attention_dense`, `supports_attention_dense`)
+- Host builder / launcher (this dir): `attention_dense_prefill.py`
+
+## Baked-in levers (always-on, no env gates)
+
+- **CK-1 transposed PV** — P feeds the PV MFMA in its native QK-output layout via a
+  half-local V load (`pv32_v_load_paired`); the cross-half P-relayout shuffle is gone
+  (~96 `ds_bpermute` removed). +35% over the pre-CK-1 winner.
+- **LDS bank-conflict padding on K** (`[NBUF, BN, D+8]`) — kills the 8-way conflict on
+  the QK K-reads. The dominant base win (+80% over the naive baseline).
+- **native `exp2_fast`** (`v_exp_f32`, no overflow guard; softmax argument is always
+  `<= 0`).
+- **full-population `sched_group_barrier` template** (DS_READ/MFMA/VALU/TRANS per PV
+  step).
+- **diagonal-only causal masking** — mask-free body over below-diagonal KV tiles
+  (~94% at Sq=8192) plus a masked diagonal tail.
+- **depth-1 cluster split** fusing exp2 into the PV MFMA loop for MFMA/VALU co-exec.
+- **vectorized O store**.
+
+Shape (batch / seqlen / heads / head_dim / causal / dtype) is baked at build time
+(dense, statically-sized ABI). `block_n` (KV tile) and `waves_per_eu` are the only
+performance knobs.
+
+## Persistent (grid-stride) mode
+
+`AttentionDenseSpec(persistent=True, num_persistent=256)` emits a persistent variant:
+a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
+`W = (seqlen_q // 256) * Hq * B` work items (qb-major decode for causal
+load-balance), so the per-CTA launch/dispatch + scalar setup + K/V-prime cold-start
+is amortized once per CU instead of once per query-block. This closes the causal
+fixed-cost amortization gap. `num_persistent=256` = one 8-wave block per CU on MI355X
+(256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail loss).
+
+## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal)
+
+| Sq | default | persistent (NP=256) |
+|----|--------:|--------------------:|
+| 2048 | ~410 TFLOPS | ~565 TFLOPS |
+| 8192 | ~521 TFLOPS | **~850 TFLOPS** |
+
+Both paths are 0 VGPR spill and bit-identical vs `torch.nn.functional.
+scaled_dot_product_attention` (max abs err ~1.46e-3 at Sq=8192).
+
+## Usage
+
+```bash
+# parity + benchmark (default shapes 256/512/2048/8192)
+python attention_dense_prefill.py                 # default (one CTA per query-block/head)
+python attention_dense_prefill.py --persistent    # persistent grid-stride (NP=256)
+python attention_dense_prefill.py --bn 128        # sweep block_n
+python attention_dense_prefill.py --persistent --np 256 --interleave
+```
+
+Programmatic:
+
+```python
+from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
+
+spec = AttentionDenseSpec(
+    batch=1, seqlen_q=8192, seqlen_kv=8192,
+    num_query_heads=128, num_kv_heads=8, head_size=128,
+    causal=True, dtype="bf16",
+    persistent=True, num_persistent=256,   # grid-stride persistent variant
+)
+kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
+```
+
+## Notes
+
+- gfx950-only (uses `ds_read_b64_tr_b16` and `v_exp_f32`).
+- Compiles through the rocke LLVM-direct (`backend="python"`) path. The `exp2_fast`
+  op is currently lowered on the LLVM-direct backend only (not yet mirrored in the
+  C++ engine); byte-identity coverage for it is a follow-up.
