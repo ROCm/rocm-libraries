@@ -13,13 +13,15 @@
 #pragma once
 #include <string>
 
-namespace rocke_client::dispatcher {
+namespace rocke_client::dispatcher
+{
 
 // Checksum of HW_PROFILES supplement data for drift detection
 constexpr const char* kSupplementChecksum = "bfd26a7ee849840f";
 
 // Supplement data for fields HIP doesn't expose
-struct HardwareProfileSupplement {
+struct HardwareProfileSupplement
+{
     int shader_engines;
     int num_xcd;
     int simds_per_cu;
@@ -35,12 +37,17 @@ constexpr HardwareProfileSupplement kGfx90aSupplement = {8, 1, 4, 32, 16, 8192, 
 constexpr HardwareProfileSupplement kGfx942Supplement = {28, 8, 4, 32, 32, 4096, 262144};
 constexpr HardwareProfileSupplement kGfx950Supplement = {32, 8, 4, 32, 32, 4096, 262144};
 
-inline const HardwareProfileSupplement* getSupplement(const std::string& arch) {
-    if (arch == "gfx1100") return &kGfx1100Supplement;
-    if (arch == "gfx90a") return &kGfx90aSupplement;
-    if (arch == "gfx942") return &kGfx942Supplement;
-    if (arch == "gfx950") return &kGfx950Supplement;
+inline const HardwareProfileSupplement* getSupplement(const std::string& arch)
+{
+    if(arch == "gfx1100")
+        return &kGfx1100Supplement;
+    if(arch == "gfx90a")
+        return &kGfx90aSupplement;
+    if(arch == "gfx942")
+        return &kGfx942Supplement;
+    if(arch == "gfx950")
+        return &kGfx950Supplement;
     return nullptr; // unknown arch
 }
 
-}  // namespace rocke_client::dispatcher
+} // namespace rocke_client::dispatcher

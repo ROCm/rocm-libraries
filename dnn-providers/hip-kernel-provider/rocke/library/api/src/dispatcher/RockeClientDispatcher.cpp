@@ -77,8 +77,8 @@ FmhaFeatures featurizeFmha(const SdpaProblem& problem, const AotInstance& inst)
     // (best approximation; matches sweep when num_warps=1).
     const double num_warps = static_cast<double>(cs.numWarps);
     const double block_m_per_warp = (cs.numWarps > 0)
-        ? static_cast<double>(cs.blockSizeQ) / num_warps
-        : static_cast<double>(cs.blockSizeQ);
+                                        ? static_cast<double>(cs.blockSizeQ) / num_warps
+                                        : static_cast<double>(cs.blockSizeQ);
 
     c.tm0 = block_m_per_warp;
     // Only override tn0 if tileSize is set (>0). When 0 (unset), keep the

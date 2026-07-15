@@ -188,8 +188,8 @@ TEST(TestRockeClientDispatcher, MultipleMatchesWithNoModelUsesFirstMatch)
     InstanceParams inst2 = d64Params();
     inst2.name = "second_match";
 
-    const RockeClientDispatcher dispatcher(AotCatalog(
-        std::vector<AotInstance>{makeInstance(inst1), makeInstance(inst2)}));
+    const RockeClientDispatcher dispatcher(
+        AotCatalog(std::vector<AotInstance>{makeInstance(inst1), makeInstance(inst2)}));
 
     SdpaProblem problem = makeMatchingProblem(inst1); // both instances satisfy
     problem.arch = "gfx999"; // no model registered for this arch
@@ -208,8 +208,8 @@ TEST(TestRockeClientDispatcher, BlockSizeQDerivesBlockMPerWarp)
     // This tests the fix for review comment about blockSizeQ vs block_m_per_warp.
     InstanceParams inst1 = d64Params();
     inst1.name = "test_tiling";
-    inst1.blockSizeQ = 64;  // BLOCK_M
-    inst1.numWarps = 2;     // should derive block_m_per_warp = 64/2 = 32
+    inst1.blockSizeQ = 64; // BLOCK_M
+    inst1.numWarps = 2; // should derive block_m_per_warp = 64/2 = 32
     inst1.tileSize = 128;
 
     const RockeClientDispatcher dispatcher(
@@ -232,7 +232,7 @@ TEST(TestRockeClientDispatcher, ZeroNumWarpsUsesBlockSizeQDirectly)
     InstanceParams inst1 = d64Params();
     inst1.name = "legacy_catalog";
     inst1.blockSizeQ = 32;
-    inst1.numWarps = 0;  // unset -> should use blockSizeQ directly
+    inst1.numWarps = 0; // unset -> should use blockSizeQ directly
 
     const RockeClientDispatcher dispatcher(
         AotCatalog(std::vector<AotInstance>{makeInstance(inst1)}));

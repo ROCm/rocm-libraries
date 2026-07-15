@@ -77,7 +77,7 @@ TEST(TestModelScorer, DifferentFeaturesProduceDifferentScores)
     std::array<double, FmhaFeatures::kNumFeatures> features2{};
 
     // Set different values in a few features
-    features1[0] = 100.0;  // batch
+    features1[0] = 100.0; // batch
     features1[1] = 1024.0; // sq
     features2[0] = 200.0;
     features2[1] = 2048.0;
@@ -210,8 +210,7 @@ TEST(TestModelScorer, SingleMatchSkipsModelScoring)
     inst.dtype = "bf16";
     inst.headSize = 128;
 
-    RockeClientDispatcher dispatcher(
-        AotCatalog(std::vector<AotInstance>{makeInstance(inst)}));
+    RockeClientDispatcher dispatcher(AotCatalog(std::vector<AotInstance>{makeInstance(inst)}));
 
     SdpaProblem problem = makeMatchingProblem(inst);
     problem.arch = "gfx950";

@@ -30,10 +30,10 @@ from .gen_sweep_data import HW_PROFILES
 
 # Fields that HIP can query (excluded from supplement)
 HIP_QUERYABLE_FIELDS = {
-    "hw_num_cus",        # hipDeviceProp_t::multiProcessorCount
+    "hw_num_cus",  # hipDeviceProp_t::multiProcessorCount
     "hw_max_clock_mhz",  # hipDeviceProp_t::clockRate / 1000
-    "hw_wavefront_size", # hipDeviceProp_t::warpSize
-    "hw_lds_capacity",   # hipDeviceProp_t::sharedMemPerBlock
+    "hw_wavefront_size",  # hipDeviceProp_t::warpSize
+    "hw_lds_capacity",  # hipDeviceProp_t::sharedMemPerBlock
 }
 
 # Fields that must come from supplement (HIP doesn't expose them)
@@ -57,7 +57,7 @@ def _compute_checksum(archs: list[str]) -> str:
         data[arch] = {field: profile[field] for field in SUPPLEMENT_FIELDS}
 
     # Serialize to JSON with sorted keys for deterministic output
-    serialized = json.dumps(data, sort_keys=True, separators=(',', ':'))
+    serialized = json.dumps(data, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode()).hexdigest()[:16]
 
 
