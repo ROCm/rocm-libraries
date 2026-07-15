@@ -27,6 +27,17 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* LOG_PREFIX = "[HipFlash2FwdPlanBuilder::isApplicable] ";
 
+    // ── rocWMMA availability (I3) ─────────────────────────────────────────────
+    // rocWMMA MFMA is baked into the precompiled .co at offline build time
+    // (HipFlash2FwdPlan.hip is compiled with -I/opt/rocm/include which provides
+    // rocwmma/rocwmma.hpp). The engine ships the compiled binary; no runtime
+    // check is needed because gfx942 and gfx950 always support MFMA. The arch
+    // guard below is the effective rocWMMA gate: the compiled .co is only valid
+    // for those two arches and hipModuleLoad will fail on any other device.
+    // If the .co was ever built without rocWMMA (which cannot happen from the
+    // in-tree offline build), hipModuleGetFunction would not find the kernel
+    // and buildPlan() would throw, surfacing the failure visibly.
+
     // ── Device check ─────────────────────────────────────────────────────────
     std::string archId;
     try {
@@ -147,13 +158,16 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
                                         const flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
                                         Context& executionContext) const {
     // ── 1. Device string ─────────────────────────────────────────────────────
+    // I6: fail-closed — throw on any error so the framework sees a hard failure
+    // rather than leaving the execution context without a plan.
     std::string archId;
     try {
         archId = getDeviceString(handle.getStream());
     } catch (const std::exception& e) {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "HipFlash2FwdPlanBuilder::buildPlan — getDeviceString: " << e.what());
-        return;
+        const std::string msg =
+            std::string("HipFlash2FwdPlanBuilder::buildPlan — getDeviceString: ") + e.what();
+        HIPDNN_PLUGIN_LOG_ERROR(msg);
+        throw std::runtime_error(msg);
     }
 
     // ── 2. Extract params from graph ─────────────────────────────────────────
@@ -164,9 +178,11 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     const std::string coPath = flash2CoPath(archId);
     const char* funcName = flash2KernelName(params.head_dim);
     if (funcName == nullptr) {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "HipFlash2FwdPlanBuilder::buildPlan — unsupported head_dim=" << params.head_dim);
-        return;
+        const std::string msg =
+            "HipFlash2FwdPlanBuilder::buildPlan — unsupported head_dim=" +
+            std::to_string(params.head_dim);
+        HIPDNN_PLUGIN_LOG_ERROR(msg);
+        throw std::runtime_error(msg);
     }
 
     HIPDNN_PLUGIN_LOG_INFO("HipFlash2FwdPlanBuilder::buildPlan — loading " << coPath
@@ -174,8 +190,10 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
 
     auto kernelOpt = loadKernelModule(coPath, funcName);
     if (!kernelOpt) {
-        HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlanBuilder::buildPlan — failed to load kernel");
-        return;
+        const std::string msg =
+            "HipFlash2FwdPlanBuilder::buildPlan — failed to load kernel from: " + coPath;
+        HIPDNN_PLUGIN_LOG_ERROR(msg);
+        throw std::runtime_error(msg);
     }
 
     // ── 4. Store plan in execution context ───────────────────────────────────
@@ -197,39 +215,4 @@ std::vector<data_objects::KnobT> HipFlash2FwdPlanBuilder::getCustomKnobs(
 // ---------------------------------------------------------------------------
 Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(
     const Handle& /*handle*/, const flatbuffer_utilities::IGraph& opGraph) const {
-    Flash2FwdParams p{};
-
-    auto& sdpaNode = opGraph.getNodeWrapper(0);
-    auto& attrs = sdpaNode.attributesAs<data_objects::SdpaAttributes>();
-    auto& tensorMap = opGraph.getTensorMap();
-
-    // Tensor UIDs
-    p.qUid = attrs.q_tensor_uid();
-    p.kUid = attrs.k_tensor_uid();
-    p.vUid = attrs.v_tensor_uid();
-    p.oUid = attrs.o_tensor_uid();
-
-    // Tensors (layout: BHSD = [B, H, S, D])
-    auto* Q = tensorMap.at(p.qUid);
-    auto* K = tensorMap.at(p.kUid);
-    auto* V = tensorMap.at(p.vUid);
-    auto* O = tensorMap.at(p.oUid);
-
-    // Dimensions from Q: [B, H_q, S_q, D_qk]
-    p.batch = static_cast<int>(Q->dims()->Get(0));
-    p.num_heads_q = static_cast<int>(Q->dims()->Get(1));
-    p.seq_len_q = static_cast<int>(Q->dims()->Get(2));
-    p.head_dim = static_cast<int>(Q->dims()->Get(3));
-
-    // Dimensions from K: [B, H_kv, S_kv, D_qk]
-    p.num_heads_k = static_cast<int>(K->dims()->Get(1));
-    p.seq_len_kv = static_cast<int>(K->dims()->Get(2));
-
-    // Attention scale
-    p.attn_scale = 0.0f;  // default: computed at runtime as 1/sqrt(head_dim)
-    if (attrs.attn_scale_value().has_value()) p.attn_scale = attrs.attn_scale_value().value();
-
-    // Causal mask
-    p.causal = attrs.causal_mask();
-
-    // Strides (in elements) — Q: [B, H, S, D
+    
