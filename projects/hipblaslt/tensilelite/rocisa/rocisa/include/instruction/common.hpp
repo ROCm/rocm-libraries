@@ -5939,6 +5939,23 @@ namespace rocisa
         {
             return std::make_shared<VPermlane16SwapB32>(*this);
         }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // v_permlane16_swap_b32 swaps both operands: both dst and src are dsts.
+            auto dsts = CommonInstruction::getDstParams();
+            dsts.insert(dsts.end(), srcs.begin(), srcs.end());
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // both dst and src are read as srcs.
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            return params;
+        }
     };
 
     struct VPermlane32SwapB32 : public CommonInstruction
