@@ -152,6 +152,10 @@ option(BUILD_CLIENTS_SAMPLES "Build rocSOLVER samples" OFF)
 cmake_dependent_option(BUILD_CLIENTS_EXTRA_TESTS "Build extra tests" OFF BUILD_TESTING OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_CODE_COVERAGE "Build rocSOLVER with code coverage enabled" OFF)
+# CI passes -DROCSOLVER_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
+# gated directly at the instrumentation site (common/) without toggling the
+# shared BUILD_CODE_COVERAGE variable.
+option(ROCSOLVER_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(WERROR "Treat warnings as errors" OFF)
 option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
 check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)

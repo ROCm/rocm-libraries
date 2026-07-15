@@ -69,7 +69,7 @@ if(BUILD_ADDRESS_SANITIZER)
   )
 endif()
 
-if(BUILD_CODE_COVERAGE)
+if(ROCSOLVER_ENABLE_COVERAGE)
   target_compile_options(rocsolver-common INTERFACE
     -g
     -O0

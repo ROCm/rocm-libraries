@@ -81,6 +81,10 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/llv
 option(BUILD_SHARED_LIBS "Build hipSOLVER as a shared library" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_CODE_COVERAGE "Build hipSOLVER with code coverage enabled" OFF)
+# CI passes -DHIPSOLVER_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
+# gated directly at the instrumentation site below without toggling the shared
+# BUILD_CODE_COVERAGE variable.
+option(HIPSOLVER_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPBLAS_TESTS "Build additional tests to ensure hipBLAS and hipSOLVER are compatible (requires installed hipBLAS)" OFF)
 option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionality (requires installed hipSPARSE)" ON)
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
@@ -289,7 +293,7 @@ set(ARMOR_LEVEL "${DEFAULT_ARMOR_LEVEL}" CACHE STRING "Enables increasingly expe
 include(armor-config)
 
 # FOR OPTIONAL CODE COVERAGE
-if(BUILD_CODE_COVERAGE)
+if(HIPSOLVER_ENABLE_COVERAGE)
   target_compile_options(hipsolver-common
     INTERFACE
     -g
