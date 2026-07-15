@@ -4,6 +4,9 @@ Run `hipblaslt-bench` (or any command) while a fixed number of CUs are occupied
 by a background "cotenant" kernel, to measure GEMM performance under CU
 contention.
 
+Linux only: the kernel uses POSIX APIs (`unistd.h`, `pause()`, `usleep()`,
+`getpid()`) and is not built or installed on Windows.
+
 ```bash
 hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
 ```
