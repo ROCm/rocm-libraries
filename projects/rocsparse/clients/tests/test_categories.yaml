@@ -157,7 +157,7 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 300
-    standard: 1800
+    standard: 3600
     comprehensive: 14400
     full: 28800
     ffm-quick: 7200

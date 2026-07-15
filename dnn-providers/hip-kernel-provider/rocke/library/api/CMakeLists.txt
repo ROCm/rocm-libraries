@@ -155,51 +155,65 @@ install(TARGETS rocke_client EXPORT rocke-client
 )
 
 if(ROCKE_CLIENT_ENABLE_TESTS)
-    finalize_test_targets("${PROJECT_NAME}")
-
-    # rocke-client is a nested project(), so add_unit_test_target() records its
-    # test binaries under the ${PROJECT_NAME}_TEST_TARGETS global property, which
-    # the provider's install_provider_ctest_files("hip_kernel_provider") never
-    # reads. Route the installed CTest entries the same way the rocKE platform
-    # engine does:
-    #   * Provider mode (built under hip-kernel-provider): append them to the
-    #     provider's aggregated bin/<subdir>/CTestTestfile.cmake so `ctest` from
-    #     the installed provider test tree runs them via the existing mechanism.
-    #   * Standalone mode: emit our own CTestTestfile under bin/rocke-client/.
-    option(ROCKE_INSTALL_STANDALONE_CTEST "Install standalone rocke-client CTest metadata" ON)
-    if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
-        set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "" CACHE STRING
-            "Provider installed CTest subdir to append rocke-client tests to, e.g. hip_kernel_provider")
-    endif()
-
-    # Both CTestTestfile locations sit one level under bin/, so "../<binary>"
-    # reaches the test executables (installed to bin/) in either mode.
-    set(_ROCKE_CLIENT_CTEST_ENTRIES "")
-    string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-           "add_test(rocke_client_tests \"../rocke_client_tests\")\n")
-    string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-           "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n")
-    string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-           "add_test(rocke_client_integration_tests \"../rocke_client_integration_tests\")\n")
-    string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-           "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
-
-    if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    if(DEFINED ROCKE_CLIENT_PARENT_PROJECT)
+        # Embedded inside hip-kernel-provider: finalize_test_targets is NOT called
+        # here — the parent owns that call, and calling it twice creates duplicate
+        # alias targets (check, unit-check, ...) and fails configure.
+        #
+        # Rename the installed binaries to match the parent provider's artifact
+        # glob ("bin/<parent>*_test*") so TheRock's packaging captures them.
+        # Without this they install as "bin/rocke_client_tests" and miss the glob.
+        # Use EXTERNAL_TEST_INSTALL_STAGING rather than _TEST_TARGETS so the
+        # CTestTestfile entries reference the renamed binary paths, not the raw
+        # CMake target names.
+        string(REPLACE "-" "_" _rocke_client_parent_prefix "${ROCKE_CLIENT_PARENT_PROJECT}")
+        set_target_properties(rocke_client_tests PROPERTIES
+            OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_tests_test")
+        set_target_properties(rocke_client_integration_tests PROPERTIES
+            OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_integration_tests_test")
+        # Build one string: set_property(APPEND_STRING) joins multiple value
+        # arguments with ";", which corrupts the generated CTestTestfile.
+        set(_ROCKE_CLIENT_CTEST_ENTRIES "\n# rocke-client installed tests\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "add_test(rocke_client_tests \"../${_rocke_client_parent_prefix}_rocke_client_tests_test\")\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "add_test(rocke_client_integration_tests \"../${_rocke_client_parent_prefix}_rocke_client_integration_tests_test\")\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
         set_property(GLOBAL APPEND_STRING PROPERTY
-                     "EXTERNAL_TEST_INSTALL_STAGING_${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}"
-                     "\n# rocke-client tests\n${_ROCKE_CLIENT_CTEST_ENTRIES}")
-    endif()
+            "EXTERNAL_TEST_INSTALL_STAGING_${_rocke_client_parent_prefix}"
+            "${_ROCKE_CLIENT_CTEST_ENTRIES}")
+    else()
+        # Standalone build: rocke-client is the top-level project, so it owns
+        # finalize_test_targets and its own installed CTestTestfile under
+        # bin/rocke-client/ (reached from ctest via "../<binary>"). Provider-mode
+        # CTest staging is handled by the embedded branch above; this branch only
+        # emits the standalone metadata.
+        finalize_test_targets("${PROJECT_NAME}")
 
-    if(ROCKE_INSTALL_STANDALONE_CTEST)
-        set(_ROCKE_CLIENT_INSTALLED_CTEST "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
-        file(WRITE "${_ROCKE_CLIENT_INSTALLED_CTEST}"
-             "# Autogenerated CTestTestfile for installed rocke-client tests\n")
-        file(APPEND "${_ROCKE_CLIENT_INSTALLED_CTEST}"
-             "# Generated by ${PROJECT_NAME} build system\n\n")
-        file(APPEND "${_ROCKE_CLIENT_INSTALLED_CTEST}" "${_ROCKE_CLIENT_CTEST_ENTRIES}")
+        option(ROCKE_INSTALL_STANDALONE_CTEST "Install standalone rocke-client CTest metadata" ON)
+        if(ROCKE_INSTALL_STANDALONE_CTEST)
+            set(_ROCKE_CLIENT_CTEST_ENTRIES "")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                   "add_test(rocke_client_tests \"../rocke_client_tests\")\n")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                   "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                   "add_test(rocke_client_integration_tests \"../rocke_client_integration_tests\")\n")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                   "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
 
-        install(FILES "${_ROCKE_CLIENT_INSTALLED_CTEST}"
-                DESTINATION ${CMAKE_INSTALL_BINDIR}/rocke-client
-                RENAME CTestTestfile.cmake)
+            set(_ROCKE_CLIENT_INSTALLED_CTEST "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install")
+            file(WRITE "${_ROCKE_CLIENT_INSTALLED_CTEST}"
+                 "# Autogenerated CTestTestfile for installed rocke-client tests\n")
+            file(APPEND "${_ROCKE_CLIENT_INSTALLED_CTEST}"
+                 "# Generated by ${PROJECT_NAME} build system\n\n")
+            file(APPEND "${_ROCKE_CLIENT_INSTALLED_CTEST}" "${_ROCKE_CLIENT_CTEST_ENTRIES}")
+            install(FILES "${_ROCKE_CLIENT_INSTALLED_CTEST}"
+                    DESTINATION ${CMAKE_INSTALL_BINDIR}/rocke-client
+                    RENAME CTestTestfile.cmake)
+        endif()
     endif()
 endif()

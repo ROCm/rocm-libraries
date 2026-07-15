@@ -37,6 +37,9 @@
 
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/ir.h"
+#include <stddef.h> /* size_t */
+/* rocke_attention_tiled_2d_spec_t (the shared tiled-2D spec mirror). */
+#include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -118,6 +121,36 @@ const char* rocke_unified_attn_kv_storage_dtype(const rocke_unified_attn_problem
  * treated as "no pin" -- matching the provider's SdpaProblem (no wpe override).
  */
 bool rocke_unified_attn_select_2d_waves_per_eu(const rocke_unified_attn_problem_t* p, int* out_wpe);
+
+/* ------------------------------------------------------- LDS-budget resolver *
+ * Selection-layer LDS accounting shared by the gfx942 admission gate and the
+ * gfx950 register-PV budget resolver (mirrors the Python helpers in
+ * rocke/instances/common/attention_unified.py). */
+
+/* Python: _tiled_2d_lds_bytes -- static LDS footprint (bytes) of a tiled-2D
+ * geometry. Single source of truth for the per-buffer tile arithmetic; callers
+ * pick which buffers are LDS-resident (K/V slots, Q/P_lds, the block_m<=2T Q
+ * alias, the OUT_STRIPE rule, the 16-bit Acc staging width). */
+int rocke_unified_attn_tiled_2d_lds_bytes(int tile_size,
+                                          int head_size,
+                                          int block_m,
+                                          int kv_elem_bytes,
+                                          int k_slots,
+                                          int v_slots,
+                                          bool include_q_lds,
+                                          bool include_p_lds,
+                                          int v_pad);
+
+/* Python: _resolve_lds_budget -- deterministically shrink an over-budget gfx950
+ * register-PV 2D spec (single-buffer K, then T=64) in place until it fits the
+ * arch LDS cap, using only compile-validated reductions. A strict no-op for
+ * already-fitting / non-register-PV / non-gfx950 specs (returns true, spec
+ * unchanged). Returns false when no validated reduction fits, filling ``reason``
+ * (up to ``reason_cap`` bytes) with a diagnostic. The provider's spec-assembly
+ * path calls this right after building a spec from the selectors above. */
+bool rocke_unified_attn_resolve_lds_budget(rocke_attention_tiled_2d_spec_t* spec,
+                                           char* reason,
+                                           size_t reason_cap);
 
 /* ------------------------------------------------ 2D feature-gate predicates *
  * Exposed mirrors of the Python _enable_* gates that _tiled_spec_from_problem

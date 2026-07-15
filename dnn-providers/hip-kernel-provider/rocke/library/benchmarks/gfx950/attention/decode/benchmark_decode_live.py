@@ -312,6 +312,76 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
         return None, None
 
 
+def _run_aoTriton(
+    shape: DecodeShape, data: dict, *, warmup: int, iters: int
+) -> "Optional[float]":
+    """Time AOTriton flash SDPA for decode. Returns ms or None on failure.
+
+    Reconstructs dense [B, H, S_k, D] KV from the paged cache outside the
+    timed region. Decode shapes have seqlen_q=1 so is_causal=False (a single
+    query attending all keys is identical to causal at q=1, but flash requires
+    non-causal for seqlen_q < seqlen_k on some backends).
+    """
+    import torch
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    from rocke.runtime import synchronize_and_release, time_launches
+
+    if data.get("softcap", 0.0):
+        return None
+    if data.get("alibi_slopes") is not None:
+        return None
+    if data.get("qq_bias") is not None:
+        return None
+
+    try:
+        nrep = shape.num_query_heads // shape.num_kv_heads
+
+        ks, vs = [], []
+        for bi in range(shape.batch):
+            bt = data["block_table"][bi]
+            ks.append(
+                data["kc"][bt].reshape(-1, shape.num_kv_heads, shape.head_size)[
+                    : shape.seqlen_k
+                ]
+            )
+            vs.append(
+                data["vc"][bt].reshape(-1, shape.num_kv_heads, shape.head_size)[
+                    : shape.seqlen_k
+                ]
+            )
+
+        kh = torch.stack([k.transpose(0, 1) for k in ks], dim=0)  # [B, nhk, S_k, D]
+        vh = torch.stack([v.transpose(0, 1) for v in vs], dim=0)
+        kh = kh.repeat_interleave(nrep, dim=1).contiguous()
+        vh = vh.repeat_interleave(nrep, dim=1).contiguous()
+
+        # q: [B, nhq, D] -> [B, nhq, 1, D]
+        qh = data["q"].unsqueeze(2).contiguous()
+
+        scale = data["scale"]
+
+        # Probe eligibility.
+        with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+            _ = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, is_causal=False, scale=scale
+            )
+        torch.cuda.synchronize()
+
+        hip_stream = _bench_stream_handle()
+
+        def call_once():
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                torch.nn.functional.scaled_dot_product_attention(
+                    qh, kh, vh, is_causal=False, scale=scale
+                )
+
+        ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+        synchronize_and_release(hip_stream)
+        return ms
+    except Exception:
+        return None
+
+
 def _gm(vals: List[float]) -> float:
     vals = [v for v in vals if v and v > 0]
     return (
@@ -455,7 +525,7 @@ def main() -> int:
     print()
 
     header = (
-        f"{'label':<22}  {'triton_us':>10}  "
+        f"{'label':<22}  {'triton_us':>10}  {'aot_us':>10}  "
         + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
         + f"  {'best_sms':>8}  {'best_spd':>9}  path"
     )
@@ -482,6 +552,9 @@ def main() -> int:
         tri_ms = _run_triton(shape, data, warmup=args.warmup, iters=args.iterations)
         tri_us = tri_ms * 1000 if tri_ms else float("nan")
 
+        aot_ms = _run_aoTriton(shape, data, warmup=args.warmup, iters=args.iterations)
+        aot_us = aot_ms * 1000 if aot_ms else float("nan")
+
         dsl_results: Dict[int, Dict] = {}
         best_sms: Optional[int] = None
         best_ms: Optional[float] = None
@@ -501,6 +574,7 @@ def main() -> int:
                 dsl_results[sms] = {"ms": None, "path": None}
 
         best_spd = (tri_ms / best_ms) if (tri_ms and best_ms) else float("nan")
+        best_spd_aot = (aot_ms / best_ms) if (aot_ms and best_ms) else float("nan")
         if math.isfinite(best_spd):
             speedups.append(best_spd)
 
@@ -512,9 +586,12 @@ def main() -> int:
             )
             for s in args.num_sms_sweep
         )
+        aot_spd_str = (
+            f"{best_spd_aot:>8.3f}x" if math.isfinite(best_spd_aot) else f"{'N/A':>9}"
+        )
         print(
-            f"{shape.label:<22}  {tri_us:>10.1f}  {sms_cols}"
-            f"  {best_sms or '-':>8}  {best_spd:>8.3f}x  {best_path}"
+            f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}  {sms_cols}"
+            f"  {best_sms or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)  {best_path}"
         )
 
         results.append(
@@ -531,19 +608,33 @@ def main() -> int:
                 "block_size": shape.block_size,
                 "dtype": shape.dtype,
                 "triton_ms": tri_ms,
+                "aoTriton_ms": aot_ms,
                 "dsl": {str(sms): dsl_results[sms] for sms in args.num_sms_sweep},
                 "best_sms": best_sms,
                 "best_ms": best_ms,
-                "best_speedup": best_spd if math.isfinite(best_spd) else None,
+                "best_speedup_vs_triton": best_spd if math.isfinite(best_spd) else None,
+                "best_speedup_vs_aoTriton": (
+                    best_spd_aot if math.isfinite(best_spd_aot) else None
+                ),
                 "best_path": best_path,
             }
         )
 
+    aot_spds = [
+        r["best_speedup_vs_aoTriton"]
+        for r in results
+        if r.get("best_speedup_vs_aoTriton") is not None
+    ]
     print()
     print(
-        f"geomean speedup (DSL best vs Triton): {_gm(speedups):.3f}x  "
+        f"geomean speedup (DSL best vs Triton):   {_gm(speedups):.3f}x  "
         f"({sum(1 for s in speedups if s > 1)}/{len(speedups)} wins)"
     )
+    if aot_spds:
+        print(
+            f"geomean speedup (DSL best vs AOTriton): {_gm(aot_spds):.3f}x  "
+            f"(n={len(aot_spds)})"
+        )
 
     if args.output_json:
         args.output_json.write_text(json.dumps(results, indent=2, default=str))
