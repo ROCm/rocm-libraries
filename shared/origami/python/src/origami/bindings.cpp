@@ -234,18 +234,18 @@ NB_MODULE(origami, m) {
 
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
-                          size_t,
-                          size_t,
-                          size_t,
-                          size_t,
-                          double,
-                          double,
-                          double,
-                          size_t,
-                          double,
-                          size_t,
-                          std::tuple<double, double, double>,
-                          std::optional<int>>(),
+                          size_t,                             // N_CU
+                          size_t,                             // lds_capacity
+                          size_t,                             // rf_capacity
+                          size_t,                             // NUM_XCD
+                          double,                             // mem1_perf_ratio
+                          double,                             // mem2_perf_ratio
+                          double,                             // mem3_perf_ratio
+                          size_t,                             // L2_capacity
+                          double,                             // compute_clock_ghz
+                          size_t,                             // parallel_mi_cu
+                          std::tuple<double, double, double>, // mem_bw_per_wg_coefficients
+                          std::optional<int>>(),              // pci_chip_id
            nanobind::arg("arch"),
            nanobind::arg("N_CU"),
            nanobind::arg("lds_capacity"),

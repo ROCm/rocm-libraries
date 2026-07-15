@@ -225,20 +225,6 @@ namespace TensileLite
                     }
                 }
             }
-            else
-            {
-                // No HipAMDGPU or Origami analytical hardware: skip rank_configs and walk
-                // solutions in library order, keeping entries that satisfy predicates.
-                for(auto const& row : solution_list)
-                {
-                    considerSolution(row.second);
-                    if(rv.size() == numSolutions)
-                    {
-                        break;
-                    }
-                }
-            }
-
             // can't reach the requested number, means findTop already done its best
             lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
