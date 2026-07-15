@@ -31,10 +31,10 @@ skips:
     solution_index: 1
     ticket: ROCM-7144
   - path: src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/Equality/gfx950_Cijk_Ailk_Bjlk_BBS_BH_BiasSB_HAS_SAV_UserArgs.yaml
-    solution_index: 12
+    solution_index: 11
     ticket: ROCM-7144
   - path: src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/Equality/gfx950_Cijk_Ailk_Bjlk_S_MX_B_BiasS_HAS_SAV_UserArgs.yaml
-    solution_index: 64
+    solution_index: 62
     ticket: ROCM-7144
   - path: src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Ailk_Bjlk_BBS_BH_BiasSB_HAS_SAV_UserArgs.yaml
     solution_index: 12
@@ -43,8 +43,8 @@ skips:
     solution_index: 64
     ticket: ROCM-7144
   - path: src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/Equality/gfx950_Cijk_Ailk_Bljk_S_MX_B_BiasS_HAS_SAV_UserArgs.yaml
-    solution_index: 88
+    solution_index: 84
     ticket: ROCM-7144
   - path: src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_S_MX_B_BiasS_HAS_SAV_UserArgs.yaml
-    solution_index: 71
+    solution_index: 64
     ticket: ROCM-7144

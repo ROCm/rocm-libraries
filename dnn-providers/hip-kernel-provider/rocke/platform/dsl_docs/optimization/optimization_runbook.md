@@ -1988,8 +1988,8 @@ moved measured throughput by under 1 % on direct-conv kernels.
 | `no_fence` context manager | `runtime/launcher.py` | Skip per-call sync inside an event-timed loop (graph-style) |
 | `time_launches(fn, warmup, iters, stream)` | `runtime/launcher.py` | The canonical HIP-event timer |
 | `StreamConfig` | `runtime/launcher.py` | Mirror of CK Tile `stream_config` |
-| `resolve_stream(stream=0)` | `runtime/torch_module.py` | Substitute torch's current stream to keep allocator coherent |
-| `pack_args` vs `pack_args_kernelparams` | `runtime/torch_module.py` | AMDGPU kernarg buffer vs the safer `kernelParams` path |
+| `resolve_stream(stream=0)` | `runtime/torch_interop.py` | Substitute torch's current stream to keep allocator coherent |
+| `pack_args` vs `pack_args_kernelparams` | `runtime/packing.py` | AMDGPU kernarg buffer vs the safer `kernelParams` path |
 | HIP graph capture | torch | Amortizes launch overhead — pair with `no_fence` and many iters |
 | `rocm-smi --setperflevel high && --setsclk 7` | shell | Lock clocks to avoid thermal / DVFS noise during measurement |
 
