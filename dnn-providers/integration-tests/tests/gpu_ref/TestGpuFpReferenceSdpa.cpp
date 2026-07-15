@@ -27,9 +27,12 @@
 
 #include <hipdnn_gpu_ref/GpuFpReferenceSdpa.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -124,9 +127,65 @@ float gpuRefFwdTolerance()
     }
 }
 
+float storeProbabilityForProvider(float probability, SdpaSoftmaxProbabilityMode mode)
+{
+    switch(mode)
+    {
+    case SdpaSoftmaxProbabilityMode::Float:
+        return probability;
+    case SdpaSoftmaxProbabilityMode::Bfloat16Rtne:
+        return static_cast<float>(bfloat16(probability));
+    case SdpaSoftmaxProbabilityMode::Bfloat16Rtz:
+    {
+        // Non-negative probability: clearing the low 16 mantissa bits is round-toward-zero.
+        const uint32_t bits = __builtin_bit_cast(uint32_t, probability) & 0xFFFF0000U;
+        return __builtin_bit_cast(float, bits);
+    }
+    default:
+        throw std::invalid_argument("Unsupported SDPA probability mode");
+    }
+}
+
+float expectedSingleQueryProviderOutput(const Tensor<bfloat16>& q,
+                                        const Tensor<bfloat16>& k,
+                                        const Tensor<bfloat16>& v,
+                                        SdpaSoftmaxProbabilityMode probabilityMode)
+{
+    const auto* qData = q.memory().hostData();
+    const auto* kData = k.memory().hostData();
+    const auto* vData = v.memory().hostData();
+    const int64_t seqKv = k.dims()[2];
+
+    std::vector<float> scores(static_cast<size_t>(seqKv));
+    float maxVal = -std::numeric_limits<float>::infinity();
+    for(int64_t skv = 0; skv < seqKv; ++skv)
+    {
+        scores[static_cast<size_t>(skv)]
+            = static_cast<float>(qData[0]) * static_cast<float>(kData[skv]);
+        maxVal = std::max(maxVal, scores[static_cast<size_t>(skv)]);
+    }
+
+    float sumExp = 0.0f;
+    for(float score : scores)
+    {
+        sumExp += std::exp(score - maxVal);
+    }
+
+    float weighted = 0.0f;
+    for(int64_t skv = 0; skv < seqKv; ++skv)
+    {
+        const float probability = std::exp(scores[static_cast<size_t>(skv)] - maxVal) / sumExp;
+        weighted += storeProbabilityForProvider(probability, probabilityMode)
+                    * static_cast<float>(vData[skv]);
+    }
+
+    return weighted;
+}
+
 // Same contract as compareGpuVsCpuSdpaFwd, but also requests the optional
-// log-sum-exp [B, H, Sq] output from both references and compares it. LSE is
-// always float. Use ONLY for configs with no fully-masked rows: a fully-masked
+// log-sum-exp output from both references. The CPU oracle exposes graph-shaped
+// rank-4 stats [B, H, Sq, 1]; the GPU reference kernel exposes squeezed rank-3
+// LSE [B, H, Sq]. Use ONLY for configs with no fully-masked rows: a fully-masked
 // row yields LSE = -inf, which assertAllClose treats as a hard failure (see
 // LseFullyMaskedRowIsNegInf for that case, which checks -inf explicitly).
 template <typename QDataType,
@@ -177,8 +236,23 @@ void compareGpuVsCpuSdpaFwdWithLse(Tensor<QDataType>& q,
 
     assertAllClose(oCpu, oGpu, tolerance);
     // LSE is always FP32 regardless of the output dtype, so it uses the float
-    // tolerance rather than the (possibly bf16/half) output tolerance.
-    assertAllClose(lseCpu, lseGpu, gpuRefFwdTolerance<float>());
+    // tolerance rather than the (possibly bf16/half) output tolerance. Compare
+    // elementwise because CPU stats are rank-4 and GPU LSE is rank-3.
+    TensorView<float> lseCpuView(lseCpu);
+    TensorView<float> lseGpuView(lseGpu);
+    for(int64_t b = 0; b < q.dims()[0]; ++b)
+    {
+        for(int64_t h = 0; h < q.dims()[1]; ++h)
+        {
+            for(int64_t sq = 0; sq < q.dims()[2]; ++sq)
+            {
+                EXPECT_NEAR(lseGpuView.getHostValue(std::vector<int64_t>{b, h, sq}),
+                            lseCpuView.getHostValue(std::vector<int64_t>{b, h, sq, 0}),
+                            gpuRefFwdTolerance<float>())
+                    << "GPU/CPU LSE mismatch at b=" << b << ", h=" << h << ", sq=" << sq;
+            }
+        }
+    }
 }
 
 } // namespace
@@ -208,6 +282,92 @@ TYPED_TEST(TestGpuSdpaFwdPlain, BasicMha)
     Tensor<T> oGpu({2, 4, 8, 16});
 
     compareGpuVsCpuSdpaFwd<T, T, T, T>(q, k, v, oCpu, oGpu, gpuRefFwdTolerance<T>());
+}
+
+TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtneRoundsProbabilityBeforePv)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<bfloat16> q({1, 1, 1, 1});
+    Tensor<bfloat16> k({1, 1, 4, 1});
+    Tensor<bfloat16> v({1, 1, 4, 1});
+    Tensor<float> oGpu({1, 1, 1, 1});
+
+    q.memory().hostData()[0] = bfloat16(1.0f);
+    k.memory().hostData()[0] = bfloat16(-3.0f);
+    k.memory().hostData()[1] = bfloat16(-1.0f);
+    k.memory().hostData()[2] = bfloat16(0.0f);
+    k.memory().hostData()[3] = bfloat16(2.0f);
+    v.memory().hostData()[0] = bfloat16(1000.0f);
+    v.memory().hostData()[1] = bfloat16(-1000.0f);
+    v.memory().hostData()[2] = bfloat16(500.0f);
+    v.memory().hostData()[3] = bfloat16(-500.0f);
+
+    const float fp32ProbabilityExpected
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Float);
+    const float providerExpected
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+    ASSERT_GT(std::abs(providerExpected - fp32ProbabilityExpected), 0.1f);
+
+    GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, float, float>(
+        q,
+        k,
+        v,
+        oGpu,
+        /*attnScaleValue=*/1.0f,
+        /*attnMask=*/nullptr,
+        /*leftBound=*/-1,
+        /*rightBound=*/-1,
+        /*topLeftAlignment=*/true,
+        /*lse=*/nullptr,
+        SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+
+    const float actual = oGpu.memory().hostData()[0];
+    EXPECT_NEAR(actual, providerExpected, 1e-2f);
+    EXPECT_GT(std::abs(actual - fp32ProbabilityExpected), 0.1f);
+}
+
+TEST(TestGpuSdpaFwdProviderContract, Bfloat16RtzModeTruncatesProbabilityBeforePv)
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<bfloat16> q({1, 1, 1, 1});
+    Tensor<bfloat16> k({1, 1, 4, 1});
+    Tensor<bfloat16> v({1, 1, 4, 1});
+    Tensor<float> oGpu({1, 1, 1, 1});
+
+    q.memory().hostData()[0] = bfloat16(1.0f);
+    k.memory().hostData()[0] = bfloat16(-3.0f);
+    k.memory().hostData()[1] = bfloat16(-1.0f);
+    k.memory().hostData()[2] = bfloat16(0.0f);
+    k.memory().hostData()[3] = bfloat16(2.0f);
+    v.memory().hostData()[0] = bfloat16(1000.0f);
+    v.memory().hostData()[1] = bfloat16(-1000.0f);
+    v.memory().hostData()[2] = bfloat16(500.0f);
+    v.memory().hostData()[3] = bfloat16(-500.0f);
+
+    const float rtneExpected
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+    const float rtzExpected
+        = expectedSingleQueryProviderOutput(q, k, v, SdpaSoftmaxProbabilityMode::Bfloat16Rtz);
+    ASSERT_GT(std::abs(rtneExpected - rtzExpected), 1.0f);
+
+    GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, float, float>(
+        q,
+        k,
+        v,
+        oGpu,
+        /*attnScaleValue=*/1.0f,
+        /*attnMask=*/nullptr,
+        /*leftBound=*/-1,
+        /*rightBound=*/-1,
+        /*topLeftAlignment=*/true,
+        /*lse=*/nullptr,
+        SdpaSoftmaxProbabilityMode::Bfloat16Rtz);
+
+    const float actual = oGpu.memory().hostData()[0];
+    EXPECT_NEAR(actual, rtzExpected, 1e-2f);
+    EXPECT_GT(std::abs(actual - rtneExpected), 1.0f);
 }
 
 // ============================================================================
@@ -739,10 +899,10 @@ TEST(TestGpuSdpaFwdMixedPrecision, Bfloat16InputsFloatOutput)
 }
 
 // ============================================================================
-// LSE (log-sum-exp) output. The GPU reference exposes the optional [B, H, Sq]
-// LSE that CpuFpReferenceSdpa produces (LSE = maxVal + log(sumExp)); these
-// compare it against the CPU oracle. Configs are chosen so no query row is fully
-// masked (LSE there is -inf, covered separately below).
+// LSE (log-sum-exp) output. The GPU reference exposes optional squeezed [B, H, Sq]
+// LSE while CpuFpReferenceSdpa produces graph-shaped [B, H, Sq, 1] stats; these
+// compare the values against the CPU oracle. Configs are chosen so no query row is
+// fully masked (LSE there is -inf, covered separately below).
 // ============================================================================
 
 TYPED_TEST(TestGpuSdpaFwdPlain, LseBasicMha)
@@ -755,7 +915,7 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LseBasicMha)
     Tensor<T> v({2, 4, 8, 16});
     Tensor<T> oCpu({2, 4, 8, 16});
     Tensor<T> oGpu({2, 4, 8, 16});
-    Tensor<float> lseCpu({2, 4, 8}); // [B, H, Sq]
+    Tensor<float> lseCpu({2, 4, 8, 1}); // CPU graph-shaped stats [B, H, Sq, 1]
     Tensor<float> lseGpu({2, 4, 8});
 
     compareGpuVsCpuSdpaFwdWithLse<T, T, T, T>(
@@ -774,7 +934,7 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LseCausalTopLeft)
     Tensor<T> v({1, 2, 8, 16});
     Tensor<T> oCpu({1, 2, 8, 16});
     Tensor<T> oGpu({1, 2, 8, 16});
-    Tensor<float> lseCpu({1, 2, 8});
+    Tensor<float> lseCpu({1, 2, 8, 1});
     Tensor<float> lseGpu({1, 2, 8});
 
     compareGpuVsCpuSdpaFwdWithLse<T, T, T, T>(q,
@@ -812,7 +972,7 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LseFullyMaskedRowIsNegInf)
     Tensor<T> v({batch, numHeads, seqKv, headDimV});
     Tensor<T> oCpu({batch, numHeads, seqQ, headDimV});
     Tensor<T> oGpu({batch, numHeads, seqQ, headDimV});
-    Tensor<float> lseCpu({batch, numHeads, seqQ});
+    Tensor<float> lseCpu({batch, numHeads, seqQ, 1});
     Tensor<float> lseGpu({batch, numHeads, seqQ});
 
     q.fillWithRandomValues(static_cast<T>(-1.0f), static_cast<T>(1.0f), SEED_Q);
@@ -849,7 +1009,7 @@ TYPED_TEST(TestGpuSdpaFwdPlain, LseFullyMaskedRowIsNegInf)
     {
         for(int64_t sq = 0; sq < seqQ; ++sq)
         {
-            const float cpuVal = lseCpuView.getHostValue(std::vector<int64_t>{0, h, sq});
+            const float cpuVal = lseCpuView.getHostValue(std::vector<int64_t>{0, h, sq, 0});
             const float gpuVal = lseGpuView.getHostValue(std::vector<int64_t>{0, h, sq});
             if(sq < 2)
             {

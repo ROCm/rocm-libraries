@@ -6,8 +6,10 @@
 #include <cstddef>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -44,6 +46,24 @@ inline std::vector<int64_t> squeezeTrailingUnitDim(const std::vector<int64_t>& d
 inline std::vector<int64_t> squeezeToRank(const std::vector<int64_t>& strides, size_t rank)
 {
     return {strides.begin(), strides.begin() + static_cast<std::ptrdiff_t>(rank)};
+}
+
+template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
+constexpr hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode sdpaProbabilityMode()
+{
+    using hipdnn_data_sdk::types::bfloat16;
+    // The P->bf16 cast is a property of the P@V matmul inputs, not the output: the
+    // AITER BF16 forward kernel materializes the softmax probabilities in bf16 before
+    // P@V whenever Q/K/V are bf16, regardless of the (fp32 or bf16) output dtype.
+    if constexpr(std::is_same_v<QDataType, bfloat16> && std::is_same_v<KDataType, bfloat16>
+                 && std::is_same_v<VDataType, bfloat16>)
+    {
+        return hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::Bfloat16Rtne;
+    }
+    else
+    {
+        return hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode::Float;
+    }
 }
 
 struct GpuSdpaFwdParams
@@ -146,7 +166,8 @@ public:
                 _params.leftBound,
                 _params.rightBound,
                 _params.topLeftAlignment,
-                lseTensor.has_value() ? &lseTensor.value() : nullptr);
+                lseTensor.has_value() ? &lseTensor.value() : nullptr,
+                sdpaProbabilityMode<QDataType, KDataType, VDataType, ODataType>());
     }
 
 private:

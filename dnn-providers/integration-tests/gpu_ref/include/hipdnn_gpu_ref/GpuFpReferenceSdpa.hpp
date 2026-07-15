@@ -17,6 +17,13 @@
 namespace hipdnn_gpu_ref
 {
 
+enum class SdpaSoftmaxProbabilityMode : int
+{
+    Float = 0,
+    Bfloat16Rtne = 1,
+    Bfloat16Rtz = 2,
+};
+
 namespace detail
 {
 
@@ -25,7 +32,7 @@ template <typename QDataType,
           typename VDataType,
           typename ODataType,
           typename ComputeDataType>
-inline std::vector<std::string> buildSdpaDefines()
+inline std::vector<std::string> buildSdpaDefines(SdpaSoftmaxProbabilityMode probabilityMode)
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DQ_TYPE=") + HipRtcTypeName<QDataType>::VALUE);
@@ -33,6 +40,8 @@ inline std::vector<std::string> buildSdpaDefines()
     defines.emplace_back(std::string("-DV_TYPE=") + HipRtcTypeName<VDataType>::VALUE);
     defines.emplace_back(std::string("-DO_TYPE=") + HipRtcTypeName<ODataType>::VALUE);
     defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
+    defines.emplace_back(std::string("-DSDPA_SOFTMAX_PROBABILITY_MODE=")
+                         + std::to_string(static_cast<int>(probabilityMode)));
     return defines;
 }
 
@@ -43,7 +52,10 @@ class GpuFpReferenceSdpa
 public:
     // --- Forward SDPA (fprop): O = softmax(Q @ K^T * scale + mask) @ V ---
     //
-    // Mirrors the numerical contract of CpuFpReferenceSdpa::forward.
+    // By default this mirrors the fp32-softmax numerical contract of
+    // CpuFpReferenceSdpa::forward. Callers that compare against provider kernels
+    // can request a provider-attuned softmax probability storage mode, e.g. bf16
+    // RTNE for AITER BF16 forward where P is rounded before P@V.
     // Supports GQA/MQA: numHeads must be divisible by both numHeadsK and numHeadsV.
     //
     // Takes non-const references because deviceData() may trigger host→device sync.
@@ -62,7 +74,9 @@ public:
                       int64_t leftBound = -1,
                       int64_t rightBound = -1,
                       bool topLeftAlignment = true,
-                      hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
+                      hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                      SdpaSoftmaxProbabilityMode probabilityMode
+                      = SdpaSoftmaxProbabilityMode::Float)
     {
         validateInput(q.dims(), k.dims(), v.dims(), o.dims());
 
@@ -79,8 +93,9 @@ public:
                                 ? attnScaleValue.value()
                                 : (1.0F / std::sqrt(static_cast<float>(headDim)));
 
-        auto defines = detail::
-            buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>();
+        auto defines
+            = detail::buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>(
+                probabilityMode);
 
         const void* maskPtr = nullptr;
         std::vector<int64_t> maskDims;

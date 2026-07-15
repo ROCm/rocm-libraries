@@ -5,11 +5,11 @@
 // Compiled via HipRTC with -DQ_TYPE=<type> -DK_TYPE=<type> -DV_TYPE=<type>
 // -DO_TYPE=<type> -DCOMPUTE_TYPE=<type>.
 // One thread per output element (b, h, sq, dv). Uses stride-based indexing.
-// Reproduces the algorithm of CpuFpReferenceSdpa::forward. FMA contraction is
-// enabled so the matmuls round like the provider asm kernel (fused multiply-add),
-// which makes the GPU reference diverge from the CPU oracle by both FMA-vs-separate
-// multiply/add noise and host-libm-vs-device-math differences; the two agree only
-// within the (relaxed) test tolerance, not bit-for-bit.
+// Default mode reproduces the fp32-softmax algorithm of CpuFpReferenceSdpa::forward.
+// Provider-attuned modes can model lower-precision softmax-probability storage before P@V.
+// FMA contraction is enabled so the matmuls round like provider asm kernels
+// (fused multiply-add), which makes the GPU reference diverge from the CPU oracle by
+// both FMA-vs-separate-multiply/add noise and host-libm-vs-device-math differences.
 
 #include "GpuRefSdpaArgs.h"
 #include "GpuRefTypes.h"
@@ -20,6 +20,42 @@ using namespace gpu_ref;
 // softmax all assume it. COMPUTE_TYPE is float by design (see buildSdpaDefines); enforce it
 // so a non-float compute path fails loudly at compile time instead of silently truncating.
 static_assert(__is_same(COMPUTE_TYPE, float), "GpuRefSdpaFwd requires COMPUTE_TYPE == float");
+
+#define SDPA_SOFTMAX_PROBABILITY_FLOAT 0
+#define SDPA_SOFTMAX_PROBABILITY_BFLOAT16_RTNE 1
+#define SDPA_SOFTMAX_PROBABILITY_BFLOAT16_RTZ 2
+
+#ifndef SDPA_SOFTMAX_PROBABILITY_MODE
+#define SDPA_SOFTMAX_PROBABILITY_MODE SDPA_SOFTMAX_PROBABILITY_FLOAT
+#endif
+
+namespace
+{
+
+__device__ inline float truncatePositiveFloatToBfloat16(float value)
+{
+    // Softmax probabilities are non-negative, so clearing the low 16 mantissa bits
+    // is exactly round-toward-zero for the bf16 P-storage cast.
+    unsigned int bits = __builtin_bit_cast(unsigned int, value) & 0xFFFF0000U;
+    return __builtin_bit_cast(float, bits);
+}
+
+__device__ inline COMPUTE_TYPE storeSoftmaxProbability(COMPUTE_TYPE probability)
+{
+#if SDPA_SOFTMAX_PROBABILITY_MODE == SDPA_SOFTMAX_PROBABILITY_FLOAT
+    return probability;
+#elif SDPA_SOFTMAX_PROBABILITY_MODE == SDPA_SOFTMAX_PROBABILITY_BFLOAT16_RTNE
+    return static_cast<COMPUTE_TYPE>(static_cast<__bf16>(probability));
+#elif SDPA_SOFTMAX_PROBABILITY_MODE == SDPA_SOFTMAX_PROBABILITY_BFLOAT16_RTZ
+    // Softmax probabilities are non-negative, so truncating the low 16 mantissa bits
+    // implements round-toward-zero for the provider's P-storage cast.
+    return static_cast<COMPUTE_TYPE>(truncatePositiveFloatToBfloat16(probability));
+#else
+#error "Unsupported SDPA_SOFTMAX_PROBABILITY_MODE"
+#endif
+}
+
+} // namespace
 
 extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
 {
@@ -144,23 +180,33 @@ extern "C" __global__ void sdpaFwdRef(SdpaFwdArgs args)
         return;
     }
 
-    // PASS 2: weighted sum over V.
+    // PASS 2: softmax denominator.
     COMPUTE_TYPE sumExp = static_cast<COMPUTE_TYPE>(0);
-    COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
     for(long long skv = 0; skv < args.seqKv; ++skv)
     {
         COMPUTE_TYPE s = score(skv);
         // COMPUTE_TYPE is float (enforced by the static_assert above), so expf is the
         // correct-precision call; device expf and the oracle's host std::exp<float> agree
         // to within the test tolerance, not bit-for-bit.
-        COMPUTE_TYPE e = expf(s - maxVal);
-        sumExp += e;
-        long long vIdx = b * args.vStr.s[0] + kvHeadV * args.vStr.s[1] + skv * args.vStr.s[2]
-                         + dv * args.vStr.s[3];
-        weighted += e * toAccum(v[vIdx]);
+        sumExp += expf(s - maxVal);
     }
 
-    o[oIdx] = fromAccum(weighted / sumExp, tag);
+    // PASS 3: weighted sum over V. Provider-attuned modes round the normalized
+    // softmax probability before P@V, matching matrix-core SDPA kernels that
+    // materialize P in bf16 before the second matmul.
+    COMPUTE_TYPE weighted = static_cast<COMPUTE_TYPE>(0);
+    for(long long skv = 0; skv < args.seqKv; ++skv)
+    {
+        COMPUTE_TYPE s = score(skv);
+        COMPUTE_TYPE probability = expf(s - maxVal) / sumExp;
+        probability = storeSoftmaxProbability(probability);
+
+        long long vIdx = b * args.vStr.s[0] + kvHeadV * args.vStr.s[1] + skv * args.vStr.s[2]
+                         + dv * args.vStr.s[3];
+        weighted += probability * toAccum(v[vIdx]);
+    }
+
+    o[oIdx] = fromAccum(weighted, tag);
 
     // LSE = maxVal + log(sumExp), matching CpuFpReferenceSdpa. sumExp is the
     // pre-normalization softmax denominator (>= 1, since exp(maxVal-maxVal)=1).

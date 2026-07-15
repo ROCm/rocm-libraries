@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_gpu_ref/GpuFpReferenceSdpa.hpp>
@@ -237,6 +238,105 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
     EXPECT_TRUE(validation.allClose(oRef, oPlan)) << "Plan output differs from direct fprop output";
     EXPECT_TRUE(validation.allClose(lseRef, lsePlan))
         << "Plan LSE (via squeezed graph stats output) differs from direct fprop LSE";
+}
+
+TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesBfloat16ProviderProbabilityMode)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_gpu_ref::GpuFpReferenceSdpa;
+    using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
+
+    const std::vector<int64_t> qDims = {1, 1, 1, 1};
+    const std::vector<int64_t> kvDims = {1, 1, 4, 1};
+    const std::vector<int64_t> oDims = {1, 1, 1, 1};
+    auto graphBuilder = createSdpaFwdGraph(
+        Q_UID, K_UID, V_UID, O_UID, qDims, kvDims, kvDims, oDims, DataType::BFLOAT16);
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const GpuSdpaFwdPlanBuilder<DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16,
+                                DataType::BFLOAT16>
+        bfloat16PlanBuilder;
+    auto plan = bfloat16PlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+
+    Tensor<bfloat16> q(qDims);
+    Tensor<bfloat16> k(kvDims);
+    Tensor<bfloat16> v(kvDims);
+    q.memory().hostData()[0] = bfloat16(1.0f);
+    k.memory().hostData()[0] = bfloat16(2.0f);
+    k.memory().hostData()[1] = bfloat16(0.0f);
+    k.memory().hostData()[2] = bfloat16(1.0f);
+    k.memory().hostData()[3] = bfloat16(0.0f);
+    v.memory().hostData()[0] = bfloat16(1000.0f);
+    v.memory().hostData()[1] = bfloat16(-1000.0f);
+    v.memory().hostData()[2] = bfloat16(500.0f);
+    v.memory().hostData()[3] = bfloat16(1000.0f);
+
+    Tensor<bfloat16> oPlan(oDims);
+    const std::unordered_map<int64_t, void*> variantPack{
+        {Q_UID, q.memory().deviceData()},
+        {K_UID, k.memory().deviceData()},
+        {V_UID, v.memory().deviceData()},
+        {O_UID, oPlan.memory().deviceData()},
+    };
+    plan->execute(variantPack);
+    oPlan.markDeviceModified();
+
+    Tensor<bfloat16> oProviderMode(oDims);
+    GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, bfloat16, float>(
+        q,
+        k,
+        v,
+        oProviderMode,
+        /*attnScaleValue=*/1.0f,
+        /*attnMask=*/nullptr,
+        /*leftBound=*/-1,
+        /*rightBound=*/-1,
+        /*topLeftAlignment=*/true,
+        /*lse=*/nullptr,
+        SdpaSoftmaxProbabilityMode::Bfloat16Rtne);
+
+    Tensor<bfloat16> oFloatMode(oDims);
+    GpuFpReferenceSdpa::fprop<bfloat16, bfloat16, bfloat16, bfloat16, float>(
+        q,
+        k,
+        v,
+        oFloatMode,
+        /*attnScaleValue=*/1.0f);
+
+    ASSERT_NE(static_cast<float>(oProviderMode.memory().hostData()[0]),
+              static_cast<float>(oFloatMode.memory().hostData()[0]));
+    EXPECT_EQ(static_cast<float>(oProviderMode.memory().hostData()[0]),
+              static_cast<float>(oPlan.memory().hostData()[0]));
+}
+
+// Regression guard for the provider P->bf16 rounding gate. The cast is a property
+// of the P@V matmul inputs (Q/K/V), not the output dtype, so the registered
+// bf16-in/fp32-out config must still round P before P@V. Compile-time because
+// sdpaProbabilityMode is constexpr; no device required.
+TEST(TestGpuSdpaFwdPlanBuilder, ProbabilityModeKeyedOnInputsNotOutput)
+{
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_gpu_ref::SdpaSoftmaxProbabilityMode;
+
+    static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>()
+                      == SdpaSoftmaxProbabilityMode::Bfloat16Rtne,
+                  "all-bf16 must round softmax probabilities to bf16 before P@V");
+    static_assert(sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, float>()
+                      == SdpaSoftmaxProbabilityMode::Bfloat16Rtne,
+                  "bf16 inputs with fp32 output must still round P to bf16 before P@V");
+    static_assert(sdpaProbabilityMode<float, float, float, float>()
+                      == SdpaSoftmaxProbabilityMode::Float,
+                  "fp32 inputs must not round the softmax probabilities");
+    static_assert(sdpaProbabilityMode<float, bfloat16, bfloat16, bfloat16>()
+                      == SdpaSoftmaxProbabilityMode::Float,
+                  "a non-bf16 P@V input must not select the bf16 P-storage cast");
+
+    SUCCEED();
 }
 
 TEST(TestGpuSdpaFwdPlanBuilder, ThrowsOnBothCausalFlags)
