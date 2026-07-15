@@ -5500,6 +5500,11 @@ public:
         {
             attributes.set_name("SdpaFwd_" + std::to_string(_sub_nodes.size()));
         }
+        if(attributes.unfuse_fma_hint)
+        {
+            HIPDNN_FE_LOG_WARN("Ignoring SDPA unfuse-FMA hint on node '"
+                               << attributes.get_name() << "'; hipDNN selects fusion internally");
+        }
         if(q->get_name().empty())
         {
             q->set_name(attributes.get_name() + "::Q");

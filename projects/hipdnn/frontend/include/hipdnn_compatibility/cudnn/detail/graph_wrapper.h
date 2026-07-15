@@ -339,35 +339,36 @@ public:
         return tensorPtr;
     }
 
-    std::shared_ptr<Tensor_attributes> tensor(const float& scalar, ScalarType scalarType)
-    {
-        return scalarTensor(scalar, scalarType);
-    }
+    // TODO: Bring this back when by-value tensors lands
+    // std::shared_ptr<Tensor_attributes> tensor(const float& scalar, ScalarType scalarType)
+    // {
+    //     return scalarTensor(scalar, scalarType);
+    // }
 
-    std::shared_ptr<Tensor_attributes> tensor(const half& scalar, ScalarType scalarType)
-    {
-        return scalarTensor(scalar, scalarType);
-    }
+    // std::shared_ptr<Tensor_attributes> tensor(const half& scalar, ScalarType scalarType)
+    // {
+    //     return scalarTensor(scalar, scalarType);
+    // }
 
-    std::shared_ptr<Tensor_attributes> tensor(const nv_bfloat16& scalar, ScalarType scalarType)
-    {
-        return scalarTensor(scalar, scalarType);
-    }
+    // std::shared_ptr<Tensor_attributes> tensor(const nv_bfloat16& scalar, ScalarType scalarType)
+    // {
+    //     return scalarTensor(scalar, scalarType);
+    // }
 
-    std::shared_ptr<Tensor_attributes> tensor(const int32_t& scalar, ScalarType scalarType)
-    {
-        return scalarTensor(scalar, scalarType);
-    }
+    // std::shared_ptr<Tensor_attributes> tensor(const int32_t& scalar, ScalarType scalarType)
+    // {
+    //     return scalarTensor(scalar, scalarType);
+    // }
 
-    std::shared_ptr<Tensor_attributes> tensor(const int64_t& scalar, ScalarType scalarType)
-    {
-        return scalarTensor(scalar, scalarType);
-    }
+    // std::shared_ptr<Tensor_attributes> tensor(const int64_t& scalar, ScalarType scalarType)
+    // {
+    //     return scalarTensor(scalar, scalarType);
+    // }
 
-    std::shared_ptr<Tensor_attributes> tensor(const double& scalar, ScalarType scalarType)
-    {
-        return scalarTensor(scalar, scalarType);
-    }
+    // std::shared_ptr<Tensor_attributes> tensor(const double& scalar, ScalarType scalarType)
+    // {
+    //     return scalarTensor(scalar, scalarType);
+    // }
 
     std::shared_ptr<Tensor_attributes>
         tensor_like(const std::shared_ptr<Tensor_attributes>& tensorAttributes,
@@ -406,15 +407,13 @@ public:
                                                            std::shared_ptr<Tensor_attributes> v,
                                                            SDPA_attributes attributes)
     {
-        adoptAttributeError(attributes);
         // cuDNN's Graph::sdpa defaults mma_core_mode to HALF when unset; hipDNN
         // leaves it NOT_SET and omits the attribute, so replicate the default.
-        if(attributes._attrs.mma_core_mode == DataType_t::NOT_SET)
+        if(attributes.mma_core_mode == DataType_t::NOT_SET)
         {
-            attributes._attrs.set_mma_core_mode(DataType_t::HALF);
+            attributes.set_mma_core_mode(DataType_t::HALF);
         }
-        auto outputs
-            = _graph.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes._attrs));
+        auto outputs = _graph.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
@@ -428,14 +427,13 @@ public:
                       std::shared_ptr<Tensor_attributes> stats,
                       SDPA_backward_attributes attributes)
     {
-        adoptAttributeError(attributes);
         auto outputs = _graph.sdpa_backward(std::move(q),
                                             std::move(k),
                                             std::move(v),
                                             std::move(o),
                                             std::move(dO),
                                             std::move(stats),
-                                            std::move(attributes._attrs));
+                                            std::move(attributes));
         _mode = Mode::Native;
         return outputs;
     }
@@ -642,30 +640,20 @@ private:
         return static_cast<int>(_stage) >= static_cast<int>(stage);
     }
 
-#ifdef HIPDNN_ENABLE_SDPA
-    template <typename Attributes>
-    void adoptAttributeError(const Attributes& attributes)
-    {
-        if(attributes.hasRecordedError())
-        {
-            recordError(attributes.getRecordedError());
-        }
-    }
-#endif // HIPDNN_ENABLE_SDPA
+    // TODO: Bring this back when by-value tensors lands
+    // template <typename T>
+    // std::shared_ptr<Tensor_attributes> scalarTensor(const T& scalar, ScalarType scalarType)
+    // {
+    //     if(scalarType == ScalarType::COMPILE_TIME_CONST)
+    //     {
+    //         recordError(error_code_t::INVALID_VALUE,
+    //                     "Compile-time scalar tensors are unsupported by this shim");
+    //     }
 
-    template <typename T>
-    std::shared_ptr<Tensor_attributes> scalarTensor(const T& scalar, ScalarType scalarType)
-    {
-        if(scalarType == ScalarType::COMPILE_TIME_CONST)
-        {
-            recordError(error_code_t::INVALID_VALUE,
-                        "Compile-time scalar tensors are unsupported by this shim");
-        }
-
-        auto tensorPtr = std::make_shared<Tensor_attributes>(scalar);
-        _ownedTensors.emplace_back(tensorPtr);
-        return tensorPtr;
-    }
+    //     auto tensorPtr = std::make_shared<Tensor_attributes>(scalar);
+    //     _ownedTensors.emplace_back(tensorPtr);
+    //     return tensorPtr;
+    // }
 
     error_t validateOwnedTensors()
     {

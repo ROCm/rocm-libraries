@@ -76,8 +76,6 @@ TEST(TestCudnnShimGraphSDPA, DeprecatedIsInferenceMapsToGenerateStats)
 
 TEST(TestCudnnShimGraphSDPA, ForwardAttnScaleOverloadsConfigure)
 {
-    // SHIM-DIVERGENCE(RENAME): float overload maps to set_attn_scale_value; the
-    // shared_ptr overload forwards. Both must compile and validate.
     fe::graph::Graph scalarGraph;
     std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
     addForwardInputs(scalarGraph, q, k, v);

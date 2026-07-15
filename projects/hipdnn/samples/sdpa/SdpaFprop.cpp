@@ -63,7 +63,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     graph::SdpaAttributes sdpaAttributes;
     sdpaAttributes.set_name("sdpa_fprop_node");
-    sdpaAttributes.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(HEAD_DIM)));
+    sdpaAttributes.set_attn_scale(1.0f / std::sqrt(static_cast<float>(HEAD_DIM)));
 
     auto [oAttr, statsAttr] = graph->sdpa(qAttr, kAttr, vAttr, std::move(sdpaAttributes));
     oAttr->set_output(true);

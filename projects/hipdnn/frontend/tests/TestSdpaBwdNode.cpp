@@ -863,3 +863,41 @@ TEST(TestSdpaBwdNode, GetNodeTypeReturnsSdpaBwd)
     const SdpaBwdNode node(SdpaBackwardAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::SDPA_BWD);
 }
+
+//==============================================================================
+// Fail-loudly drain of unsupported cuDNN-compat setters
+//==============================================================================
+
+TEST(TestSdpaBwdNode, PreValidateFailsUnsupportedDeterministic)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_deterministic_algorithm(true);
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("Deterministic"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaBwdNode, PreValidateDrainRunsBeforeShapeChecks)
+{
+    // Q is rank-3 (shape-invalid) AND an unsupported setter is present. The drain
+    // must run first, so the surfaced message is the unsupported one.
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16});
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_deterministic_algorithm(true);
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("Deterministic"), std::string::npos) << err.err_msg;
+    EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
+}
