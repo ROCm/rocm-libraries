@@ -42,8 +42,9 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK)
 
 namespace miopen {
 
-namespace {
+namespace debug {
 
+MIOPEN_INTERNALS_EXPORT
 void LogConvolutionExecution(const Handle& handle,
                              const conv::ProblemDescription& problem,
                              const std::string& network_config,
@@ -167,7 +168,7 @@ void LogConvolutionExecution(const Handle& handle,
     }
 }
 
-} // anonymous namespace
+} // namespace debug
 
 struct SolutionTimeComparator
 {
@@ -977,7 +978,7 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
 
             // Log convolution execution summary (only if MIOPEN_LOG_LEVEL >= 5)
             // This logs: Problem, Solver, Config, and Time for easy kernel tracking
-            LogConvolutionExecution(handle, problem, network_config, algorithm_name);
+            debug::LogConvolutionExecution(handle, problem, network_config, algorithm_name);
             return;
         }
 
@@ -1417,7 +1418,7 @@ void ConvolutionDescriptor::ConvolutionBackwardData(const Handle& handle,
 
         // Log convolution execution summary (only if MIOPEN_LOG_LEVEL >= 5)
         // This logs: Problem, Solver, Config, and Time for easy kernel tracking
-        LogConvolutionExecution(handle, problem, network_config, algorithm_name);
+        debug::LogConvolutionExecution(handle, problem, network_config, algorithm_name);
     });
 }
 
@@ -1637,7 +1638,7 @@ void ConvolutionDescriptor::ConvolutionBackwardWeights(const Handle& handle,
 
         // Log convolution execution summary (only if MIOPEN_LOG_LEVEL >= 5)
         // This logs: Problem, Solver, Config, and Time for easy kernel tracking
-        LogConvolutionExecution(handle, problem, network_config, algorithm_name);
+        debug::LogConvolutionExecution(handle, problem, network_config, algorithm_name);
     });
 }
 
