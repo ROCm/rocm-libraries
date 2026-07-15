@@ -24,7 +24,7 @@ _IS_WINDOWS = platform.system() == "Windows"
 # on its own; only the HIP runtime, which lives off-path in the core wheel, needs
 # preloading (amdhip64 pulls comgr/hiprtc and the sysdeps via its own runpath).
 _ROCM_WHEEL_SHORTNAMES = (
-    ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen", "kpack"]
+    ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen", "rocm_kpack"]
     if _IS_WINDOWS
     else ["amd_comgr", "amdhip64", "hiprtc"]
 )
