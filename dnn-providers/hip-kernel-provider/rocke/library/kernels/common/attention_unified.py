@@ -1175,8 +1175,12 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         fp16 winners were as accurate as flash).
       * no FP8 K/V (the combo reads bf16 K from LDS; the fp8 cache path uses
         the sync-dequant loader and its own routing).
-      * no ALiBi / QQ bias / softcap / sinks (not wired into the transposed
-        softmax VALU opts; the spec validator rejects them).
+      * no softcap / sinks (not wired into the transposed softmax VALU opts;
+        the spec validator rejects them).
+      * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
+        them per-score, so biased single-batch prefill takes the combo path
+        instead of the fallback. Only softcap/sinks are excluded (above)
+        because the mask-limit shortcut can't fold them.
       * no sliding window (the mask-once / mask-limit opts require no-SW).
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
@@ -1190,8 +1194,6 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
     if problem.dtype not in ("bf16", "fp16"):
         return False
     if problem.use_fp8:
-        return False
-    if problem.use_alibi or problem.use_qq_bias:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
@@ -1344,9 +1346,12 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         16x16 path it replaces lost accuracy on long-KV d128 fp16). The
         fp8 K/V cache path still uses the default kernel.
       * no FP8 K/V (transposed path doesn't dequant K/V from fp8 yet)
-      * no ALiBi or QQ bias (transposed mask block doesn't fold them yet)
       * head_size in {64, 128} (hd=256 not benchmarked yet)
       * no softcap / sinks (not wired into transposed softmax yet)
+      * ALiBi / QQ bias ARE admitted: ``_enable_combo_2d`` and
+        ``_enable_single_batch_combo`` short-circuit to True for biased
+        problems, routing them onto the transposed path (whose softmax body
+        applies bias per-score). Only softcap/sinks stay excluded below.
 
     The validated ``_enable_combo_2d`` family is a superset that DOES wire
     sinks (and sliding window) through the transposed softmax, so it
@@ -1370,8 +1375,8 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.use_fp8:
         return False
-    if problem.use_alibi or problem.use_qq_bias:
-        return False
+    # Only softcap/sinks gated here — alibi/qq_bias are handled by the
+    # transposed softmax body, so do NOT add them to this check.
     if problem.softcap > 0 or problem.use_sinks:
         return False
     if problem.head_size not in (64, 128):
@@ -1733,13 +1738,11 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.sliding_window > 0:
         return False
-    if problem.softcap > 0:
-        return False
-    if problem.use_alibi:
-        return False
-    if problem.use_qq_bias:
-        return False
     if _kv_storage_dtype(problem) is not None:
+        return False
+    # register-pv v1 does not implement softcap, ALiBi, or QQ-bias paths;
+    # the spec __post_init__ enforces this.
+    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
         return False
     # use_register_pv requires the 16x16x32 MFMA path; it conflicts with
     # use_mfma_32x32. When the 32x32 path is selected we leave it disabled
@@ -1787,8 +1790,6 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
     # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
     # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
-    if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
-        return False
     if problem.head_size != 64 or problem.block_size != 32:
         return False
     if problem.num_queries_per_kv != 8:
@@ -1825,6 +1826,10 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem) -> bool:
     sliding window (the SW combo keeps its own nw2/T32 mask handling).
     """
     if problem.sliding_window > 0:
+        return False
+    # use_transposed_mask_limit (and the other VALU sub-flags) do not support
+    # softcap, ALiBi or QQ bias; the spec __post_init__ enforces this.
+    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
         return False
     return _enable_transposed_qk_32x32(problem)
 

@@ -970,7 +970,7 @@ namespace TensileLite
             {
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
-                hipGetDeviceProperties(&prop, deviceIdx);
+                HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
                 m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
             }
 

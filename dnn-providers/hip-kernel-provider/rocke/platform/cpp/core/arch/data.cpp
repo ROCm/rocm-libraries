@@ -25,7 +25,6 @@
  */
 #include "rocke/arch_target_internal.h"
 
-#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -47,26 +46,11 @@ typedef struct rocke_ati_dtype_alias
 /* Byte-for-byte the _DTYPE_ALIASES map (insertion order is irrelevant: lookup is
  * by exact lowercased key). */
 static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
-    {"f16", "fp16"},
-    {"half", "fp16"},
-    {"fp16", "fp16"},
-    {"bf16", "bf16"},
-    {"bfloat16", "bf16"},
-    {"f32", "fp32"},
-    {"float", "fp32"},
-    {"fp32", "fp32"},
-    {"fp8", "fp8e4m3"},
-    {"fp8e4m3", "fp8e4m3"},
-    {"bf8", "bf8e5m2"},
-    {"bf8e5m2", "bf8e5m2"},
-    {"iu8", "iu8"},
-    {"iu4", "iu4"},
-    {"i8", "i8"},
-    {"int8", "i8"},
-    {"i4", "i4"},
-    {"int4", "i4"},
-    {"i32", ROCKE_DTYPE_I32},
-    {"int32", ROCKE_DTYPE_I32},
+    {"f16", "fp16"},      {"half", "fp16"},       {"fp16", "fp16"},   {"bf16", "bf16"},
+    {"bfloat16", "bf16"}, {"f32", "fp32"},        {"float", "fp32"},  {"fp32", "fp32"},
+    {"fp8", "fp8e4m3"},   {"fp8e4m3", "fp8e4m3"}, {"bf8", "bf8e5m2"}, {"bf8e5m2", "bf8e5m2"},
+    {"iu8", "iu8"},       {"iu4", "iu4"},         {"i8", "i8"},       {"int8", "i8"},
+    {"i4", "i4"},         {"int4", "i4"},         {"i32", "i32"},     {"int32", "i32"},
 };
 #define K_NUM_DTYPE_ALIASES ((int)(sizeof(k_dtype_aliases) / sizeof(k_dtype_aliases[0])))
 
@@ -830,100 +814,6 @@ static const rocke_layout_map_t lm_wmma_gfx12_a = {ROCKE_MMA_ROLE_A, 8, 32, _wmm
 static const rocke_layout_map_t lm_wmma_gfx12_b = {ROCKE_MMA_ROLE_B, 8, 32, _wmma_gfx12_b_16x16};
 static const rocke_layout_map_t lm_wmma_gfx12_c
     = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_gfx12_acc_16x16};
-
-/* =========================================================================
- * op_id -> accumulator fragment length (the c_frag_len projection of
- * target.py::_MMA_FRAGMENT_INFO).
- * =========================================================================
- *
- * This is the arch SSOT that rocke.core.ir.IRBuilder.mma (rocke_b_mma) consults
- * to size a tile.mma result vector from a bare op_id string; the ir bucket keeps
- * no private copy. It mirrors _MMA_FRAGMENT_INFO's c_frag_len column exactly.
- * Only atoms this engine can emit are listed: the Python SSOT also registers the
- * gfx1250 WMMA atoms, but the C99 arch registry has no gfx1250 target, so those
- * op_ids are intentionally absent here (the (0,0,0,64) fallback / unknown path).
- *
- * `ati` = arch-target internal (see arch_target_internal.h): the naming prefix
- * reserved for storage private to this arch-target port, kept out of the public
- * rocke_ / rocke_arch_ namespace. This table is file-local static (only
- * rocke_arch_mma_c_frag_len below reads it), so it is not extern'd in the
- * internal header like the cross-bucket rocke_ati_ symbols are.
- *
- * NOTE (drift): this is still a hand-maintained mirror of the Python
- * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it.
- * TODO: codegen this table from the Python SSOT (_MMA_FRAGMENT_INFO) at build
- * time so the two engines share a single source of truth. Until then the tests
- * assert this table and _MMA_FRAGMENT_INFO agree (test_arch_mma_ssot.py) so the
- * two copies cannot silently drift.
- */
-typedef struct rocke_ati_mma_frag_row
-{
-    const char* op_id;
-    int c_frag_len;
-} rocke_ati_mma_frag_row_t;
-
-/* Layout guard for the rocke_arch_mma_c_frag_len lookup below, which derives its
- * row count from sizeof(table)/sizeof(row). That division is exact for any
- * element size, so padding of rocke_ati_mma_frag_row_t (12 bytes of data padded
- * out to 16 for op_id's 8-byte alignment) cannot desync the count. These asserts
- * pin the field order so a future reorder/resize is caught at compile time. */
-static_assert(offsetof(rocke_ati_mma_frag_row_t, op_id) == 0,
-              "op_id must be the first field of rocke_ati_mma_frag_row_t");
-static_assert(offsetof(rocke_ati_mma_frag_row_t, c_frag_len) == sizeof(const char*),
-              "c_frag_len must immediately follow op_id (no leading padding)");
-
-static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
-    /* --- MFMA fp32 (wave64) --- */
-    {"mfma_f32_16x16x4_f32", 4},
-    {"mfma_f32_32x32x2_f32", 16},
-    /* --- MFMA f16 (wave64) --- */
-    {"mfma_f32_16x16x16_f16", 4},
-    {"mfma_f32_16x16x32_f16", 4},
-    {"mfma_f32_32x32x8_f16", 16},
-    {"mfma_f32_32x32x16_f16", 16},
-    {"mfma_f32_4x4x4_f16", 4},
-    /* --- MFMA bf16 (wave64) --- */
-    {"mfma_f32_16x16x16_bf16", 4},
-    {"mfma_f32_16x16x32_bf16", 4},
-    {"mfma_f32_32x32x8_bf16", 16},
-    {"mfma_f32_32x32x16_bf16", 16},
-    /* --- MFMA fp8 / bf8 (wave64) --- */
-    {"mfma_f32_16x16x32_fp8", 4},
-    {"mfma_f32_16x16x32_bf8", 4},
-    {"mfma_f32_32x32x16_fp8", 16},
-    {"mfma_f32_32x32x16_bf8", 16},
-    /* --- MFMA MX (wave64), frag lengths only --- */
-    {"mfma_f32_16x16x128_fp4", 4},
-    {"mfma_f32_16x16x96_fp6", 4},
-    {"mfma_f32_16x16x128_fp8", 4},
-    {"mfma_scale_f32_16x16x128_f8f6f4", 4},
-    /* --- WMMA f16 / bf16 (wave32, RDNA) --- */
-    {"wmma_f32_16x16x16_f16", 8},
-    {"wmma_f32_16x16x16_bf16", 8},
-    /* --- WMMA iu8 / iu4 (wave32, RDNA3/3.5) --- */
-    {"wmma_i32_16x16x16_iu8", 8},
-    {"wmma_i32_16x16x16_iu4", 8},
-    /* --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) --- */
-    {"wmma_gfx12_f32_16x16x16_f16", 8},
-    {"wmma_gfx12_f32_16x16x16_bf16", 8},
-};
-
-int rocke_arch_mma_c_frag_len(const char* op_id)
-{
-    size_t i;
-    if(!op_id)
-    {
-        return 0;
-    }
-    for(i = 0; i < sizeof(rocke_ati_mma_frag) / sizeof(rocke_ati_mma_frag[0]); ++i)
-    {
-        if(strcmp(rocke_ati_mma_frag[i].op_id, op_id) == 0)
-        {
-            return rocke_ati_mma_frag[i].c_frag_len;
-        }
-    }
-    return 0; /* unknown atom: the zero-length _frag_info fallback */
-}
 
 /* =========================================================================
  * Per-arch rocke_mma_op_t[] catalogs (the embedded arch_specs.json mma rows,
