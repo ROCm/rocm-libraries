@@ -1024,6 +1024,8 @@ struct MFMAModifiers : public TypedModifier<MFMAModifiers> {
 // instructions, the per-matrix scale numeric format (scaleFmtA/scaleFmtB).
 // Used both for assembly emission (matrix_a_fmt:..., matrix_a_scale_fmt:...)
 // and as the match key for cost-override entries in *_Instructions.def.
+// MX scale-select (matrix_a_scale:N / matrix_b_scale:N): which MX scale
+// slot the WMMA reads (0 = default lower half-wave, 1 = partner upper half-wave).
 struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
 
@@ -1031,6 +1033,8 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     MatrixFmt fmtB = MatrixFmt::NONE;
     MatrixScaleFmt scaleFmtA = MatrixScaleFmt::NONE;
     MatrixScaleFmt scaleFmtB = MatrixScaleFmt::NONE;
+    int scaleSelA = 0;
+    int scaleSelB = 0;
 
     MatrixFmtModifiers() : TypedModifier<MatrixFmtModifiers>() {}
     MatrixFmtModifiers(MatrixFmt a, MatrixFmt b)

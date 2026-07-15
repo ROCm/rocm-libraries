@@ -341,6 +341,9 @@ inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
         os << " matrix_a_scale_fmt:" << static_cast<int>(m.scaleFmtA);
     if (m.scaleFmtB != MatrixScaleFmt::NONE)
         os << " matrix_b_scale_fmt:" << static_cast<int>(m.scaleFmtB);
+    // MX scale-select: 0 is the default and emitted implicitly (matches rocisa).
+    if (m.scaleSelA != 0) os << " matrix_a_scale:" << m.scaleSelA;
+    if (m.scaleSelB != 0) os << " matrix_b_scale:" << m.scaleSelB;
     return os;
 }
 
