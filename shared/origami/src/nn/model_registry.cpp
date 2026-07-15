@@ -60,8 +60,8 @@ model_info_t make_tilewright_info(const twrec::detail::LoadedModel& model) {
   model_info_t info;
   info.backend                     = backend_id_t::tilewright_v1;
   info.arch                        = model.arch;
-  info.features.catalog_id         = features::gemm_tilewright_v1::catalog_id;
-  info.features.feature_names_hash = features::gemm_tilewright_v1::feature_names_hash;
+  info.features.catalog_id         = features::gemm_tilewright::catalog_id;
+  info.features.feature_names_hash = features::gemm_tilewright::feature_names_hash;
   info.features.query_dim          = model.q_dim;
   info.features.item_dim           = model.i_dim;
   info.features.interaction_dim    = model.x_dim;
@@ -89,13 +89,6 @@ void print_load_diag(model_handle_t handle,
                model.cells.size(),
                model.splits.size());
   std::fflush(stderr);
-}
-
-void register_handle(model_handle_t handle, backend_id_t backend, const model_info_t& info) {
-  if (handle < 0) return;
-  std::lock_guard<std::mutex> lock(g_mutex);
-  g_infos[handle] = info;
-  g_infos[handle].backend = backend;
 }
 
 model_handle_t load_tilewright_manifest(const std::string& path) {
@@ -183,6 +176,20 @@ library_models_t load_models_for_logic(const std::string& logic_stem,
 void unload_model(model_handle_t handle) {
   if (handle < 0) return;
   std::lock_guard<std::mutex> lock(g_mutex);
+  const auto idx = static_cast<std::size_t>(handle);
+
+  for (auto it = g_path_to_handle.begin(); it != g_path_to_handle.end();) {
+    if (it->second == handle) {
+      it = g_path_to_handle.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  if (idx < g_models.size()) {
+    g_models[idx].reset();
+  }
+
   g_infos.erase(handle);
   if (g_default_tilewright == handle) g_default_tilewright = invalid_handle;
   if (g_default_es == handle) g_default_es = invalid_handle;
@@ -225,7 +232,7 @@ const twrec::detail::LoadedModel* model_payload(model_handle_t handle) {
   if (handle < 0) return nullptr;
   std::lock_guard<std::mutex> lock(g_mutex);
   const auto idx = static_cast<std::size_t>(handle);
-  if (idx >= g_models.size()) return nullptr;
+  if (idx >= g_models.size() || g_models[idx] == nullptr) return nullptr;
   return g_models[idx].get();
 }
 

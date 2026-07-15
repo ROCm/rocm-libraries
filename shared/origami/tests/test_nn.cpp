@@ -71,18 +71,18 @@ TEST_CASE("NN: rank_configs inference=nn_fallback uses analytical", "[nn]") {
   REQUIRE(results.front().latency > 0.0);
 }
 
-TEST_CASE("NN: gemm_tilewright_v1 feature dimensions", "[nn]") {
+TEST_CASE("NN: gemm_tilewright feature dimensions", "[nn]") {
   const auto hardware = make_hardware(950);
   const auto problem  = make_problem(1024, 1024, 1024);
   const auto config   = make_config(128, 128, 32);
 
-  std::array<float, origami::nn::features::gemm_tilewright_v1::query_dim> query{};
-  std::array<float, origami::nn::features::gemm_tilewright_v1::item_dim> item{};
-  std::array<float, origami::nn::features::gemm_tilewright_v1::interaction_dim> inter{};
+  std::array<float, origami::nn::features::gemm_tilewright::query_dim> query{};
+  std::array<float, origami::nn::features::gemm_tilewright::item_dim> item{};
+  std::array<float, origami::nn::features::gemm_tilewright::interaction_dim> inter{};
 
-  origami::nn::features::gemm_tilewright_v1::build_query(problem, hardware, query.data());
-  origami::nn::features::gemm_tilewright_v1::build_item(config, item.data());
-  origami::nn::features::gemm_tilewright_v1::build_interaction(
+  origami::nn::features::gemm_tilewright::build_query(problem, hardware, query.data());
+  origami::nn::features::gemm_tilewright::build_item(config, item.data());
+  origami::nn::features::gemm_tilewright::build_interaction(
       problem, config, hardware, inter.data());
 
   REQUIRE(query.size() == 55);
@@ -203,6 +203,65 @@ TEST_CASE("NN: is_kernel_feasible cache-hint gate", "[nn]") {
 
   REQUIRE(origami::nn::filter::is_kernel_feasible(problem, bad_hints) == false);
   REQUIRE(origami::nn::filter::is_kernel_feasible(problem, good_hints) == true);
+}
+
+TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
+  const char* logic_stem =
+      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const origami::nn::model_handle_t handle =
+      origami::nn::load_models_for_logic(logic_stem, "").tilewright;
+  REQUIRE(handle >= 0);
+  REQUIRE(origami::nn::model_info(handle) != nullptr);
+
+  origami::nn::unload_model(handle);
+  REQUIRE(origami::nn::model_info(handle) == nullptr);
+
+  const auto hardware = make_hardware(950);
+  const auto problem  = make_problem(1024, 3072, 2048);
+  std::vector<origami::config_t> configs = {make_config(128, 128, 128)};
+
+  origami::rank_options_t options;
+  options.inference  = origami::inference_mode_t::nn;
+  options.nn_backend = origami::nn_backend_t::tilewright;
+  options.nn_model   = handle;
+  REQUIRE_THROWS_AS(origami::rank_configs(problem, hardware, configs, options), std::runtime_error);
+}
+
+TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
+  const char* logic_stem =
+      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const origami::nn::model_handle_t handle =
+      origami::nn::load_models_for_logic(logic_stem, "").tilewright;
+  REQUIRE(handle >= 0);
+
+  const auto hardware = make_hardware(950);
+  auto problem =
+      make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::BFloat16;
+  problem.c_dtype = origami::data_type_t::BFloat16;
+  problem.d_dtype = origami::data_type_t::BFloat16;
+  problem.mi_dtype = origami::data_type_t::BFloat16;
+
+  std::vector<origami::config_t> configs = {
+      make_config(128, 128, 128, 16, 16, 32, false, 1, 6, 0, 0),
+      make_config(352, 224, 64, 32, 32, 32, false, 1, 6, 0, 0),
+  };
+
+  origami::rank_options_t routed;
+  routed.inference  = origami::inference_mode_t::nn;
+  routed.nn_backend = origami::nn_backend_t::tilewright;
+  routed.nn_model   = handle;
+
+  origami::rank_options_t forced = routed;
+  forced.nn.force_cell            = 0;
+
+  const auto routed_results = origami::rank_configs(problem, hardware, configs, routed);
+  const auto forced_results = origami::rank_configs(problem, hardware, configs, forced);
+
+  REQUIRE_FALSE(routed_results.empty());
+  REQUIRE_FALSE(forced_results.empty());
+  REQUIRE(std::isfinite(forced_results.front().latency));
 }
 
 #else

@@ -32,13 +32,13 @@
 
 #include <cstddef>
 
-namespace origami::nn::features::gemm_tilewright_v1 {
+namespace origami::nn::features::gemm_tilewright {
 
 constexpr std::size_t query_dim       = 55;
 constexpr std::size_t item_dim        = 12;
 constexpr std::size_t interaction_dim = 37;
 
-constexpr const char* catalog_id            = "gemm_tilewright_v1";
+constexpr const char* catalog_id            = "gemm_tilewright";
 constexpr const char* feature_names_hash    = "e7fe4b524851e895";
 
 void ORIGAMI_EXPORT build_query(const problem_t& problem, const hardware_t& hardware, float* out);
@@ -50,4 +50,4 @@ void ORIGAMI_EXPORT build_interaction(const problem_t& problem,
                        const hardware_t& hardware,
                        float* out);
 
-}  // namespace origami::nn::features::gemm_tilewright_v1
+}  // namespace origami::nn::features::gemm_tilewright

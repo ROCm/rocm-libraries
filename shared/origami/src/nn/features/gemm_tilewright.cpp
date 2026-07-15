@@ -10,7 +10,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace origami::nn::features::gemm_tilewright_v1 {
+namespace origami::nn::features::gemm_tilewright {
 namespace {
 
 double bpe_for_dtype(data_type_t dt) {
@@ -338,4 +338,4 @@ void build_interaction(const problem_t& p,
   out[i++] = static_cast<float>(active_cus / N_CU);
 }
 
-}  // namespace origami::nn::features::gemm_tilewright_v1
+}  // namespace origami::nn::features::gemm_tilewright

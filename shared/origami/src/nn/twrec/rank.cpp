@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -157,6 +158,23 @@ int resolve_model_cell_index(const LoadedModel& mdl, const problem_t& p) {
   }
 }
 
+int resolve_cell_index(const LoadedModel& model,
+                       const problem_t& problem,
+                       const inference_options_t& options) {
+  if (options.force_cell >= 0) {
+    const std::size_t idx = static_cast<std::size_t>(options.force_cell);
+    if (idx < model.cells.size()) return options.force_cell;
+    return -1;
+  }
+  if (const char* env = std::getenv("ORIGAMI_TW_CELL")) {
+    if (env[0] != '\0' && std::strcmp(env, "0") != 0) {
+      const int forced = std::atoi(env);
+      if (forced >= 0 && static_cast<std::size_t>(forced) < model.cells.size()) return forced;
+    }
+  }
+  return resolve_model_cell_index(model, problem);
+}
+
 std::array<int, 8> sig_of(const config_t& c) {
   return {static_cast<int>(c.mt.m),
           static_cast<int>(c.mt.n),
@@ -177,6 +195,26 @@ std::vector<rank_entry_t> fallback_all(const std::vector<config_t>& configs) {
   return result;
 }
 
+std::vector<std::uint32_t> apply_smart_k_filter(const std::vector<config_t>& configs,
+                                                const std::vector<std::size_t>& feasible,
+                                                bool use_sig_filter,
+                                                bool have_sk,
+                                                const CellModel& cm) {
+  auto sig_in_set = [&](const std::array<int, 8>& s) -> bool {
+    for (const auto& w : cm.smart_k_signatures)
+      if (w == s) return true;
+    return false;
+  };
+
+  std::vector<std::uint32_t> out;
+  out.reserve(feasible.size());
+  for (const std::size_t idx : feasible) {
+    if (use_sig_filter && have_sk && !sig_in_set(sig_of(configs[idx]))) continue;
+    out.push_back(static_cast<std::uint32_t>(idx));
+  }
+  return out;
+}
+
 }  // namespace
 
 std::vector<rank_entry_t> rank_configs(const LoadedModel& model,
@@ -186,7 +224,7 @@ std::vector<rank_entry_t> rank_configs(const LoadedModel& model,
                                        const inference_options_t& options) {
   if (configs.empty()) return fallback_all(configs);
 
-  int cell_idx = resolve_model_cell_index(model, problem);
+  const int cell_idx = resolve_cell_index(model, problem, options);
   if (cell_idx < 0) return fallback_all(configs);
 
   const CellModel& cm = model.cells[static_cast<std::size_t>(cell_idx)];
@@ -197,47 +235,32 @@ std::vector<rank_entry_t> rank_configs(const LoadedModel& model,
   const bool have_sk =
       options.use_smart_k_whitelist && !cm.smart_k_signatures.empty();
 
-  auto sig_in_set = [&](const std::array<int, 8>& s) -> bool {
-    for (const auto& w : cm.smart_k_signatures)
-      if (w == s) return true;
-    return false;
-  };
+  const filter::filter_result_t filtered =
+      filter::filter_configs(problem, hardware, configs);
 
-  auto scan = [&](bool use_sig_filter, std::vector<std::uint32_t>& out_idx) {
-    out_idx.clear();
-    for (std::uint32_t ci = 0; ci < configs.size(); ++ci) {
-      const config_t& cc = configs[ci];
-      if (!gemm::check_lds_capacity(hardware, cc.mt, problem.a_dtype, problem.b_dtype)) continue;
-      if (!filter::is_kernel_feasible(problem, cc)) continue;
-      if (use_sig_filter && have_sk && !sig_in_set(sig_of(cc))) continue;
-      out_idx.push_back(ci);
-    }
-  };
-
-  std::vector<std::uint32_t> cand;
-  scan(true, cand);
+  std::vector<std::uint32_t> cand =
+      apply_smart_k_filter(configs, filtered.feasible_indices, true, have_sk, cm);
   bool tier1_is_whitelist = have_sk;
   if (cand.empty() && have_sk) {
-    scan(false, cand);
+    cand = apply_smart_k_filter(configs, filtered.feasible_indices, false, have_sk, cm);
     tier1_is_whitelist = false;
   }
   if (cand.empty()) return fallback_all(configs);
 
   std::vector<std::uint32_t> cand2;
   if (tier1_is_whitelist && options.min_scored > cand.size()) {
-    std::vector<std::uint32_t> feasible;
-    scan(false, feasible);
     std::vector<char> in_tier1(configs.size(), 0);
     for (std::uint32_t ci : cand) in_tier1[ci] = 1;
-    for (std::uint32_t ci : feasible)
-      if (!in_tier1[ci]) cand2.push_back(ci);
+    for (std::size_t idx : filtered.feasible_indices) {
+      if (!in_tier1[idx]) cand2.push_back(static_cast<std::uint32_t>(idx));
+    }
   }
 
-  std::array<float, features::gemm_tilewright_v1::query_dim> q_feat{};
-  std::array<float, features::gemm_tilewright_v1::item_dim> item_feat{};
-  std::array<float, features::gemm_tilewright_v1::interaction_dim> x_feat{};
+  std::array<float, features::gemm_tilewright::query_dim> q_feat{};
+  std::array<float, features::gemm_tilewright::item_dim> item_feat{};
+  std::array<float, features::gemm_tilewright::interaction_dim> x_feat{};
 
-  features::gemm_tilewright_v1::build_query(problem, hardware, q_feat.data());
+  features::gemm_tilewright::build_query(problem, hardware, q_feat.data());
   std::vector<float> scratch;
   std::vector<float> q_emb;
   compute_qe(cm, q_feat.data(), q_dim, scratch, q_emb);
@@ -248,10 +271,10 @@ std::vector<rank_entry_t> rank_configs(const LoadedModel& model,
     out.reserve(cset.size());
     for (std::uint32_t ci : cset) {
       const config_t& cc = configs[ci];
-      features::gemm_tilewright_v1::build_item(cc, item_feat.data());
+      features::gemm_tilewright::build_item(cc, item_feat.data());
       compute_ie(cm, item_feat.data(), i_dim, scratch, i_emb);
       const float emb_score = score_from_embeds(cm, q_emb.data(), i_emb.data(), cm.embed_dim);
-      features::gemm_tilewright_v1::build_interaction(problem, cc, hardware, x_feat.data());
+      features::gemm_tilewright::build_interaction(problem, cc, hardware, x_feat.data());
       const float inter_score = compute_inter_score(cm, x_feat.data(), x_dim, scratch);
       out.emplace_back(ci, emb_score + inter_score);
     }
