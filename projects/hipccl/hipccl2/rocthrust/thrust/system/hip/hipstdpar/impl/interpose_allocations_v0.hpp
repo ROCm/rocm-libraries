@@ -42,12 +42,18 @@
 #  if defined(__HIPSTDPAR_INTERPOSE_ALLOC__)
 #    include <hip/hip_runtime.h>
 
+#    include <algorithm>
 #    include <cstddef>
 #    include <cstdint>
 #    include <cstring>
 #    include <memory_resource>
 #    include <new>
 #    include <stdexcept>
+
+#    if __has_include(<malloc.h>)
+#      include <malloc.h>
+#      define __HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__
+#    endif
 
 namespace hipstd
 {
@@ -132,7 +138,22 @@ extern "C" __attribute__((weak)) void __hipstdpar_hidden_free(void*);
 
 extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::size_t n)
 {
-  auto q = std::memcpy(__hipstdpar_malloc(n), p, n);
+  if (!p)
+  {
+    return __hipstdpar_malloc(n);
+  }
+
+  if (n == 0)
+  {
+    __hipstdpar_free(p);
+    return nullptr;
+  }
+
+  auto q = __hipstdpar_malloc(n);
+  if (!q)
+  {
+    return nullptr;
+  }
 
   auto h = static_cast<hipstd::Header*>(p) - 1;
 
@@ -141,10 +162,18 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_realloc(void* p, std::
 
   if (!tmp.isManaged)
   {
+    std::size_t old = n;
+#    if defined(__HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__)
+    old = malloc_usable_size(p);
+#    endif
+    std::memcpy(q, p, std::min(old, n));
     __hipstdpar_hidden_free(p);
   }
   else
   {
+    const auto old = reinterpret_cast<std::uintptr_t>(h->alloc_ptr) + h->size
+                     - reinterpret_cast<std::uintptr_t>(p);
+    std::memcpy(q, p, std::min<std::size_t>(old, n));
     hipstd::heap.deallocate(h->alloc_ptr, h->size, h->align);
   }
 

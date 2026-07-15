@@ -104,6 +104,7 @@ set(ROCPRIM_LOCATION ${ROCPRIM_INCLUDE_DIR})
 # Add tests
 add_hipstdpar_test("algorithms" "compile" OFF)
 add_hipstdpar_test("interpose" "compile" ON)
+add_hipstdpar_test("realloc" "run" ON)
 
 # Restore global state
 set(CMAKE_CXX_STANDARD ${ROCTHRUST_CMAKE_CXX_STANDARD})
