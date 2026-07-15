@@ -9,6 +9,7 @@ import importlib.util
 import json
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -53,14 +54,38 @@ EXPECTED_ATTRIBUTE_CONSTRAINTS = {
     "padding_mask": {"equals": False},
     "alibi_mask": {"equals": False},
 }
+# Additional shipped instances (appended after the baseline). Each shares the
+# baseline dtype/layout/mask/selection; only the head-size and head counts vary.
+EXPECTED_D128_COMPILE_SPEC = {**EXPECTED_COMPILE_SPEC, "head_size": 128}
+EXPECTED_GQA_COMPILE_SPEC = {
+    **EXPECTED_COMPILE_SPEC,
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+}
+# Ordered exactly as the checked-in aot_list.json: baseline first (several tests
+# key on parsed[0]), then d128, then the GQA (hq8/hkv2) instance.
+EXPECTED_INSTANCES = [
+    (
+        "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d64_none",
+        EXPECTED_COMPILE_SPEC,
+    ),
+    (
+        "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d128_none",
+        EXPECTED_D128_COMPILE_SPEC,
+    ),
+    (
+        "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq8_hkv2_d64_none",
+        EXPECTED_GQA_COMPILE_SPEC,
+    ),
+]
 
 
-def _read_json(path: Path) -> dict:
+def _read_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def _write_json(path: Path, data: dict) -> None:
+def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, sort_keys=True)
@@ -148,21 +173,47 @@ def test_checked_in_sdpa_instance_parses_and_name_is_deterministic(arch):
     assert list_path.parent.parent.name == arch
 
     parsed = parse_instance_list(list_path, handler_path=HANDLER)
-    assert len(parsed) == 1
-    data = parsed[0].data
+    assert len(parsed) == len(EXPECTED_INSTANCES)
 
-    assert data["schema"] == "rocke.aot.instance/v1"
-    assert data["name"] == expected_name
-    assert data["op"] == "sdpa_fwd"
-    assert data["family"] == "fmha_fwd_mfma"
-    assert data["arch"] == arch
-    assert data["compile_spec"] == EXPECTED_COMPILE_SPEC
-    assert data["selection"]["batch"] == {"min": 1, "max": 64}
-    assert data["selection"]["attribute_constraints"] == EXPECTED_ATTRIBUTE_CONSTRAINTS
-    assert data["test_profiles"] == [{"batch": 1}, {"batch": 2}, {"batch": 64}]
-    assert parsed[0].compile_spec is data["compile_spec"]
-    assert parsed[0].selection is data["selection"]
-    assert parsed[0].test_profiles == data["test_profiles"]
+    # Baseline instance stays at index 0: TestSdpaGraphAdapter parity and the
+    # sidecar/build-CLI tests below index parsed[0]/instances[0].
+    assert parsed[0].data["name"] == expected_name
+    assert parsed[0].data["compile_spec"] == EXPECTED_COMPILE_SPEC
+
+    # Every entry parses to a deterministic canonical name (parse_instance_list
+    # raises if a declared name diverges from the handler basename) with the
+    # shared selection/test-profile blocks.
+    for entry, (basename, compile_spec) in zip(parsed, EXPECTED_INSTANCES):
+        data = entry.data
+        assert data["schema"] == "rocke.aot.instance/v1"
+        assert data["name"] == basename.format(arch=arch)
+        assert data["op"] == "sdpa_fwd"
+        assert data["family"] == "fmha_fwd_mfma"
+        assert data["arch"] == arch
+        assert data["compile_spec"] == compile_spec
+        assert data["selection"]["batch"] == {"min": 1, "max": 64}
+        assert (
+            data["selection"]["attribute_constraints"] == EXPECTED_ATTRIBUTE_CONSTRAINTS
+        )
+        assert data["test_profiles"] == [{"batch": 1}, {"batch": 2}, {"batch": 64}]
+        assert entry.compile_spec is data["compile_spec"]
+        assert entry.selection is data["selection"]
+        assert entry.test_profiles == data["test_profiles"]
+
+
+@pytest.mark.parametrize("arch", ["gfx1151", "gfx942"])
+def test_added_instances_present_beyond_baseline(arch):
+    instances = _read_json(_aot_list_path(arch))
+    specs = {inst["name"]: inst["compile_spec"] for inst in instances}
+    d128_name = f"sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d128_none"
+    gqa_name = f"sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq8_hkv2_d64_none"
+    assert d128_name in specs
+    assert gqa_name in specs
+    assert specs[d128_name]["head_size"] == 128
+    assert (specs[gqa_name]["num_query_heads"], specs[gqa_name]["num_kv_heads"]) == (
+        8,
+        2,
+    )
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx942"])

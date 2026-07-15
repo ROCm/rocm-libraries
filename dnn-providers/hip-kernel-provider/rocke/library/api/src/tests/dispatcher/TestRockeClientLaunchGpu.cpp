@@ -109,7 +109,36 @@ void* toDevice(const Tensor<half>& tensor)
     return devicePtr;
 }
 
-TEST(TestRockeClientLaunchGpu, EngineLaunchesRealSdpaKernelAndMatchesGoldenRef)
+// One shipped-instance shape to launch E2E. The fixture and golden reference are
+// fully config-driven (CpuFpReferenceSdpa handles GQA and any head size), so each
+// case is pure config: the graph, kernel, and reference all follow it.
+struct LaunchCase
+{
+    std::string name;
+    dispatcher::test::SdpaGraphConfig cfg;
+};
+
+dispatcher::test::SdpaGraphConfig d128Config()
+{
+    dispatcher::test::SdpaGraphConfig cfg;
+    cfg.headSizeQK = 128;
+    cfg.headSizeV = 128;
+    return cfg;
+}
+
+dispatcher::test::SdpaGraphConfig gqaConfig()
+{
+    dispatcher::test::SdpaGraphConfig cfg;
+    cfg.numQueryHeads = 8;
+    cfg.numKvHeads = 2;
+    return cfg;
+}
+
+class RockeClientLaunchGpuTest : public ::testing::TestWithParam<LaunchCase>
+{
+};
+
+TEST_P(RockeClientLaunchGpuTest, EngineLaunchesRealSdpaKernelAndMatchesGoldenRef)
 {
     int deviceCount = 0;
     if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
@@ -143,9 +172,9 @@ TEST(TestRockeClientLaunchGpu, EngineLaunchesRealSdpaKernelAndMatchesGoldenRef)
     RockeClientHandle handle;
     handle.setStream(stream);
 
-    // Real single-node fp16/BSHD SDPA graph; defaults match the gfx1151 instance
-    // (batch 2, 4 heads, seqlen 64, head dim 64, mask none, default scale).
-    const dispatcher::test::SdpaGraphConfig cfg{};
+    // Real single-node fp16/BSHD SDPA graph for the parametrized shipped shape
+    // (baseline d64/hq4, d128, or GQA hq8/hkv2), mask none, default scale.
+    const dispatcher::test::SdpaGraphConfig& cfg = GetParam().cfg;
     const auto fixture = dispatcher::test::buildSdpaGraph(cfg);
     const auto graph = fixture.graphWrapper();
 
@@ -229,6 +258,16 @@ TEST(TestRockeClientLaunchGpu, EngineLaunchesRealSdpaKernelAndMatchesGoldenRef)
     }
     EXPECT_LE(maxAbs, tolerance) << "device SDPA output diverged from the golden reference";
 }
+
+INSTANTIATE_TEST_SUITE_P(ShippedInstances,
+                         RockeClientLaunchGpuTest,
+                         ::testing::Values(LaunchCase{.name = "baseline_d64_hq4",
+                                                      .cfg = dispatcher::test::SdpaGraphConfig{}},
+                                           LaunchCase{.name = "d128", .cfg = d128Config()},
+                                           LaunchCase{.name = "gqa_hq8_hkv2", .cfg = gqaConfig()}),
+                         [](const ::testing::TestParamInfo<LaunchCase>& info) {
+                             return info.param.name;
+                         });
 
 } // namespace
 } // namespace rocke_client
