@@ -38,3 +38,4 @@ Requires rocWMMA (rocm-libraries component).
 
 Registered via `HIPDNN_REGISTER_ENGINE(HIP_FLASH2_ENGINE)` in EngineNames.hpp.
 Engine ID is derived from the name via FNV-1a hash (same mechanism as other engines).
+
