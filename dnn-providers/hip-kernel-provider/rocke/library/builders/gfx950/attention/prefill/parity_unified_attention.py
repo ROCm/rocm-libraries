@@ -1239,6 +1239,29 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         _force_triton_path("auto")
 
 
+def _with_kq_xor_swizzle(spec):
+    """Return a harness-only ProbeSpec with the measurement-only KQ XOR swizzle ON.
+
+    The XOR swizzle produces INTENTIONALLY WRONG numerics (a read-only
+    bank-conflict probe), so the flag lives ONLY on this harness-local subclass --
+    never on the production ``UnifiedAttention2DTiledSpec`` -- and the kernel emit
+    reads it via ``getattr(spec, "use_kq_xor_swizzle", False)``.
+    """
+    import dataclasses
+
+    from kernels import UnifiedAttention2DTiledSpec
+
+    @dataclasses.dataclass(frozen=True)
+    class _ProbeTiledSpec(UnifiedAttention2DTiledSpec):
+        use_kq_xor_swizzle: bool = False
+
+    fields = {
+        f.name: getattr(spec, f.name)
+        for f in dataclasses.fields(UnifiedAttention2DTiledSpec)
+    }
+    return _ProbeTiledSpec(**fields, use_kq_xor_swizzle=True)
+
+
 def _run_rocke(
     s: Scenario,
     data,
@@ -1328,9 +1351,7 @@ def _run_rocke(
         if _d256_gfx950_fast(problem):
             spec = _tiled_spec_from_problem(problem)
             if kq_swizzle:
-                from dataclasses import replace as _replace
-
-                spec = _replace(spec, use_kq_xor_swizzle=True)
+                spec = _with_kq_xor_swizzle(spec)
                 print(
                     "    [2d-direct] KQ XOR swizzle ON (read-only probe; "
                     "numerics intentionally wrong)"

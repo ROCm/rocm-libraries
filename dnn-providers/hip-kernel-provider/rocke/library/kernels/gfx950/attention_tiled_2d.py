@@ -342,14 +342,6 @@ class UnifiedAttention2DTiledSpec:
     # K-axis mostly lives in registers. This flag tracks that orientation
     # independently while it is brought up.
     use_transposed_qk_32x32: bool = False
-    # EXPERIMENTAL / measurement-only: apply a vanilla XOR swizzle to the QK
-    # K_lds read column offset (``col ^= (row & 7) << 3``) to spread the
-    # row-aliased banks. This is a *read-only* probe: the async-DMA K write is
-    # contiguous and is NOT swizzled to match, so numeric results are INTENTIONALLY
-    # WRONG when this is on -- its sole purpose is to measure whether
-    # ``SQ_LDS_BANK_CONFLICT`` drops for the swizzled access pattern. Off by
-    # default; never enable in production.
-    use_kq_xor_swizzle: bool = False
     # Slab-granularity K_lds pad: pad the K_lds allocation once per 2-row
     # async-DMA slab (pad width ``kq_lds_pad_halves``) to break the row-aliased
     # bank conflict on the QK K read (drops ``SQ_LDS_BANK_CONFLICT``). DMA-safe
@@ -1118,7 +1110,7 @@ def build_unified_attention_2d_tiled(
     FP8_NATIVE_QK = False
     REGISTER_PV = spec.use_register_pv
     TRANSPOSED_QK_32X32 = spec.use_transposed_qk_32x32
-    KQ_XOR_SWIZZLE = spec.use_kq_xor_swizzle
+    KQ_XOR_SWIZZLE = getattr(spec, "use_kq_xor_swizzle", False)
     # Slab-granularity K_lds pad. The async DMA writes one WAVE_BYTES (=1024 B =
     # SLAB_ROWS*HD*2) contiguous slab per wave per call, so padding BETWEEN slabs
     # keeps the write contiguous while breaking the row-aliased bank conflict on
