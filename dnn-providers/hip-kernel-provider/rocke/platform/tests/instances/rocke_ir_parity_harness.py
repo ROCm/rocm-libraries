@@ -235,6 +235,71 @@ def build_deep(kind, arch, **kw):
     return _build
 
 
+def build_attention(arch):
+    """D256 gfx950 bf16 prefill *fast* spec: 32x32-transposed +
+    ``use_kq_lds_pad`` (slab-granularity K_lds pad) + ``use_softmax_mfma_interleave``.
+
+    Pins the *emitted addressing* for the slab pad: its async-DMA write and the
+    padded read remap must agree byte-for-byte or numerics silently corrupt, and
+    only the spec dataclass is otherwise asserted -- a codegen drift in the
+    addressing would pass every CPU test and fail only on GPU (#9233 review).
+
+    ``_d256_gfx950_fast`` gates on the *memoized runtime device arch* via
+    ``_resolve_attention_arch`` -- NOT the per-case ``arch`` (which only feeds the
+    lowerer). The spec builder also holds a *bound* import of it. Both bindings
+    are patched wholesale (per its docstring) to ``arch`` so the fast spec is
+    selected deterministically on any bless/CI host, GPU or not; otherwise a
+    non-gfx950 host would silently pin the FALLBACK spec (no pad/interleave).
+    """
+
+    def _build():
+        import builders.common.attention_spec_builder as asb
+        import kernels.common.attention_unified as au
+        from kernels import build_unified_attention_2d_tiled
+        from kernels.common.attention_unified import (
+            UnifiedAttentionProblem,
+            _d256_gfx950_fast,
+            _tiled_spec_from_problem,
+        )
+
+        # Validated D256 cohort point (GQA 16/2, hd256, bs16, sq4096 bf16).
+        problem = UnifiedAttentionProblem(
+            total_q=4096,
+            num_seqs=1,
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            max_seqlen_q=4096,
+            max_seqlen_k=4096,
+            dtype="bf16",
+            num_sms=120,
+        )
+        pin = lambda: arch  # noqa: E731
+        o_au, o_asb = au._resolve_attention_arch, asb._resolve_attention_arch
+        au._resolve_attention_arch = pin
+        asb._resolve_attention_arch = pin
+        try:
+            if not _d256_gfx950_fast(problem):
+                raise RuntimeError(
+                    f"D256 fast spec not selected under pinned arch {arch!r}; "
+                    "golden would pin the fallback (no pad/interleave)"
+                )
+            spec = _tiled_spec_from_problem(problem)
+            if not (spec.use_kq_lds_pad and spec.use_softmax_mfma_interleave):
+                raise RuntimeError(
+                    "expected pad+interleave in the D256 fast spec; got "
+                    f"pad={spec.use_kq_lds_pad} "
+                    f"interleave={spec.use_softmax_mfma_interleave}"
+                )
+            return build_unified_attention_2d_tiled(spec, arch=arch)
+        finally:
+            au._resolve_attention_arch = o_au
+            asb._resolve_attention_arch = o_asb
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -811,6 +876,16 @@ def cases():
             pool_tile_w=4,
             native_int=True,
         ),
+    )
+    # Attention: D256 gfx950 bf16 prefill fast spec. Pins the slab-pad DMA
+    # write + padded read remap addressing and the softmax<->MFMA interleave --
+    # coupled optimizations that only agree byte-for-byte in the emitted IR, so
+    # a CPU spec assert can't catch a drift (it would fail only on GPU). #9233.
+    add(
+        "attention",
+        "attention/gfx950/d256_pad_interleave",
+        "gfx950",
+        build_attention("gfx950"),
     )
     return out
 
