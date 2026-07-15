@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,30 +20,6 @@
  *
  * ************************************************************************ */
 
-#pragma once
+#include "blas_ex/rocblas_gemm_grouped_batched_ex_imp.hpp"
 
-struct Arguments;
-
-template <typename T>
-void testing_gemm_bad_arg(const Arguments& arg);
-
-template <typename T>
-void testing_gemm(const Arguments& arg);
-
-template <typename T>
-void testing_gemm_batched_bad_arg(const Arguments& arg);
-
-template <typename T>
-void testing_gemm_batched(const Arguments& arg);
-
-template <typename T>
-void testing_gemm_strided_batched_bad_arg(const Arguments& arg);
-
-template <typename T>
-void testing_gemm_strided_batched(const Arguments& arg);
-
-template <typename T>
-void testing_gemm_grouped_batched_bad_arg(const Arguments& arg);
-
-template <typename T>
-void testing_gemm_grouped_batched(const Arguments& arg);
+INST_GEMM_GROUPED_BATCHED_EX_C_API(rocblas_int)

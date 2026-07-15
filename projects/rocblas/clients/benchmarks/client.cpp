@@ -154,6 +154,7 @@ struct perf_gemm_ex<
         static const func_map map = {
             {"gemm_ex", testing_gemm_ex<Ti, To, Tc>},
             {"gemm_batched_ex", testing_gemm_batched_ex<Ti, To, Tc>},
+            {"gemm_grouped_batched_ex", testing_gemm_grouped_batched_ex<Ti, To, Tc>},
         };
         run_function(map, arg);
     }
@@ -306,6 +307,7 @@ struct perf_blas<T, U, std::enable_if_t<std::is_same_v<T, float> || std::is_same
             // allow profiling with source gemms even without BUILD_WITH_TENSILE
             {"gemm", testing_gemm<T>},
             {"gemm_batched", testing_gemm_batched<T>},
+            {"gemm_grouped_batched", testing_gemm_grouped_batched<T>},
             {"gemm_strided_batched", testing_gemm_strided_batched<T>},
             {"syrkx", testing_syr2k<T, false>},
             {"syrkx_batched", testing_syr2k_batched<T, false>},
@@ -1094,7 +1096,8 @@ int run_bench_test(bool               init,
 
     // argument modifications and dispatch
 
-    if(!strcmp(function, "gemm_ex") || !strcmp(function, "gemm_batched_ex"))
+    if(!strcmp(function, "gemm_ex") || !strcmp(function, "gemm_batched_ex")
+       || !strcmp(function, "gemm_grouped_batched_ex"))
     {
         gemm_arg_adjust(arg, any_stride);
 
