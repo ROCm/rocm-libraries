@@ -129,13 +129,16 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
 /**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
  *
- * Calibrated table-driven heuristic. Thresholds were tuned on MI350
- * (gfx950, f16) in June 2026; problems whose macro-tile shape is not
- * in the table fall through to a safe default of 2.0 tiles/CU.
+ * Decision rule fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X
+ * (gfx950); see origami::streamk_hybrid_defaults_t for the thresholds.
+ * Other architectures always return hybrid_mode_t::static_ until they are
+ * tuned in a follow-up PR. Gates, in order: grid size (tiles), then whether
+ * a cotenant currently holds any CU away from this kernel, then occupancy,
+ * falling back to tiles-per-CU only once occupancy alone isn't decisive.
  *
  * @param problem            Problem description (M, N, K, batch).
  * @param hardware           Hardware characteristics (@see origami::hardware_t).
- * @param config             Kernel configuration (provides MT shape).
+ * @param config             Kernel configuration (provides MT shape and occupancy).
  * @param sm_count_target    Caller's effective CU budget (0 = use all
  *                           CUs the device exposes). When non-zero,
  *                           clamps hardware.N_CU from above.
