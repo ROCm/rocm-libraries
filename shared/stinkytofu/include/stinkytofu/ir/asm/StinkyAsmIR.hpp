@@ -393,6 +393,10 @@ inline bool isGLOBALStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStore);
 }
 
+inline bool isGlobalStoreAsyncFromLds(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALStoreAsyncFromLds);
+}
+
 inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
 }
@@ -455,7 +459,8 @@ inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
-    return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst);
+    return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst) ||
+           isGlobalStoreAsyncFromLds(inst);
 }
 
 /// A destination register is implicit (not printed) when it was added solely
@@ -507,6 +512,13 @@ inline bool isReturningAtomic(const StinkyInstruction& inst) {
 
 inline bool isTensorLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_TENSORLoadToLds);
+}
+
+// Async memory ops tracked by ASYNCcnt (s_wait_asynccnt). Shared FIFO counter
+// across the whole async family; extend this predicate as async loads /
+// cluster-async / ds_atomic_async_barrier_arrive are added.
+inline bool isAsyncMemOp(const StinkyInstruction& inst) {
+    return isGlobalStoreAsyncFromLds(inst);
 }
 
 inline bool isDSRead(const StinkyInstruction& inst) {

@@ -299,6 +299,7 @@ struct Modifier {
         VCC,
         SWAITCNT_DATA,
         SWAITTENSORCNT_DATA,
+        SWAITASYNCCNT_DATA,
         SWAITSTORECNT_DATA,
         SDELAYALU_DATA,
         SWAITALU_DATA,
@@ -811,6 +812,14 @@ struct SWaitTensorCntData : public TypedModifier<SWaitTensorCntData> {
     SWaitTensorCntData(int8_t tlcnt = -1) : TypedModifier<SWaitTensorCntData>(), tlcnt(tlcnt) {}
 
     int8_t tlcnt;
+};
+
+struct SWaitAsyncCntData : public TypedModifier<SWaitAsyncCntData> {
+    static constexpr Modifier::Type Type = Modifier::Type::SWAITASYNCCNT_DATA;
+
+    SWaitAsyncCntData(int8_t asynccnt = -1) : TypedModifier<SWaitAsyncCntData>(), asynccnt(asynccnt) {}
+
+    int8_t asynccnt;
 };
 
 struct SWaitStoreCntData : public TypedModifier<SWaitStoreCntData> {

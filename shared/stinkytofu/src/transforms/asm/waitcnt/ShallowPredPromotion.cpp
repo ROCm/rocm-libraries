@@ -82,6 +82,9 @@ void setCounter(WaitCountSpec& spec, CounterKind c, int w) {
         case CK_Tensor:
             spec.tensorCount = w;
             break;
+        case CK_Async:
+            spec.asyncCount = w;
+            break;
         default:
             break;
     }
@@ -97,6 +100,8 @@ int getCounter(const WaitCountSpec& spec, CounterKind c) {
             return spec.kmCount;
         case CK_Tensor:
             return spec.tensorCount;
+        case CK_Async:
+            return spec.asyncCount;
         default:
             return WaitCountSpec::kUnused;
     }

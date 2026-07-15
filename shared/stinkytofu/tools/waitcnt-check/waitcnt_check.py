@@ -23,12 +23,13 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 
 # Enum member order mirrors C++ CounterKind (CK_DS, CK_Buffer, CK_KM,
-# CK_Tensor) so iteration order matches the reference dataflow.
+# CK_Tensor, CK_Async) so iteration order matches the reference dataflow.
 class CK(Enum):
     DS = "DS"
     BUFFER = "Buffer"
     KM = "KM"
     TENSOR = "Tensor"
+    ASYNC = "Async"
 
 
 COUNTER_WAIT_OPS: Dict[CK, str] = {
@@ -36,6 +37,7 @@ COUNTER_WAIT_OPS: Dict[CK, str] = {
     CK.BUFFER: "s_wait_loadcnt",
     CK.KM: "s_wait_kmcnt",
     CK.TENSOR: "s_wait_tensorcnt",
+    CK.ASYNC: "s_wait_asynccnt",
 }
 
 WAIT_MOD_FIELDS: Dict[str, Tuple[CK, str]] = {
@@ -43,6 +45,7 @@ WAIT_MOD_FIELDS: Dict[str, Tuple[CK, str]] = {
     "s_wait_loadcnt": (CK.BUFFER, "vlcnt"),
     "s_wait_kmcnt": (CK.KM, "kmcnt"),
     "s_wait_tensorcnt": (CK.TENSOR, "tlcnt"),
+    "s_wait_asynccnt": (CK.ASYNC, "asynccnt"),
 }
 
 K_UNUSED = -1
@@ -593,6 +596,10 @@ def classify_counter(inst: Instruction) -> Optional[CK]:
         return CK.DS
     if _is_km_producer(op):
         return CK.KM
+    # Must precede the buffer check: global_store_async_from_lds_* shares the
+    # "global_store" prefix but lives on asynccnt, not loadcnt.
+    if _is_async_producer(op):
+        return CK.ASYNC
     if _is_buffer_producer(op):
         return CK.BUFFER
     if op == "tensor_load_to_lds":
@@ -625,6 +632,13 @@ def _is_buffer_producer(op: str) -> bool:
         "flat_store",
     )
     return any(op.startswith(p) for p in prefixes)
+
+
+def _is_async_producer(op: str) -> bool:
+    # Async memory family tracked by asynccnt (s_wait_asynccnt). Today only
+    # global_store_async_from_lds_* (an LDS reader); extend as async loads etc.
+    # are added. Mirrors C++ isAsyncMemOp.
+    return op.startswith("global_store_async_from_lds")
 
 
 def is_barrier(inst: Instruction) -> bool:
@@ -667,7 +681,10 @@ def get_wait_counts(inst: Instruction) -> Dict[CK, int]:
     if inst.opcode not in WAIT_MOD_FIELDS:
         return result
     ck, field_name = WAIT_MOD_FIELDS[inst.opcode]
-    mod_key = "mod.swaitcnt" if ck != CK.TENSOR else "mod.swaittensorcnt"
+    mod_key = {
+        CK.TENSOR: "mod.swaittensorcnt",
+        CK.ASYNC: "mod.swaitasynccnt",
+    }.get(ck, "mod.swaitcnt")
     mod = inst.attrs.get(mod_key)
     if isinstance(mod, dict) and field_name in mod:
         val = int(mod[field_name])
@@ -961,6 +978,55 @@ def collect_war_deps(
     return deps
 
 
+def _writes_lds(inst: Instruction) -> bool:
+    # LDS-writing ops for async-counter hazard detection. Barrier acts as a
+    # full LDS fence. Mirrors writesLds in WaitDataflow.cpp.
+    return (
+        inst.opcode == "tensor_load_to_lds"
+        or is_ds_write(inst)
+        or is_ds_atomic(inst)
+        or is_barrier(inst)
+    )
+
+
+def collect_async_war_deps(
+    inst: Instruction, state: CounterState
+) -> List[Tuple[Instruction, CK]]:
+    # WAR/RAW/WAW on LDS across the shared async counter. Mirrors
+    # scanAsyncAntiDeps in WaitDataflow.cpp: an LDS-touching anchor must drain
+    # any in-flight async LDS op it conflicts with (overlapping token, and at
+    # least one side writes; two pure reads never conflict).
+    anchor_touches_lds = (
+        _writes_lds(inst)
+        or is_ds_read(inst)
+        or _is_async_producer(inst.opcode)
+    )
+    if not anchor_touches_lds:
+        return []
+    anchor_tokens = inst.memtokens()
+    deps: List[Tuple[Instruction, CK]] = []
+    seen: Set[int] = set()
+    for op in state.iter_ops(CK.ASYNC):
+        if op.uid == inst.uid:
+            continue
+        if not _writes_lds(inst) and not _writes_lds(op):
+            continue
+        op_tokens = op.memtokens()
+        overlap = (
+            not anchor_tokens
+            or not op_tokens
+            or has_token_overlap(anchor_tokens, op_tokens)
+        )
+        if not overlap:
+            continue
+        if op.uid in seen:
+            continue
+        if state.count_from(CK.ASYNC, op) > 0:
+            deps.append((op, CK.ASYNC))
+            seen.add(op.uid)
+    return deps
+
+
 def collect_conservative_deps(
     inst: Instruction, state: CounterState
 ) -> List[Tuple[Instruction, CK]]:
@@ -998,6 +1064,7 @@ def collect_all_deps(
         collect_register_deps,
         collect_lds_raw_deps,
         collect_war_deps,
+        collect_async_war_deps,
         collect_conservative_deps,
     ):
         for prod, ck in collector(inst, state):

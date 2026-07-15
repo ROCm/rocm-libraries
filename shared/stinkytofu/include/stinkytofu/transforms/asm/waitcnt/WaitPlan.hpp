@@ -46,10 +46,11 @@ struct WaitCountSpec {
     int bufferCount = kUnused;  // vlcnt -> s_wait_loadcnt
     int kmCount = kUnused;      // kmcnt -> s_wait_kmcnt
     int tensorCount = kUnused;  // tlcnt -> s_wait_tensorcnt
+    int asyncCount = kUnused;   // asynccnt -> s_wait_asynccnt
 
     bool isValid() const {
         return dsCount != kUnused || bufferCount != kUnused || kmCount != kUnused ||
-               tensorCount != kUnused;
+               tensorCount != kUnused || asyncCount != kUnused;
     }
 };
 

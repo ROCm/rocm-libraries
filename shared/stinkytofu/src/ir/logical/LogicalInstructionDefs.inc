@@ -755,6 +755,16 @@
              false,
              "IF_VALU"},
 
+                                    {"VPermlane16SwapB32",
+             "VPermlane16SwapB32",
+             1,
+             true,
+             "Vector Other",
+             false,
+             false,
+             false,
+             "IF_VALU"},
+
                                     {"VPackF16toB32",
              "VPackF16toB32",
              2,

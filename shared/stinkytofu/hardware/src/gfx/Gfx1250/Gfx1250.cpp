@@ -180,6 +180,10 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"GlobalPrefetchB8", "global_prefetch_b8"},
         {"GlobalLoadTR8B64", "global_load_tr_b64"},
         {"GlobalLoadTR16B128", "global_load_tr_b128"},
+        {"GlobalStoreAsyncFromLdsB8", "global_store_async_from_lds_b8"},
+        {"GlobalStoreAsyncFromLdsB32", "global_store_async_from_lds_b32"},
+        {"GlobalStoreAsyncFromLdsB64", "global_store_async_from_lds_b64"},
+        {"GlobalStoreAsyncFromLdsB128", "global_store_async_from_lds_b128"},
         /* common.hpp */
         {"SAddF32", "s_add_f32"},
         {"SCvtF32U32", "s_cvt_f32_u32"},
@@ -330,6 +334,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"VReadfirstlaneB32", "v_readfirstlane_b32"},
         {"VRndneF32", "v_rndne_f32"},
         {"VPermB32", "v_perm_b32"},
+        {"VPermlane16SwapB32", "v_permlane16_swap_b32"},
         {"VPrngB32", "v_prng_b32"},
     };
     registry.setRocisaToArchMap(std::move(rocisaToArchMap));

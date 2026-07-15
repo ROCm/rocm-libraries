@@ -439,6 +439,22 @@ DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .logical =
     .cost = {12, 116},
     .operand_fields = { {D0, vdst, vgpr, 128}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
 
+// global_store_async_from_lds_*: gfx1250 async store copying data from LDS to
+// global memory, completion via s_wait_asynccnt. No dest; S0 = 64-bit vaddr,
+// S1 = 32-bit dsaddr (LDS byte address of the source data), S2 = 64-bit saddr.
+DEF_T(GlobalStoreAsyncFromLdsB8Inst, "global_store_async_from_lds_b8", .format = VGLOBAL,
+    .flags = {GLOBALStoreAsyncFromLds},
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, vsrc, vgpr, 32}, {S2, saddr, sreg, 64} })
+DEF_T(GlobalStoreAsyncFromLdsB32Inst, "global_store_async_from_lds_b32", .format = VGLOBAL,
+    .flags = {GLOBALStoreAsyncFromLds},
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, vsrc, vgpr, 32}, {S2, saddr, sreg, 64} })
+DEF_T(GlobalStoreAsyncFromLdsB64Inst, "global_store_async_from_lds_b64", .format = VGLOBAL,
+    .flags = {GLOBALStoreAsyncFromLds},
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, vsrc, vgpr, 32}, {S2, saddr, sreg, 64} })
+DEF_T(GlobalStoreAsyncFromLdsB128Inst, "global_store_async_from_lds_b128", .format = VGLOBAL,
+    .flags = {GLOBALStoreAsyncFromLds},
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, vsrc, vgpr, 32}, {S2, saddr, sreg, 64} })
+
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
     .operand_fields = { {D0, simm16, hwreg, 16}, {S0, literal, simm32, 32} })
@@ -759,6 +775,15 @@ DEF_T(VReadfirstlaneB32Inst, "v_readfirstlane_b32", .format = VOP1, .logical = "
 
 // Vector ALU — VOP1 only (special swap)
 DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
+    .operand_fields = {
+        {D0, vdst, vgpr, 32, RW},
+        {D1, src0, src_vgpr, 32, RW},
+    },
+)
+
+// Vector ALU — VOP1 only (swaps the b32 across lane pairs 16 apart; both
+// operands are read-modify-write, like v_swap_b32).
+DEF_T(VPermlane16SwapB32Inst, "v_permlane16_swap_b32", .format = VOP1, .logical = "VPermlane16SwapB32",
     .operand_fields = {
         {D0, vdst, vgpr, 32, RW},
         {D1, src0, src_vgpr, 32, RW},
