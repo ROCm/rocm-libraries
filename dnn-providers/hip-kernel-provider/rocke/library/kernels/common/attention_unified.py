@@ -2229,9 +2229,9 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
 def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
     """Predicate: true when this problem belongs to the D256 bf16 decode cohort.
 
-    Covers gfx950 and gfx942, bf16, head_size=256, decode (all_decode=True).
-    No sliding window, softcap, sinks, alibi, or qq_bias — these features
-    are not validated for the D256 decode fast path.
+    Intended for bf16, head_size=256, decode-only (all_decode=True) shapes; the
+    architecture gate (gfx942/gfx950) is enforced by the dispatcher/caller.
+    Excludes sliding window, softcap, sinks, ALiBi, and QQ-bias.
     """
     return (
         problem.head_size == 256
