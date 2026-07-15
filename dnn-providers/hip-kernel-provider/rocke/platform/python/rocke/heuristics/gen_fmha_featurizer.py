@@ -298,10 +298,12 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     FmhaFeatures f;
 {setters}
     return f;
-}
+}}
 
 }}  // namespace rocke_client::dispatcher
-""".format(dtype_bytes_fn=dtype_bytes_fn, dtype_enc_fn=dtype_enc_fn, setters=setters)
+""".format(
+        dtype_bytes_fn=dtype_bytes_fn, dtype_enc_fn=dtype_enc_fn, setters=setters
+    )
 
 
 def generate(out_dir: Path) -> list[str]:
