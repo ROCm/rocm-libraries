@@ -58,8 +58,14 @@ Use the following commands to install rocALUTION on SLES:
 
 .. code-block:: shell
 
-   sudo dnf upgrade
-   sudo dnf install rocalution
+   sudo zypper refresh
+   sudo zypper install rocalution
+
+.. note::
+
+   On SLES, use ``zypper`` instead of ``dnf``. The ROCm repositories must be
+   configured first, and installing the full ``rocm`` package is usually
+   recommended because rocALUTION depends on other ROCm components.
 
 After you install rocALUTION, you can use it like any other library with a C++ API.
 Include the header file in your code to call rocALUTION.
