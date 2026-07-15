@@ -2,14 +2,6 @@
   "flavors": {
     "llvm20": {
       "cases": {
-        "attention/gfx950/d256_pad_interleave": {
-          "arch": "gfx950",
-          "bytes": 609602,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg",
-          "sha256": "4650f01f089d4cd21714515984b697f6dd307bf506c7993ede6a04286f50a14f",
-          "status": "ok"
-        },
         "conv/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
           "bytes": 42207,
@@ -316,29 +308,20 @@
           "gfx1250": 2,
           "gfx90a": 3,
           "gfx942": 4,
-          "gfx950": 15
+          "gfx950": 14
         },
         "expected_failures": 0,
         "families": {
-          "attention": 1,
           "conv": 7,
           "deep_fused_conv": 9,
           "gemm": 12,
           "moe": 9
         },
-        "ok_cases": 38
+        "ok_cases": 37
       }
     },
     "llvm22": {
       "cases": {
-        "attention/gfx950/d256_pad_interleave": {
-          "arch": "gfx950",
-          "bytes": 609706,
-          "family": "attention",
-          "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_h16kv2_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg",
-          "sha256": "50a532b844ea16f58bdc3bbc5b8bc53434642fa4bfeb4355f47b8c4f58e093c4",
-          "status": "ok"
-        },
         "conv/gfx1151/n1h8c16k32r3": {
           "arch": "gfx1151",
           "bytes": 42350,
@@ -645,17 +628,16 @@
           "gfx1250": 2,
           "gfx90a": 3,
           "gfx942": 4,
-          "gfx950": 15
+          "gfx950": 14
         },
         "expected_failures": 0,
         "families": {
-          "attention": 1,
           "conv": 7,
           "deep_fused_conv": 9,
           "gemm": 12,
           "moe": 9
         },
-        "ok_cases": 38
+        "ok_cases": 37
       }
     }
   },
