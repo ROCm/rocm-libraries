@@ -65,7 +65,48 @@ def main():
             env["TEMP"] = os.environ.get("TEMP")
 
     # Run the command line with the given environment in the execution directory.
-    return subprocess.call(commandLine, cwd=args.execdir, env=env, shell=False)
+    #
+    # A hipThreads test can hang (e.g. a hip::thread whose persistent scheduler
+    # never reaches the state join() waits for). Without a timeout, one hung test
+    # would block the whole lit run until the CI job's global timeout, cancelling
+    # every later test. So we run the child in its own process group and kill the
+    # entire group if it exceeds HIPTHREADS_TEST_TIMEOUT seconds (default 30, 0 to
+    # disable). Using killpg to kill the whole process group (not just the
+    # immediate child like the timeout command) is required in case a test
+    # launches a sub-process. A timed-out test returns non-zero, which lit records
+    # as a normal FAIL/XFAIL instead of a hang.
+    try:
+        timeout = float(os.environ.get("HIPTHREADS_TEST_TIMEOUT", "30"))
+    except ValueError:
+        timeout = 30.0
+
+    if not timeout or platform.system() == "Windows":
+        # No timeout requested, or process-group semantics below are POSIX-only.
+        return subprocess.call(commandLine, cwd=args.execdir, env=env, shell=False)
+
+    proc = subprocess.Popen(
+        commandLine, cwd=args.execdir, env=env, shell=False, start_new_session=True
+    )
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        import signal
+
+        # Graduated shutdown - send SIGTERM to request graceful shutdown and give
+        # it 5 seconds to gracefully shut down before forcefully killing it with
+        # SIGKILL.
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(pgid, signal.SIGKILL)
+            proc.wait()
+        print(
+            f"run.py: command timed out after {timeout:g}s and was killed: "
+            f"{' '.join(commandLine)}"
+        )
+        return 124
 
 
 if __name__ == "__main__":
