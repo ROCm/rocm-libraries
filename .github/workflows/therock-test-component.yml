@@ -176,6 +176,14 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/build/lib/llvm/lib:${{ github.workspace }}/build/lib
         run: |
           set -euo pipefail
+          # --- TEMP DEBUG: locate profraw files across the container ---
+          echo "== profraw discovery =="
+          echo "PROFRAW_DIR=${PROFRAW_DIR}"
+          ls -la "${PROFRAW_DIR}" 2>/dev/null || echo "(coverage-profraw dir missing)"
+          echo "-- find *.profraw under workspace, /tmp, HOME --"
+          find "${GITHUB_WORKSPACE}" /tmp "${HOME}" -name '*.profraw' 2>/dev/null | head -50 || true
+          echo "== end profraw discovery =="
+          # --- END TEMP DEBUG ---
           mkdir -p "${REPORT_DIR}"
           OBJECT="${BUILD}/lib/lib${PROJECT}.so"
           PROFDATA="${REPORT_DIR}/${PROJECT}.profdata"
