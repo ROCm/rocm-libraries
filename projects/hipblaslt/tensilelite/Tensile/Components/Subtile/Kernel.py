@@ -901,15 +901,20 @@ class RegisterTileInfo:
 
 
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
-  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst)."""
+  """Zero a contiguous register range using MFMA (16/inst) or WMMA."""
   useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
   tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
   tileCopyInst = VMovB32 if useWmma else (VAccvgprWrite if isAgpr else VMovB32)
 
   if useWmma:
-    regsPerInst = 8
-    instType, accType = InstType.INST_F32, InstType.INST_F32
-    variant = [16, 16, 4, 1]
+    if writer.states.asmCaps.get("HasWMMA_V1", False):
+      regsPerInst = 4
+      instType, accType = InstType.INST_F16, InstType.INST_F32
+      variant = [16, 16, 16, 1]
+    else:
+      regsPerInst = 8
+      instType, accType = InstType.INST_F32, InstType.INST_F32
+      variant = [16, 16, 4, 1]
     acc2_kwargs = {"acc2_imm": 0}
   else:
     regsPerInst = 16
