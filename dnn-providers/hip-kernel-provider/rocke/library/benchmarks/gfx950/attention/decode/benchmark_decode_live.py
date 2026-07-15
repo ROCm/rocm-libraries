@@ -17,6 +17,11 @@ Run::
         --shapes shapes_a.json shapes_b.json \\
         --num-sms-sweep 60 120 152 304 \\
         --output-json /tmp/decode_gfx950.json
+
+    # --flydsl requires FLYDSL_PATH env var set to the ROCm/FlyDSL repo root:
+    FLYDSL_PATH=/path/to/FlyDSL \\
+    python -m benchmarks.gfx950.attention.decode.benchmark_decode_live \\
+        --shapes shapes.json --flydsl
 """
 
 from __future__ import annotations
@@ -390,6 +395,147 @@ def _gm(vals: List[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
+# FlyDSL helpers
+# ---------------------------------------------------------------------------
+
+_FLYDSL_FUNC = None
+_FLYDSL_KERNELS: dict = {}
+_ROCKE_KERNELS: dict = {}
+
+
+def _import_flydsl():
+    global _FLYDSL_FUNC, _FLYDSL_KERNELS, _ROCKE_KERNELS
+    if _FLYDSL_FUNC is not None:
+        return
+    import os
+
+    flydsl_path = os.environ.get("FLYDSL_PATH")
+    if not flydsl_path:
+        raise RuntimeError(
+            "FLYDSL_PATH env var must be set to the ROCm/FlyDSL repo root"
+        )
+    sys.path.insert(0, flydsl_path)
+    _rocke = {
+        k: sys.modules.pop(k)
+        for k in list(sys.modules)
+        if k == "kernels" or k.startswith("kernels.")
+    }
+    try:
+        import kernels.attention.flash_attn_generic  # type: ignore  # noqa: F401
+        import kernels.attention.flash_attn_gfx950  # type: ignore  # noqa: F401
+        from kernels.attention.flash_attn_interface import flydsl_flash_attn_func  # type: ignore
+
+        _FLYDSL_FUNC = flydsl_flash_attn_func
+        _FLYDSL_KERNELS = {
+            k: v
+            for k, v in sys.modules.items()
+            if k == "kernels" or k.startswith("kernels.")
+        }
+    finally:
+        sys.path.remove(flydsl_path)
+        for k in [k for k in sys.modules if k == "kernels" or k.startswith("kernels.")]:
+            del sys.modules[k]
+        sys.modules.update(_rocke)
+        _ROCKE_KERNELS = {
+            k: v
+            for k, v in sys.modules.items()
+            if k == "kernels" or k.startswith("kernels.")
+        }
+
+
+def _flydsl_swap(flydsl: bool) -> None:
+    for k in [k for k in sys.modules if k == "kernels" or k.startswith("kernels.")]:
+        del sys.modules[k]
+    sys.modules.update(_FLYDSL_KERNELS if flydsl else _ROCKE_KERNELS)
+
+
+_FLYDSL_PAGED_PAGE_SIZE = 64
+
+
+def _flydsl_supported(shape: DecodeShape) -> tuple[bool, str]:
+    if shape.head_size not in (64, 128):
+        return False, f"head_size={shape.head_size} (need 64 or 128)"
+    if shape.dtype not in ("bf16", "fp16"):
+        return False, f"dtype={shape.dtype} (need bf16 or fp16)"
+    return True, ""
+
+
+def _run_flydsl(shape: DecodeShape, data: dict, *, warmup: int, iters: int):
+    """Time FlyDSL flash attention for decode.
+
+    FlyDSL decode uses 4D Q [B, Sq, H, D] (no cu_seqlens_q).
+
+    block_size == 64: paged path — FlyDSL reads KV natively via block_table.
+    block_size != 64: dense path — KV reconstructed as [B, Skv, H, D] outside
+        the timed loop, then passed without block_table.
+
+    Returns (ms, kv_path) or (None, None) on failure.
+    """
+    import torch
+    from rocke.runtime import synchronize_and_release, time_launches
+
+    _import_flydsl()
+    hip_stream = _bench_stream_handle()
+
+    # Decode q from _make_inputs: [batch, num_query_heads, head_size].
+    # FlyDSL dense/paged path expects 4D [B, Sq, H, D].
+    q = data["q"].unsqueeze(1)  # [B, 1, H, D]
+    kv_lens = data["kv_lens"]
+    out = torch.empty_like(q)
+
+    if shape.block_size == _FLYDSL_PAGED_PAGE_SIZE:
+        kv_path = "paged"
+
+        def call_once():
+            _FLYDSL_FUNC(
+                q,
+                data["kc"],
+                data["vc"],
+                causal=True,
+                block_table=data["block_table"],
+                seqlen_k=kv_lens,
+                out=out,
+            )
+
+    else:
+        # Reconstruct dense KV [B, Skv, nhk, D] outside the timed region.
+        kv_path = "dense"
+        block_size = shape.block_size
+        nheads_k = shape.num_kv_heads
+        head_dim = shape.head_size
+        seqlen_k = shape.seqlen_k
+        k_dense = torch.empty(
+            shape.batch, seqlen_k, nheads_k, head_dim, dtype=q.dtype, device=q.device
+        )
+        v_dense = torch.empty_like(k_dense)
+        for bi in range(shape.batch):
+            bt = data["block_table"][bi]
+            k_dense[bi] = data["kc"][bt].reshape(-1, nheads_k, head_dim)[:seqlen_k]
+            v_dense[bi] = data["vc"][bt].reshape(-1, nheads_k, head_dim)[:seqlen_k]
+
+        def call_once():
+            _FLYDSL_FUNC(
+                q,
+                k_dense,
+                v_dense,
+                causal=True,
+                num_kv_heads=nheads_k,
+                out=out,
+            )
+
+    try:
+        _flydsl_swap(flydsl=True)
+        try:
+            ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+            synchronize_and_release(hip_stream)
+        finally:
+            _flydsl_swap(flydsl=False)
+        return ms, kv_path
+    except Exception:
+        return None, None
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -462,6 +608,11 @@ def main() -> int:
         default=False,
         help="Enable QQ-bias. Forces scalar fallback (tiled path unsupported).",
     )
+    ap.add_argument(
+        "--flydsl",
+        action="store_true",
+        help="Also benchmark FlyDSL flash attention (set FLYDSL_PATH to ROCm/FlyDSL repo root)",
+    )
     args = ap.parse_args()
 
     import torch
@@ -524,8 +675,9 @@ def main() -> int:
     print(f"bias   : {bias_tag}")
     print()
 
+    fly_col = f"  {'fly_us':>10}" if args.flydsl else ""
     header = (
-        f"{'label':<22}  {'triton_us':>10}  {'aot_us':>10}  "
+        f"{'label':<22}  {'triton_us':>10}  {'aot_us':>10}{fly_col}  "
         + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
         + f"  {'best_sms':>8}  {'best_spd':>9}  path"
     )
@@ -554,6 +706,19 @@ def main() -> int:
 
         aot_ms = _run_aoTriton(shape, data, warmup=args.warmup, iters=args.iterations)
         aot_us = aot_ms * 1000 if aot_ms else float("nan")
+
+        fly_ms = None
+        fly_kv_path = None
+        fly_skip_reason = None
+        fly_error = None
+        if args.flydsl:
+            fly_ok, fly_skip_reason = _flydsl_supported(shape)
+            if fly_ok:
+                fly_ms, fly_kv_path = _run_flydsl(
+                    shape, data, warmup=args.warmup, iters=args.iterations
+                )
+                if fly_ms is None:
+                    fly_error = "runtime error (see stderr)"
 
         dsl_results: Dict[int, Dict] = {}
         best_sms: Optional[int] = None
@@ -589,8 +754,17 @@ def main() -> int:
         aot_spd_str = (
             f"{best_spd_aot:>8.3f}x" if math.isfinite(best_spd_aot) else f"{'N/A':>9}"
         )
+        fly_col_val = (
+            f"  {fly_ms * 1000:>10.1f}"
+            if fly_ms is not None
+            else (
+                (f"  {'SKIP':>10}" if fly_skip_reason else f"  {'ERR':>10}")
+                if args.flydsl
+                else ""
+            )
+        )
         print(
-            f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}  {sms_cols}"
+            f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}{fly_col_val}  {sms_cols}"
             f"  {best_sms or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)  {best_path}"
         )
 
@@ -617,6 +791,15 @@ def main() -> int:
                     best_spd_aot if math.isfinite(best_spd_aot) else None
                 ),
                 "best_path": best_path,
+                "flydsl_ms": fly_ms,
+                "flydsl_kv_path": fly_kv_path,
+                "flydsl_skip_reason": fly_skip_reason,
+                "flydsl_error": fly_error,
+                "best_speedup_vs_flydsl": (
+                    fly_ms / best_ms
+                    if (fly_ms is not None and best_ms is not None and best_ms > 0)
+                    else None
+                ),
             }
         )
 
@@ -635,6 +818,29 @@ def main() -> int:
             f"geomean speedup (DSL best vs AOTriton): {_gm(aot_spds):.3f}x  "
             f"(n={len(aot_spds)})"
         )
+    if args.flydsl:
+        fly_ran = [r for r in results if r.get("flydsl_ms") is not None]
+        fly_vs_tri = [
+            r["flydsl_ms"] / r["triton_ms"]
+            for r in fly_ran
+            if r.get("triton_ms") and r["triton_ms"] > 0
+        ]
+        fly_vs_ck = [
+            r["best_speedup_vs_flydsl"]
+            for r in fly_ran
+            if r.get("best_speedup_vs_flydsl") is not None
+        ]
+        print(f"\nFlyDSL summary ({len(fly_ran)}/{len(results)} shapes ran):")
+        if fly_vs_tri:
+            wins = sum(1 for x in fly_vs_tri if x > 1)
+            print(
+                f"  fly vs Triton:      geomean={_gm(fly_vs_tri):.3f}x  wins={wins}/{len(fly_vs_tri)}"
+            )
+        if fly_vs_ck:
+            wins = sum(1 for x in fly_vs_ck if x > 1)
+            print(
+                f"  rocke vs FlyDSL:    geomean={_gm(fly_vs_ck):.3f}x  wins={wins}/{len(fly_vs_ck)}"
+            )
 
     if args.output_json:
         args.output_json.write_text(json.dumps(results, indent=2, default=str))
