@@ -22,6 +22,7 @@
 
 #include "handle.hpp"
 #include "int64_helpers.hpp"
+#include "logging.hpp"
 
 #include "rocblas_gemm_ex_64.hpp"
 
@@ -123,6 +124,33 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
     bool              source_dims_supported = (m_64 <= limit && n_64 <= limit) || k_64 == 0;
     if(!source_dims_supported)
         return rocblas_status_invalid_size;
+
+    if(handle->layer_mode & rocblas_layer_mode_log_internal)
+    {
+        rocblas_internal_ostream alphass, betass;
+        (void)rocblas_internal_log_trace_alpha_beta_ex(
+            rocblas_datatype_from_type<TScal>, alpha, beta, alphass, betass);
+
+        rocblas_internal_logger logger;
+        logger.log_trace(handle,
+                         c_rocblas_internal,
+                         "rocblas_gemm_source_backend",
+                         trans_a,
+                         trans_b,
+                         m_64,
+                         n_64,
+                         k_64,
+                         alphass.str(),
+                         a,
+                         lda_64,
+                         b,
+                         ldb_64,
+                         betass.str(),
+                         c,
+                         ldc_64,
+                         d,
+                         ldd_64);
+    }
 
     for(int64_t b_base = 0; b_base < batch_count_64; b_base += c_i64_grid_YZ_chunk)
     {

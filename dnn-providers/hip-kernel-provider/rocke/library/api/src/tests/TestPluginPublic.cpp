@@ -30,14 +30,29 @@ TEST(TestPluginPublic, GetVersionReturnsGeneratedVersion)
     EXPECT_STREQ(version, ROCKE_CLIENT_VERSION_STRING);
 }
 
-TEST(TestPluginPublic, GetApiVersionReturnsBaselineEngineApi)
+TEST(TestPluginPublic, GetApiVersionReportsEnginePluginApi110)
 {
     const char* version = nullptr;
 
     auto status = hipdnnPluginGetApiVersion(&version);
 
     ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(version, "1.0.0");
+    EXPECT_STREQ(version, "1.1.0");
+}
+
+TEST(TestPluginPublic, ExecuteOpGraphWithOverridesDeclinesOverrideExecution)
+{
+    // rocke-client exports the 1.1 override-execute entry point but does not serve
+    // override-shape graphs (they are declined during applicability); the entry
+    // returns a clean NOT_APPLICABLE rather than mis-executing.
+    hipdnnEnginePluginHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    const auto status = hipdnnEnginePluginExecuteOpGraphWithOverrides(
+        handle, nullptr, nullptr, nullptr, 0, 0, nullptr, nullptr, nullptr, nullptr);
+
+    EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 
 TEST(TestPluginPublic, GetTypeReturnsEnginePlugin)
