@@ -75,6 +75,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Components.GL2Prefetch import GL2PrefetchLoad
+from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
@@ -2642,55 +2643,15 @@ class KernelWriterAssembly(KernelWriter):
                                comment="WorkGroup2 = (cluster_z * nwg_z) + wg_z"))
             moduleRegInit.add(label_calculate_workgroup_done)
 
-        if kernel["Multicast"]:
-          moduleRegInit.addComment0("Calculate multicast mask")
-          sgprWgX = sTmp+1
-          sgprWgY = sTmp+2
-          sgprNWgX = sTmp+3
-
-          maskA = 1
-          for idx in range(kernel["ClusterDim"][1]):
-            maskA |= (1 << (idx * kernel["ClusterDim"][0]))
-
-          maskB = (1 << kernel["ClusterDim"][0]) - 1
-
-          if kernel["enableTDMMetadata"]:
-            if kernel["ProblemType"]["Sparse"] == 1:
-              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                                comment="Setting metadata mask (follows sparse A)"))
-            elif kernel["ProblemType"]["Sparse"] == 2:
-              moduleRegInit.add(SMulI32(dst=sgpr(sTmp+4), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                        comment="Shift factor: wg_y * nwg_x (metadata)"))
-              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sTmp+4), src=hex(maskB),\
-                                                comment="Setting metadata mask (follows sparse B)"))
-
-          if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-            setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
-            setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
-            setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
-
-            moduleRegInit.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
-            moduleRegInit.add(SCBranchSCC1(setMulticastMaskLblOdd.getLabelName(), "Jump if wId is odd"))
-
-            moduleRegInit.add(setMulticastMaskLblEven)
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                              comment="Setting maskA for even wave"))
-            moduleRegInit.add(SBranch(setMulticastMaskLblEnd.getLabelName()))
-            moduleRegInit.add(setMulticastMaskLblOdd)
-            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                      comment="Shift factor: wg_y * nwg_x"))
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMask"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                              comment="Setting maskB for odd wave"))
-            moduleRegInit.add(setMulticastMaskLblEnd)
-
-          else:
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskA"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
-                                              comment="Setting maskA"))
-
-            moduleRegInit.add(SMulI32(dst=sgpr(sgprWgY), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
-                                      comment="Shift factor: wg_y * nwg_x"))
-            moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
-                                              comment="Setting maskB"))
+        # Guard the compute site like the apply sites: find() returns None
+        # unless TDMInst==3 + HasTDM match, so Multicast with TDMInst in {1,2}
+        # or a non-TDM arch would otherwise None-deref here.
+        clusterComp = ClusterLoadTDM.find(self)
+        if kernel["Multicast"] and clusterComp:
+          # Same SGPR operands allocated above (wg_x=sTmp+1, wg_y=sTmp+2,
+          # nwg_x=sTmp+3, scratch=sTmp+4) are passed through.
+          moduleRegInit.add(clusterComp.computeMasks(
+              self, kernel, sgprWgX=sTmp+1, sgprWgY=sTmp+2, sgprNWgX=sTmp+3, sTmp=sTmp))
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
@@ -18844,7 +18805,6 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
-    enableCluster = clusterEnabled(kernel["ClusterDim"])
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
@@ -18857,13 +18817,6 @@ class KernelWriterAssembly(KernelWriter):
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
-
-    def maskSgprName(tc: str) -> str:
-      if tc.startswith("MXS"):
-        string = tc.removeprefix("MXS")
-      else:
-        string = tc
-      return f"MulticastMask{string}"
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
@@ -18895,8 +18848,9 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), isMetadata))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
-    if kernel["Multicast"] and enableCluster:
-      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
+    clusterComp = ClusterLoadTDM.find(self)
+    if clusterComp:
+      mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc))
 
     with self.allocTmpSgpr(2, tag="initTDMDescriptor_tmpSgprRes") as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
@@ -18997,7 +18951,6 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
-    enableCluster = clusterEnabled(kernel["ClusterDim"])
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
@@ -19010,9 +18963,6 @@ class KernelWriterAssembly(KernelWriter):
     def sizeRefName(idx: int) -> str:
       idxChar= INDEX_CHARS[idx]
       return f"Size{idxChar}"
-
-    def maskSgprName(tc: str) -> str:
-      return f"MulticastMask"
 
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
@@ -19053,8 +19003,9 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), group2Name, None))
     mod.add(comp.setDataType(dtype, descSgprName(1), tc == "Metadata"))
     mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
-    if kernel["Multicast"] and enableCluster:
-      mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
+    clusterComp = ClusterLoadTDM.find(self)
+    if clusterComp:
+      mod.add(clusterComp.applyToDescriptor(self, kernel, descSgprName(1), tc, waveSeparated=True))
 
     with self.allocTmpSgpr(2, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgprRes") as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx

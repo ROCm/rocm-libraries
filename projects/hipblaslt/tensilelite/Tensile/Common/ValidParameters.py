@@ -1105,6 +1105,14 @@ validParameters = { # we need to make sure this matches develop
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
+    # Multicast (cluster load) control. Decouples the TDM-multicast opt-in from
+    # ClusterDim so barrier-only clustering and cooperative-load clustering
+    # compose independently. Tri-state:
+    #   -1 = auto (legacy: ClusterDim != [1,1] implies Multicast, except the
+    #        StreamK cluster paths); reproduces historic behavior exactly.
+    #    0 = force multicast off.
+    #    1 = force multicast on (independent of the ClusterDim coupling).
+    "Multicast": [-1, 0, 1],
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled
     # 1: Use PLR 0.5 for A
