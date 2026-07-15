@@ -906,6 +906,12 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   Uses the last MFMA-sized chunk of the D range itself as the zero source:
   scalar-zero that chunk first, then use it as the A/B operand to MFMA-zero
   all preceding chunks. No external scratch VGPRs are needed.
+
+  The A/B source is addressed via tileAlias so it lives in the same register
+  file as the accumulator: VGPRs for WMMA / VGPR accumulation, AGPRs for AGPR
+  accumulation (gfx90a+/CDNA MFMA can read A/B from AGPRs). Using vgpr() here
+  unconditionally would read an unzeroed VGPR of the same index on the AGPR path
+  and produce -nan.
   """
   useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
   tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
@@ -946,7 +952,7 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
       module.add(MFMAInstruction(instType=instType, accType=accType,
                                  variant=variant, mfma1k=False,
                                  acc=tileAlias(r, regsPerInst),
-                                 a=vgpr(lastChunkBase, 2), b=vgpr(lastChunkBase, 2),
+                                 a=tileAlias(lastChunkBase, 2), b=tileAlias(lastChunkBase, 2),
                                  **acc2_kwargs, **reuseHint,
                                  comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
   # Remainder registers (< regsPerInst) that don't fill a full MFMA

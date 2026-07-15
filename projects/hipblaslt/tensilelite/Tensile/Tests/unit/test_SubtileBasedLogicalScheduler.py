@@ -4069,9 +4069,10 @@ class TestBuildTailloopPGR0:
 #
 # The initC zeroing uses the last MFMA-sized chunk of the D register range
 # itself as the zero source: scalar-zero that chunk, then use its first 2
-# VGPRs as the A/B operand to MFMA-zero all preceding chunks. This avoids
-# any external scratch allocation and saves 1 MFMA instruction compared to
-# zeroing all chunks via MFMA with a separate scratch pair.
+# registers as the A/B operand to MFMA-zero all preceding chunks. The A/B
+# source is addressed in the accumulator's own register file (VGPRs for
+# WMMA/VGPR accumulation, AGPRs for AGPR accumulation), so no external scratch
+# allocation is needed and 1 MFMA is saved vs zeroing with a separate pair.
 
 class _InitCPool:
     """Minimal vgpr pool mock for initC tests (no checkouts needed)."""
@@ -4156,12 +4157,25 @@ class TestInitCZeroRegRange:
         _zero_range(w, 0, 96, isAgpr=True)
         assert w.vgprPool.size() == 100, "pool size must not change"
 
-    def test_source_uses_last_chunk_base(self):
-        """MFMA source operand references the base of the last chunk."""
+    def test_source_uses_last_chunk_base_agpr(self):
+        """AGPR accumulation: MFMA A/B source is the zeroed last chunk in the
+        AGPR file (acc[80:81]), NOT the same-index VGPR (v[80:81]).
+
+        Regression guard for the -nan bug: naming vgpr(lastChunkBase) reads an
+        unzeroed VGPR of a coincidentally-matching index. gfx90a+/CDNA MFMA can
+        read A/B from AGPRs, so the source must live in the accumulator's file.
+        """
         w = _initc_writer()
-        # 96 regs starting at v0: last chunk base = 0 + 5*16 = 80
+        # 96 regs starting at reg0: last chunk base = 0 + 5*16 = 80
         src = _zero_range(w, 0, 96, isAgpr=True)
-        assert "v[80:81]" in src, f"expected source v[80:81] (last chunk base):\n{src[:600]}"
+        assert "acc[80:81]" in src, f"expected AGPR source acc[80:81]:\n{src[:600]}"
+        assert "v[80:81]" not in src, f"AGPR source must not be the same-index VGPR:\n{src[:600]}"
+
+    def test_source_uses_last_chunk_base_vgpr(self):
+        """VGPR accumulation: MFMA A/B source is the zeroed last chunk in VGPRs."""
+        w = _initc_writer()
+        src = _zero_range(w, 0, 96, isAgpr=False)
+        assert "v[80:81]" in src, f"expected VGPR source v[80:81] (last chunk base):\n{src[:600]}"
 
 
 class TestInitCInitVgprTilesToZero:
