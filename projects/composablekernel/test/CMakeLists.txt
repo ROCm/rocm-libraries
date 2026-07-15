@@ -323,6 +323,9 @@ endif()
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx942|gfx950") # smfmac needs ROCm6.2
     add_subdirectory(smfmac_op)
 endif()
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx942|gfx950") # fused MoE GEMM fp8 path
+    add_subdirectory(moe_gemm)
+endif()
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     add_subdirectory(mx_mfma_op)
 endif()
