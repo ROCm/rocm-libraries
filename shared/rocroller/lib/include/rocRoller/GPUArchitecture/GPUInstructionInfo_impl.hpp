@@ -30,6 +30,8 @@ namespace rocRoller
             return "EXPQueue";
         case GPUWaitQueueType::VSQueue:
             return "VSQueue";
+        case GPUWaitQueueType::TensorQueue:
+            return "TensorQueue";
         case GPUWaitQueueType::FinalInstruction:
             return "FinalInstruction";
         case GPUWaitQueueType::None:
@@ -65,6 +67,9 @@ namespace rocRoller
         case GPUWaitQueueType::VSQueue:
             return GPUWaitQueue::VSQueue;
 
+        case GPUWaitQueueType::TensorQueue:
+            return GPUWaitQueue::TensorQueue;
+
         case GPUWaitQueueType::FinalInstruction:
         case GPUWaitQueueType::None:
             return GPUWaitQueue::None;
@@ -90,6 +95,8 @@ namespace rocRoller
             return "EXPQueue";
         case GPUWaitQueue::VSQueue:
             return "VSQueue";
+        case GPUWaitQueue::TensorQueue:
+            return "TensorQueue";
         case GPUWaitQueue::Count:
             return "Count";
         case GPUWaitQueue::None:

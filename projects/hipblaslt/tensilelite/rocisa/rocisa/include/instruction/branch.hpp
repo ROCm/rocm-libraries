@@ -181,6 +181,19 @@ namespace rocisa
 
     struct SSetPCB64 : public BranchInstruction
     {
+        // Optional long-branch target hint.
+        //
+        // When non-empty, this names the static label that the surrounding
+        // SLongBranch* helper sequence (s_getpc_b64 / s_add_i32 / s_add_u32 /
+        // s_addc_u32 / s_setpc_b64) is computing the address for. The
+        // StinkyTofu IR converter reads this field to wire a direct CFG edge
+        // instead of treating the s_setpc_b64 as an opaque indirect jump.
+        //
+        // This field is metadata only: it does NOT change toString() nor the
+        // emitted assembly. Empty string means "no hint" -- the instruction
+        // remains a generic indirect set-PC.
+        std::string longBranchLabel;
+
         SSetPCB64(const std::shared_ptr<Container>& src, const std::string& comment = "")
             : BranchInstruction("", comment)
             , srcs(src)
@@ -190,6 +203,7 @@ namespace rocisa
 
         SSetPCB64(const SSetPCB64& other)
             : BranchInstruction(other)
+            , longBranchLabel(other.longBranchLabel)
             , srcs(other.srcs ? other.srcs->clone() : nullptr)
         {
         }
@@ -225,6 +239,10 @@ namespace rocisa
 
     struct SSwapPCB64 : public BranchInstruction
     {
+        // Candidate callee names for consumers that model s_swappc_b64 as a
+        // function call. Metadata only: it does not change emitted assembly.
+        std::vector<std::string> calleeFuncs;
+
         SSwapPCB64(const std::shared_ptr<Container>& dst,
                    const std::shared_ptr<Container>& src,
                    const std::string&                comment = "")
@@ -237,6 +255,7 @@ namespace rocisa
 
         SSwapPCB64(const SSwapPCB64& other)
             : BranchInstruction(other)
+            , calleeFuncs(other.calleeFuncs)
             , dst(other.dst ? other.dst->clone() : nullptr)
             , srcs(other.srcs ? other.srcs->clone() : nullptr)
         {

@@ -1,9 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-add_library(hipblaslt-rocroller OBJECT)
+add_library(hipblaslt-rocroller STATIC)
 
-add_subdirectory(custom_kernels)
+string(REGEX MATCHALL "gfx[a-z0-9]+" _rocroller_archs "${GPU_TARGETS}")
+if("gfx950" IN_LIST _rocroller_archs)
+    add_subdirectory(custom_kernels)
+endif()
 
 target_sources(hipblaslt-rocroller
     PRIVATE
@@ -35,4 +38,10 @@ target_include_directories(hipblaslt-rocroller
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/tensilelite/include"
 )
-target_link_libraries(hipblaslt PRIVATE hipblaslt-rocroller)
+target_link_libraries(hipblaslt PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,hipblaslt-rocroller>)
+
+if(NOT HIPBLASLT_BUILD_SHARED_LIBS)
+    install(TARGETS hipblaslt-rocroller
+        EXPORT hipblaslt-targets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel)
+endif()

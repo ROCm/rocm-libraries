@@ -4,11 +4,14 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_universal_gemm_as_bs_cr.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
-#include "ck_tile/ops/common/tensor_layout.hpp"
+
+#include <tuple>
+#include <type_traits>
 
 namespace ck_tile {
 
@@ -87,10 +90,6 @@ struct UniversalGemmBasePolicy
 #if defined(__gfx950__) || defined(__gfx125__)
     // The combination of pk_int4_t and transposed loading causes numerical errors.
     // Therefore do not use transposed loading in this case.
-    // Also, transpose load (ds_read_tr) requires specific tile distribution patterns
-    // that only work for certain K warp tile sizes based on data type size:
-    // - For 1-byte types (fp8/bf8): K warp tile <= 64
-    // - For 2-byte types (fp16/bf16): K warp tile <= 32
     template <typename T>
     static constexpr bool supports_transpose_load =
         std::is_same_v<T, pk_fp4_t> || std::is_same_v<T, fp16_t> || std::is_same_v<T, bf16_t> ||
@@ -107,16 +106,7 @@ struct UniversalGemmBasePolicy
                                           tensor_layout::gemm::ColumnMajor>)
             return false;
         else
-        {
-#if defined(__gfx950__)
-            using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
-            constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-            constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
-            return kKWarpTile <= kMaxKWarpTile;
-#else
             return true;
-#endif
-        }
     }();
 
     template <typename Problem>
@@ -129,16 +119,7 @@ struct UniversalGemmBasePolicy
                                           tensor_layout::gemm::RowMajor>)
             return false;
         else
-        {
-#if defined(__gfx950__)
-            using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
-            constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
-            constexpr index_t kMaxKWarpTile = (sizeof(BLdsDataType) == 1) ? 64 : 32;
-            return kKWarpTile <= kMaxKWarpTile;
-#else
             return true;
-#endif
-        }
     }();
 #else
     template <typename Problem>
@@ -937,6 +918,24 @@ struct UniversalGemmBasePolicy
         return Problem::TransposeC;
     }
 
+    template <typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeDramTensorView(const WindowTmp& window_tmp)
+    {
+        return window_tmp.get_bottom_tensor_view();
+    }
+
+    template <typename Problem, typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeADramTensorView(const WindowTmp& window_tmp)
+    {
+        return MakeDramTensorView(window_tmp);
+    }
+
+    template <typename Problem, typename WindowTmp>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeBDramTensorView(const WindowTmp& window_tmp)
+    {
+        return MakeDramTensorView(window_tmp);
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeADramTileDistribution()
     {
@@ -1437,14 +1436,8 @@ struct UniversalGemmPipelineAgBgCrPolicy
         constexpr auto wg_attr_num_access = WGAttrNumAccessEnum::Default;
 #endif
 
-        using ATypeToUse = if_select_t<typename Problem::AComputeDataType,
-                                       tf32_t,
-                                       float_t,
-                                       typename Problem::AComputeDataType>;
-        using BTypeToUse = if_select_t<typename Problem::BComputeDataType,
-                                       tf32_t,
-                                       float_t,
-                                       typename Problem::BComputeDataType>;
+        using ATypeToUse = typename Problem::AComputeDataType;
+        using BTypeToUse = typename Problem::BComputeDataType;
 
         using WarpGemm = WarpGemmDispatcher<typename Problem::AComputeDataType,
                                             typename Problem::BComputeDataType,

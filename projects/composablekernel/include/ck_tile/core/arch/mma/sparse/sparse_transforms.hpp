@@ -3,12 +3,17 @@
 
 #pragma once
 
-#include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_transforms.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
-#include <cstdint>
+#include "ck_tile/core/utility/bit_cast.hpp"
+#include "ck_tile/core/utility/functional.hpp"
+
+#include <tuple>
+#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 
@@ -23,7 +28,7 @@ static constexpr index_t idx_words_needed = (CompressedSize * 2 + 31) / 32;
  * @brief Variable-length container for 2:4 structured sparsity index metadata.
  *
  * Each compressed element produces a 2-bit index field encoding the original
- * position (0–3) within its group of 4.  When composing multiple MMA fragments
+ * position (0-3) within its group of 4.  When composing multiple MMA fragments
  * in M and K dimensions within a WaveTile, the total number of index bits can
  * exceed 32.  This struct packs the index fields into an array of int32_t words,
  * sized at compile time.
@@ -44,22 +49,22 @@ struct SparseIdxPack
  * @tparam ADataType The data type of a_vec
  * @tparam CompressedSize The target compression size
  * @tparam AVec The vector type of a_vec (deduced)
- * @return SparseIdxPack containing **CompressedSize** 2‑bit fields packed
+ * @return SparseIdxPack containing **CompressedSize** 2-bit fields packed
  *         across one or more int32_t words.  Each field encodes the original
- *         position (0–3) of the corresponding non‑zero element in the input.
- *         If fewer than CompressedSize non‑zeros are found, remaining fields
+ *         position (0-3) of the corresponding non-zero element in the input.
+ *         If fewer than CompressedSize non-zeros are found, remaining fields
  *         default to 2 (see below).
  */
 template <typename ADataType, index_t CompressedSize, typename AVec>
 static CK_TILE_DEVICE auto compress_a_impl(AVec& a_vec)
 {
     static constexpr index_t NumIdxWords = idx_words_needed<CompressedSize>;
-    // idx holds one 2‑bit index per output element (total CompressedSize entries),
+    // idx holds one 2-bit index per output element (total CompressedSize entries),
     // packed across NumIdxWords int32_t words.
     // It is initialized to the pattern 0b10 for every field. This matches
-    // what the hardware expects when there are fewer than two non‑zero values
-    // in a 4‑element group – the unused output is treated as coming from slot 2.
-    // The loop below will clear and set each field as real non‑zeros are seen.
+    // what the hardware expects when there are fewer than two non-zero values
+    // in a 4-element group - the unused output is treated as coming from slot 2.
+    // The loop below will clear and set each field as real non-zeros are seen.
     SparseIdxPack<NumIdxWords> idx{};
     static_for<0, CompressedSize, 1>{}([&](auto k) {
         constexpr uint32_t bit_pos = static_cast<uint32_t>(k) * 2u;
@@ -76,7 +81,7 @@ static CK_TILE_DEVICE auto compress_a_impl(AVec& a_vec)
             if(static_cast<float>(a_vec[i * 4 + j]) != 0.0f)
             {
                 nonzero_elems[non_zero_pos] = a_vec[i * 4 + j];
-                // clear the two‑bit field for this output and insert j
+                // clear the two-bit field for this output and insert j
                 const uint32_t field_idx =
                     static_cast<uint32_t>(i) * 2u + static_cast<uint32_t>(non_zero_pos);
                 const uint32_t bit_pos = field_idx * 2u;
@@ -131,15 +136,18 @@ static CK_TILE_DEVICE int32_t extract_fragment_idx(const SparseIdxPack<NumIdxWor
 
 /**
  * @class SparseCompressTransform
- * @brief Performs 2:4 structured sparsity compression to the vector v and produces an index mask.
- * @note  Returns a tuple of two. The first element is the vector v with the same scalar type but
- *        its size halved. The second element is the index mask.
+ * @brief Performs 2:4 structured sparsity compression on a static_distributed_tensor representing A
+ *        and produces an index mask.
+ * @note  Returns a tuple of two. The first element is an ext_vector containing all the compressed
+ *        elements. The second element is the index mask.
  */
 template <index_t CompressionRatio>
 struct SparseCompressTransform
 {
+    // This function takes A in uncompressed form as a big ext_vector, and returns a
+    // compressed ext_vector.
     template <typename VecType>
-    CK_TILE_DEVICE static decltype(auto) exec(VecType& v)
+    CK_TILE_DEVICE static decltype(auto) execExtVec(VecType& v)
     {
         using VecTraits                         = vector_traits<remove_cvref_t<VecType>>;
         using ScalarT                           = typename VecTraits::scalar_type;
@@ -155,6 +163,22 @@ struct SparseCompressTransform
         auto idx = sparse::detail::compress_a_impl<ScalarT, CompressedSize>(v);
 
         return std::tuple<VecCompressed&, IdxType>(*ck_tile::bit_cast<VecCompressed*>(&v), idx);
+    }
+
+    // This function takes A in uncompressed form as a static_distributed tensor and performs an
+    // in-place compression, returning a compressed ext_vector. It would be a little bit cleaner if
+    // it returned a compressed static_distributed tensor, but this would require access to another
+    // Tile Distr encoding for the compressed one. This would have to be passed down, breaking the
+    // MmaPipeline Base API, or calculated in place, which is a bit annoying. TODO.
+    template <typename ATensor>
+    CK_TILE_DEVICE static decltype(auto) exec(ATensor& a_tensor)
+    {
+        // Properties of ATensor as a big ext vector.
+        using ADataType        = typename ATensor::DataType;
+        constexpr index_t VecN = ATensor::get_thread_buffer_size();
+        using VecType          = ext_vector_t<ADataType, VecN>;
+
+        return execExtVec(a_tensor.get_thread_buffer().template get_as<VecType>().template at<0>());
     }
 };
 

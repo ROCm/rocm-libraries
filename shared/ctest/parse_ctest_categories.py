@@ -408,6 +408,11 @@ def main():
         description="Parse test_categories.yaml and generate CMake code "
         "that applies category labels to CTest tests."
     )
+    parser.add_argument(
+        "--print-categories",
+        action="store_true",
+        help="Print category names as a semicolon-separated list and exit.",
+    )
     parser.add_argument("input_yaml", help="Path to test_categories.yaml")
     parser.add_argument(
         "install_test_file",
@@ -419,11 +424,12 @@ def main():
         "--explicit-tests",
         default=None,
         help="Semicolon-separated list of test names known at parse time. "
-        "When provided, regex patterns are expanded against this list and "
-        "the emitted code uses explicit per-test set_property() calls. "
-        "Required for install-tree CTestTestfile.cmake files because "
-        "ctest's script interpreter does not support "
-        "get_property(DIRECTORY ... PROPERTY TESTS).",
+        "Regex patterns are expanded against this list, avoiding ctest's "
+        "unsupported get_property(DIRECTORY ... PROPERTY TESTS) loop. "
+        "Combined with install_test_file, emits one set_tests_properties() "
+        "line per test (the only label form ctest --print-labels / -L "
+        "honour in installed CTestTestfile.cmake fragments); otherwise "
+        "emits per-test set_property(TEST ...) calls.",
     )
     args = parser.parse_args()
 
@@ -448,6 +454,10 @@ def main():
         sys.exit(1)
 
     categories, general_excludes = parse_yaml(input_path)
+
+    if args.print_categories:
+        print(";".join(categories.keys()))
+        return
 
     if install_test_file and explicit_tests:
         # Install-tree path. Emit `set_tests_properties()` lines with the

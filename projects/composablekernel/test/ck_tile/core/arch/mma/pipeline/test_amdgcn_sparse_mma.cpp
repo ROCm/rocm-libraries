@@ -1,27 +1,26 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
-#include <gtest/gtest.h>
-#include <iostream>
-#include <numeric>
+#include "pipeline_tests_helper.hpp"
 
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma.hpp"
-#include "ck_tile/core/arch/mma/mma_op_family.hpp"
-#include "ck_tile/core/arch/mma/mma_selector.hpp"
+#include "ck_tile/core/arch/mma/mma_wavewise.hpp"
 #include "ck_tile/core/arch/mma/sparse/sparse_mma_pipeline.hpp"
-#include <hip/hip_runtime.h>
-#include "ck_tile/core/numeric/bfloat16.hpp"
-#include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
-#include "ck_tile/host/hip_check_error.hpp"
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/host/hip_check_error.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/host/stream_config.hpp"
 
-#include "pipeline_tests_helper.hpp"
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+
+#include <tuple>
+#include <type_traits>
+#include <vector>
 
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
@@ -38,7 +37,6 @@ TEST(SparseMMATrait, SparseMfmaGfx950Specialization)
                                            16u,
                                            16u,
                                            32u,
-                                           DefaultSparseMfmaCtrlFlags,
                                            CompilerTargetGfx950,
                                            MmaOpFamily::SPARSE>;
 
@@ -59,7 +57,6 @@ TEST(SparseMMATrait, MmaOpTraitsIntegration)
                                       16u,
                                       16u,
                                       32u,
-                                      DefaultSparseMfmaCtrlFlags,
                                       CompilerTargetGfx950,
                                       MmaOpFamily::SPARSE>;
 
@@ -82,7 +79,6 @@ TEST(SparseMMATrait, TestConceptRequirements)
                                       16u,
                                       16u,
                                       32u,
-                                      DefaultSparseMfmaCtrlFlags,
                                       CompilerTargetGfx950,
                                       MmaOpFamily::SPARSE>;
     EXPECT_TRUE(MmaOpI<TestSparseMmma>);
@@ -94,15 +90,8 @@ TEST(SparseMMATrait, TestConceptRequirements)
 TEST(SparseMMATrait, DenseVsSparseDistinction)
 {
     // Dense MFMA from mfma/mfma_gfx9.hpp
-    using DenseMfma = amdgcn_mma<fp16_t,
-                                 fp16_t,
-                                 fp32_t,
-                                 16u,
-                                 16u,
-                                 32u,
-                                 DefaultMfmaCtrlFlags,
-                                 CompilerTargetGfx950,
-                                 MmaOpFamily::DENSE>;
+    using DenseMfma =
+        amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CompilerTargetGfx950, MmaOpFamily::DENSE>;
 
     // Sparse MFMA on GFX950
     using SparseMfma = amdgcn_mma<fp16_t,
@@ -111,7 +100,6 @@ TEST(SparseMMATrait, DenseVsSparseDistinction)
                                   16u,
                                   16u,
                                   32u,
-                                  DefaultSparseMfmaCtrlFlags,
                                   CompilerTargetGfx950,
                                   MmaOpFamily::SPARSE>;
 
@@ -132,35 +120,6 @@ TEST(SparseMMATrait, DenseVsSparseDistinction)
         << "Sparse MFMA should be identified correctly";
 }
 
-TEST(SparseMMATrait, SparseSelector)
-{
-    static_for<1, 33, 1>{}([](auto i) {
-        using Selected = typename MmaDefaultSelector<fp16_t,
-                                                     fp16_t,
-                                                     fp32_t,
-                                                     static_cast<uint32_t>(i),
-                                                     static_cast<uint32_t>(i),
-                                                     static_cast<uint32_t>(2 * i),
-                                                     CompilerTargetGfx950,
-                                                     MmaOpFamily::SPARSE>::SelectedOp;
-
-        static constexpr bool isValid = (i == 16) || (i == 32);
-        if constexpr(isValid)
-        {
-            // Selector should pick a sparse MFMA implementation
-            EXPECT_TRUE(MmaOpTraits<Selected>::IsSparse);
-            EXPECT_TRUE(MmaOpTraits<Selected>::IsMfma);
-            EXPECT_TRUE(MmaOpTraits<Selected>::IsSupported);
-            EXPECT_TRUE((std::is_same<typename Selected::OpType, MfmaOp>::value));
-        }
-        else
-        {
-            // Selector should pick the unsupported pass through
-            EXPECT_FALSE(MmaOpTraits<Selected>::IsSupported);
-        }
-    });
-}
-
 template <uint32_t CompressionRatio, typename Vec>
 struct SparseTransformKernel
 {
@@ -169,11 +128,11 @@ struct SparseTransformKernel
     __device__ void operator()(void* a, void* idx) const
     {
         using ResultT =
-            decltype(SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a)));
+            decltype(SparseCompressTransform<CompressionRatio>::execExtVec(*static_cast<Vec*>(a)));
         using FirstT = std::tuple_element_t<0, ResultT>;
         using IdxT   = std::tuple_element_t<1, ResultT>;
         const auto& [vec, i] =
-            SparseCompressTransform<CompressionRatio>::exec(*static_cast<Vec*>(a));
+            SparseCompressTransform<CompressionRatio>::execExtVec(*static_cast<Vec*>(a));
         *reinterpret_cast<remove_cvref_t<FirstT>*>(a) = vec;
         __builtin_memcpy(idx, &i, sizeof(IdxT));
     }
@@ -244,7 +203,7 @@ void sparse_transform_verify(
     }
 
     // Semantic index validation: each 2-bit field in h_idx encodes the original
-    // slot (0–3) within the group of 4 that the corresponding compressed element
+    // slot (0-3) within the group of 4 that the corresponding compressed element
     // came from. Verify that the index is consistent with input and output.
     //
     // Note: when a group has fewer than 2 non-zeros, unused output slots contain
@@ -522,30 +481,32 @@ struct SparsePipelineKernel
                                                  WaveTileN,
                                                  WaveTileK,
                                                  AccumPolicy,
+                                                 false, // CTranspose
+                                                 1,     // SwizzleFactor
+                                                 1,     // AttrNumAccessAV
+                                                 1,     // AttrNumAccessBV
                                                  CompilerTarget>;
 
-        using AVecType = typename Pipeline::AVecType;
-        using BVecType = typename Pipeline::BVecType;
-        using CVecType = typename Pipeline::CVecType;
+        using ATensor = typename Pipeline::AWarpTensor;
+        using BTensor = typename Pipeline::BWarpTensor;
+        using CTensor = typename Pipeline::CWarpTensor;
 
         const uint32_t lane = threadIdx.x;
 
-        AVecType a;
-        BVecType b;
-        CVecType c;
-        __builtin_memcpy(&a,
-                         static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(AVecType),
-                         sizeof(AVecType));
-        __builtin_memcpy(&b,
-                         static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BVecType),
-                         sizeof(BVecType));
-        __builtin_memset(&c, 0, sizeof(CVecType));
+        ATensor a;
+        BTensor b;
+        CTensor c;
+        __builtin_memcpy(
+            &a, static_cast<const uint8_t*>(a_per_lane) + lane * sizeof(ATensor), sizeof(ATensor));
+        __builtin_memcpy(
+            &b, static_cast<const uint8_t*>(b_per_lane) + lane * sizeof(BTensor), sizeof(BTensor));
+        __builtin_memset(&c, 0, sizeof(CTensor));
 
         if constexpr(MmaOpTraits<typename Pipeline::MmaOp>::IsSupported)
         {
             Pipeline::exec(a, b, c);
             __builtin_memcpy(
-                static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CVecType), &c, sizeof(CVecType));
+                static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CTensor), &c, sizeof(CTensor));
         }
     }
 };
@@ -579,6 +540,10 @@ struct SparsePipelineFactory
                                        WaveTileN,
                                        WaveTileK,
                                        AccumPolicy,
+                                       false, // CTranspose
+                                       1,     // SwizzleFactor
+                                       1,     // AttrNumAccessAV
+                                       1,     // AttrNumAccessBV
                                        Target>;
     };
 };
