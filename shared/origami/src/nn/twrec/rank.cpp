@@ -5,6 +5,7 @@
 
 #include "origami/nn/features/gemm_tilewright.hpp"
 #include "origami/nn/filter.hpp"
+#include "origami/gemm.hpp"
 
 #include <algorithm>
 #include <array>
@@ -206,7 +207,7 @@ std::vector<rank_entry_t> rank_configs(const LoadedModel& model,
     out_idx.clear();
     for (std::uint32_t ci = 0; ci < configs.size(); ++ci) {
       const config_t& cc = configs[ci];
-      if (!filter::check_lds_capacity(problem, cc, hardware)) continue;
+      if (!gemm::check_lds_capacity(hardware, cc.mt, problem.a_dtype, problem.b_dtype)) continue;
       if (!filter::is_kernel_feasible(problem, cc)) continue;
       if (use_sig_filter && have_sk && !sig_in_set(sig_of(cc))) continue;
       out_idx.push_back(ci);

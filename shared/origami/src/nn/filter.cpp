@@ -28,13 +28,6 @@ int dtype_bits_feasible(data_type_t dt) {
 
 }  // namespace
 
-bool check_lds_capacity(const problem_t& problem,
-                        const config_t& config,
-                        const hardware_t& hardware) {
-  return gemm::check_lds_capacity(
-      hardware, config.mt, problem.a_dtype, problem.b_dtype);
-}
-
 bool is_kernel_feasible(const problem_t& problem, const config_t& config) {
   const long long M    = static_cast<long long>(problem.size.m);
   const long long N    = static_cast<long long>(problem.size.n);
@@ -85,7 +78,7 @@ filter_result_t filter_configs(const problem_t& problem,
 
   for (std::size_t i = 0; i < configs.size(); ++i) {
     const auto& config = configs[i];
-    if (!check_lds_capacity(problem, config, hardware) ||
+    if (!gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype) ||
         !is_kernel_feasible(problem, config)) {
       result.rejected_indices.push_back(i);
     } else {

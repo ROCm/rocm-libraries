@@ -40,10 +40,6 @@ struct filter_result_t {
   std::vector<std::size_t> rejected_indices;
 };
 
-bool ORIGAMI_EXPORT check_lds_capacity(const problem_t& problem,
-                        const config_t& config,
-                        const hardware_t& hardware);
-
 bool ORIGAMI_EXPORT is_kernel_feasible(const problem_t& problem, const config_t& config);
 
 filter_result_t ORIGAMI_EXPORT filter_configs(const problem_t& problem,

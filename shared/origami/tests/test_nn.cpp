@@ -184,8 +184,10 @@ TEST_CASE("NN: filter_configs rejects LDS-infeasible kernels", "[nn]") {
       origami::nn::filter::filter_configs(problem, hardware, {huge, ok});
 
   REQUIRE(result.feasible_indices.size() + result.rejected_indices.size() == 2);
-  REQUIRE(origami::nn::filter::check_lds_capacity(problem, huge, hardware) == false);
-  REQUIRE(origami::nn::filter::check_lds_capacity(problem, ok, hardware) == true);
+  REQUIRE(origami::gemm::check_lds_capacity(hardware, huge.mt, problem.a_dtype, problem.b_dtype) ==
+          false);
+  REQUIRE(origami::gemm::check_lds_capacity(hardware, ok.mt, problem.a_dtype, problem.b_dtype) ==
+          true);
 }
 
 TEST_CASE("NN: is_kernel_feasible cache-hint gate", "[nn]") {
