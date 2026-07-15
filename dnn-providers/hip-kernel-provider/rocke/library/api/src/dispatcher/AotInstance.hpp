@@ -3,10 +3,13 @@
 
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -81,25 +84,129 @@ struct CompileSpec
     std::string maskMode; // e.g. "none"
 };
 
-// One checked-in, AOT-built kernel instance (one element of a per-arch
-// aot_list.json array in PR #8866).
-//
-// Kept a cheap-to-copy value type: selection returns the winner by value, so
-// avoid move-only or expensive-to-copy members (runtime state belongs on the
-// execution-time plan, not here).
-//
-// NOTE: the instance list does NOT carry the sidecar `cache_key` (the kernel_id).
-// Until the sidecar index lands (kpack fast-follow), `name` is the unique, stable
-// selection handle. The kernel_id + launch metadata are resolved from the sidecar
-// at plan-construction time, which is out of scope for this ticket.
+// Launch metadata copied from the per-arch rocke_client_<arch>.json bundle
+// manifest. It is deliberately plain C++ data so selection stays independent of
+// any JSON library and execution can pack kernel arguments without reparsing.
+struct GridValue
+{
+    std::optional<std::string> symbol;
+    std::int64_t literal = 0;
+};
+
+struct GridAxis
+{
+    enum class Kind
+    {
+        VALUE,
+        CEIL_DIV
+    };
+
+    Kind kind = Kind::VALUE;
+    GridValue value;
+    GridValue numerator;
+    GridValue denominator;
+};
+
+struct GridFormula
+{
+    GridAxis x;
+    GridAxis y;
+    GridAxis z;
+};
+
+// Kernel-argument ABI class. Mirrors the sidecar/bundle schema's
+// args_signature[].kind enum ("pointer" | "scalar"); parsed once at manifest
+// load (AotCatalog parseArgsSignature) so the launch path matches a closed set
+// instead of re-comparing strings on every launch, and an unknown kind
+// fails closed at load rather than being silently bound as a scalar.
+enum class ArgKind
+{
+    POINTER,
+    SCALAR
+};
+
+// Scalar argument dtype. The bundle schema's args_signature[].type carries a
+// structured string (scalars like "i32"/"f32"; pointers like "ptr<f16, global>"),
+// but the launch ABI only ever needs the scalar dtype -- pointers are packed
+// uniformly as a 64-bit device address regardless of pointee type. So only the
+// scalar dtype is modelled here; it is parsed once at manifest load and an
+// unknown dtype fails closed there (AotCatalog parseScalarType).
+enum class ScalarType
+{
+    F32,
+    I32,
+    I64
+};
+
+// ABI width of a scalar dtype in bytes; alignment is natural (== width).
+inline std::size_t scalarTypeSizeBytes(ScalarType type)
+{
+    return type == ScalarType::I64 ? sizeof(std::int64_t) : sizeof(std::int32_t);
+}
+
+struct KernelArgument
+{
+    std::string name;
+    ArgKind kind = ArgKind::SCALAR;
+    // Set iff kind == SCALAR; pointers carry no dtype (packed as a raw address).
+    std::optional<ScalarType> scalarType;
+};
+
+// ABI width of a packed argument in bytes (pointer = 8, scalar = dtype width);
+// alignment equals this width for every supported argument type.
+inline std::size_t argSizeBytes(const KernelArgument& arg)
+{
+    return arg.kind == ArgKind::POINTER ? sizeof(std::uint64_t)
+                                        : scalarTypeSizeBytes(arg.scalarType.value());
+}
+
+// A concrete kernel-argument value: device pointer (as an integer), signed
+// integer, or float. The variant alternative selected must match the argument's
+// declared kind/type in the launch signature (see launch::packArgs).
+using ScalarValue = std::variant<std::uint64_t, std::int64_t, float>;
+
+// Op-agnostic launch bindings: the concrete per-launch values an op adapter
+// derives from the graph, keyed by the argument names the kernel's ABI
+// (args_signature) already declares. launch::bindArgs() resolves each signature
+// argument through this table -- pointerUids[name] -> tensor uid (turned into a
+// device address at launch), scalars[name] -> packed scalar. A signature name
+// absent here is a fail-closed error, so no launch runs with a wrong buffer.
+struct LaunchBindings
+{
+    std::unordered_map<std::string, std::int64_t> pointerUids;
+    std::unordered_map<std::string, ScalarValue> scalars;
+};
+
+struct LaunchMetadata
+{
+    GridFormula grid;
+    std::array<unsigned int, 3> block = {1, 1, 1};
+    std::size_t sharedMemBytes = 0;
+    std::vector<KernelArgument> argsSignature;
+};
+
+struct AotRuntimeMetadata
+{
+    std::string cacheKey;
+    std::string tocKey;
+    std::string symbol;
+    std::string kpackPath;
+    LaunchMetadata launch;
+};
+
+// One installed, AOT-built kernel instance parsed from a per-arch kpack bundle
+// manifest. Selection uses the compile/constraint fields; plan construction uses
+// runtime metadata to fetch the HSACO from kpack and launch it.
 struct AotInstance
 {
     std::string name; // unique within a catalog
     std::string op; // "sdpa_fwd"
+    std::string family; // "fmha_fwd_mfma"
     std::string arch; // "gfx942"
     CompileSpec compileSpec;
     BatchRange batch;
     AttributeConstraints attributeConstraints;
+    AotRuntimeMetadata runtime;
 };
 
 } // namespace rocke_client::dispatcher

@@ -220,7 +220,18 @@ def test_manifest_validates_and_carries_sidecar_fields_unchanged(tmp_path):
     for entry in manifest["entries"]:
         name = entry["toc_key"].rsplit("/", 1)[1]
         sidecar = sidecars[name]
+        instance = next(
+            item
+            for item in json.loads(
+                (artifact_dir / "aot_list.json").read_text(encoding="utf-8")
+            )
+            if item["name"] == name
+        )
         # Single source of truth: nothing is re-derived from the sidecar.
+        assert entry["name"] == instance["name"]
+        assert entry["op"] == instance["op"]
+        assert entry["family"] == instance["family"]
+        assert entry["compile_spec"] == instance["compile_spec"]
         assert entry["selection"] == sidecar["selection"]
         assert entry["launch"] == sidecar["launch"]
         assert entry["args_signature"] == sidecar["args_signature"]

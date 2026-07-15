@@ -3,7 +3,9 @@
 
 #include "dispatcher/SdpaGraphAdapter.hpp"
 
+#include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -329,6 +331,77 @@ std::optional<SdpaProblem> translate(const fb::IGraph& graph)
 
     // arch is filled by the dispatcher (needs the HIP stream).
     return problem;
+}
+
+std::optional<SdpaLaunchInputs> buildSdpaLaunchInputs(const fb::IGraph& graph)
+{
+    // Reuse translate() as the single accept/reject authority: if it declines the
+    // graph there is no valid launch, and its success guarantees a single SDPA
+    // node with rank-4 Q/K/V/O present in the tensor map (checked below anyway).
+    const auto problem = translate(graph);
+    if(!problem.has_value())
+    {
+        return std::nullopt;
+    }
+
+    const fb::INodeWrapper& node = graph.getNodeWrapper(0);
+    const auto& attrs = node.attributesAs<SdpaAttributes>();
+    const auto& tensorMap = graph.getTensorMap();
+    const TensorAttributes* q = findTensor(tensorMap, attrs.q_tensor_uid());
+    const TensorAttributes* k = findTensor(tensorMap, attrs.k_tensor_uid());
+    const TensorAttributes* v = findTensor(tensorMap, attrs.v_tensor_uid());
+    const TensorAttributes* o = findTensor(tensorMap, attrs.o_tensor_uid());
+    if(!isRank4(q) || !isRank4(k) || !isRank4(v) || !isRank4(o))
+    {
+        return std::nullopt;
+    }
+
+    // Every key MUST match the kernel ABI argument name the AOT packer emits into
+    // args_signature (rocke_client_<arch>.json); launch::bindArgs looks each up by
+    // name and fails closed on a mismatch.
+    SdpaLaunchInputs inputs;
+    LaunchBindings& b = inputs.bindings;
+    b.pointerUids = {{"Q", attrs.q_tensor_uid()},
+                     {"K", attrs.k_tensor_uid()},
+                     {"V", attrs.v_tensor_uid()},
+                     {"O", attrs.o_tensor_uid()}};
+
+    // scale_log2 = (1/sqrt(head_size)) * log2(e): the family's default_1_over_sqrt_d
+    // scale, converted into the log2 domain the kernel's exp2-based softmax expects.
+    // Must stay byte-equal to the numeric oracle aot/tests/sdpa_aot_numeric.py
+    // (`1.0 / math.sqrt(head_size) * math.log2(math.e)`).
+    b.scalars.emplace("scale_log2",
+                      static_cast<float>(1.0 / std::sqrt(static_cast<double>(problem->headSize))
+                                         * std::numbers::log2e));
+    b.scalars.emplace("seqlen_q", static_cast<std::int64_t>(problem->seqlenQ));
+    b.scalars.emplace("seqlen_k", static_cast<std::int64_t>(problem->seqlenK));
+    // Dims are [B, H, S, D]: the token (seqlen) axis is dim 2, the head axis dim 1.
+    // Reading the tensor's own strides keeps the launch correct for any packing
+    // selection accepted (BSHD today), rather than assuming one and re-deriving.
+    b.scalars.emplace("stride_q_token", static_cast<std::int64_t>(q->strides()->Get(2)));
+    b.scalars.emplace("stride_q_head", static_cast<std::int64_t>(q->strides()->Get(1)));
+    b.scalars.emplace("stride_k_token", static_cast<std::int64_t>(k->strides()->Get(2)));
+    b.scalars.emplace("stride_k_head", static_cast<std::int64_t>(k->strides()->Get(1)));
+    b.scalars.emplace("stride_v_token", static_cast<std::int64_t>(v->strides()->Get(2)));
+    b.scalars.emplace("stride_v_head", static_cast<std::int64_t>(v->strides()->Get(1)));
+    b.scalars.emplace("stride_o_token", static_cast<std::int64_t>(o->strides()->Get(2)));
+    b.scalars.emplace("stride_o_head", static_cast<std::int64_t>(o->strides()->Get(1)));
+
+    inputs.batch = problem->batch;
+    return inputs;
+}
+
+std::unordered_map<std::string, std::int64_t> sdpaGridSymbols(const CompileSpec& spec,
+                                                              std::int64_t batch)
+{
+    return {{"batch", batch},
+            {"seqlen_q", spec.seqlenQ},
+            {"seqlen_k", spec.seqlenK},
+            {"num_query_heads", spec.numQueryHeads},
+            {"num_kv_heads", spec.numKvHeads},
+            {"head_size", spec.headSize},
+            {"block_size_q", spec.blockSizeQ},
+            {"block_size_k", spec.blockSizeK}};
 }
 
 } // namespace rocke_client::dispatcher

@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "dispatcher/AotCatalog.hpp"
+#include "plans/RockeClientPlan.hpp"
 
 namespace rocke_client
 {
@@ -33,8 +34,8 @@ bool RockeClientEngine::isApplicable(
     RockeClientHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    // Graph accept/reject: true only if the AOT catalog holds an instance that
-    // can serve this graph. Phase 1: the catalog is empty, so this is false.
+    // Graph accept/reject: true only if the installed kpack AOT catalog holds an
+    // instance that can serve this graph on the handle's stream device.
     return _dispatcher.isApplicable(handle, opGraph);
 }
 
@@ -69,19 +70,14 @@ size_t RockeClientEngine::getMaxWorkspaceSize(
             "rocke-client: no AOT instance matches this graph");
     }
 
-    // TODO(AICK-1484): return the workspace size from the winning instance's
-    // sidecar launch metadata once plan construction lands. No AOT plan can be
-    // built yet, so decline rather than report a bogus size.
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-        "rocke-client: AOT plan construction (kpack) not yet implemented");
+    return 0;
 }
 
 void RockeClientEngine::initializeExecutionContext(
     const RockeClientHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
-    RockeClientContext& /*executionContext*/) const
+    RockeClientContext& executionContext) const
 {
     const auto instance = _dispatcher.selectInstance(handle, opGraph);
     if(!instance.has_value())
@@ -91,19 +87,8 @@ void RockeClientEngine::initializeExecutionContext(
             "rocke-client: no AOT instance matches this graph");
     }
 
-    // A winning instance was selected -- this is the plan-construction seam.
-    // TODO(AICK-1484): once plan construction lands, replace this decline with:
-    //   1. resolve kernel_id (cache_key) + launch metadata from the instance's sidecar;
-    //   2. load the pre-built HSACO from the kpack (hipModuleLoad/hipModuleGetFunction);
-    //   3. evaluate the symbolic grid_formula -> concrete grid[3];
-    //   4. executionContext.setExecutionSettings(RockeClientSettings{});
-    //   5. executionContext.setPlan(std::make_unique<RockeClientPlan>(module, params, launchMeta));
-    HIPDNN_PLUGIN_LOG_WARN("rocke-client selected AOT instance '"
-                           << instance->name
-                           << "' but plan construction (kpack) is not implemented yet");
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-        "rocke-client: AOT plan construction (kpack) not yet implemented");
+    executionContext.setExecutionSettings(RockeClientSettings{});
+    executionContext.setPlan(std::make_unique<RockeClientPlan>(*instance, opGraph, handle));
 }
 
 } // namespace rocke_client

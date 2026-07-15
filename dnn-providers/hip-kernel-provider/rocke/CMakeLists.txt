@@ -42,12 +42,6 @@ if(ROCKE_BUILD_PYENV)
         CACHE FILEPATH "Interpreter for the rocke editable Python env")
 endif()
 
-# library/ first to mirror the historical rocke-client-before-rocKE ordering;
-# both complete before src/ (added by the parent) reads the staged CTest
-# entries. library/aot consumes the pyenv variables defined above.
-add_subdirectory(library)
-add_subdirectory(platform)
-
 if(ROCKE_BUILD_PYENV)
     set(_ROCKE_AOT_REQUIREMENTS
         "${CMAKE_CURRENT_SOURCE_DIR}/library/aot/requirements.txt")
@@ -80,3 +74,9 @@ if(ROCKE_BUILD_PYENV)
         DEPENDS "${ROCKE_PYENV_STAMP}"
         COMMENT "rocke-pyenv: build-time editable Python environment")
 endif()
+
+# library/ first to mirror the historical rocke-client-before-rocKE ordering;
+# both complete before src/ (added by the parent) reads the staged CTest
+# entries. library/aot consumes the pyenv variables defined above.
+add_subdirectory(library)
+add_subdirectory(platform)

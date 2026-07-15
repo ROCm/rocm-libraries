@@ -5,10 +5,10 @@
 
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 
-// Plugin log capture is set up per-test via hipdnnSetUserLogCallback_ext (see
-// ScopedUserLogCallback in TestRockeClientAotLoad.cpp): plugin markers reach the
-// process only through the backend logger, so a backend user callback is the
-// reliable sink. No process-wide log recording is installed here.
+// Plugin log capture is set up per-test via hipdnnSetUserLogCallback_ext:
+// plugin markers reach the process only through the backend logger, so a
+// backend user callback is the reliable sink. No process-wide log recording is
+// installed here.
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

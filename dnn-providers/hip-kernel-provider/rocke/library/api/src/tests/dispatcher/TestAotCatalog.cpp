@@ -20,9 +20,8 @@ TEST(TestAotCatalog, LoadForDeviceIsEmptyWhenNoBundlePresent)
 {
     // Invariant: when no AOT bundle is installed beside the test binary (or the
     // path from ROCKE_CLIENT_AOT_BUNDLE_DIR does not exist), loadForDevice
-    // returns an empty catalog without touching any HIP API or throwing. This
-    // mirrors the Phase-1 guarantee that the engine declines all graphs when
-    // the kpack producer has not yet installed a bundle.
+    // returns an empty catalog without throwing. The engine then declines all
+    // graphs when the kpack producer has not yet installed a bundle.
     const AotCatalog catalog = AotCatalog::loadForDevice(0, "gfx942");
     EXPECT_TRUE(catalog.empty());
     EXPECT_EQ(catalog.size(), 0u);
