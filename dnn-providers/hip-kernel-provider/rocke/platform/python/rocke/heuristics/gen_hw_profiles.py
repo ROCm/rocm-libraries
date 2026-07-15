@@ -19,6 +19,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -46,8 +48,23 @@ SUPPLEMENT_FIELDS = [
 ]
 
 
+def _compute_checksum(archs: list[str]) -> str:
+    """Compute a checksum of HW_PROFILES supplement data for validation."""
+    # Extract only supplement fields in sorted order for deterministic hash
+    data = {}
+    for arch in sorted(archs):
+        profile = HW_PROFILES[arch]
+        data[arch] = {field: profile[field] for field in SUPPLEMENT_FIELDS}
+
+    # Serialize to JSON with sorted keys for deterministic output
+    serialized = json.dumps(data, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(serialized.encode()).hexdigest()[:16]
+
+
 def _emit_header(archs: list[str]) -> str:
     """Generate the HardwareProfileSupplements.hpp header."""
+
+    checksum = _compute_checksum(archs)
 
     # Build supplement struct values for each arch
     supplement_inits = []
@@ -75,10 +92,17 @@ def _emit_header(archs: list[str]) -> str:
 //   cd build && cmake --build . --target rocke_regenerate_hw_profiles
 //
 // Commit both gen_sweep_data.py and this generated file together.
+//
+// Checksum: {checksum}
+// (First 16 hex digits of SHA256 of supplement data. Tests verify this matches
+// the Python source to catch stale generated files.)
 #pragma once
 #include <string>
 
 namespace rocke_client::dispatcher {{
+
+// Checksum of HW_PROFILES supplement data for drift detection
+constexpr const char* kSupplementChecksum = "{checksum}";
 
 // Supplement data for fields HIP doesn't expose
 struct HardwareProfileSupplement {{

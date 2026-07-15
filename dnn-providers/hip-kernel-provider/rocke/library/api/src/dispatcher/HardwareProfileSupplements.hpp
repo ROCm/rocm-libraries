@@ -6,10 +6,17 @@
 //   cd build && cmake --build . --target rocke_regenerate_hw_profiles
 //
 // Commit both gen_sweep_data.py and this generated file together.
+//
+// Checksum: bfd26a7ee849840f
+// (First 16 hex digits of SHA256 of supplement data. Tests verify this matches
+// the Python source to catch stale generated files.)
 #pragma once
 #include <string>
 
 namespace rocke_client::dispatcher {
+
+// Checksum of HW_PROFILES supplement data for drift detection
+constexpr const char* kSupplementChecksum = "bfd26a7ee849840f";
 
 // Supplement data for fields HIP doesn't expose
 struct HardwareProfileSupplement {

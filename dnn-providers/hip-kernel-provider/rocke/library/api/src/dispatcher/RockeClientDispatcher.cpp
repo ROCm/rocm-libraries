@@ -237,6 +237,7 @@ std::optional<AotInstance>
         hipStream_t stream = handle.getStream();
         if(hipStreamGetDevice(stream, &device) != hipSuccess)
         {
+            logSelectionFailure("hipStreamGetDevice failed, using device 0 fallback");
             device = 0; // fallback to device 0 if stream query fails
         }
 
