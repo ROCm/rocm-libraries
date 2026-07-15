@@ -34,8 +34,10 @@
 #include "handle.h"
 #include "logging.h"
 #include <algorithm>
+#include <cstdint>
 #include <exception>
 #include <mutex>
+#include <vector>
 #include <csignal>
 
 #pragma STDC CX_LIMITED_RANGE ON

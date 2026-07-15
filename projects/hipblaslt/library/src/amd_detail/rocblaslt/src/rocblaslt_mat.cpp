@@ -251,6 +251,11 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         effective_uniform_summation_order(handle, matmul_descr)};
     problem.streamKFlags = streamKFlags;
 
+    // Forward any composable fused-epilogue chain (e.g. fused RMSNorm) attached via
+    // HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE so ConstructTensileProblem can drive the
+    // TensileLite PartialRMS problem flags. Non-owning; the descriptor outlives the call.
+    problem.fused_epilogue = matmul_descr->fused_epilogue;
+
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
     if(st == rocblaslt_status_success)
@@ -447,6 +452,9 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
+    // Forward the fused-epilogue chain (ext hipblaslt_ext::Gemm create path) so the cached
+    // problem drives PartialRMS solution selection, matching the C-API matmul/heuristic paths.
+    problem.fused_epilogue = matmul_descr->fused_epilogue;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
