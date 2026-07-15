@@ -3,10 +3,11 @@
 # SPDX-License-Identifier: MIT
 """Discover ctest targets in a hipDNN superbuild.
 
-The hip-kernel-provider currently registers bare `unit-check`, `check`, and
-`integration-check` targets under `dnn-providers/hip-kernel-provider/src/`
-rather than prefixed top-level targets. This helper checks the normal prefixed
-form first, then falls back to the path-qualified target for that provider.
+Most components register prefixed top-level targets (e.g.
+`<prefix>-unit-check`). Some register the bare `unit-check` / `check` /
+`integration-check` targets under their source subdirectory instead of a
+prefixed top-level target. This helper checks the prefixed form first, then
+falls back to the path-qualified target for such components.
 """
 
 import argparse

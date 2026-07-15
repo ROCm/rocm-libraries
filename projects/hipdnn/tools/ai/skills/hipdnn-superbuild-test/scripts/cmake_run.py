@@ -19,8 +19,10 @@ ROCM_PATH; if it is unset, runtime compilation can fail with errors such as
 Why comgr is staged app-local: on Windows the loader resolves amd_comgr.dll
 from the .exe's directory, then System32, then PATH. The driver's stale
 System32 comgr outranks the wheel's copy on PATH and breaks MIOpen's runtime
-GCN-assembly (Winograd) JIT. Copying the wheel's amd_comgr.dll into <build>/bin
-(the test exe's own directory) before launch overrides it. See comgr_stage.py.
+kernel JIT (GCN-assembly Winograd solvers are the common failure, but the
+mismatch is not limited to them), so this is done on every Windows run.
+Copying the wheel's amd_comgr.dll into <build>/bin (the test exe's own
+directory) before launch overrides it. See comgr_stage.py.
 """
 
 import argparse

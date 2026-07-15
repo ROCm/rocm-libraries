@@ -73,11 +73,11 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 
 8. If the build fails with a stale CMake cache error such as `does not match the source`, clean the selected build directory once, reconfigure with the same `-B <build-dir>` command, and retry once. Do not loop.
 
-9. On Windows, stage the wheel's `amd_comgr.dll` app-local into `<build-dir>/bin` after a successful build:
+9. On Windows, always stage the wheel's `amd_comgr.dll` app-local into `<build-dir>/bin` after a successful build:
    ```bash
    python3 <scripts>/comgr_stage.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
    ```
-   The AMD driver leaves an old `amd_comgr.dll` in `C:\Windows\System32` that outranks the wheel's copy on PATH, so MIOpen otherwise loads stale comgr and fails to JIT-build GCN-assembly (Winograd) kernels at runtime. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares the wheel comgr's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The test runner (`cmake_run.py`) stages comgr on its own as well, so this build step is belt-and-suspenders that makes the app-local copy present immediately after build.
+   The AMD driver leaves an old `amd_comgr.dll` in `C:\Windows\System32` that outranks the wheel's copy on PATH, so MIOpen otherwise loads stale comgr and can fail to JIT-build kernels at runtime (GCN-assembly Winograd solvers are the common example, but the mismatch is not limited to them). Do this on every Windows build rather than only when a specific kernel path is expected. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares the wheel comgr's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The test runner (`cmake_run.py`) stages comgr on its own as well, so this build step is belt-and-suspenders that makes the app-local copy present immediately after build.
 
 ## Report
 

@@ -1,6 +1,6 @@
 ---
 name: hipdnn-superbuild-test
-description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite that most CI failures come from. Handles Windows DLL PATH automatically.
+description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite. Handles Windows DLL PATH automatically.
 argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|external-integration|all] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
@@ -14,7 +14,7 @@ Use this skill when the user asks to test an existing hipDNN superbuild. It does
 Infer options from the user request:
 
 - **Component**: `hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`; default `all`
-- **Scope**: `unit`, `integration`, `external-integration`, or `all`; default `unit`. `external-integration` covers the cross-provider `hipdnn_integration_tests` suite (the `<provider>-external-integration-check` targets) that most CI failures come from
+- **Scope**: `unit`, `integration`, `external-integration`, or `all`; default `unit`. `external-integration` covers the cross-provider `hipdnn_integration_tests` suite (the `<provider>-external-integration-check` targets)
 - **Filter**: optional gtest filter; when present, run test binaries directly
 - **Verbose**: use verbose test targets when requested
 - **Keep going**: continue after failures only when requested
@@ -105,6 +105,6 @@ If a requested component has no matching target, say that it was not present in 
 
 - `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, `scripts/windows_rocm_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
 - Windows DLL loading is handled by `cmake_run.py`, which sets PATH in Python's subprocess environment before launching CMake or test binaries.
-- Windows GCN-assembly (Winograd) kernels: before launching, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr, which fails with `[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (`v2.5.0` = stale System32, `v3.0.0` = wheel).
+- Windows comgr staging: before launching any target or binary on Windows, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr. This happens on every Windows run, not just for a specific kernel path; GCN-assembly Winograd solvers are the common failure (`[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`), but the version mismatch is not limited to them. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (a low version indicates the stale System32 copy; the wheel's is newer).
 - Integration tests require an AMD GPU. Unit scope is the default for CPU-only validation.
 - Prefer running test binaries through `cmake_run.py` (it wires PATH/ROCM_PATH for the loader); pass extra binary flags via `--extra-arg`/`-- <args>` rather than folding them into `--binary`.
