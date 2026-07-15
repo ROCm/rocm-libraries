@@ -480,13 +480,18 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                         vector_type<ComputeTypeA, KPack> a_thread_vec;
                         vector_type<ComputeTypeB, BKPack> b_thread_vec;
 
+                        // im_major/im_minor/in_major/in_minor are constexpr index_t values, so
+                        // decltype(...) is a plain integer type. thread_buf_to_vec_loader indexes
+                        // through IndexEval<T, N>, which is only defined for compile-time index
+                        // types, so a raw index_t leaves IndexEval<int, N> undefined (CK #9400).
+                        // Wrap in Number<> to hand the loader a compile-time index (as in v3).
                         auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
                                                               decltype(a_thread_buf),
                                                               decltype(a_thread_desc_),
                                                               ComputeTypeA,
-                                                              decltype(im_major),
+                                                              Number<im_major>,
                                                               Number<0>,
-                                                              decltype(im_minor),
+                                                              Number<im_minor>,
                                                               decltype(k0),
                                                               index_expression::Ik>{a_thread_vec,
                                                                                     a_thread_buf};
@@ -495,9 +500,9 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                                                      decltype(b_thread_bufs[scale_comp_buf]),
                                                      decltype(b_thread_desc_),
                                                      ComputeTypeB,
-                                                     decltype(in_major),
+                                                     Number<in_major>,
                                                      Number<0>,
-                                                     decltype(in_minor),
+                                                     Number<in_minor>,
                                                      decltype(k0),
                                                      index_expression::Ik>{
                                 b_thread_vec, b_thread_bufs[scale_comp_buf]};
@@ -649,9 +654,9 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                                              decltype(a_thread_buf),
                                              decltype(a_thread_desc_),
                                              ComputeTypeA,
-                                             decltype(im_major),
+                                             Number<im_major>,
                                              Number<0>,
-                                             decltype(im_minor),
+                                             Number<im_minor>,
                                              decltype(k0),
                                              index_expression::Ik>{a_thread_vec, a_thread_buf};
                 auto loadB =
@@ -659,9 +664,9 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                                              decltype(b_thread_bufs[I0]),
                                              decltype(b_thread_desc_),
                                              ComputeTypeB,
-                                             decltype(in_major),
+                                             Number<in_major>,
                                              Number<0>,
-                                             decltype(in_minor),
+                                             Number<in_minor>,
                                              decltype(k0),
                                              index_expression::Ik>{b_thread_vec, b_thread_bufs[I0]};
 
@@ -763,9 +768,9 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                                              decltype(a_thread_buf),
                                              decltype(a_thread_desc_),
                                              ComputeTypeA,
-                                             decltype(im_major),
+                                             Number<im_major>,
                                              Number<0>,
-                                             decltype(im_minor),
+                                             Number<im_minor>,
                                              decltype(k0),
                                              index_expression::Ik>{a_thread_vec, a_thread_buf};
                 auto loadB =
@@ -773,9 +778,9 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                                              decltype(b_thread_bufs[I1]),
                                              decltype(b_thread_desc_),
                                              ComputeTypeB,
-                                             decltype(in_major),
+                                             Number<in_major>,
                                              Number<0>,
-                                             decltype(in_minor),
+                                             Number<in_minor>,
                                              decltype(k0),
                                              index_expression::Ik>{b_thread_vec, b_thread_bufs[I1]};
 
@@ -846,9 +851,9 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                                              decltype(a_thread_buf),
                                              decltype(a_thread_desc_),
                                              ComputeTypeA,
-                                             decltype(im_major),
+                                             Number<im_major>,
                                              Number<0>,
-                                             decltype(im_minor),
+                                             Number<im_minor>,
                                              decltype(k0),
                                              index_expression::Ik>{a_thread_vec, a_thread_buf};
                 auto loadB =
@@ -856,9 +861,9 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_mx_moe_v1<BlockGemmPipelineSched
                                              decltype(b_thread_bufs[I0]),
                                              decltype(b_thread_desc_),
                                              ComputeTypeB,
-                                             decltype(in_major),
+                                             Number<in_major>,
                                              Number<0>,
-                                             decltype(in_minor),
+                                             Number<in_minor>,
                                              decltype(k0),
                                              index_expression::Ik>{b_thread_vec, b_thread_bufs[I0]};
 
