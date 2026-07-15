@@ -20,6 +20,10 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
 * Changed `CCCL_MINIMUM_VERSION` to `3.1.4` to align with CUB.
 
+### Removed
+
+* Removed the deprecated thread operators `Equality`, `Inequality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+
 ## hipCUB-5.0.0 for ROCm 10.0.0
 
 ### Added
