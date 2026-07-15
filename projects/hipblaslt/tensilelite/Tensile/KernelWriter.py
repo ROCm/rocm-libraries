@@ -48,6 +48,7 @@ from .KernelWriterModules import *
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
+from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
@@ -2835,17 +2836,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.graUnrollOffsets(kernel, tensorParametersB))
 
       # Free sgpr that will not be used
-      if kernel["Multicast"] and kernel["TDMInst"] != 0:
-        tdmA: bool = kernel["enableTDMA"]
-        tdmB: bool = kernel["enableTDMB"]
-        tdmM: bool = kernel["enableTDMMetadata"]
-        if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-          module.add(self.undefineSgpr("MulticastMask"))
-        else:
-          module.add(self.undefineSgpr("MulticastMaskA"))
-          module.add(self.undefineSgpr("MulticastMaskB"))
-        if tdmM:
-          module.add(self.undefineSgpr("MulticastMaskMetadata"))
+      clusterComp = ClusterLoadTDM.find(self)
+      if clusterComp:
+        module.add(clusterComp.undeclareSgprs(self, kernel))
 
       # tile edges
       if kernel["EdgeType"] == "ShiftPtr" and not tdmA and not tdmB:
@@ -9177,20 +9170,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["enableTDMA"] or kernel["enableTDMB"]:
       self.defineSgpr("WaveIdx", 1)
 
-    if kernel["Multicast"]:
-      tdmA: bool = kernel["enableTDMA"]
-      tdmB: bool = kernel["enableTDMB"]
-      tdmM: bool = kernel["enableTDMMetadata"]
-      # Subtile issues both A and B loads on every wave (no wave-parity load
-      # split), so the single parity MulticastMask is wrong there -- it would
-      # OR one tensor's mask into both descriptors. Use the split A/B masks.
-      if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
-        self.defineSgpr("MulticastMask", 1)
-      else:
-        self.defineSgpr("MulticastMaskA", 1)
-        self.defineSgpr("MulticastMaskB", 1)
-      if tdmM:
-        self.defineSgpr("MulticastMaskMetadata", 1)
+    clusterComp = ClusterLoadTDM.find(self)
+    if clusterComp:
+      clusterComp.declareSgprs(self, kernel)
 
     # SGPR above are user SGPR which are set by GPU hardware when the kernel is launched
     self.states.firstInitSgpr = self.sgprPool.size()

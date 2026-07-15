@@ -434,6 +434,21 @@ def validateParameterTypes(state, srcFile=""):
   return records
 
 
+def coerceLegacyMulticastType(state) -> None:
+  """Normalize a legacy bool ``Multicast`` to the tri-state int, in place.
+
+  Shipped library-logic artifacts serialize the derived value as a bool, but
+  ``Multicast`` is now an int ([-1, 0, 1]); bool and int are different msgpack
+  wire types, so a bool trips the create-library type gate (would ``std::bad_cast``
+  at C++ deserialization). Coerce ``false -> 0`` / ``true -> 1`` (never -1
+  "auto", to avoid switching a tuned kernel into legacy auto-coupling). Scoped to
+  the serialized-state loading path (the config/derivation path stays bool).
+  """
+  mc = state.get("Multicast")
+  if type(mc) is bool:
+    state["Multicast"] = int(mc)
+
+
 def raiseIfTypeMismatches() -> None:
   """Raise when collected type mismatches exist.
 
@@ -655,7 +670,17 @@ class Solution(collections.abc.Mapping):
       self["AssignedProblemIndependentDerivedParameters"] = False
     if "AssignedDerivedParameters" not in self._state:
       self["AssignedDerivedParameters"] = False
-    
+
+    # ``raiseProblemTypeOnTypeMismatch=False`` marks the paths that load a
+    # serialized / pre-derived solution state (library-logic artifacts,
+    # solution files, OriginalSolution). Those legacy artifacts carry a bool
+    # ``Multicast``; normalize it to the tri-state int so both the strict type
+    # gate and the emitted msgpack see an int. The config/derivation path
+    # (raiseProblemTypeOnTypeMismatch=True) is left untouched.
+    loadingSerializedState = not raiseProblemTypeOnTypeMismatch
+    if loadingSerializedState:
+      coerceLegacyMulticastType(self._state)
+
     # Validate parameter types against the validParameters registry.
     # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
     # std::bad_cast at C++ msgpack deserialization time. The mismatch
@@ -682,6 +707,10 @@ class Solution(collections.abc.Mapping):
       assembler.rocm_version
     )
     self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
+
+    # Note: derivation now emits an int Multicast (0/1) on all paths, so no
+    # post-derivation coercion is needed. The pre-load coerceLegacyMulticastType
+    # above still guards shipped library YAMLs that serialize a bool Multicast.
 
     # Only merge and report mismatches if there were no pre-existing mismatches
     # To avoid duplicates and noise from cascading issues.
@@ -1093,25 +1122,35 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
-    state["Multicast"] = False
     state["ClusterBarrier"] = False
-    if state["ClusterDim"] != [1, 1]:
-      # StreamKClusterReduction forms a barrier-only cluster whose members are a
-      # StreamK tile's fixup peers. Those peers each iterate a DIFFERENT K-split
-      # range, so they do NOT march through the mainloop in lockstep -- splicing
-      # the cooperative subtile ClusterBarrier handshake (insertClusterBarrier)
-      # into that mainloop would leave the cross-workgroup cluster barrier counts
-      # mismatched and deadlock the whole cluster. The reduction instead emits its
-      # own cluster split barrier in the StreamK fixup epilogue
-      # (StreamK.clusterReduceSignal/clusterReduceWait, gated purely on
-      # StreamKClusterReduction, independent of state["ClusterBarrier"]). So a
-      # StreamK cluster keeps both Multicast and the mainloop ClusterBarrier off;
-      # every other clustered (e.g. subtile) path retains the existing behavior.
-      if not state.get("StreamKClusterReduction", 0):
-        state["Multicast"] = True
-        # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
-        if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
-          state["ClusterBarrier"] = True
+    # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
+    # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
+    # that omits Multicast is byte-identical.
+    mc = state.get("Multicast", -1)
+    if mc == 1:
+      state["Multicast"] = 1
+    elif mc == 0:
+      state["Multicast"] = 0
+    elif state.get("StreamKMulticast", 0):
+      # StreamKMulticast drives TDM B-multicast through the ClusterLoad component
+      # explicitly (its [C,1] cluster is spatial DP peers, not the legacy subtile
+      # coupling); ClusterBarrier stays off (lockstep DP peers gated by the
+      # runtime clusterMulticastValid predicate, no barrier handshake).
+      state["Multicast"] = 1
+    else:  # -1 auto (legacy)
+      # A legacy broadcast targets a fixed physical cluster position, which
+      # Stream-K tile remapping would send to the wrong partner, so auto-multicast
+      # is off for ALL Stream-K here; StreamKMulticast is the one explicit
+      # exception (branch above). Non-Stream-K clustered paths are unchanged.
+      state["Multicast"] = int(state["ClusterDim"] != [1, 1]
+                               and state["StreamK"] == 0)
+    # ClusterBarrier applies only to the non-Stream-K clustered (legacy/subtile)
+    # path; keyed off "StreamK == 0" so it excludes both StreamK cluster features
+    # (which imply StreamK != 0). A forced-off Multicast also keeps it off.
+    if state["ClusterDim"] != [1, 1] and state["StreamK"] == 0 \
+       and state["Multicast"] and state["TDMInst"] != 0 \
+       and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
+      state["ClusterBarrier"] = True
 
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
