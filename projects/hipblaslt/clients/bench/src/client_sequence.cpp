@@ -475,20 +475,16 @@ int main(int argc, char** argv)
                + layer[i].m * layer[i].n * type2Size(layer[i].problem.getTypeD()) + size_bias;
     }
     // Calculating block count
-    // Adaptive mode ignores cold_iters/iters and runs on a time budget instead; a max_iters
-    // of 0 there means unbounded, so no iteration-count cap applies at all.
-    int32_t max_iters  = rv.gs.adaptive ? rv.gs.max_iters : max(cold_iters, iters);
-    bool    apply_cap  = !(rv.gs.adaptive && max_iters == 0);
-    auto    mem_blocks = ceil((float)rotating / totalRotatingSizeNeeded);
-    int32_t block_count
-        = max(1, apply_cap ? min(max_iters, mem_blocks) : mem_blocks);
+    auto plan = hipblaslt_bench::compute_rotating_buffer_plan(
+        rv.gs.adaptive, rv.gs.max_iters, cold_iters, iters, rotating, totalRotatingSizeNeeded);
+    int32_t block_count = plan.block_count;
     if(rotating > 0)
     {
         std::cout << "Rotating buffer " << (float)rotating / (1024 * 1024) << " MiB. "
                   << "Needed Size: " << (float)totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
                   << "Needed block count: " << block_count;
-        if(apply_cap && max_iters < mem_blocks)
-            std::cout << " (Capped to max iters: " << max_iters << ")";
+        if(plan.capped)
+            std::cout << " (Capped to max iters: " << plan.iter_cap << ")";
         std::cout << std::endl;
     }
 
