@@ -161,7 +161,7 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
 if(ROCRAND_ENABLE_COVERAGE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping")
     add_definitions(-DROCRAND_ENABLE_COVERAGE)
 endif()
 
