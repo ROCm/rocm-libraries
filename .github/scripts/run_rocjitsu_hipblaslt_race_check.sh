@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This workflow that calls this script fetches hipBLASLt/TensileLite artifacts from
-# the current TheRock build, then checks out rocm-systems.
+# The workflow that calls this script fetches hipBLASLt/TensileLite artifacts
+# from the current TheRock build, then checks out rocm-systems.
 #
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
 # The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
 # TODO(newling) expand the GEMM-space tested.
+#
+# Basic flow:
+#   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
+#   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
+#   3. Select a rocjitsu config for gfx942, gfx950, or gfx1151.
+#   4. Run hipblaslt-bench and a reduced TensileLite smoke under RJ_RACE=1.
 
+# These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
+# unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
+# rocm-systems source tree, ROCJITSU_BUILD_DIR is a local build directory, and
+# RACE_REPORT_DIR is uploaded at the end of the job. They can be overridden for
+# local reproduction. The brittle part is not the path names themselves, but the
+# artifact layout underneath ROCM_PATH; the checks below fail early if
+# hipBLASLt/TensileLite files move in TheRock artifacts.
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
 AMDGPU_FAMILIES="${AMDGPU_FAMILIES:-}"
 ROCJITSU_GPU_TARGET="${ROCJITSU_GPU_TARGET:-}"
@@ -57,6 +70,9 @@ select_rocjitsu_config() {
   local candidates=()
   case "${ROCJITSU_GPU_TARGET}" in
     gfx942)
+      # Four names cover two rocm-systems config naming choices that are still
+      # in flight: target-specific vs family-generic, and KMD vs non-KMD.
+      # Prefer the target-specific KMD config when it exists.
       candidates=(
         "${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
         "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
@@ -65,6 +81,8 @@ select_rocjitsu_config() {
       )
       ;;
     gfx950)
+      # Same four-name compatibility pattern as gfx942: target-specific before
+      # family-generic, and KMD before non-KMD.
       candidates=(
         "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
         "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
@@ -240,9 +258,9 @@ cmake_args+=(
 
 run_timed "configure rocjitsu" cmake "${cmake_args[@]}"
 
-# rocm-systems has been renaming/splitting rocjitsu build targets while this
-# bridge job is being developed. Probe for optional targets instead of assuming
-# one exact target set, so the CI job survives small target-layout changes.
+# The CLI is required. The shared library and KMD shim target names have existed
+# in some rocm-systems revisions and not others; build them when available, but
+# do not make this bridge job depend on optional target names.
 cmake_target_exists() {
   local target="$1"
   cmake --build "${ROCJITSU_BUILD_DIR}" --target help \
@@ -267,28 +285,6 @@ fi
 show_rocjitsu_version() {
   echo "rocjitsu version:"
   "${ROCJITSU_BIN}" --version
-}
-
-# This is a cheap launch-path check for rocjitsu itself. Treat it as diagnostic
-# rather than authoritative: the real signal is whether HIP/HSA workloads from
-# the fetched ROCm payload run and whether their race logs contain reports.
-run_sanity_check() {
-  echo "rocjitsu /bin/true sanity check:"
-  mkdir -p "${RACE_REPORT_DIR}/sanity"
-  timeout 30 \
-    env \
-      RJ_LOG=1 \
-      RJ_SINKS=stderr,file \
-      RJ_SINK_DIR="${RACE_REPORT_DIR}/sanity" \
-      "${ROCJITSU_BIN}" \
-        --config "${ROCJITSU_CONFIG}" \
-        -- /bin/true \
-    2>&1 | tee "${RACE_REPORT_DIR}/sanity.log"
-  local status=$?
-  if [[ "${status}" -ne 0 ]]; then
-    echo "rocjitsu /bin/true sanity check failed with status ${status}" >&2
-    return "${status}"
-  fi
 }
 
 run_hipblaslt_bench_check() {
@@ -343,11 +339,16 @@ write_tensilelite_check_yaml() {
     # Keep this as a weak smoke for now: running the benchmark path currently
     # trips a suspected rocjitsu false positive in the TensileLite client helper
     # kernels (`global_load_d16_u8` destination-merge reads racing with the same
-    # instruction's outstanding VGPR write). `NumBenchmarks: 0` still exercises
-    # the Tensile front end, solution filtering, KernelWriter, code-object build,
-    # rocjitsu launch, and standalone client startup. The real executed GEMM
-    # coverage for gfx1151 remains the hipblaslt-bench check above until the
-    # rocjitsu D16 VGPR self-race is fixed.
+    # instruction's outstanding VGPR write). ROCm/rocm-systems#8628 fixes that
+    # in rocjitsu. Until that fix is available in this CI path,
+    # `NumBenchmarks: 0` still exercises the Tensile front end, solution
+    # filtering, KernelWriter, code-object build, rocjitsu launch, and
+    # standalone client startup. The real executed GEMM coverage for gfx1151
+    # remains the hipblaslt-bench check above.
+    #
+    # TODO(newling): Move these inline YAMLs into checked-in TensileLite test
+    # data, or reuse existing TensileLite YAMLs once the component path can
+    # consume product-owned workload definitions.
     cat >"${yaml}" <<'YAML'
 GlobalParameters:
   NumBenchmarks: 0
@@ -542,14 +543,6 @@ run_tensilelite_client_check() {
 }
 
 run_timed "rocjitsu version" show_rocjitsu_version
-
-set +e
-run_timed "rocjitsu sanity check" run_sanity_check
-sanity_status=$?
-set -e
-if [[ "${sanity_status}" -ne 0 ]]; then
-  echo "WARNING: rocjitsu /bin/true sanity check failed; continuing to GPU workload checks" >&2
-fi
 
 check_status=0
 
