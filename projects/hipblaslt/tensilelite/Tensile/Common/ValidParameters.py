@@ -1175,11 +1175,13 @@ def _getExpectedTypes(validParams: dict[str, Union[int, list[Any], Any]]) -> dic
     typeMap = {}
     for name, allowedValues in validParams.items():
         if isinstance(allowedValues, list):
-            assert len(allowedValues) > 0, f"Invalid parameter value: {name} = {allowedValues}"
+            if len(allowedValues) == 0:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
         else:  # Sentinel value -1 is allowed for all parameters
-            assert allowedValues == -1, f"Invalid parameter value: {name} = {allowedValues}"
+            if allowedValues != -1:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
             continue
-        
+
         typeMap[name] = set(type(v) for v in allowedValues)
     return typeMap
 
@@ -1346,4 +1348,3 @@ def validateInternalSupportParams(
         expectedTypes = {type(default)}
         if type(value) not in expectedTypes:
             raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
-

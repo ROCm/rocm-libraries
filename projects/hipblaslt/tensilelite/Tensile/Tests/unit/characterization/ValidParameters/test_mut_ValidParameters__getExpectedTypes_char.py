@@ -5,8 +5,9 @@
 ``Tensile.Common.ValidParameters._getExpectedTypes``.
 
 These pin the helper's current behavior: it skips the ``-1`` sentinel, rejects
-empty lists and invalid scalar values, and builds a dictionary whose values are
-exact concrete type sets. The ``bool`` case is deliberate because the
+empty lists and invalid scalar values (raising ``ValueError``), and builds a
+dictionary whose values are exact concrete type sets. The ``bool`` case is
+deliberate because the
 implementation uses ``type()``, not ``isinstance()``, so ``bool`` stays distinct
 from ``int``.
 """
@@ -50,17 +51,17 @@ def test_get_expected_types_includes_singleton_allowed_values():
     assert result == {"Singleton": {int}}
 
 
-def test_get_expected_types_empty_list_asserts():
-    """An empty allowed-values list raises the current assertion message."""
-    with pytest.raises(AssertionError) as excinfo:
+def test_get_expected_types_empty_list_raises():
+    """An empty allowed-values list raises ``ValueError`` with the current message."""
+    with pytest.raises(ValueError) as excinfo:
         _getExpectedTypes({"Empty": []})
 
     assert str(excinfo.value) == "Invalid parameter value: Empty = []"
 
 
-def test_get_expected_types_invalid_scalar_asserts():
-    """A scalar value other than the ``-1`` sentinel raises the current assertion."""
-    with pytest.raises(AssertionError) as excinfo:
+def test_get_expected_types_invalid_scalar_raises():
+    """A scalar value other than the ``-1`` sentinel raises ``ValueError``."""
+    with pytest.raises(ValueError) as excinfo:
         _getExpectedTypes({"NotSentinel": 1})
 
     assert str(excinfo.value) == "Invalid parameter value: NotSentinel = 1"

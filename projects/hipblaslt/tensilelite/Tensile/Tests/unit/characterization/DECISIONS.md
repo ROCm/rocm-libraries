@@ -367,5 +367,15 @@ reading the fixed `WorkGroupMappingXCC` value, and
 `SpinnyThing.increment` now uses its `value` parameter to advance by caller
 selected steps.
 
+**M4 — widened mutation slice.** The `only_mutate` set in `[tool.mutmut]` was
+extended past the original five files to add `Common/DataType.py`,
+`Common/Types.py`, and `Common/ValidParameters.py`, with the matching
+characterization directories (`DataType`, `CommonTypes`, `ValidParameters`)
+added to `pytest_add_cli_args_test_selection`. Source-path mapping for the
+widened slice (recorded here because the shorthand names differ from the file
+paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
+`Tensile/Common/Types.py`; ValidParameters → `Tensile/Common/ValidParameters.py`
+(there is no `Tensile/SolutionStructs/ValidParameters.py`).
+
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
