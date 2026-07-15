@@ -90,7 +90,7 @@ class Shape:
 # gfx942 constraints vs. gfx950:
 #   - causal-only (no sliding window / softcap / ALiBi / QQ-bias / sinks)
 #   - BLOCK_SIZE = 64 (tile size T = BLOCK_SIZE)
-#   - head_size ∈ {64, 128} for the shipped paths
+#   - head_size ∈ {64, 128} for the shipped paths (+ select 256 decode shapes)
 #   - Scenarios with non-uniform seq_lens are split into one Shape per unique
 #     (seqlen_q, seqlen_k) pair (batch=1) and given a disambiguating suffix.
 # ---------------------------------------------------------------------------
