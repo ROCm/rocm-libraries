@@ -3858,6 +3858,7 @@ namespace TensileLite
                     .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
                            static_cast<size_t>(sizeMapping.macroTile.y),
                            static_cast<size_t>(sizeMapping.depthU)},
+                    .occupancy = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
                 };
 
                 hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);

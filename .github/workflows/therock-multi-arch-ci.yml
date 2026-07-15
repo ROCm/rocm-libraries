@@ -18,8 +18,6 @@ name: TheRock Multi-Arch CI
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:

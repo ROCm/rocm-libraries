@@ -1207,6 +1207,16 @@ namespace TensileLite
                     return rejectFast("K_not_multiple_of_mxBlockA");
                 if(mxBlockB > 0 && sizeK % mxBlockB != 0)
                     return rejectFast("K_not_multiple_of_mxBlockB");
+
+                // The fast path reinterprets the scale tensors as E8 (UE8M0)
+                // unconditionally (see solveGemmMXFastPath). Non-E8 scale
+                // formats (E5M3 / Float8-E4M3) would be misdecoded as e8m0
+                // exponents (e.g. byte 0xFF -> NaN), so defer to the slow path,
+                // which decodes each scale via mxScaleElementAsFloat().
+                if(mxBlockA > 0 && problem.mxsa().dataType() != rocisa::DataType::E8)
+                    return rejectFast("mxScaleA_not_E8");
+                if(mxBlockB > 0 && problem.mxsb().dataType() != rocisa::DataType::E8)
+                    return rejectFast("mxScaleB_not_E8");
             }
 
             if(problem.boundIndices().size() >= 1)
