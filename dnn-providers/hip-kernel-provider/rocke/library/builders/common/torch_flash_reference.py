@@ -68,6 +68,15 @@ def run_torch_flash(
             vh = vh.repeat_interleave(nqpkv, dim=1)
         seqs.append((qh, kh, vh, ql, kvl))
 
+    # Every sequence was empty (all query_lens <= 0) -> nothing to time. Fail
+    # explicitly here rather than letting the seqs[0] backend probe below
+    # IndexError into a misleading "no working torch sdpa backend".
+    if not seqs:
+        raise ValueError(
+            "run_torch_flash: no sequence with query_len > 0 "
+            f"(query_lens={list(query_lens)}); nothing to time"
+        )
+
     # Pick a working flash-first backend once.
     backend = None
     for be, name in (
