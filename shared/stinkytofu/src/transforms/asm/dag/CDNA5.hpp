@@ -481,14 +481,10 @@ bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
 
     for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
         if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
-        const uint32_t dstLo = dstReg.reg.idx;
-        const uint32_t dstHi = dstReg.reg.idx + dstReg.reg.num;  // exclusive
         for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
             if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
-            if (srcReg.reg.type != dstReg.reg.type) continue;  // compare same register class
-            const uint32_t srcLo = srcReg.reg.idx;
-            const uint32_t srcHi = srcReg.reg.idx + srcReg.reg.num;  // exclusive
-            if (dstLo < srcHi && srcLo < dstHi) return true;
+            // isOverlap already requires the same register class before checking indices.
+            if (dstReg.isOverlap(srcReg)) return true;
         }
     }
     return false;
