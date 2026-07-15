@@ -164,17 +164,20 @@ engine support query for the exact graph — the expanded case, for a sweep.
 
 Claim evaluation is built on RFC 0011's existing machinery:
 
-- **Discovery must exclude the new sidecar for both bundle kinds.** Bundle discovery
-  (`discoverBundles` in
+- **Discovery must exclude the new sidecar.** Bundle discovery (`discoverBundles` in
   `dnn-providers/integration-tests/src/harness/bundle/BundleDiscovery.hpp`) registers one test per
   single-graph `{Name}.json` and one per template-sweep `cases[].id`, already skipping companion
-  `meta.json` and treating `graph.template.json` + `sweep.json` as a sweep root, not a graph. The
-  concrete hook is `companionKinds()` (currently `{"meta"}`), which `isGraphFile()` consults:
-  adding `"support"` excludes both the single-graph `{Name}.support.json` (final dotted segment
-  `support`) and a sweep's bare `support.json` (whole stem `support`), which otherwise register as
-  spurious graph tests. The sidecar annotates already-discovered bundles and must never register,
-  remove, or be loaded as a test/graph. *Acceptance:* a single-graph dir registers one test; a
-  sweep dir exactly one per `cases[].id`; the sidecar is never loaded as a graph.
+  `meta.json` and treating `graph.template.json` + `sweep.json` as a sweep root. The two sidecar
+  kinds are excluded by different mechanisms. A single-graph `{Name}.support.json` sits in an
+  ordinary bundle dir, so it reaches `isGraphFile()` and — because its final dotted segment
+  `support` is not yet a companion kind — would register as a spurious second test; the fix is to
+  add `"support"` to `companionKinds()` (currently `{"meta"}`), the companion-suffix exclusion list
+  `isGraphFile()` consults. A sweep's bare `support.json` needs no code change: `discoverBundles`
+  already skips every `.json` under a sweep root (the `isDescendantOf(sweepDir)` guard), and
+  `discoverSweepCases()` looks only at `sweep.json` and `graph.template.json`, so the sidecar is
+  never a discovery candidate — the claim loader reads it later. *Acceptance:* a single-graph dir
+  with `{Name}.json` + `{Name}.support.json` registers exactly one test; a sweep dir registers
+  exactly one per `cases[].id`; the sidecar is never loaded as a graph.
 - **The claim key is the on-disk graph**, not a content hash. For a single-graph bundle it is
   that bundle (`{Name}.json` + co-located `{Name}.support.json`); for a template sweep it is the
   **expanded case** — the `cases[].id` applied to `graph.template.json`, plus that case's verdict
