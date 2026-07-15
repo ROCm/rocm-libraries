@@ -826,9 +826,9 @@ def main() -> int:
     if args.flydsl:
         fly_ran = [r for r in results if r.get("flydsl_ms") is not None]
         fly_vs_tri = [
-            r["flydsl_ms"] / r["triton_ms"]
+            r["triton_ms"] / r["flydsl_ms"]
             for r in fly_ran
-            if r.get("triton_ms") and r["triton_ms"] > 0
+            if r.get("triton_ms") and r["triton_ms"] > 0 and r["flydsl_ms"] > 0
         ]
         fly_vs_ck = [
             r["best_speedup_vs_flydsl"]
