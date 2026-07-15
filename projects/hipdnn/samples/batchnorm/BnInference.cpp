@@ -121,6 +121,13 @@ int main(int argc, char* argv[])
 {
     try
     {
+        int deviceCount = 0;
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        {
+            std::cout << "SKIPPED: No GPU devices available.\n";
+            return 0;
+        }
+
         auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();

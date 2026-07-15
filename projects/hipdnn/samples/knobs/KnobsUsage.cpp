@@ -146,6 +146,13 @@ int main(int argc, char* argv[])
 {
     try
     {
+        int deviceCount = 0;
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        {
+            std::cout << "SKIPPED: No GPU devices available.\n";
+            return 0;
+        }
+
         bool useBenchmarking = false;
         for(int i = 1; i < argc; ++i)
         {
