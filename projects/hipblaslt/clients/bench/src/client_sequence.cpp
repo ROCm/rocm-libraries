@@ -475,14 +475,21 @@ int main(int argc, char** argv)
                + layer[i].m * layer[i].n * type2Size(layer[i].problem.getTypeD()) + size_bias;
     }
     // Calculating block count
-    int32_t max_iters   = max(cold_iters, iters);
-    int32_t block_count = max(1, min(max_iters, ceil((float)rotating / totalRotatingSizeNeeded)));
+    // Adaptive mode ignores cold_iters/iters and runs on a time budget instead; a max_iters
+    // of 0 there means unbounded, so no iteration-count cap applies at all.
+    int32_t max_iters  = rv.gs.adaptive ? rv.gs.max_iters : max(cold_iters, iters);
+    bool    apply_cap  = !(rv.gs.adaptive && max_iters == 0);
+    auto    mem_blocks = ceil((float)rotating / totalRotatingSizeNeeded);
+    int32_t block_count
+        = max(1, apply_cap ? min(max_iters, mem_blocks) : mem_blocks);
     if(rotating > 0)
     {
         std::cout << "Rotating buffer " << (float)rotating / (1024 * 1024) << " MiB. "
                   << "Needed Size: " << (float)totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
-                  << "Needed block count: " << block_count << " (Capped to max iters: " << max_iters
-                  << ")" << std::endl;
+                  << "Needed block count: " << block_count;
+        if(apply_cap && max_iters < mem_blocks)
+            std::cout << " (Capped to max iters: " << max_iters << ")";
+        std::cout << std::endl;
     }
 
     hipStream_t       stream;

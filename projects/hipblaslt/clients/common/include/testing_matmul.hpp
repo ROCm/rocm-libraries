@@ -55,6 +55,7 @@
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <iomanip>
 #include <map>
 #include <numeric>
 #include <omp.h>
@@ -2235,14 +2236,21 @@ void testing_matmul_with_bias(const Arguments& arg,
     gpu_mem_gbytes = static_cast<double>(totalRotatingSizeNeeded) / (1024 * 1024 * 1024);
 
     // Calculating block count
-    int32_t max_iters   = max(arg.cold_iters, arg.iters);
-    int32_t block_count = max(1, min(max_iters, ceil((float)rotating / totalRotatingSizeNeeded)));
+    // Adaptive mode ignores arg.iters/arg.cold_iters and runs on a time budget instead; a
+    // max_iters of 0 there means unbounded, so no iteration-count cap applies at all.
+    int32_t max_iters  = arg.adaptive ? arg.max_iters : max(arg.cold_iters, arg.iters);
+    bool    apply_cap  = !(arg.adaptive && max_iters == 0);
+    auto    mem_blocks = ceil((float)rotating / totalRotatingSizeNeeded);
+    int32_t block_count
+        = max(1, apply_cap ? min(max_iters, mem_blocks) : mem_blocks);
     if(rotating > 0)
     {
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
                        << "Needed Size: " << totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
-                       << "Needed block count: " << block_count
-                       << " (Capped to max iters: " << max_iters << ")" << std::endl;
+                       << "Needed block count: " << block_count;
+        if(apply_cap && max_iters < mem_blocks)
+            hipblaslt_cout << " (Capped to max iters: " << max_iters << ")";
+        hipblaslt_cout << std::endl;
     }
     // Calculating block count end
     matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(gemm_count));
@@ -4833,6 +4841,38 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     auto ptrs = benchmark_allocation();
+
+    if(arg.adaptive)
+    {
+        hipblaslt_cout << std::defaultfloat << std::setprecision(6)
+                       << "Adaptive timing: warmup " << arg.warmup_time << "ms. Sample ";
+        if(arg.sample_time == 0.0f)
+            hipblaslt_cout << "single-enqueue";
+        else
+            hipblaslt_cout << arg.sample_time << "ms";
+        hipblaslt_cout << ". Measure " << arg.measure_time << "ms (max ";
+        if(arg.max_measure_time == 0.0f)
+            hipblaslt_cout << "unbounded";
+        else
+            hipblaslt_cout << arg.max_measure_time << "ms";
+        hipblaslt_cout << "). Iters " << arg.min_iters << " (max ";
+        if(arg.max_iters == 0)
+            hipblaslt_cout << "unbounded";
+        else
+            hipblaslt_cout << arg.max_iters;
+        hipblaslt_cout << "). Noise threshold ";
+        if(arg.noise_threshold == 0.0f)
+            hipblaslt_cout << "disabled";
+        else
+            hipblaslt_cout << arg.noise_threshold * 100 << "%";
+        if(arg.stability_threshold == 0.0f)
+            hipblaslt_cout << " (stability fallback disabled)";
+        else
+            hipblaslt_cout << " (stability " << arg.stability_threshold * 100 << "%, window "
+                           << arg.stability_window << ", interval " << arg.stability_interval
+                           << ")";
+        hipblaslt_cout << "." << std::endl;
+    }
 
     if(arg.print_solution_found)
         hipblaslt_cout << "Is supported " << heuristicResult.size()
