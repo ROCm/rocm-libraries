@@ -114,7 +114,7 @@ circular. torch is therefore **optional** and the only hard dep is `numpy`
 
 1. the `torch.fx` fusion frontend (`torch_backend.py`, `helpers/fuse.py`
    graph capture);
-2. torch-tensor launch integration (`runtime/torch_module.py`);
+2. torch-tensor launch integration (`runtime/torch_interop.py`);
 3. on-GPU numeric verification against torch eager.
 
 Everything else runs torch-free: IR build, lower, `comgr` compile, numpy launch,
@@ -125,8 +125,8 @@ with neither torch nor a GPU installed.
 ### ROCm library discovery (libamd_comgr / libamdhip64)
 
 The runtime resolves the ROCm shared libs WITHOUT importing torch
-(`runtime/hip_module._candidate_lib_paths` / `_rocm_root_libdirs`), in priority
-order:
+(`runtime/runtime_coexistence._candidate_lib_paths` / `_rocm_root_libdirs`), in
+priority order:
 
 1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
 2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch
@@ -186,6 +186,8 @@ GPU node.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
+  *Note*: For non-`gfx950` targets, pass `target_architecture` and beware that some code
+  paths still silently fall back to `gfx950` on non-GPU systems.
 - **torch is optional, never import it from a library to gain a side effect.**
   numpy is the only hard dep. torch is needed only for the fusion frontend,
   torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind
