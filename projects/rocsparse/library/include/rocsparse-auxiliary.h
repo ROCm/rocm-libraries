@@ -2760,9 +2760,8 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
  *  \retval rocsparse_status_invalid_pointer if \p descr, \p bell_col_ind, or \p bell_val is invalid.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_bell_set_pointers(rocsparse_spmat_descr descr,
-                                             void*                 bell_col_ind,
-                                             void*                 bell_val);
+rocsparse_status
+    rocsparse_bell_set_pointers(rocsparse_spmat_descr descr, void* bell_col_ind, void* bell_val);
 
 /*! \ingroup aux_module
  *  \brief Get the number of rows, columns, and non-zeros from the sparse matrix descriptor.
