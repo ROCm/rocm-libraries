@@ -11,9 +11,12 @@ All feature engines produce a consistent numpy array for LightGBM.
 
 import math
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 DTYPE_BYTES = {
@@ -58,8 +61,10 @@ class FeatureEngine(ABC):
         """Extract a single feature vector from a (problem, kernel) pair."""
         ...
 
-    def extract_batch(self, df: pd.DataFrame) -> np.ndarray:
+    def extract_batch(self, df: "pd.DataFrame") -> np.ndarray:
         """Vectorized batch extraction from a DataFrame. Override for speed."""
+        import pandas as pd
+
         names = self.get_feature_names()
         result = np.zeros((len(df), len(names)), dtype=np.float64)
         for i in range(len(df)):
@@ -407,8 +412,10 @@ class GemmUniversalFeatureEngine(FeatureEngine):
             dtype=np.float64,
         )
 
-    def extract_batch(self, df: pd.DataFrame) -> np.ndarray:
+    def extract_batch(self, df: "pd.DataFrame") -> np.ndarray:
         """Vectorized batch extraction -- much faster than row-by-row."""
+        import pandas as pd
+
         n = len(df)
         names = self.get_feature_names()
         result = np.zeros((n, len(names)), dtype=np.float64)
