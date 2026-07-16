@@ -181,7 +181,7 @@ std::pair<std::unique_ptr<MockKernelCompiler>, std::unique_ptr<std::vector<std::
             auto mockProgram = std::make_unique<MockCompiledProgram>();
             EXPECT_CALL(*mockProgram, getKernel("RMSnormBwdData"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel1))));
-            EXPECT_CALL(*mockProgram, getKernel("RMSnormBwdWeightBias"))
+            EXPECT_CALL(*mockProgram, getKernel("RMSnormBwdScaleBias"))
                 .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel2))));
 
             return mockProgram;
