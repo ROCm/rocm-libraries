@@ -11,7 +11,7 @@
 
 namespace {
 
-class GPU_StreamTracker_NONE : public ::testing::Test
+class GPU_StreamTracker_FP32 : public ::testing::Test
 {
 protected:
     miopen::Handle& handle         = get_handle();
@@ -20,7 +20,7 @@ protected:
 
 } // namespace
 
-TEST_F(GPU_StreamTracker_NONE, AcquireRelease)
+TEST_F(GPU_StreamTracker_FP32, AcquireRelease)
 {
     auto slot = tracker.acquire(handle);
     ASSERT_GT(slot.pool_id, 0);
@@ -34,7 +34,7 @@ TEST_F(GPU_StreamTracker_NONE, AcquireRelease)
     tracker.release(slot2);
 }
 
-TEST_F(GPU_StreamTracker_NONE, AcquireGrowsPool)
+TEST_F(GPU_StreamTracker_FP32, AcquireGrowsPool)
 {
     auto slot1 = tracker.acquire(handle);
     auto slot2 = tracker.acquire(handle);
@@ -44,7 +44,7 @@ TEST_F(GPU_StreamTracker_NONE, AcquireGrowsPool)
     tracker.release(slot1);
 }
 
-TEST_F(GPU_StreamTracker_NONE, AbandonAndReclaim)
+TEST_F(GPU_StreamTracker_FP32, AbandonAndReclaim)
 {
     auto slot = tracker.acquire(handle);
 
@@ -64,7 +64,7 @@ TEST_F(GPU_StreamTracker_NONE, AbandonAndReclaim)
     ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
 }
 
-TEST_F(GPU_StreamTracker_NONE, AbandonStillDraining)
+TEST_F(GPU_StreamTracker_FP32, AbandonStillDraining)
 {
     auto slot = tracker.acquire(handle);
 
@@ -90,7 +90,7 @@ TEST_F(GPU_StreamTracker_NONE, AbandonStillDraining)
     ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
 }
 
-TEST_F(GPU_StreamTracker_NONE, CascadeAbandonReclaim)
+TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
 {
     constexpr int kCount = 4;
     std::vector<miopen::StreamTracker::Slot> slots;
