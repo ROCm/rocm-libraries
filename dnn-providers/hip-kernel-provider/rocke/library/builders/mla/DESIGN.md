@@ -776,7 +776,7 @@ measure against the in-loop fusion approach.
   the score + value step (same as §2.4).
 - CK backend for gfx942 prefill; supports gfx942 and gfx950.
 
-### 11.5 SGLang weight absorption
+### 11.6 SGLang weight absorption
 
 `github.com/sgl-project/sglang` — the weight absorption technique (§2.4) was first
 deployed at scale in SGLang (PR #905, #1138). Key implementation details:
