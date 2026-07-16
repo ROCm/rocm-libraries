@@ -189,13 +189,13 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(int, int, 1, 1000, 128, 2, 4);
     CREATE_BENCHMARK(int, int, 1, 5000, 128, 2, 4);
 
-    CREATE_BENCHMARK(double, long long, 1, 5, 128, 2, 4);
-    CREATE_BENCHMARK(double, long long, 1, 10, 128, 2, 4);
-    CREATE_BENCHMARK(double, long long, 1, 50, 128, 2, 4);
-    CREATE_BENCHMARK(double, long long, 1, 100, 128, 2, 4);
-    CREATE_BENCHMARK(double, long long, 1, 500, 128, 2, 4);
-    CREATE_BENCHMARK(double, long long, 1, 1000, 128, 2, 4);
-    CREATE_BENCHMARK(double, long long, 1, 5000, 128, 2, 4);
+    CREATE_BENCHMARK(double, int64_t, 1, 5, 128, 2, 4);
+    CREATE_BENCHMARK(double, int64_t, 1, 10, 128, 2, 4);
+    CREATE_BENCHMARK(double, int64_t, 1, 50, 128, 2, 4);
+    CREATE_BENCHMARK(double, int64_t, 1, 100, 128, 2, 4);
+    CREATE_BENCHMARK(double, int64_t, 1, 500, 128, 2, 4);
+    CREATE_BENCHMARK(double, int64_t, 1, 1000, 128, 2, 4);
+    CREATE_BENCHMARK(double, int64_t, 1, 5000, 128, 2, 4);
 
     executor.run();
 }

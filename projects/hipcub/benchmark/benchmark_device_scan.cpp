@@ -275,8 +275,8 @@ struct min_tag
     CREATE_BENCHMARK(true, float, SCAN_OP, TAG);           \
     CREATE_BENCHMARK(false, double, SCAN_OP, TAG);         \
     CREATE_BENCHMARK(true, double, SCAN_OP, TAG);          \
-    CREATE_BENCHMARK(false, long long, SCAN_OP, TAG);      \
-    CREATE_BENCHMARK(true, long long, SCAN_OP, TAG);       \
+    CREATE_BENCHMARK(false, int64_t, SCAN_OP, TAG);      \
+    CREATE_BENCHMARK(true, int64_t, SCAN_OP, TAG);       \
     CREATE_BENCHMARK(false, custom_float2, SCAN_OP, TAG);  \
     CREATE_BENCHMARK(true, custom_float2, SCAN_OP, TAG);   \
     CREATE_BENCHMARK(false, custom_double2, SCAN_OP, TAG); \

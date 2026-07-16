@@ -253,7 +253,7 @@ void add_benchmarks(primbench::executor& executor)
     CREATE_BENCHMARKS(float);
     CREATE_BENCHMARKS(double);
     CREATE_BENCHMARKS(int8_t);
-    CREATE_BENCHMARKS(long long);
+    CREATE_BENCHMARKS(int64_t);
     CREATE_BENCHMARKS(custom_float2);
     CREATE_BENCHMARKS(custom_double2);
 }

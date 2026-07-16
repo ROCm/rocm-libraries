@@ -349,7 +349,7 @@ int main(int argc, char* argv[])
     primbench::executor executor(argc, argv);
 
     QUEUE_KEY(int)
-    QUEUE_KEY(long long)
+    QUEUE_KEY(int64_t)
     QUEUE_KEY(int8_t)
     QUEUE_KEY(uint8_t)
     QUEUE_KEY(short)
@@ -362,12 +362,12 @@ int main(int argc, char* argv[])
     QUEUE_PAIR(int, custom_char_double);
     QUEUE_PAIR(int, custom_double_char);
 
-    QUEUE_PAIR(long long, float);
-    QUEUE_PAIR(long long, double);
-    QUEUE_PAIR(long long, custom_float2);
-    QUEUE_PAIR(long long, custom_char_double);
-    QUEUE_PAIR(long long, custom_double_char);
-    QUEUE_PAIR(long long, custom_double2);
+    QUEUE_PAIR(int64_t, float);
+    QUEUE_PAIR(int64_t, double);
+    QUEUE_PAIR(int64_t, custom_float2);
+    QUEUE_PAIR(int64_t, custom_char_double);
+    QUEUE_PAIR(int64_t, custom_double_char);
+    QUEUE_PAIR(int64_t, custom_double2);
 
     QUEUE_PAIR(int8_t, int8_t);
     QUEUE_PAIR(uint8_t, uint8_t);

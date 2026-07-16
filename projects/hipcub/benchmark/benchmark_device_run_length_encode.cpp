@@ -208,7 +208,7 @@ template<size_t MaxLength>
 void add_encode_benchmarks(primbench::executor& executor)
 {
     CREATE_ENCODE_BENCHMARK(int);
-    CREATE_ENCODE_BENCHMARK(long long);
+    CREATE_ENCODE_BENCHMARK(int64_t);
 
     CREATE_ENCODE_BENCHMARK(int8_t);
     CREATE_ENCODE_BENCHMARK(uint8_t);
@@ -224,7 +224,7 @@ template<size_t MaxLength>
 void add_non_trivial_runs_benchmarks(primbench::executor& executor)
 {
     CREATE_NON_TRIVIAL_RUNS_BENCHMARK(int);
-    CREATE_NON_TRIVIAL_RUNS_BENCHMARK(long long);
+    CREATE_NON_TRIVIAL_RUNS_BENCHMARK(int64_t);
 
     CREATE_NON_TRIVIAL_RUNS_BENCHMARK(int8_t);
     CREATE_NON_TRIVIAL_RUNS_BENCHMARK(uint8_t);
