@@ -136,6 +136,9 @@ public:
         return _shallowTensor->is_runtime_pass_by_value();
     }
 
+    // Umbrella: value present || runtime flag. Differs by design from the
+    // backend C-API's HIPDNN_ATTR_TENSOR_IS_BY_VALUE (1307), which is
+    // value-presence only for back-compat. See RFC 0016 §4.1.
     bool isByValue() const override
     {
         return valueType() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE

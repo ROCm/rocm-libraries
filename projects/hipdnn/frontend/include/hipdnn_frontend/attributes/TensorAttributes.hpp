@@ -128,7 +128,7 @@ public:
      */
     bool get_is_pass_by_value() const // NOLINT(readability-identifier-naming)
     {
-        return _isRuntimePassByValue || !std::holds_alternative<std::monostate>(_value);
+        return _isRuntimePassByValue || hasValue();
     }
 
     /**
@@ -140,9 +140,8 @@ public:
     std::optional<pass_by_values_t>
         get_pass_by_value() const // NOLINT(readability-identifier-naming)
     {
-        return _isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
-                   ? std::optional<pass_by_values_t>{_value}
-                   : std::nullopt;
+        return _isRuntimePassByValue && hasValue() ? std::optional<pass_by_values_t>{_value}
+                                                   : std::nullopt;
     }
 
     /**
@@ -170,9 +169,8 @@ public:
     std::optional<pass_by_values_t>
         get_compile_time_constant() const // NOLINT(readability-identifier-naming)
     {
-        return !_isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
-                   ? std::optional<pass_by_values_t>{_value}
-                   : std::nullopt;
+        return !_isRuntimePassByValue && hasValue() ? std::optional<pass_by_values_t>{_value}
+                                                    : std::nullopt;
     }
 
     /**
@@ -197,7 +195,7 @@ public:
      */
     bool get_has_compile_time_constant() const // NOLINT(readability-identifier-naming)
     {
-        return !_isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value);
+        return !_isRuntimePassByValue && hasValue();
     }
 
     /**
@@ -534,7 +532,7 @@ public:
         HIPDNN_RETURN_IF_TRUE(_isVirtual && _isRuntimePassByValue,
                               ErrorCode::INVALID_VALUE,
                               "Tensor " + _name + " cannot be virtual and runtime pass by value");
-        HIPDNN_RETURN_IF_TRUE(_isVirtual && !std::holds_alternative<std::monostate>(_value),
+        HIPDNN_RETURN_IF_TRUE(_isVirtual && hasValue(),
                               ErrorCode::INVALID_VALUE,
                               "Tensor " + _name + " cannot be virtual and pass by value");
         HIPDNN_RETURN_IF_NE(_dim.size(),
@@ -618,6 +616,11 @@ public:
     }
 
 private:
+    bool hasValue() const
+    {
+        return !std::holds_alternative<std::monostate>(_value);
+    }
+
     int64_t _uid = 0;
     bool _uidSet = false;
     std::string _name;

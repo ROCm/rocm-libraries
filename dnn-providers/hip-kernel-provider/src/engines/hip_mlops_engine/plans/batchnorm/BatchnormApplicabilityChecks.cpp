@@ -46,8 +46,7 @@ void BatchnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<in
     for(const auto& id : tensorIds)
     {
         auto attr = _tensorMap.at(id);
-        if(!attr->is_runtime_pass_by_value()
-           && attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(attr))
         {
             tensors.emplace_back(attr);
         }

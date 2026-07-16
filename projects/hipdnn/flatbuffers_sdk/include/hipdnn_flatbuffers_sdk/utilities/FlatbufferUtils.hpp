@@ -181,6 +181,15 @@ inline bool isTensorRuntimePassByValue(const data_objects::TensorAttributes* ten
     return tensor != nullptr && tensor->is_runtime_pass_by_value();
 }
 
+/// True if `tensor` is a pass-by-value scalar in ANY state (compile-time
+/// constant, runtime-with-default, or pure runtime user-supplied)
+inline bool isPassByValueTensor(const data_objects::TensorAttributes* tensor)
+{
+    return tensor != nullptr
+           && (tensor->is_runtime_pass_by_value()
+               || tensor->value_type() != data_objects::TensorValue::NONE);
+}
+
 /// @brief Reads the runtime pass-by-value flag off a mutable tensor object.
 inline bool isTensorRuntimePassByValue(const data_objects::TensorAttributesT* tensor)
 {
