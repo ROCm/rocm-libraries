@@ -47,15 +47,17 @@ def _make_launcher(spec: AttentionDenseSpec):
         backend="python",
         capture_ir_text=False,
     )
-    sig = (
+    sb = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
         .ptr("v_ptr", spec.dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
-        .build()
     )
+    if spec.varlen:
+        sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    sig = sb.build()
     return KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig)
 
 
@@ -99,9 +101,19 @@ def run(
         rep = Hq // Hkv
         kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
         vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-        ref = torch.nn.functional.scaled_dot_product_attention(
-            qh, kh, vh, is_causal=spec.causal
-        ).transpose(1, 2)
+        W = spec.sliding_window
+        if spec.causal and W > 0:
+            # Banded mask: keep k in [q-W+1, q] (causal AND sliding window).
+            qi = torch.arange(Sq, device=dev).view(-1, 1)
+            ki = torch.arange(Skv, device=dev).view(1, -1)
+            allowed = (ki <= qi) & (ki > qi - W)
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, attn_mask=allowed
+            ).transpose(1, 2)
+        else:
+            ref = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, is_causal=spec.causal
+            ).transpose(1, 2)
         err = (out.float() - ref).abs().max().item()
 
     for _ in range(warmup):
@@ -114,11 +126,15 @@ def run(
     e.record()
     e.synchronize()
     ms = s.elapsed_time(e) / iters
-    flops = (
-        4 * B * Hq * D * (Sq * (Sq + 1) // 2)
-        if spec.causal
-        else 2 * 2 * B * Hq * D * Sq * Skv
-    )
+    W = spec.sliding_window
+    if spec.causal and W > 0:
+        # banded pair count: sum_q min(q+1, W) = W*Sq - W*(W-1)/2 (Sq>=W)
+        pairs = W * Sq - W * (W - 1) // 2 if Sq >= W else Sq * (Sq + 1) // 2
+        flops = 4 * B * Hq * D * pairs
+    elif spec.causal:
+        flops = 4 * B * Hq * D * (Sq * (Sq + 1) // 2)
+    else:
+        flops = 2 * 2 * B * Hq * D * Sq * Skv
     tf = flops / (ms * 1e-3) / 1e12
     status = "PASS" if (not check or err < 2e-2) else "FAIL"
     print(
@@ -144,6 +160,9 @@ def main():
     )
     ap.add_argument("--np", type=int, default=256, help="num_persistent CTAs")
     ap.add_argument("--interleave", action="store_true", help="boustrophedon qb order")
+    ap.add_argument(
+        "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
+    )
     args = ap.parse_args()
     for sq in (256, 512, 2048, 8192):
         spec = AttentionDenseSpec(
@@ -160,6 +179,7 @@ def main():
             persistent=args.persistent,
             num_persistent=args.np,
             interleave=args.interleave,
+            sliding_window=args.sw,
         )
         run(spec)
 

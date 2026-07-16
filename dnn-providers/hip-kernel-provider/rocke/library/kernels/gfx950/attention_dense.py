@@ -38,7 +38,7 @@ NOT carried over — see the experiment's ``plan.md`` for their measured results
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from rocke.core.ir import IRBuilder, KernelDef, PtrType, BF16, F16, F32, I64
+from rocke.core.ir import IRBuilder, KernelDef, PtrType, BF16, F16, F32, I32, I64
 from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from rocke.helpers.spec import kernel_name_join
@@ -56,6 +56,16 @@ _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 _BLOCK_M = 256
 _NBUF = 2
 _LDS_PAD = 8
+# _LDS_PAD_V: bf16 elements of V-row padding for the transposed PV read
+#   (ds_read_b64_tr_b16). The transpose read has a stricter bank pattern than
+#   K's ds_read_b128, so it needs a LARGER pad than _LDS_PAD (8): a measured
+#   sweep @ GQA-8 S=8192 gives conflicts {VPAD0: 30, VPAD8: 29, VPAD16: 11,
+#   VPAD32: 0} and TFLOPS {906, 901, 944, 953} -- i.e. +8 is useless here and
+#   only +32 fully clears the V-read conflicts (matches flyDSL's SMEM_V_PAD).
+#   Overridable via ROCKE_DENSE_VPAD for re-sweeps.
+import os as _os  # noqa: E402
+
+_LDS_PAD_V = int(_os.environ.get("ROCKE_DENSE_VPAD", "32"))
 
 
 @dataclass(frozen=True)
@@ -77,6 +87,20 @@ class AttentionDenseSpec:
     head_size: int
     causal: bool = True
     dtype: str = "bf16"
+    # sliding_window: left-context window W. 0 = disabled (full causal, the
+    #   byte-identical always-on path). When W>0 each query token q attends to
+    #   keys k in [q-W+1, q] (causal AND within-window). The valid KV region per
+    #   256-row block is a slope-1 parallelogram band, so the KV loop is pruned
+    #   to ~(W/block_n + block_m/block_n) tiles instead of the full causal
+    #   triangle. Requires causal=True and W % block_n == 0.
+    sliding_window: int = 0
+    # varlen: packed variable-length batch. Q/K/V/O are packed [total_tok, H, D]
+    #   and per-sequence boundaries come from cu_seqlens_q/cu_seqlens_kv (int32
+    #   [batch+1]) at runtime. seqlen_q/seqlen_kv are the MAX lengths (grid
+    #   sizing); each sequence's length must be a multiple of block_m (q) and
+    #   block_n (kv). Self-attention only (per-seq seqlen_q == seqlen_kv). Not
+    #   supported with persistent. 0-cost when False (dense uniform path).
+    varlen: bool = False
 
     # --- validated performance knobs ---
     # block_n: KV tile length. 64 (66 KB LDS, WPE-tunable) and 128 (135 KB LDS, pins
@@ -101,6 +125,21 @@ class AttentionDenseSpec:
     #   (hq,bt) planes to spread the triangular causal load across CTAs. A large-Sq
     #   lever (helps Sq>=16384) that slightly hurts small Sq; only used when persistent.
     interleave: bool = False
+    # persist_decode: work-item -> (qb, hq, bt) decode for the persistent grid.
+    #   "qb_major" (default): wi = qb*(Hq*B) + hq*B + bt. Balances the triangular
+    #     causal load across CTAs, but every 256-CTA grid-stride phase spans ALL
+    #     kv-heads at once -> large L2 footprint (measured 57% L2 hit @ GQA-8).
+    #   "hkv_major": wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt, with blk
+    #     folded to a low/high-paired qb. Concentrates each grid-stride phase on
+    #     ~1 kv-head so the shared GQA K/V stays L2-resident across its gqa query
+    #     heads (measured L2 hit 57% -> 93%, HBM misses 5.9x lower, matching the
+    #     non-persistent grid). Only balances the causal triangle when each CTA
+    #     grid-strides across BOTH halves of a kv-head, i.e. gqa*NQB*B >= 2*NP;
+    #     otherwise each CTA gets a fixed qb (severe imbalance) -> slower.
+    #   "auto" (default): hkv_major when it is balance-safe AND GQA
+    #     (gqa>1 and gqa*NQB*B >= 2*num_persistent), else qb_major. Strictly >=
+    #     qb_major (falls back where hkv_major would lose).
+    persist_decode: str = "auto"
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -134,6 +173,26 @@ class AttentionDenseSpec:
             raise ValueError(
                 f"num_persistent must be positive, got {self.num_persistent}"
             )
+        if self.persist_decode not in ("qb_major", "hkv_major", "auto"):
+            raise ValueError(
+                f"persist_decode must be 'qb_major', 'hkv_major', or 'auto', got "
+                f"{self.persist_decode}"
+            )
+        if self.sliding_window < 0:
+            raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
+        if self.sliding_window > 0:
+            if not self.causal:
+                raise ValueError("sliding_window>0 requires causal=True")
+            if self.sliding_window % self.block_n != 0:
+                raise ValueError(
+                    f"sliding_window ({self.sliding_window}) must be a multiple of "
+                    f"block_n={self.block_n}"
+                )
+        if self.varlen:
+            if self.persistent:
+                raise ValueError("varlen is not supported with persistent=True")
+            if not self.causal:
+                raise ValueError("varlen requires causal=True")
 
     @property
     def num_waves(self) -> int:
@@ -147,6 +206,21 @@ class AttentionDenseSpec:
     def num_queries_per_kv(self) -> int:
         return self.num_query_heads // self.num_kv_heads
 
+    @property
+    def resolved_persist_decode(self) -> str:
+        """Resolve persist_decode='auto' to 'hkv_major' (GQA L2-locality win,
+        when balance-safe) or 'qb_major'. hkv_major balances the causal triangle
+        only when each CTA grid-strides across both halves of a kv-head
+        (gqa*NQB*B >= 2*num_persistent) and there is GQA sharing (gqa>1)."""
+        if self.persist_decode != "auto":
+            return self.persist_decode
+        gqa = self.num_query_heads // self.num_kv_heads
+        nqb = self.seqlen_q // _BLOCK_M
+        per_hkv = gqa * nqb * self.batch
+        if gqa > 1 and per_hkv >= 2 * self.num_persistent:
+            return "hkv_major"
+        return "qb_major"
+
     def kernel_name(self) -> str:
         parts = [
             "rocke_attention_dense",
@@ -159,8 +233,14 @@ class AttentionDenseSpec:
             f"sk{self.seqlen_kv}",
             "causal" if self.causal else "full",
         ]
+        if self.sliding_window > 0:
+            parts.append(f"swa{self.sliding_window}")
+        if self.varlen:
+            parts.append("varlen")
         if self.persistent:
             parts.append(f"persist{self.num_persistent}")
+            if self.resolved_persist_decode == "hkv_major":
+                parts.append("hkvmaj")
             if self.interleave:
                 parts.append("intl")
         return kernel_name_join(*parts)
@@ -203,6 +283,9 @@ def build_attention_dense(
     BN = spec.block_n
     NBUF = _NBUF
     PAD = _LDS_PAD
+    W = spec.sliding_window
+    Wt = W // BN  # window length in KV tiles (0 when disabled)
+    varlen = spec.varlen
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -229,6 +312,17 @@ def build_attention_dense(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    if varlen:
+        cu_q = b.param(
+            "cu_seqlens_q", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+        )
+        cu_kv = b.param(
+            "cu_seqlens_kv",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     _exp2 = b.exp2_fast  # native v_exp_f32 (softmax arg always <= 0)
@@ -246,19 +340,40 @@ def build_attention_dense(
     bt = b.block_id_z()
     hkv = b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
-    q_base = b.add(
-        b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
-        b.mul(hq, b.const_i32(D)),
-    )
-    k_base = b.add(
-        b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
-        b.mul(hkv, b.const_i32(D)),
-    )
 
-    # --- LDS allocation: PAD on K (bank-conflict fix), unpadded V ---
+    if varlen:
+        # Per-sequence token bases from cu_seqlens; early-exit q-blocks that fall
+        # past this sequence's length (packed [total_tok, H, D] layout).
+        q_seq0 = b.global_load_i32(cu_q, bt)
+        q_seq1 = b.global_load_i32(cu_q, b.add(bt, b.const_i32(1)))
+        seqlen_q_b = b.sub(q_seq1, q_seq0)
+        kv_seq0 = b.global_load_i32(cu_kv, bt)
+        kv_seq1 = b.global_load_i32(cu_kv, b.add(bt, b.const_i32(1)))
+        seqlen_kv_b = b.sub(kv_seq1, kv_seq0)
+        with b.scf_if(b.cmp_ge(b.mul(qb, b.const_i32(BLOCK_M)), seqlen_q_b)):
+            b.ret()
+        q_base = b.add(
+            b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
+        )
+        k_base = b.add(
+            b.mul(kv_seq0, b.const_i32(stride_k_tok)), b.mul(hkv, b.const_i32(D))
+        )
+    else:
+        q_base = b.add(
+            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(hq, b.const_i32(D)),
+        )
+        k_base = b.add(
+            b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
+            b.mul(hkv, b.const_i32(D)),
+        )
+
+    # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
+    #     PV read bank-conflict pad) ---
     LDROW = D + PAD
+    VROW = D + _LDS_PAD_V
     K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [NBUF, BN, D], name_hint="Vlds")
+    V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
 
     # Q packs (B operand), scaled once by qk_scale = softmax_scale * log2(e).
     q_tok = b.add(q_tok0, lane_m)
@@ -278,7 +393,8 @@ def build_attention_dense(
 
     K_BYTES_PER_BUF = BN * LDROW * 2
     K_LDROW_BYTES = LDROW * 2
-    V_BYTES_PER_BUF = BN * D * 2
+    V_BYTES_PER_BUF = BN * VROW * 2
+    V_LDROW_BYTES = VROW * 2
     ROWS_PER_WAVE = BN // WAVES
     WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
@@ -306,23 +422,20 @@ def build_attention_dense(
             )
 
     def async_load_v(lds_base, buf_val, tile_key0):
-        """Contiguous async DMA into unpadded [BN, D] V_lds layout."""
+        """Row-by-row async DMA into [BN, VROW] V_lds (row-strided so V can carry
+        the +PAD_V transposed-PV bank pad); 64 lanes x 2 bf16 = D per row."""
         buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(V_BYTES_PER_BUF))
-        base_off = b.add(v_wave_off_i64, buf_off)
-        for c in range(V_DMA_PASSES):
-            wave_base = b.smem_ptr_add(
-                lds_base, b.add(base_off, b.const_i64(c * WAVES * WAVE_BYTES))
+        for r in range(ROWS_PER_WAVE):
+            row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
+            row_lds_off = b.add(
+                buf_off, b.zext(b.mul(row, b.const_i32(V_LDROW_BYTES)), I64)
             )
-            flat = b.mul(
-                b.add(b.mul(b.const_i32(c), b.const_i32(WAVES * 64)), tid),
-                b.const_i32(8),
-            )
-            krow = b.div(flat, b.const_i32(D))
-            kcol = b.mod(flat, b.const_i32(D))
-            gkey = b.add(tile_key0, krow)
-            voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), kcol)
+            row_base = b.smem_ptr_add(lds_base, row_lds_off)
+            gkey = b.add(tile_key0, row)
+            gcol = b.mul(lane, b.const_i32(2))
+            voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol)
             b.async_buffer_load_lds_addr(
-                v_rsrc, wave_base, b.mul(voff, b.const_i32(2)), zero_soff, 4
+                v_rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
             )
 
     def load_tile(buf_val, tile_idx):
@@ -348,18 +461,29 @@ def build_attention_dense(
             s_reg.append([b.vec_extract(acc, i) for i in range(16)])
         return s_reg
 
-    def do_mask(s_reg, tile_idx):
+    def do_mask(s_reg, tile_idx, lower=False, upper=True):
+        """Apply causal (upper: ktok<=q) and/or sliding-window (lower:
+        ktok>q-W) masks in-place on the QK-output layout. W is compile-time so
+        the lower threshold folds to an immediate. No relayout (reuses the same
+        lane->ktok/query_tok maps as causal)."""
         if not causal:
             return
         tile_key0 = b.mul(tile_idx, b.const_i32(BN))
         query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        # lower bound key: q - W + 1  (keep iff ktok > q - W)
+        win_lo = b.sub(query_tok, b.const_i32(W)) if lower else None
         for nsub in range(N_SUB):
             sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
             for i in range(16):
                 ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
-                s_reg[nsub][i] = b.select(
-                    b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
-                )
+                if upper:
+                    s_reg[nsub][i] = b.select(
+                        b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
+                    )
+                if lower:
+                    s_reg[nsub][i] = b.select(
+                        b.cmp_gt(ktok, win_lo), s_reg[nsub][i], neg_inf
+                    )
 
     def softmax_max(s_reg, m_i):
         local_max = neg_inf
@@ -460,21 +584,40 @@ def build_attention_dense(
         l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
         return out, p_vals, l_tile
 
+    n_ktiles_val = (
+        b.div(seqlen_kv_b, b.const_i32(BN)) if varlen else b.const_i32(n_ktiles)
+    )
     if causal:
         n_upper = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
-        n_upper = b.select(
-            b.cmp_lt(n_upper, b.const_i32(n_ktiles)), n_upper, b.const_i32(n_ktiles)
+        n_upper = b.select(b.cmp_lt(n_upper, n_ktiles_val), n_upper, n_ktiles_val)
+    else:
+        n_upper = n_ktiles_val
+
+    # Sliding-window: first KV tile any row in this block attends to. Valid band
+    # is [start_tile, n_upper); tiles < start_tile are fully outside the window
+    # (all -inf) so they are never visited (the KV-loop prune). W==0 keeps
+    # start_tile=0 -> full causal, byte-identical to the always-on path.
+    if causal and W > 0:
+        _diag0 = b.mul(qb, b.const_i32(n_per))
+        _lo_raw = b.sub(_diag0, b.const_i32(Wt))
+        start_tile = b.select(
+            b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
         )
     else:
-        n_upper = b.const_i32(n_ktiles)
+        start_tile = b.const_i32(0)
+    start_buf = b.mod(start_tile, b.const_i32(NBUF))
+    start_buf1 = b.mod(b.add(start_tile, b.const_i32(1)), b.const_i32(NBUF))
 
-    # Prologue: prime the K/V double buffer and compute tile 0.
-    load_tile(b.const_i32(0), b.const_i32(0))
-    load_tile(b.const_i32(1), b.const_i32(1))
+    # Prologue: prime the K/V double buffer and compute the first (start) tile.
+    load_tile(start_buf, start_tile)
+    load_tile(start_buf1, b.add(start_tile, b.const_i32(1)))
     b.s_waitcnt(vmcnt=0)
     b.s_barrier_bare()
-    s0 = do_qk(b.const_i32(0))
-    do_mask(s0, b.const_i32(0))
+    s0 = do_qk(start_buf)
+    if causal and W > 0:
+        do_mask(s0, start_tile, lower=True, upper=True)
+    else:
+        do_mask(s0, start_tile)
     m0, _alpha0 = softmax_max(s0, neg_inf)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     p0_vals = [
@@ -494,7 +637,7 @@ def build_attention_dense(
         + [(f"pk{kk}", pk0[kk]) for kk in range(KK_STEPS)]
     )
 
-    def emit_loop_body(j, carry, masked):
+    def emit_loop_body(j, carry, mask_lower=False, mask_upper=False):
         m_i = carry[0]
         l_i = carry[1]
         o_acc = list(carry[2 : 2 + D_TILES])
@@ -508,8 +651,8 @@ def build_attention_dense(
         b.s_waitcnt(vmcnt=V_DMA_PASSES)
         b.s_barrier_bare()
         s = do_qk(kbuf)
-        if masked:
-            do_mask(s, j)
+        if mask_lower or mask_upper:
+            do_mask(s, j, lower=mask_lower, upper=mask_upper)
         m_new, alpha = softmax_max(s, m_i)
         b.sched_barrier(0)  # depth-1 fence: m_new region-live-in
         b.s_setprio(1)  # PV-only s_setprio (paired with PF ~+3.5%)
@@ -522,7 +665,41 @@ def build_attention_dense(
         load_tile(pbuf, b.add(j, b.const_i32(1)))
         b.scf_yield(m_new, l_new, *o_acc, *p_packs)
 
-    if causal:
+    if causal and W > 0:
+        # Sliding-window three-phase band loop (prologue already did start_tile):
+        #   L: [start+1, mid_lo)  window-edge tiles (masked)
+        #   M: [mid_lo, mid_hi)   interior (mask-free: both bounds hold for all rows)
+        #   R: [mid_hi, n_upper)  causal-edge tiles (masked)
+        # Boundary phases apply BOTH bounds (robust for W<block_m overlap); the
+        # redundant bound is a no-op compare. M is provably mask-free by geometry.
+        diag_start = b.mul(qb, b.const_i32(n_per))
+        a = b.add(start_tile, b.const_i32(1))
+        left_end = b.add(diag_start, b.const_i32(n_per - Wt))  # start of mask-free M
+
+        def _clamp(x, lo, hi):
+            x = b.select(b.cmp_lt(x, lo), lo, x)  # max(x, lo)
+            x = b.select(b.cmp_lt(x, hi), x, hi)  # min(x, hi)
+            return x
+
+        mid_lo = _clamp(left_end, a, n_upper)
+        mid_hi = _clamp(diag_start, mid_lo, n_upper)
+
+        phL = b.scf_for_iter(a, mid_lo, b.const_i32(1), iter_args, iv_name="swl")
+        with phL as (j, carry):
+            emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+        mid_args = [
+            (name + "_m", val) for (name, _), val in zip(iter_args, phL.results)
+        ]
+        phM = b.scf_for_iter(mid_lo, mid_hi, b.const_i32(1), mid_args, iv_name="swm")
+        with phM as (j, carry):
+            emit_loop_body(j, carry)
+        rgt_args = [
+            (name + "_r", val) for (name, _), val in zip(iter_args, phM.results)
+        ]
+        loop = b.scf_for_iter(mid_hi, n_upper, b.const_i32(1), rgt_args, iv_name="swr")
+        with loop as (j, carry):
+            emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+    elif causal:
         # Diagonal-only masking: below-diagonal tiles need no mask (~94% at Sq=8192).
         diag_start = b.mul(qb, b.const_i32(n_per))
         body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
@@ -530,7 +707,7 @@ def build_attention_dense(
             b.const_i32(1), body_upper, b.const_i32(1), iter_args, iv_name="nb"
         )
         with body as (j, carry):
-            emit_loop_body(j, carry, masked=False)
+            emit_loop_body(j, carry)
         tail_args = [
             (name + "_t", val) for (name, _), val in zip(iter_args, body.results)
         ]
@@ -539,13 +716,13 @@ def build_attention_dense(
         )
         loop = b.scf_for_iter(tail_lo, n_upper, b.const_i32(1), tail_args, iv_name="nt")
         with loop as (j, carry):
-            emit_loop_body(j, carry, masked=True)
+            emit_loop_body(j, carry, mask_upper=True)
     else:
         loop = b.scf_for_iter(
             b.const_i32(1), n_upper, b.const_i32(1), iter_args, iv_name="nkt"
         )
         with loop as (j, carry):
-            emit_loop_body(j, carry, masked=False)
+            emit_loop_body(j, carry)
 
     res = loop.results
     l_i = res[1]
@@ -560,10 +737,15 @@ def build_attention_dense(
 
     # Epilogue: O = (P@V) / l, vectorized bf16 store.
     rcp_l = b.rcp(l_i)
-    o_base = b.add(
-        b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
-        b.mul(hq, b.const_i32(D)),
-    )
+    if varlen:
+        o_base = b.add(
+            b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
+        )
+    else:
+        o_base = b.add(
+            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(hq, b.const_i32(D)),
+        )
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
     d_half = b.mul(lane_h, b.const_i32(4))
@@ -623,6 +805,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     n_per = BLOCK_M // BN
     NQB = Sq // BLOCK_M
     W = NQB * Hq * B  # total work items
+    SW = spec.sliding_window  # sliding-window length (0 = disabled)
+    SWt = SW // BN  # window length in KV tiles
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -654,12 +838,14 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     neg_inf = b.const_f32(-1e30)
 
     LDROW = D + PAD
+    VROW = D + _LDS_PAD_V  # V-row pitch (padded for the transposed PV read)
     K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
-    V_lds = b.smem_alloc(dtype, [NBUF, BN, D], name_hint="Vlds")
+    V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
 
     K_BYTES_PER_BUF = BN * LDROW * 2
     K_LDROW_BYTES = LDROW * 2
-    V_BYTES_PER_BUF = BN * D * 2
+    V_BYTES_PER_BUF = BN * VROW * 2
+    V_LDROW_BYTES = VROW * 2
     ROWS_PER_WAVE = BN // WAVES
     WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
@@ -680,20 +866,45 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
 
-        # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the triangular
-        # causal cost index) in the MSB spreads cheap+expensive query blocks across
-        # each CTA under grid-stride; a qb-fast decode would alias qb to a constant
-        # per CTA when NP is a multiple of NQB (32x imbalance).
-        bt = b.mod(wi, b.const_i32(B))
-        rem = b.div(wi, b.const_i32(B))
-        hq = b.mod(rem, b.const_i32(Hq))
-        qb0 = b.div(rem, b.const_i32(Hq))
-        if INTERLEAVE and causal and NQB > 1:
-            odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
-            qb = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
+        if spec.resolved_persist_decode == "hkv_major":
+            # hkv-MAJOR + causal-balanced decode:
+            #   wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt
+            # * hkv in the MSB -> each grid-stride phase (NP consecutive wi) stays
+            #   within ~1 kv-head, so the shared GQA K/V is L2-resident across its
+            #   gqa query heads (recovers the non-persistent grid's locality:
+            #   measured L2 hit 57% -> ~90%+ vs qb_major).
+            # * `blk` (0..NQB-1) is folded to a query-block index that PAIRS a low
+            #   and a high qb per CTA: blk<half -> qb=blk (cheap), blk>=half ->
+            #   qb=NQB-1-(blk-half) (expensive), so a CTA that grid-strides over
+            #   both halves of a kv-head does qb=X and qb=NQB-1-X (constant causal
+            #   cost) -> keeps qb_major's load balance while gaining L2 locality.
+            half = NQB // 2
+            bt = b.mod(wi, b.const_i32(B))
+            rem = b.div(wi, b.const_i32(B))  # hkv*(NQB*gqa) + blk*gqa + hql
+            hql = b.mod(rem, b.const_i32(gqa))
+            r2 = b.div(rem, b.const_i32(gqa))  # hkv*NQB + blk
+            blk = b.mod(r2, b.const_i32(NQB))
+            hkv = b.div(r2, b.const_i32(NQB))
+            hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
+            # qb = blk<half ? blk : (NQB-1 - (blk-half))
+            qb_hi = b.sub(b.const_i32(NQB - 1 + half), blk)  # NQB-1-(blk-half)
+            qb = b.select(b.cmp_lt(blk, b.const_i32(half)), blk, qb_hi)
         else:
-            qb = qb0
-        hkv = b.div(hq, b.const_i32(gqa))
+            # qb-MAJOR decode: wi = qb*(Hq*B) + hq*B + bt. Putting qb (the
+            # triangular causal cost index) in the MSB spreads cheap+expensive
+            # query blocks across each CTA under grid-stride; a qb-fast decode
+            # would alias qb to a constant per CTA when NP is a multiple of NQB
+            # (32x imbalance).
+            bt = b.mod(wi, b.const_i32(B))
+            rem = b.div(wi, b.const_i32(B))
+            hq = b.mod(rem, b.const_i32(Hq))
+            qb0 = b.div(rem, b.const_i32(Hq))
+            if INTERLEAVE and causal and NQB > 1:
+                odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
+                qb = b.select(odd, b.sub(b.const_i32(NQB - 1), qb0), qb0)
+            else:
+                qb = qb0
+            hkv = b.div(hq, b.const_i32(gqa))
 
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
         q_base = b.add(
@@ -743,25 +954,30 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     voff = b.add(voff, b.const_i32(stride_k_tok))
 
         def async_load_v(lds_base, buf_val, tile_key0):
+            """Row-by-row async DMA into [BN, VROW] V_lds. Row-strided (like K)
+            so V can carry the +PAD_V bank-conflict pad for the transposed PV
+            read; each row's 64 lanes load 2 bf16 each (= D) contiguously."""
             buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(V_BYTES_PER_BUF))
-            base_off = b.add(v_wave_off_i64, buf_off)
-            for c in range(V_DMA_PASSES):
-                wave_base = b.smem_ptr_add(
-                    lds_base, b.add(base_off, b.const_i64(c * WAVES * WAVE_BYTES))
-                )
-                flat = b.mul(
-                    b.add(b.mul(b.const_i32(c), b.const_i32(WAVES * 64)), tid),
-                    b.const_i32(8),
-                )
-                krow = b.div(flat, b.const_i32(D))
-                kcol = b.mod(flat, b.const_i32(D))
-                gkey = b.add(tile_key0, krow)
-                voff = b.add(
-                    b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), kcol
-                )
+            row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
+            row_lds_off = b.add(
+                buf_off, b.zext(b.mul(row0, b.const_i32(V_LDROW_BYTES)), I64)
+            )
+            gcol = b.mul(lane, b.const_i32(2))
+            voff = b.add(
+                b.add(
+                    k_base,
+                    b.mul(b.add(tile_key0, row0), b.const_i32(stride_k_tok)),
+                ),
+                gcol,
+            )
+            for r in range(ROWS_PER_WAVE):
+                row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 b.async_buffer_load_lds_addr(
-                    v_rsrc, wave_base, b.mul(voff, b.const_i32(2)), zero_soff, 4
+                    v_rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                 )
+                if r + 1 < ROWS_PER_WAVE:
+                    row_lds_off = b.add(row_lds_off, b.const_i64(V_LDROW_BYTES))
+                    voff = b.add(voff, b.const_i32(stride_k_tok))
 
         def load_tile(buf_val, tile_idx):
             tk0 = b.mul(tile_idx, b.const_i32(BN))
@@ -780,18 +996,24 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
             return s_reg
 
-        def do_mask(s_reg, tile_idx):
+        def do_mask(s_reg, tile_idx, lower=False, upper=True):
             if not causal:
                 return
             tile_key0 = b.mul(tile_idx, b.const_i32(BN))
             query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+            win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
                     ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
-                    s_reg[nsub][i] = b.select(
-                        b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
-                    )
+                    if upper:
+                        s_reg[nsub][i] = b.select(
+                            b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
+                        )
+                    if lower:
+                        s_reg[nsub][i] = b.select(
+                            b.cmp_gt(ktok, win_lo), s_reg[nsub][i], neg_inf
+                        )
 
         def softmax_max(s_reg, m_i):
             local_max = neg_inf
@@ -900,7 +1122,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
             return out, p_vals, l_tile
 
-        def emit_loop_body(j, carry, masked):
+        def emit_loop_body(j, carry, mask_lower=False, mask_upper=False):
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
@@ -915,8 +1137,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.s_waitcnt(vmcnt=V_DMA_PASSES)
             b.s_barrier_bare()
             s = do_qk(kbuf)
-            if masked:
-                do_mask(s, j)
+            if mask_lower or mask_upper:
+                do_mask(s, j, lower=mask_lower, upper=mask_upper)
             m_new, alpha = softmax_max(s, m_i)
             b.sched_barrier(0)
             # PV-only s_setprio: the PV MFMA cluster wins issue slots; paired with
@@ -941,12 +1163,27 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         else:
             n_upper = b.const_i32(n_ktiles)
 
-        load_tile(b.const_i32(0), b.const_i32(0))
-        load_tile(b.const_i32(1), b.const_i32(1))
+        # Sliding-window start tile (see default builder). SW==0 -> start_tile=0.
+        if causal and SW > 0:
+            _diag0 = b.mul(qb, b.const_i32(n_per))
+            _lo_raw = b.sub(_diag0, b.const_i32(SWt))
+            start_tile = b.select(
+                b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
+            )
+        else:
+            start_tile = b.const_i32(0)
+        start_buf = b.mod(start_tile, b.const_i32(NBUF))
+        start_buf1 = b.mod(b.add(start_tile, b.const_i32(1)), b.const_i32(NBUF))
+
+        load_tile(start_buf, start_tile)
+        load_tile(start_buf1, b.add(start_tile, b.const_i32(1)))
         b.s_waitcnt(vmcnt=0)
         b.s_barrier_bare()
-        s0 = do_qk(b.const_i32(0))
-        do_mask(s0, b.const_i32(0))
+        s0 = do_qk(start_buf)
+        if causal and SW > 0:
+            do_mask(s0, start_tile, lower=True, upper=True)
+        else:
+            do_mask(s0, start_tile)
         m0, _alpha0, p0, l0 = softmax_stats(s0, neg_inf)
         o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
         pk0 = relayout_p(p0)
@@ -957,14 +1194,47 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             + [(f"pk{kk}", pk0[kk]) for kk in range(KK_STEPS)]
         )
 
-        if causal:
+        if causal and SW > 0:
+            # Sliding-window three-phase band loop (prologue did start_tile).
+            diag_start = b.mul(qb, b.const_i32(n_per))
+            a = b.add(start_tile, b.const_i32(1))
+            left_end = b.add(diag_start, b.const_i32(n_per - SWt))
+
+            def _clamp(x, lo, hi):
+                x = b.select(b.cmp_lt(x, lo), lo, x)
+                x = b.select(b.cmp_lt(x, hi), x, hi)
+                return x
+
+            mid_lo = _clamp(left_end, a, n_upper)
+            mid_hi = _clamp(diag_start, mid_lo, n_upper)
+
+            phL = b.scf_for_iter(a, mid_lo, b.const_i32(1), iter_args, iv_name="swl")
+            with phL as (j, carry):
+                emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+            mid_args = [
+                (name + "_m", val) for (name, _), val in zip(iter_args, phL.results)
+            ]
+            phM = b.scf_for_iter(
+                mid_lo, mid_hi, b.const_i32(1), mid_args, iv_name="swm"
+            )
+            with phM as (j, carry):
+                emit_loop_body(j, carry)
+            rgt_args = [
+                (name + "_r", val) for (name, _), val in zip(iter_args, phM.results)
+            ]
+            loop = b.scf_for_iter(
+                mid_hi, n_upper, b.const_i32(1), rgt_args, iv_name="swr"
+            )
+            with loop as (j, carry):
+                emit_loop_body(j, carry, mask_lower=True, mask_upper=True)
+        elif causal:
             diag_start = b.mul(qb, b.const_i32(n_per))
             body_upper = b.select(b.cmp_lt(diag_start, n_upper), diag_start, n_upper)
             body = b.scf_for_iter(
                 b.const_i32(1), body_upper, b.const_i32(1), iter_args, iv_name="nb"
             )
             with body as (j, carry):
-                emit_loop_body(j, carry, masked=False)
+                emit_loop_body(j, carry)
             tail_args = [
                 (name + "_t", val) for (name, _), val in zip(iter_args, body.results)
             ]
@@ -975,13 +1245,13 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 tail_lo, n_upper, b.const_i32(1), tail_args, iv_name="nt"
             )
             with loop as (j, carry):
-                emit_loop_body(j, carry, masked=True)
+                emit_loop_body(j, carry, mask_upper=True)
         else:
             loop = b.scf_for_iter(
                 b.const_i32(1), n_upper, b.const_i32(1), iter_args, iv_name="nkt"
             )
             with loop as (j, carry):
-                emit_loop_body(j, carry, masked=False)
+                emit_loop_body(j, carry)
 
         res = loop.results
         l_i = res[1]
@@ -995,10 +1265,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
         # Epilogue: recompute (bt, hq) from the live loop IV so they need not cross
-        # the KV loop (keeps the loop-carried live set minimal -> 0 spill).
+        # the KV loop (keeps the loop-carried live set minimal -> 0 spill). Must
+        # mirror the work-item decode used at the top of the loop.
         rcp_l = b.rcp(l_i)
         bt_e = b.mod(wi, b.const_i32(B))
-        hq_e = b.mod(b.div(wi, b.const_i32(B)), b.const_i32(Hq))
+        if spec.resolved_persist_decode == "hkv_major":
+            rem_e = b.div(wi, b.const_i32(B))
+            hql_e = b.mod(rem_e, b.const_i32(gqa))
+            hkv_e = b.div(b.div(rem_e, b.const_i32(gqa)), b.const_i32(NQB))
+            hq_e = b.add(b.mul(hkv_e, b.const_i32(gqa)), hql_e)
+        else:
+            hq_e = b.mod(b.div(wi, b.const_i32(B)), b.const_i32(Hq))
         o_base = b.add(
             b.mul(b.mul(bt_e, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
             b.mul(hq_e, b.const_i32(D)),
