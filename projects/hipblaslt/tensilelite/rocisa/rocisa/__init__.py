@@ -48,8 +48,8 @@ def _register_win_dll_dirs() -> None:
     Since Python 3.8 the loader resolves an extension module's dependent DLLs
     only from the system directories, the directory containing the .pyd, and
     directories added via os.add_dll_directory() -- PATH is ignored. Mirrors the
-    runtime resolver in
-    dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/runtime/hip_module.py.
+    runtime resolver _add_dll_dir() in
+    dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/runtime/runtime_coexistence.py.
     """
     import os
 
@@ -66,13 +66,35 @@ def _register_win_dll_dirs() -> None:
                 pass
 
 
-# Must run BEFORE the _rocisa import below: it registers the directories of
-# _rocisa's dependent DLLs so the extension loads on Windows (WinError 126).
-if sys.platform == "win32":
-    _register_win_dll_dirs()
+def _import_rocisa():
+    """Import the _rocisa extension, registering its DLL dirs first on Windows.
 
-from ._rocisa import *
-from . import _rocisa
+    Registration and import are bound in one scope so their order is
+    inseparable: _register_win_dll_dirs() must run before the loader resolves
+    _rocisa's dependent DLLs, and no reorder of module-level imports can split
+    them (a split silently reintroduces WinError 126 on Windows). For the same
+    reason there is no module-level `from ._rocisa import *` -- that would be a
+    second, reorderable trigger of the load; the public names are bound below.
+    """
+    if sys.platform == "win32":
+        _register_win_dll_dirs()
+    from . import _rocisa
+
+    return _rocisa
+
+
+_rocisa = _import_rocisa()
+
+# Reorder-safe equivalent of `from ._rocisa import *`: binding the extension's
+# public API here keeps the DLL load confined to _import_rocisa() above.
+_all = getattr(_rocisa, "__all__", None)
+_public = (
+    list(_all)
+    if _all is not None
+    else [_n for _n in dir(_rocisa) if not _n.startswith("_")]
+)
+globals().update({_n: getattr(_rocisa, _n) for _n in _public})
+del _all, _public
 
 # Register nanobind submodules under the rocisa.* namespace so that
 # `from rocisa.enum import X` and `import rocisa.instruction as ri` work.
