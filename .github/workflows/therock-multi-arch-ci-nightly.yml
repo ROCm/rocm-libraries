@@ -57,11 +57,12 @@ jobs:
       - name: Surface locked TheRock ref
         run: |
           RESOLVED_REF="${{ needs.setup.outputs.ref }}"
-          echo "Locked TheRock ref for this run: ${RESOLVED_REF}"
+          COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
+          echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
           {
             echo "### Locked TheRock ref"
             echo ""
-            echo "Every build/test job in this run is locked to ROCm/TheRock commit \`${RESOLVED_REF}\`."
+            echo "Every build/test job in this run is locked to ROCm/TheRock commit [\`${RESOLVED_REF}\`](${COMMIT_URL})."
           } >> "$GITHUB_STEP_SUMMARY"
 
   linux_build_and_test:

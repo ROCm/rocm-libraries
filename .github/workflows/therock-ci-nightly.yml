@@ -60,11 +60,12 @@ jobs:
       - name: Log locked TheRock ref
         run: |
           RESOLVED_REF="${{ steps.checkout_therock.outputs.commit }}"
-          echo "Locked TheRock ref for this run: ${RESOLVED_REF}"
+          COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
+          echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
           {
             echo "### Locked TheRock ref"
             echo ""
-            echo "This nightly builds every job against ROCm/TheRock commit \`${RESOLVED_REF}\`."
+            echo "This nightly builds every job against ROCm/TheRock commit [\`${RESOLVED_REF}\`](${COMMIT_URL})."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout CI config
