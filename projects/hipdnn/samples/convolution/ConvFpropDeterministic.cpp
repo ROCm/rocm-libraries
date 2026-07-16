@@ -55,7 +55,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    if(config.engine_id != -1 || !config.engine_name.empty())
+    if(config.engineId != -1 || !config.engineName.empty())
     {
         setPreferredEngine(graph, config);
     }

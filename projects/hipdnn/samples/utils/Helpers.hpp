@@ -130,10 +130,10 @@ struct Config
     bool cpuValidation = false;
     bool useRunningStats = false;
 
-    int engine_id = -1;
+    int engineId = -1;
     std::string dtype;
     std::string layout;
-    std::string engine_name;
+    std::string engineName;
 
     std::vector<int64_t> dims;
     std::vector<int64_t> filter;
@@ -171,7 +171,9 @@ inline std::vector<int64_t> parseList(const std::string& str)
     std::string item;
 
     while(std::getline(ss, item, ','))
+    {
         result.push_back(parseInteger<int64_t>(item, "list argument"));
+    }
 
     return result;
 }
@@ -185,7 +187,7 @@ inline Config
 
     for(int i = 1; i < argc; ++i)
     {
-        std::string arg = argv[i];
+        const std::string arg = argv[i];
 
         if(arg == "--verify-cpu" || arg == "-vc")
         {
@@ -206,7 +208,7 @@ inline Config
                 std::cerr << "--engine-id requires a value\n";
                 exit(EXIT_FAILURE);
             }
-            config.engine_id = parseInteger<int>(argv[++i], "--engine-id");
+            config.engineId = parseInteger<int>(argv[++i], "--engine-id");
         }
         else if(arg == "--engine-name")
         {
@@ -215,7 +217,7 @@ inline Config
                 std::cerr << "--engine-name requires a value\n";
                 exit(EXIT_FAILURE);
             }
-            config.engine_name = argv[++i];
+            config.engineName = argv[++i];
         }
         else if(arg == "--dtype")
         {
@@ -317,7 +319,7 @@ inline Config
     }
 
     // Prevent conflicting options
-    if(config.engine_id != -1 && !config.engine_name.empty())
+    if(config.engineId != -1 && !config.engineName.empty())
     {
         std::cerr << "Specify either --engine-id or --engine-name, not both\n";
         exit(EXIT_FAILURE);
@@ -339,20 +341,30 @@ bool run(F&& f)
     {
         // Skip data types not requested via --dtype (empty config.dtype means "run all").
         if(!f.config.dtype.empty() && f.config.dtype != dt)
+        {
             continue;
+        }
 
         for(const auto& [layoutName, layout] : layouts)
         {
             // Skip layouts not requested via --layout (empty config.layout means "run all").
             if(!f.config.layout.empty() && f.config.layout != layoutName)
+            {
                 continue;
+            }
 
             if(dt == "fp32")
+            {
                 allPassed &= f.template operator()<float, float>(layout);
+            }
             else if(dt == "fp16")
+            {
                 allPassed &= f.template operator()<half, float>(layout);
+            }
             else if(dt == "bf16")
+            {
                 allPassed &= f.template operator()<bfloat16, float>(layout);
+            }
         }
     }
 
@@ -367,20 +379,20 @@ bool run(F&& f)
 // here so every sample gets consistent validation instead of duplicating this logic.
 inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Config& config)
 {
-    if(config.engine_id != -1)
+    if(config.engineId != -1)
     {
-        graph.set_preferred_engine_id_ext(config.engine_id);
+        graph.set_preferred_engine_id_ext(config.engineId);
     }
-    else if(!config.engine_name.empty())
+    else if(!config.engineName.empty())
     {
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engineName))
         {
-            std::cerr << "Error: Unknown engine name: " << config.engine_name << '\n';
+            std::cerr << "Error: Unknown engine name: " << config.engineName << '\n';
             exit(EXIT_FAILURE);
         }
 
         graph.set_preferred_engine_id_ext(
-            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
+            hipdnn_data_sdk::utilities::engineNameToId(config.engineName));
     }
 }
 
@@ -409,7 +421,9 @@ inline int64_t
 {
     int64_t count = 1;
     for(auto dim : tensor->get_dim())
+    {
         count *= dim;
+    }
 
     return count;
 }

@@ -117,7 +117,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                       &savedInvVarTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
-        const float floatTolerance = static_cast<float>(tolerance);
+        const auto floatTolerance = static_cast<float>(tolerance);
 
         auto dxValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
