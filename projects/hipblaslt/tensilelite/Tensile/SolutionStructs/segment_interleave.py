@@ -31,6 +31,20 @@ def _footprint(state, tc):
     padElems = state["LdsPad%s" % tc]
     return d + _pad(d, blk, padElems, _bpe(state))
 
+def _mx_scale_bases(state, mxsaStart):
+    """MX scale-block LDS bases, placed after the interleaved A/B region. Returns
+    (ldsBaseMXSA, ldsBaseMXSB, end); a base is None when that scale is not LDS-resident."""
+    pt = state["ProblemType"]
+    hasA = bool(pt.get("MXBlockA")) and not state.get("DirectToVgprMXSA")
+    hasB = bool(pt.get("MXBlockB")) and not state.get("DirectToVgprMXSB")
+    if not (hasA or hasB):
+        return None, None, mxsaStart
+    baseA = mxsaStart
+    szA = int(state.get("LdsNumElementsAlignedMXSA", 0)) if hasA else 0
+    baseB = baseA + szA
+    szB = int(state.get("LdsNumElementsAlignedMXSB", 0)) if hasB else 0
+    return (baseA if hasA else None), (baseB if hasB else None), baseB + szB
+
 def _coarse_vw(state):
     # A must cover a full component (never crosses one). B may be narrower, as long as its column
     # span (vIdxColsB below) divides compColsB evenly so B reads split on component boundaries.
@@ -84,8 +98,8 @@ def evaluate(state):
     # assume exactly 2 waves per MFMA dim. MIWaveGroup!=[2,2] (e.g. [4,1]) loses the component
     # jump on the dim==1 tensor and reads OOB on the dim==4 one.
     if list(state.get("MIWaveGroup", [])) != [2, 2]:           return _no("MIWaveGroup!=[2,2]")
-    if state.get("TDMSplit") or pt.get("MXBlockA") or pt.get("MXBlockB") or pt.get("Sparse"):
-        return _no("split/mxs/sparse")
+    if state.get("TDMSplit") or pt.get("Sparse"):
+        return _no("split/sparse")
     # Subtile uses a separate codegen body; the emit path these offsets target runs only for
     # non-subtile kernels.
     if state.get("UseSubtileImpl"):                            return _no("subtile")
@@ -93,8 +107,9 @@ def evaluate(state):
     # (Solution.py resolves it later, then re-evaluates).
     if state.get("1LDSBuffer", 0) != 0:                         return _no("needs 1LDSBuffer==0")
     _dt = pt["DataType"]
-    if not (_dt.isBFloat16() or _dt.isHalf()):
-        return _no("bf16/fp16 only")
+    # fp8 covers mxf8; its MX scales are relocated as a trailing block (see _mx_scale_bases).
+    if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat()):
+        return _no("bf16/fp16/fp8 only")
     if not _coarse_vw(state):                                   return _no("fine VW")
 
     fA, fB = _footprint(state, "A"), _footprint(state, "B")
@@ -115,6 +130,11 @@ def evaluate(state):
         }
         # Per-buffer span: B1 ends at base + pre(=A1) + fA + fB.
         blockSpan = base + pre + fA + fB
+        # mxf8: put the scale block after B1. Needs extra LDS, so extend the size below.
+        bMXSA, bMXSB, mxEnd = _mx_scale_bases(state, blockSpan)
+        if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
+        if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
+        blockSpan = max(blockSpan, mxEnd)
         return {"applicable": True, "aligned": True, "offsets": offsets,
                 "blockSpan": blockSpan, "reason": "aligned",
                 "segmentMap": "ALIGNED seg%d={A0,B0} seg%d={A1,B1}"
@@ -128,6 +148,10 @@ def evaluate(state):
         "readWaveStride":   (fA + fB) // bpe,   # same, in elements
         "footprintPacked":  True,
     }
+    # mxf8: put the scale block after B1. Uses no more LDS than the non-interleaved layout.
+    bMXSA, bMXSB, _ = _mx_scale_bases(state, base + 2 * (fA + fB))
+    if bMXSA is not None: offsets["ldsBaseMXSA"] = bMXSA
+    if bMXSB is not None: offsets["ldsBaseMXSB"] = bMXSB
     a0 = base // SEG
     a1 = (base + fA + fB) // SEG                 # tight branch guarantees a1 > a0
     seg_map = "CLEAN seg%d={A0,B0} seg%d={A1,B1}" % (a0, a1)

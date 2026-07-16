@@ -5904,9 +5904,15 @@ class KernelWriterAssembly(KernelWriter):
     # no need to generate add code if LdsOffset is 0 or DirectToVgprB
     if (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]:
       module = Module("lraDeclareAddresses (Empty)")
-    elif (kernel["LdsOffset%s"%tc] != 0) or (kernel.get("LDSSegmentInterleave") == 1 and tc == "B"):
-      _ldsBase = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"] if (kernel.get("LDSSegmentInterleave") == 1 and tc == "B") \
-               else kernel["LdsOffset%s"%tc]
+    elif (kernel["LdsOffset%s"%tc] != 0) or \
+         (kernel.get("LDSSegmentInterleave") == 1 and tc in ("B", "MXSA", "MXSB")):
+      _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+      if tc == "B" and kernel.get("LDSSegmentInterleave") == 1:
+        _ldsBase = _segOff["ldsBaseB"]
+      elif tc in ("MXSA", "MXSB") and _segOff.get("ldsBase" + tc) is not None:
+        _ldsBase = _segOff["ldsBase" + tc]   # relocated MX scale base
+      else:
+        _ldsBase = kernel["LdsOffset%s"%tc]
       module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+0"%tc), dst1=VCC(),
                            src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
                            comment=" += LdsOffset%s (lower)"%tc))
@@ -18989,8 +18995,10 @@ class KernelWriterAssembly(KernelWriter):
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
-      _segFootprint = bool(kernel.get("LDSSegmentInterleave") == 1) and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
-      if kernel.get("LDSSegmentInterleave") == 1:
+      # Interleave rewrites only A/B; MX scales keep their own stride, relocated via ldsBaseMXS*.
+      _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and tc in ("A", "B")
+      _segFootprint = _segAB and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
+      if _segAB:
           dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed
@@ -19004,6 +19012,10 @@ class KernelWriterAssembly(KernelWriter):
                 "woffset += padBytes"))
       if kernel.get("LDSSegmentInterleave") == 1 and tc == "B":
           ldsConstOffset = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"]
+      elif kernel.get("LDSSegmentInterleave") == 1 and tc in ("MXSA", "MXSB"):
+          _mxBase = kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc)
+          if _mxBase is not None:
+              ldsConstOffset = _mxBase   # relocated MX scale base
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 

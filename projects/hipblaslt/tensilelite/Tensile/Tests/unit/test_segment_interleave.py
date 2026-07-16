@@ -207,10 +207,28 @@ def test_fp16_applies_same_as_bf16():
     assert r["offsets"] == {"ldsBaseB": 33024, "writeStrideBytes": 66048,
                             "readWaveStride": 33024, "footprintPacked": True}
 
-def test_fp8_skips():
-    # fp8 is out of scope for v1 (bf16/fp16 only); must skip.
-    r = evaluate(_vw8_state(ProblemType={"DataType": _FakeDataType(bf16=False, f8=True, nbytes=1)}))
-    assert r["applicable"] is False and ("bf16" in r["reason"] or "fp16" in r["reason"])
+def test_fp8_tight_applies():
+    # fp8 (bpe=1) is now supported. DepthU=256 -> fA+fB >= SEG -> tight branch.
+    r = evaluate(_vw8_state(DepthU=256,
+                            ProblemType={"DataType": _FakeDataType(bf16=False, f8=True, nbytes=1)}))
+    fA = 32768 + (32768 // 2048) * 8   # data + pad (LdsPadA=8, block=2048, bpe=1)
+    assert r["applicable"] is True and r["reason"] == "tight"
+    assert r["offsets"]["writeStrideBytes"] == 2 * fA and r["offsets"]["readWaveStride"] == 2 * fA
+    # No MX scales -> no relocation keys emitted.
+    assert "ldsBaseMXSA" not in r["offsets"] and "ldsBaseMXSB" not in r["offsets"]
+
+def test_mxf8_tight_relocates_scales():
+    # mxf8: fp8 + MXBlock scales. Tight A/B interleave unchanged; scale block relocated to
+    # base + 2*(fA+fB), sized from LdsNumElementsAlignedMXS{A,B}.
+    r = evaluate(_vw8_state(DepthU=256,
+                            LdsNumElementsAlignedMXSA=2304, LdsNumElementsAlignedMXSB=2304,
+                            DirectToVgprMXSA=0, DirectToVgprMXSB=0,
+                            ProblemType={"DataType": _FakeDataType(bf16=False, f8=True, nbytes=1),
+                                         "MXBlockA": 32, "MXBlockB": 32}))
+    fA = 32768 + (32768 // 2048) * 8
+    assert r["applicable"] is True and r["reason"] == "tight"
+    assert r["offsets"]["ldsBaseMXSA"] == 2 * (2 * fA)          # after [A0][B0][A1][B1]
+    assert r["offsets"]["ldsBaseMXSB"] == 2 * (2 * fA) + 2304   # MXSB right after MXSA
 
 def test_fp32_skips():
     r = evaluate(_vw8_state(ProblemType={"DataType": _FakeDataType(bf16=False, half=False, nbytes=4)}))

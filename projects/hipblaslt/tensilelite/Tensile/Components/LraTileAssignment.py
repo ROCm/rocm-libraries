@@ -850,10 +850,10 @@ class LraTileAssignmentMFMA(LraTileAssignment):
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
 
         # When one wave's read spans a whole LDS component, the component jump lives in the wave
-        # stride. A narrower VW makes the wave straddle two components; then LocalRead applies the
-        # jump instead, so keep the baseline wave stride here.
+        # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
+        # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
         segILWaveSpansComp = False
-        if kernel.get("LDSSegmentInterleave") == 1:
+        if kernel.get("LDSSegmentInterleave") == 1 and tc in ("A", "B"):
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
             segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
             if segILWaveSpansComp:
