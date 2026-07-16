@@ -34,12 +34,24 @@ public:
     ShallowRaggedTensor(void* data,
                         std::vector<int64_t> paddedDims,
                         std::vector<int64_t> strides,
+                        int seqAxis,
                         std::shared_ptr<ITensor> raggedOffset,
                         std::optional<size_t> physicalElementCount = std::nullopt)
         : RaggedTensorBase<T>(std::move(paddedDims),
                               std::move(strides),
+                              seqAxis,
                               std::move(raggedOffset),
                               physicalElementCount)
+    {
+        _memory = ShallowHostOnlyMigratableMemory<T>(data, this->elementSpace());
+    }
+
+    ShallowRaggedTensor(void* data,
+                        const std::vector<int64_t>& paddedDims,
+                        const TensorLayout& layout,
+                        std::shared_ptr<ITensor> raggedOffset,
+                        std::optional<size_t> physicalElementCount = std::nullopt)
+        : RaggedTensorBase<T>(paddedDims, layout, std::move(raggedOffset), physicalElementCount)
     {
         _memory = ShallowHostOnlyMigratableMemory<T>(data, this->elementSpace());
     }

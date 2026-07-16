@@ -10,6 +10,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <iostream>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <variant>
 #include <vector>
@@ -83,6 +84,20 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 
 // Forward declarations
 class ITensor;
+
+/**
+ * @brief Snapshot of the state a ragged tensor iterator needs to traverse its buffer.
+ *
+ * `rowOffsets` is the B+1 offset table (element units), `seqAxis` is the logical axis
+ * that varies within a batch's sequence, and `seqStride` is that axis's stride. All
+ * three are fixed at construction so traversal performs no per-step aux reads.
+ */
+struct RaggedIterationInfo
+{
+    std::vector<int64_t> rowOffsets;
+    int seqAxis;
+    int64_t seqStride;
+};
 
 template <bool IsConst = false>
 class ITensorIterator
@@ -296,37 +311,20 @@ public:
      * @brief Iterator index for ragged tensors.
      *
      * Walks each batch's full per-batch range `[ragged_offset[b], ragged_offset[b+1])`
-     * in turn, visiting exactly `ragged_offset[B]` physical elements. The B+1
-     * `rowOffsets` are snapshotted once (at `begin()`/`end()`) so traversal performs
-     * no per-step aux reads.
-     *
-     * The variable (sequence) axis is identified from the stride pattern rather than
-     * hardcoded: physical memory is always BSHD, so batch (logical index 0) carries
-     * the largest stride and the sequence axis carries the next-largest. This makes
-     * the sequence axis logical index 1 for BSHD and logical index 2 for BHSD without
-     * special-casing.
+     * in turn, visiting exactly `ragged_offset[B]` physical elements. The traversal
+     * state (`rowOffsets`, `seqAxis`, `seqStride`) is snapshotted once via
+     * `RaggedIterationInfo` at `begin()`/`end()`, so traversal performs no per-step
+     * aux reads.
      */
     struct RaggedCompositeIndex
     {
-        RaggedCompositeIndex(TensorType tensor, std::vector<int64_t> rowOffsets, bool isEnd)
+        RaggedCompositeIndex(TensorType tensor, RaggedIterationInfo info, bool isEnd)
             : indices(tensor.get().dims().size(), 0)
-            , rowOffsets(std::move(rowOffsets))
+            , rowOffsets(std::move(info.rowOffsets))
             , tensor(tensor)
+            , seqAxis(info.seqAxis)
+            , seqStride(info.seqStride)
         {
-            const auto& strides = this->tensor.get().strides();
-
-            // Sequence axis == the non-batch axis with the largest stride
-            // (== H*D in physical BSHD, for both BSHD and BHSD logical orders).
-            seqAxis = 1;
-            for(int j = 2; j < static_cast<int>(strides.size()); ++j)
-            {
-                if(strides[static_cast<size_t>(j)] > strides[static_cast<size_t>(seqAxis)])
-                {
-                    seqAxis = j;
-                }
-            }
-            seqStride = strides.empty() ? int64_t{1} : strides[static_cast<size_t>(seqAxis)];
-
             const int64_t batchCount = numBatches();
             if(isEnd)
             {
@@ -447,12 +445,11 @@ private:
         {
             return LinearIndex(tensor, isEnd);
         }
-        // Ragged tensors expose a non-empty B+1 offset table; dense strided tensors
-        // return {} and fall through to the regular CompositeIndex.
-        auto rowOffsets = tensor.get().raggedRowOffsets();
-        if(!rowOffsets.empty())
+        // Ragged tensors expose traversal info; dense strided tensors return nullopt
+        // and fall through to the regular CompositeIndex.
+        if(auto info = tensor.get().raggedIterationInfo())
         {
-            return RaggedCompositeIndex(tensor, std::move(rowOffsets), isEnd);
+            return RaggedCompositeIndex(tensor, std::move(*info), isEnd);
         }
         return CompositeIndex(tensor, isEnd);
     }
@@ -509,15 +506,16 @@ public:
     }
 
     /**
-     * @brief Returns the B+1 ragged row offsets (element units), widened to int64_t.
+     * @brief Returns the traversal info the iterator needs for a ragged tensor.
      *
-     * Dense tensors return an empty vector (the iterator then uses Linear/Composite
+     * Dense tensors return `std::nullopt` (the iterator then uses Linear/Composite
      * indexing as today). Ragged tensors override this to expose their offset table,
-     * which the iterator snapshots once to build a RaggedCompositeIndex.
+     * sequence axis, and sequence stride, which the iterator snapshots once to build a
+     * RaggedCompositeIndex.
      */
-    virtual std::vector<int64_t> raggedRowOffsets() const
+    virtual std::optional<RaggedIterationInfo> raggedIterationInfo() const
     {
-        return {};
+        return std::nullopt;
     }
 
     virtual ITensorIterator<false> begin() = 0;

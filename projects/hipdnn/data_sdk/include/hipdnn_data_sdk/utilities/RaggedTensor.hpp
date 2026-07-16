@@ -23,19 +23,39 @@ namespace hipdnn_data_sdk::utilities
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
 /**
+ * @brief Derives the sequence (ragged) axis from a layout's stride order.
+ *
+ * `strideOrder` is a permutation of [0, rank) where a lower value means tighter packing
+ * (smaller stride). The batch axis carries the largest stride (value rank-1) and the
+ * sequence axis carries the next-largest (value rank-2), so the sequence axis is simply
+ * whichever axis holds the value rank-2 — no assumption about the batch axis's position.
+ */
+inline int sequenceAxisFromStrideOrder(const std::vector<int64_t>& strideOrder, size_t rank)
+{
+    const int64_t seqOrder = static_cast<int64_t>(rank) - 2;
+    for(size_t i = 0; i < strideOrder.size(); ++i)
+    {
+        if(strideOrder[i] == seqOrder)
+        {
+            return static_cast<int>(i);
+        }
+    }
+    throw std::invalid_argument("strideOrder must contain the sequence axis (value "
+                                + std::to_string(seqOrder) + " for rank " + std::to_string(rank)
+                                + ")");
+}
+
+/**
  * @brief Shared, ragged-aware base for RaggedTensor<T> and ShallowRaggedTensor<T>.
  *
  * Holds the `ragged_offset` aux type-erased as a `std::shared_ptr<ITensor>` (both
  * int32 and int64 element types are accepted; the element type is discovered at
  * runtime). This intermediate carries everything the two concrete ragged types
  * share — offset reads, ragged addressing (`getIndexImpl`), the traversal hook
- * (`raggedRowOffsets`), geometry reporting, and structural validation — leaving the
+ * (`raggedIterationInfo`), geometry reporting, and structural validation — leaving the
  * concrete types responsible only for the memory carrier and fill operations.
  *
  * No CRTP is required because `memory()` is already virtual on `TensorBase<T>`.
- *
- * @note Physical memory layout is assumed BSHD with batch at logical index 0, so the
- * sequence (ragged) axis is the unique non-batch axis with the maximal stride.
  */
 template <typename T>
 class RaggedTensorBase : public TensorBase<T>
@@ -43,14 +63,18 @@ class RaggedTensorBase : public TensorBase<T>
 public:
     RaggedTensorBase(std::vector<int64_t> paddedDims,
                      std::vector<int64_t> strides,
+                     int seqAxis,
                      std::shared_ptr<ITensor> raggedOffset,
                      std::optional<size_t> physicalElementCount)
         : _paddedDims(std::move(paddedDims))
         , _strides(std::move(strides))
+        , _seqAxis(seqAxis)
         , _raggedOffset(std::move(raggedOffset))
     {
-        // Structural checks first, so readOffset below only sees a supported element size.
+        // Structural checks first, so readOffset below only sees a supported element size and
+        // _seqAxis is a valid index into _strides.
         validateRaggedStructure();
+        _seqStride = _strides[static_cast<size_t>(_seqAxis)];
 
         // Snapshot and validate the B+1 offset table. Reading the aux may trigger a device->host
         // sync if it lives in device memory.
@@ -67,6 +91,18 @@ public:
                 + ") must equal ragged_offset[B] (" + std::to_string(_iteratedElementCount) + ")");
         }
         _physicalElementCount = _iteratedElementCount;
+    }
+
+    RaggedTensorBase(const std::vector<int64_t>& paddedDims,
+                     const TensorLayout& layout,
+                     std::shared_ptr<ITensor> raggedOffset,
+                     std::optional<size_t> physicalElementCount)
+        : RaggedTensorBase(paddedDims,
+                           generateStrides(paddedDims, layout.strideOrder),
+                           sequenceAxisFromStrideOrder(layout.strideOrder, paddedDims.size()),
+                           std::move(raggedOffset),
+                           physicalElementCount)
+    {
     }
 
     const std::vector<int64_t>& dims() const override
@@ -99,9 +135,9 @@ public:
         return false;
     }
 
-    std::vector<int64_t> raggedRowOffsets() const override
+    std::optional<RaggedIterationInfo> raggedIterationInfo() const override
     {
-        return collectRowOffsets();
+        return RaggedIterationInfo{collectRowOffsets(), _seqAxis, _seqStride};
     }
 
     const ITensor* raggedOffset() const
@@ -149,9 +185,21 @@ protected:
         {
             throw std::invalid_argument("ragged_offset must not be null");
         }
-        if(_paddedDims.empty())
+        if(_paddedDims.size() < 2)
         {
-            throw std::invalid_argument("paddedDims must not be empty");
+            throw std::invalid_argument("paddedDims must have rank >= 2 (got "
+                                        + std::to_string(_paddedDims.size()) + ")");
+        }
+        if(_strides.size() != _paddedDims.size())
+        {
+            throw std::invalid_argument("strides size (" + std::to_string(_strides.size())
+                                        + ") must equal paddedDims size ("
+                                        + std::to_string(_paddedDims.size()) + ")");
+        }
+        if(_seqAxis < 1 || _seqAxis >= static_cast<int>(_paddedDims.size()))
+        {
+            throw std::invalid_argument("sequence axis (" + std::to_string(_seqAxis)
+                                        + ") must be in [1, rank)");
         }
         const size_t expectedCount = static_cast<size_t>(_paddedDims[0]) + 1;
         if(_raggedOffset->elementCount() != expectedCount)
@@ -185,22 +233,6 @@ protected:
         return offsets;
     }
 
-    // Sequence (ragged) axis == the non-batch axis with the largest stride.
-    std::pair<int, int64_t> sequenceAxisAndStride() const
-    {
-        int seqAxis = 1;
-        for(int j = 2; j < static_cast<int>(_strides.size()); ++j)
-        {
-            if(_strides[static_cast<size_t>(j)] > _strides[static_cast<size_t>(seqAxis)])
-            {
-                seqAxis = j;
-            }
-        }
-        const int64_t seqStride
-            = _strides.size() < 2 ? int64_t{1} : _strides[static_cast<size_t>(seqAxis)];
-        return {seqAxis, seqStride};
-    }
-
     // Validates offset contents: offset[0] == 0, monotonic non-decreasing, each per-batch
     // block a whole number of sequence rows, and per-batch extent <= S_max (RFC 0014 §4.5 mirrored
     // as debug asserts in RaggedCompositeIndex).
@@ -216,13 +248,11 @@ protected:
                                         + std::to_string(offsets.front()) + ")");
         }
 
-        const auto [seqAxis, seqStride] = sequenceAxisAndStride();
-        const bool haveSeqAxis = _strides.size() >= 2;
-        if(haveSeqAxis && seqStride <= 0)
+        if(_seqStride <= 0)
         {
             throw std::invalid_argument("sequence-axis stride must be positive");
         }
-        const int64_t sMax = haveSeqAxis ? _paddedDims[static_cast<size_t>(seqAxis)] : int64_t{0};
+        const int64_t sMax = _paddedDims[static_cast<size_t>(_seqAxis)];
 
         const int64_t batchCount = static_cast<int64_t>(offsets.size()) - 1;
         for(int64_t b = 0; b < batchCount; ++b)
@@ -234,26 +264,25 @@ protected:
                 throw std::invalid_argument("ragged_offset must be monotonic non-decreasing (batch "
                                             + std::to_string(b) + ")");
             }
-            if(haveSeqAxis)
+            if(block % _seqStride != 0)
             {
-                if(block % seqStride != 0)
-                {
-                    throw std::invalid_argument(
-                        "per-batch block must be a whole number of sequence rows (batch "
-                        + std::to_string(b) + ")");
-                }
-                if(block / seqStride > sMax)
-                {
-                    throw std::invalid_argument(
-                        "per-batch sequence extent exceeds dims()[seqAxis] / S_max (batch "
-                        + std::to_string(b) + ")");
-                }
+                throw std::invalid_argument(
+                    "per-batch block must be a whole number of sequence rows (batch "
+                    + std::to_string(b) + ")");
+            }
+            if(block / _seqStride > sMax)
+            {
+                throw std::invalid_argument(
+                    "per-batch sequence extent exceeds dims()[seqAxis] / S_max (batch "
+                    + std::to_string(b) + ")");
             }
         }
     }
 
     std::vector<int64_t> _paddedDims;
     std::vector<int64_t> _strides;
+    int _seqAxis;
+    int64_t _seqStride{1};
     size_t _iteratedElementCount{0}; ///< ragged_offset[B]
     size_t _physicalElementCount{0}; ///< allocated buffer size (== ragged_offset[B])
     std::shared_ptr<ITensor> _raggedOffset; ///< non-null, fixed at construction, never reseated
@@ -273,12 +302,23 @@ class RaggedTensor : public RaggedTensorBase<T>
 public:
     RaggedTensor(std::vector<int64_t> paddedDims,
                  std::vector<int64_t> strides,
+                 int seqAxis,
                  std::shared_ptr<ITensor> raggedOffset,
                  std::optional<size_t> physicalElementCount = std::nullopt)
         : RaggedTensorBase<T>(std::move(paddedDims),
                               std::move(strides),
+                              seqAxis,
                               std::move(raggedOffset),
                               physicalElementCount)
+    {
+        _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(this->elementSpace());
+    }
+
+    RaggedTensor(const std::vector<int64_t>& paddedDims,
+                 const TensorLayout& layout,
+                 std::shared_ptr<ITensor> raggedOffset,
+                 std::optional<size_t> physicalElementCount = std::nullopt)
+        : RaggedTensorBase<T>(paddedDims, layout, std::move(raggedOffset), physicalElementCount)
     {
         _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(this->elementSpace());
     }
