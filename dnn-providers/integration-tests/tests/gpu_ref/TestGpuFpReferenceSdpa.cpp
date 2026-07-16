@@ -166,7 +166,7 @@ float expectedSingleQueryProviderOutput(const Tensor<bfloat16>& q,
     }
 
     float sumExp = 0.0f;
-    for(float score : scores)
+    for(const float score : scores)
     {
         sumExp += std::exp(score - maxVal);
     }
