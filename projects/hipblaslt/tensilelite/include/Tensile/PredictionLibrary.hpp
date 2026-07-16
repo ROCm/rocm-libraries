@@ -220,23 +220,6 @@ namespace TensileLite
                 }
             }
 
-            if(rv.empty())
-            {
-                for(const auto& r : prediction_result)
-                {
-                    auto& solution = solution_list[r.config.index].second;
-                    if((*(solution->hardwarePredicate))(hardware)
-                       && (*(solution->problemPredicate))(problem))
-                    {
-                        rv.emplace_back(solution);
-                        if(rv.size() == static_cast<std::size_t>(numSolutions))
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-
             // can't reach the requested number, means findTop already done its best
             lastFindTopRetAll = (rv.size() < static_cast<std::size_t>(numSolutions));
             return rv;
