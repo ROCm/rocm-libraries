@@ -6,6 +6,9 @@
 #include <optional>
 #include <vector>
 
+#include <hipdnn_test_sdk/HipTestMacros.hpp>
+
+#include "RockeClientHandle.hpp"
 #include "dispatcher/RockeClientDispatcher.hpp"
 #include "tests/dispatcher/DispatcherFixtures.hpp"
 #include "tests/dispatcher/SdpaGraphFixture.hpp"

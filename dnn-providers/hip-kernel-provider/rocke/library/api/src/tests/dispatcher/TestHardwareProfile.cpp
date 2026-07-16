@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_test_sdk/HipTestMacros.hpp>
+
 #include "dispatcher/HardwareProfile.hpp"
 
 namespace rocke_client::dispatcher

@@ -47,6 +47,7 @@ struct InstanceParams
 {
     std::string name = "sdpa_smoke";
     std::string arch = "gfx942";
+    std::string dtype = "fp16";
     std::int64_t headSize = 64;
     std::int64_t seqlenQ = 64;
     std::int64_t seqlenK = 64;
@@ -66,7 +67,7 @@ inline AotInstance makeInstance(const InstanceParams& params)
     instance.name = params.name;
     instance.op = "sdpa_fwd";
     instance.arch = params.arch;
-    instance.compileSpec.dtype = "fp16";
+    instance.compileSpec.dtype = params.dtype;
     instance.compileSpec.canonicalLayout = "BSHD";
     instance.compileSpec.seqlenQ = params.seqlenQ;
     instance.compileSpec.seqlenK = params.seqlenK;
