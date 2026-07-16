@@ -54,7 +54,7 @@ protected:
         _tensorMap[K_TENSOR_DX_UID] = TensorDescriptor::fromFlatBuffer(dxAttrs);
         TensorAttributesT indexAttrs;
         indexAttrs.uid = K_TENSOR_INDEX_UID;
-        indexAttrs.data_type = DataType::FLOAT;
+        indexAttrs.data_type = DataType::INT32;
         indexAttrs.dims = toVec(K_TENSOR_INDEX_DIMS);
         indexAttrs.strides = toVec(K_TENSOR_INDEX_STRIDES);
 
@@ -93,7 +93,7 @@ TEST_F(TestResampleBwdOperationFromNode, CreatesValidFinalizedDescriptor)
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR);
     EXPECT_EQ(desc->getData().dy_tensor_uid, K_TENSOR_DY_UID);
 }
 
@@ -216,7 +216,7 @@ TEST_F(TestResampleBwdOperationFromNode, SetsTensorReferencesWithFullValues)
 
     ASSERT_NE(desc->getIndexDesc(), nullptr);
     EXPECT_EQ(desc->getIndexDesc()->getData().uid, K_TENSOR_INDEX_UID);
-    EXPECT_EQ(desc->getIndexDesc()->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getIndexDesc()->getData().data_type, DataType::INT32);
     EXPECT_EQ(desc->getIndexDesc()->getData().dims, (std::vector<int64_t>{1, 3, 16, 16}));
     EXPECT_EQ(desc->getIndexDesc()->getData().strides, (std::vector<int64_t>{768, 256, 16, 1}));
 }
@@ -243,6 +243,7 @@ TEST_F(TestResampleBwdOperationFromNode, SucceedsWithOnlyRequiredTensors)
 {
     auto attrs = createStandardResampleBwdAttrs();
     attrs.index_tensor_uid = flatbuffers::nullopt;
+    attrs.resample_mode = ResampleMode::AVGPOOL_EXCLUDE_PADDING;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
@@ -257,6 +258,19 @@ TEST_F(TestResampleBwdOperationFromNode, SucceedsWithOnlyRequiredTensors)
     EXPECT_NE(desc->getDxDesc(), nullptr);
     // Optional tensor getters are null
     EXPECT_EQ(desc->getIndexDesc(), nullptr);
+}
+
+TEST_F(TestResampleBwdOperationFromNode, FailsWithoutIndexForMaxpool)
+{
+    auto attrs = createStandardResampleBwdAttrs();
+    attrs.index_tensor_uid = flatbuffers::nullopt;
+
+    NodeT node;
+    node.compute_data_type = DataType::FLOAT;
+    node.attributes.Set(attrs);
+
+    ASSERT_THROW_HIPDNN_STATUS(ResampleBwdOperationDescriptor::fromNode(node, _tensorMap),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestResampleBwdOperationFromNode, FailsWhenOptionalIndexUidSetButTensorMissing)
@@ -373,7 +387,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dy tensor
     hipdnn_backend::ScopedDescriptor dyScoped;
     int64_t dyCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dyCount,
@@ -386,7 +400,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dx tensor
     hipdnn_backend::ScopedDescriptor dxScoped;
     int64_t dxCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dxCount,
@@ -399,7 +413,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify index tensor (optional)
     hipdnn_backend::ScopedDescriptor indexScoped;
     int64_t indexCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &indexCount,
@@ -408,7 +422,7 @@ TEST_F(TestResampleBwdOperationFromNode, GetAttributeWorksAfterFromNode)
     ASSERT_NE(indexScoped.get(), nullptr);
     verifyTensorDescriptor(indexScoped.get(),
                            K_TENSOR_INDEX_UID,
-                           HIPDNN_DATA_FLOAT,
+                           HIPDNN_DATA_INT32,
                            {1, 3, 16, 16},
                            {768, 256, 16, 1});
 

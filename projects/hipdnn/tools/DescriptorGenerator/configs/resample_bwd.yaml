@@ -5,7 +5,7 @@ operation:
   fbs_generated_header: "resample_bwd_attributes_generated.h"
 
   descriptor_type:
-    enum_name: "HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT"
+    enum_name: "HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR"
 
   operation_attr_prefix: "HIPDNN_ATTR_OPERATION_RESAMPLE_BWD"
 
@@ -69,19 +69,19 @@ operation:
   tensor_fields:
     - name: "dy"
       fbs_field: "dy_tensor_uid"
-      attr_suffix: "DY_EXT"
+      attr_suffix: "DYDESC"
       required: true
       frontend_getter: "get_dy()"
 
     - name: "dx"
       fbs_field: "dx_tensor_uid"
-      attr_suffix: "DX_EXT"
+      attr_suffix: "DXDESC"
       required: true
       frontend_getter: "get_dx()"
 
     - name: "index"
       fbs_field: "index_tensor_uid"
-      attr_suffix: "INDEX_EXT"
+      attr_suffix: "IDXDESC"
       required: false
       frontend_getter: "get_index()"
 

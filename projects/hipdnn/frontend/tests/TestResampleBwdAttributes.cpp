@@ -49,6 +49,8 @@ TEST(TestResampleBwdAttributes, CreateResampleBwdAttributes)
     EXPECT_EQ(attrs.get_post_padding(), (std::vector<int64_t>{1, 1}));
     EXPECT_EQ(attrs.get_stride(), (std::vector<int64_t>{2, 2}));
     EXPECT_EQ(attrs.get_window(), (std::vector<int64_t>{3, 3}));
+    EXPECT_EQ(attrs.get_resample_mode(), ResampleMode::MAXPOOL);
+    EXPECT_EQ(attrs.get_padding_mode(), PaddingMode::ZERO_PAD);
 }
 
 TEST(TestResampleBwdAttributes, DefaultValues)
@@ -65,6 +67,8 @@ TEST(TestResampleBwdAttributes, DefaultValues)
     EXPECT_TRUE(attrs.get_post_padding().empty());
     EXPECT_TRUE(attrs.get_stride().empty());
     EXPECT_TRUE(attrs.get_window().empty());
+    EXPECT_EQ(attrs.get_resample_mode(), ResampleMode::NOT_SET);
+    EXPECT_EQ(attrs.get_padding_mode(), PaddingMode::NOT_SET);
 }
 
 TEST(TestResampleBwdAttributes, SetDyMove)

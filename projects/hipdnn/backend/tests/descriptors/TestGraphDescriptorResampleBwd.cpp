@@ -45,17 +45,17 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<ResampleBwdOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ResampleBwdOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dyDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dxDesc));
     if(indexDesc != nullptr)
     {
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            static_cast<const void*>(&indexDesc));
@@ -85,7 +85,8 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                        static_cast<int64_t>(window.size()),
                        window.data());
 
-    auto resampleMode = HIPDNN_RESAMPLE_MAXPOOL;
+    auto resampleMode
+        = indexDesc != nullptr ? HIPDNN_RESAMPLE_MAXPOOL : HIPDNN_RESAMPLE_AVGPOOL_EXCLUDE_PADDING;
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_MODE, HIPDNN_TYPE_RESAMPLE_MODE, 1, &resampleMode);
 
     auto paddingMode = HIPDNN_PADDING_ZERO_PAD;
@@ -305,17 +306,17 @@ TEST_F(TestGraphDescriptorResampleBwd, ResampleBwdAttributesPreserved)
     auto opDesc = wrapper->asDescriptor<ResampleBwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* dyPtr = dyDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dyPtr));
     HipdnnBackendDescriptor* dxPtr = dxDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dxPtr));
     HipdnnBackendDescriptor* indexPtr = indexDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&indexPtr));
@@ -506,6 +507,7 @@ TEST_F(TestGraphDescriptorResampleBwd, BuildFromOperationWithoutOptionalTensors)
     EXPECT_EQ(attrs->dy_tensor_uid, K_TENSOR_DY_UID);
     EXPECT_EQ(attrs->dx_tensor_uid, K_TENSOR_DX_UID);
     EXPECT_FALSE(attrs->index_tensor_uid.has_value());
+    EXPECT_EQ(attrs->resample_mode, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
 }
 
 } // namespace

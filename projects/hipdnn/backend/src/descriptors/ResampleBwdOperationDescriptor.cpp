@@ -39,10 +39,11 @@ void ResampleBwdOperationDescriptor::finalize()
                       == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "ResampleBwdOperationDescriptor::finalize() failed: resample_mode not set");
-    THROW_IF_TRUE(_data.padding_mode
-                      == hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET,
+    THROW_IF_TRUE(_data.resample_mode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL
+                      && !_indexDesc,
                   HIPDNN_STATUS_BAD_PARAM,
-                  "ResampleBwdOperationDescriptor::finalize() failed: padding_mode not set");
+                  "ResampleBwdOperationDescriptor::finalize() failed: Index tensor not set for "
+                  "MAXPOOL");
 
     HipdnnBackendDescriptorImpl<ResampleBwdOperationDescriptor>::finalize();
 }
@@ -62,7 +63,7 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC:
         setTensorDescriptor(_dyDesc,
                             _data.dy_tensor_uid,
                             attributeType,
@@ -70,7 +71,7 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC:
         setTensorDescriptor(_dxDesc,
                             _data.dx_tensor_uid,
                             attributeType,
@@ -78,7 +79,7 @@ void ResampleBwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC:
         setOptionalTensorDescriptor(_indexDesc,
                                     _data.index_tensor_uid,
                                     attributeType,
@@ -169,7 +170,7 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC:
         getTensorDescriptor(_dyDesc,
                             attributeType,
                             requestedElementCount,
@@ -177,7 +178,7 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC:
         getTensorDescriptor(_dxDesc,
                             attributeType,
                             requestedElementCount,
@@ -185,7 +186,7 @@ void ResampleBwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                             arrayOfElements,
                             "ResampleBwdOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT:
+    case HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC:
         getOptionalTensorDescriptor(_indexDesc,
                                     attributeType,
                                     requestedElementCount,
@@ -303,7 +304,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t ResampleBwdOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR_EXT;
+    return HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR;
 }
 
 std::string ResampleBwdOperationDescriptor::toString() const

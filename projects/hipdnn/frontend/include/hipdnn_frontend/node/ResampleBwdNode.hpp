@@ -40,6 +40,11 @@ public:
         HIPDNN_RETURN_IF_FALSE(attributes.get_dy(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "ResampleBwdNode missing dy (input) for pre-validation");
+        if(attributes.get_resample_mode() == ResampleMode::MAXPOOL && !attributes.get_index())
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "ResampleBwdNode missing Index input for MAXPOOL pre-validation"};
+        }
 
         // Validate required output tensors
         HIPDNN_RETURN_IF_FALSE(attributes.get_dx(),
@@ -64,6 +69,39 @@ public:
         HIPDNN_RETURN_IF_TRUE(attributes.get_window().empty(),
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ResampleBwdNode missing window for pre-validation");
+
+        auto dy = attributes.get_dy();
+        if(!dy->get_dim().empty() && dy->get_dim().size() < 3)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "ResampleBwdNode input DY must have at least rank 3 (N, C, spatial...)"};
+        }
+
+        auto dx = attributes.get_dx();
+        if(!dx->get_dim().empty() && dx->get_dim().size() < 3)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "ResampleBwdNode output DX must have at least rank 3 (N, C, spatial...)"};
+        }
+
+        if(auto index = attributes.get_index())
+        {
+            if(!index->get_dim().empty() && index->get_dim().size() < 3)
+            {
+                return {ErrorCode::INVALID_VALUE,
+                        "ResampleBwdNode input Index must have at least rank 3 (N, C, spatial...)"};
+            }
+
+            switch(index->get_data_type())
+            {
+            case DataType::INT8:
+            case DataType::INT32:
+                break;
+            default:
+                return {ErrorCode::INVALID_VALUE,
+                        "ResampleBwdNode input Index type must be Int8 or Int32"};
+            }
+        }
 
         return {};
     }
@@ -138,6 +176,19 @@ public:
             auto dxStrides
                 = hipdnn_data_sdk::utilities::generateStrides(currentDxDims, strideOrder);
             dxTensor->set_stride(dxStrides);
+        }
+
+        auto index = attributes.get_index();
+        if(index)
+        {
+            if(index->get_dim().empty())
+            {
+                index->set_dim(dyTensor->get_dim());
+            }
+            if(index->get_stride().empty())
+            {
+                index->set_stride(dyTensor->get_stride());
+            }
         }
 
         return {};

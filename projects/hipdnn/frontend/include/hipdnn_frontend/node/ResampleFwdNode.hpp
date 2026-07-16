@@ -37,7 +37,7 @@ public:
                     "ResampleFwdNode missing output Y for pre-validation"};
         }
 
-        const bool generateIndex = attributes.get_generate_index();
+        const bool generateIndex = attributes.get_generate_index().value_or(false);
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL
            && !attributes.get_index())
         {

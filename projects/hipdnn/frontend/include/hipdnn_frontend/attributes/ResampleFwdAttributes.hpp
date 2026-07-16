@@ -44,7 +44,7 @@ public:
     std::vector<int64_t> window;
     ResampleMode resample_mode = ResampleMode::NOT_SET;
     PaddingMode padding_mode = PaddingMode::NOT_SET;
-    bool generate_index = false;
+    std::optional<bool> generate_index = std::nullopt;
     // NOLINTEND(readability-identifier-naming)
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -180,7 +180,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    bool get_generate_index() const
+    std::optional<bool> get_generate_index() const
     {
         return generate_index;
     }

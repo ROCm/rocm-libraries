@@ -74,7 +74,7 @@ protected:
         dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
         auto index = std::make_shared<TensorAttributes>();
-        index->set_uid(K_TENSOR_INDEX_UID).set_name("index").set_data_type(DataType::FLOAT);
+        index->set_uid(K_TENSOR_INDEX_UID).set_name("index").set_data_type(DataType::INT32);
         index->set_dim(toVec(K_TENSOR_INDEX_DIMS)).set_stride(toVec(K_TENSOR_INDEX_STRIDES));
 
         auto dx = graph->resample_bwd(dy, attrs, index);
@@ -91,7 +91,7 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, ResampleBwdLoweringRoundTrip)
 {
     ResampleBwdAttributes attrs;
     attrs.set_name("test_op");
-    attrs.set_resample_mode(ResampleMode::MAXPOOL);
+    attrs.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     attrs.set_pre_padding(toVec(K_PRE_PADDING));
     attrs.set_post_padding(toVec(K_POST_PADDING));
     attrs.set_stride(toVec(K_STRIDE));
@@ -108,10 +108,12 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, ResampleBwdLoweringRoundTrip)
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->dims, toVec(K_TENSOR_DY_DIMS));
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->strides, toVec(K_TENSOR_DY_STRIDES));
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->name, "dy");
     ASSERT_NE(tensorMap.count(K_TENSOR_DX_UID), 0u);
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->dims, toVec(K_TENSOR_DX_DIMS));
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->strides, toVec(K_TENSOR_DX_STRIDES));
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->name, "dx");
 
     // Verify operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -130,7 +132,7 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, ResampleBwdLoweringRoundTrip)
     EXPECT_EQ(node->name, "test_op");
 
     // Verify mode
-    EXPECT_EQ(opNode->resample_mode, ResampleModeSdk::MAXPOOL);
+    EXPECT_EQ(opNode->resample_mode, ResampleModeSdk::AVGPOOL_EXCLUDE_PADDING);
 
     // Verify pre_padding
     EXPECT_EQ(opNode->pre_padding, toVec(K_PRE_PADDING));
@@ -160,6 +162,8 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, IndexTensorPreservedInRoundTrip
     ASSERT_NE(tensorMap.count(K_TENSOR_INDEX_UID), 0u);
     EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->dims, toVec(K_TENSOR_INDEX_DIMS));
     EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->strides, toVec(K_TENSOR_INDEX_STRIDES));
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->data_type, DataTypeSdk::INT32);
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->name, "index");
 
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto* opNode = graphT.nodes[0]->attributes.AsResampleBwdAttributes();
@@ -181,7 +185,7 @@ TEST_F(IntegrationResampleBwdDescriptorLowering, AutoAssignedUidsPreservedInRoun
     dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
     ResampleBwdAttributes attrs;
-    attrs.set_resample_mode(ResampleMode::MAXPOOL);
+    attrs.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     attrs.set_padding_mode(PaddingMode::ZERO_PAD);
     attrs.set_pre_padding(toVec(K_PRE_PADDING));
     attrs.set_post_padding(toVec(K_POST_PADDING));

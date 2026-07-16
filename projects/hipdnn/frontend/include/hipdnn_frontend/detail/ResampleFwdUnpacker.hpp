@@ -94,15 +94,18 @@ namespace hipdnn_frontend::detail
     }
     attributes.set_padding_mode(paddingModeResult);
 
-    // Unpack generate_index
+    // Unpack generate_index (optional)
     {
-        bool generateIndex = false;
-        HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                                   HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT,
-                                                   HIPDNN_TYPE_BOOLEAN,
-                                                   generateIndex,
-                                                   "resample generate_index"));
-        attributes.set_generate_index(generateIndex);
+        std::optional<bool> generateIndex;
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT,
+                                                           HIPDNN_TYPE_BOOLEAN,
+                                                           generateIndex,
+                                                           "resample generate_index"));
+        if(generateIndex.has_value())
+        {
+            attributes.set_generate_index(*generateIndex);
+        }
     }
 
     // Unpack operation name

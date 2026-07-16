@@ -29,7 +29,7 @@ TEST(TestGraphResampleBwd, BuildGraph)
     attributes.set_post_padding({1, 1});
     attributes.set_stride({2, 2});
     attributes.set_window({3, 3});
-    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     attributes.set_padding_mode(PaddingMode::ZERO_PAD);
 
     // Call graph method
@@ -56,7 +56,7 @@ TEST(TestGraphResampleBwd, BuildGraphWithIndex)
     dy->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::FLOAT);
 
     auto index = std::make_shared<TensorAttributes>();
-    index->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::FLOAT);
+    index->set_dim({1, 3, 16, 16}).set_stride({768, 256, 16, 1}).set_data_type(DataType::INT32);
 
     ResampleBwdAttributes attributes;
     attributes.set_name("ResampleBwdNode");

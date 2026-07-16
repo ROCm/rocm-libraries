@@ -132,7 +132,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, BasicResampleFwdRoundTrip)
     EXPECT_EQ(opNode->attributes.get_window(), toVec(K_RESAMPLE_FWD_WINDOW));
 
     // Verify generate index
-    EXPECT_FALSE(opNode->attributes.get_generate_index());
+    EXPECT_FALSE(opNode->attributes.get_generate_index().has_value());
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -290,7 +290,8 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
     auto* opNode = dynamic_cast<ResampleFwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr) << "Expected a ResampleFwdNode";
 
-    EXPECT_TRUE(opNode->attributes.get_generate_index());
+    ASSERT_TRUE(opNode->attributes.get_generate_index().has_value());
+    EXPECT_TRUE(opNode->attributes.get_generate_index().value());
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();

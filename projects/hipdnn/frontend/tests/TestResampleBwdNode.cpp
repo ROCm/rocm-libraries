@@ -38,6 +38,15 @@ ResampleBwdAttributes createValidAttributes()
     return attrs;
 }
 
+std::shared_ptr<TensorAttributes> createValidIndexTensor()
+{
+    auto indexTensor = std::make_shared<TensorAttributes>();
+    indexTensor->set_dim({1, 3, 16, 16});
+    indexTensor->set_stride({768, 256, 16, 1});
+    indexTensor->set_data_type(DataType::INT32);
+    return indexTensor;
+}
+
 } // namespace
 
 // --- GetNodeType ---
@@ -143,18 +152,116 @@ TEST(TestResampleBwdNode, PreValidateNodeAllValuesSet)
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 }
 
+TEST(TestResampleBwdNode, PreValidateNodeMaxpoolRequiresIndex)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_resample_mode(ResampleMode::MAXPOOL);
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeMaxpoolAcceptsIntegerIndex)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_resample_mode(ResampleMode::MAXPOOL);
+    attrs.set_index(createValidIndexTensor());
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidIndexDataType)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_resample_mode(ResampleMode::MAXPOOL);
+    auto indexTensor = createValidIndexTensor();
+    indexTensor->set_data_type(DataType::FLOAT);
+    attrs.set_index(indexTensor);
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidTensorRank)
+{
+    auto attrs = createValidAttributes();
+    attrs.get_dy()->set_dim({1, 3});
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidDxRank)
+{
+    auto attrs = createValidAttributes();
+    attrs.get_dx()->set_dim({1, 3});
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidIndexRank)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_resample_mode(ResampleMode::MAXPOOL);
+    auto indexTensor = createValidIndexTensor();
+    indexTensor->set_dim({1, 3});
+    attrs.set_index(indexTensor);
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
 // --- InferPropertiesNode ---
 
 TEST(TestResampleBwdNode, InferPropertiesNode)
 {
-    auto attrs = createValidAttributes();
+    ResampleBwdAttributes attrs;
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 3, 16, 16});
+    dyTensor->set_stride({768, 256, 16, 1});
+    attrs.set_dy(dyTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    attrs.set_dx(dxTensor);
+
+    auto indexTensor = std::make_shared<TensorAttributes>();
+    indexTensor->set_data_type(DataType::INT32);
+    attrs.set_index(indexTensor);
+
+    attrs.set_pre_padding({1, 1});
+    attrs.set_post_padding({1, 1});
+    attrs.set_stride({2, 2});
+    attrs.set_window({3, 3});
 
     const GraphAttributes graphAttributes;
     ResampleBwdNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
-    // Stub implementation: verify the method can be called without error
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+    EXPECT_EQ(dxTensor->get_dim(), (std::vector<int64_t>{1, 3, 31, 31}));
+    EXPECT_EQ(dxTensor->get_stride(), (std::vector<int64_t>{2883, 961, 31, 1}));
+    EXPECT_EQ(indexTensor->get_dim(), dyTensor->get_dim());
+    EXPECT_EQ(indexTensor->get_stride(), dyTensor->get_stride());
 }
 
 // --- GatherHipdnnTensors ---
@@ -169,6 +276,9 @@ TEST(TestResampleBwdNode, GatherHipdnnTensor)
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(51).set_name("DxTensor");
     attrs.set_dx(dxTensor);
+    auto indexTensor = std::make_shared<TensorAttributes>();
+    indexTensor->set_uid(52).set_name("IndexTensor").set_data_type(DataType::INT32);
+    attrs.set_index(indexTensor);
 
     attrs.set_pre_padding({1, 1});
     attrs.set_post_padding({1, 1});
@@ -184,5 +294,6 @@ TEST(TestResampleBwdNode, GatherHipdnnTensor)
 
     EXPECT_TRUE(allTensors.find(dyTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(dxTensor) != allTensors.end());
-    EXPECT_EQ(allTensors.size(), 2u);
+    EXPECT_TRUE(allTensors.find(indexTensor) != allTensors.end());
+    EXPECT_EQ(allTensors.size(), 3u);
 }

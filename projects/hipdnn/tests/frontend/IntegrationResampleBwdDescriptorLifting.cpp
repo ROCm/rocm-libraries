@@ -47,6 +47,10 @@ protected:
         dy->set_uid(K_TENSOR_DY_UID).set_name("dy").set_data_type(DataType::FLOAT);
         dy->set_dim(toVec(K_TENSOR_DY_DIMS)).set_stride(toVec(K_TENSOR_DY_STRIDES));
 
+        auto index = std::make_shared<TensorAttributes>();
+        index->set_uid(K_TENSOR_INDEX_UID).set_name("index").set_data_type(DataType::INT32);
+        index->set_dim(toVec(K_TENSOR_INDEX_DIMS)).set_stride(toVec(K_TENSOR_INDEX_STRIDES));
+
         ResampleBwdAttributes attrs;
         attrs.set_name("test_op");
         attrs.set_resample_mode(ResampleMode::MAXPOOL);
@@ -55,7 +59,7 @@ protected:
         attrs.set_stride(toVec(K_STRIDE));
         attrs.set_window(toVec(K_WINDOW));
 
-        auto dx = graph->resample_bwd(dy, attrs);
+        auto dx = graph->resample_bwd(dy, attrs, index);
         dx->set_uid(K_TENSOR_DX_UID).set_output(true).set_name("dx");
         dx->set_dim(toVec(K_TENSOR_DX_DIMS)).set_stride(toVec(K_TENSOR_DX_STRIDES));
 
@@ -80,7 +84,7 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, BasicResampleBwdRoundTrip)
 
     // Verify tensors by UID
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 2u);
+    ASSERT_EQ(tensorMap.size(), 3u);
 
     // Verify dy tensor
     ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
@@ -88,6 +92,7 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, BasicResampleBwdRoundTrip)
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_stride(), toVec(K_TENSOR_DY_STRIDES));
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_name(), "dy");
 
     // Verify dx tensor
     ASSERT_NE(tensorMap.count(K_TENSOR_DX_UID), 0u);
@@ -95,6 +100,15 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, BasicResampleBwdRoundTrip)
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_dim(), toVec(K_TENSOR_DX_DIMS));
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_stride(), toVec(K_TENSOR_DX_STRIDES));
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_name(), "dx");
+
+    // Verify index tensor
+    ASSERT_NE(tensorMap.count(K_TENSOR_INDEX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->get_uid(), K_TENSOR_INDEX_UID);
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->get_dim(), toVec(K_TENSOR_INDEX_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->get_stride(), toVec(K_TENSOR_INDEX_STRIDES));
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->get_data_type(), DataType::INT32);
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->get_name(), "index");
 
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
@@ -144,6 +158,9 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, ResampleBwdTensorSharingPreserve
     // Verify dx tensor sharing
     EXPECT_EQ(opNode->attributes.get_dx()->get_uid(), K_TENSOR_DX_UID);
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID].get(), opNode->attributes.get_dx().get());
+    // Verify index tensor sharing
+    EXPECT_EQ(opNode->attributes.get_index()->get_uid(), K_TENSOR_INDEX_UID);
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID].get(), opNode->attributes.get_index().get());
 }
 
 // Builds a ResampleBwd graph, serializes to binary, creates a backend descriptor
@@ -185,7 +202,7 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, ResampleBwdLiftWithoutFinalizati
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 2u);
+    ASSERT_EQ(tensorMap.size(), 3u);
 
     ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
     EXPECT_EQ(tensorMap[K_TENSOR_DY_UID]->get_dim(), toVec(K_TENSOR_DY_DIMS));
@@ -193,6 +210,9 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, ResampleBwdLiftWithoutFinalizati
     ASSERT_NE(tensorMap.count(K_TENSOR_DX_UID), 0u);
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_dim(), toVec(K_TENSOR_DX_DIMS));
     EXPECT_EQ(tensorMap[K_TENSOR_DX_UID]->get_stride(), toVec(K_TENSOR_DX_STRIDES));
+    ASSERT_NE(tensorMap.count(K_TENSOR_INDEX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->get_dim(), toVec(K_TENSOR_INDEX_DIMS));
+    EXPECT_EQ(tensorMap[K_TENSOR_INDEX_UID]->get_stride(), toVec(K_TENSOR_INDEX_STRIDES));
 }
 
 // Builds a ResampleBwd graph without calling set_uid() on any tensor,
@@ -212,7 +232,7 @@ TEST_F(IntegrationResampleBwdDescriptorLifting, AutoAssignedUidsPreservedInLifti
 
     ResampleBwdAttributes attrs;
     attrs.set_name("test_auto_uid");
-    attrs.set_resample_mode(ResampleMode::MAXPOOL);
+    attrs.set_resample_mode(ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     attrs.set_pre_padding(toVec(K_PRE_PADDING));
     attrs.set_post_padding(toVec(K_POST_PADDING));
     attrs.set_stride(toVec(K_STRIDE));

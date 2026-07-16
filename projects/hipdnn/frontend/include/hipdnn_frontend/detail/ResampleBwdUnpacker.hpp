@@ -20,7 +20,7 @@ namespace hipdnn_frontend::detail
     // Unpack dy tensor
     std::shared_ptr<graph::TensorAttributes> dyTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DY_EXT,
+                                               HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC,
                                                tensorMap,
                                                dyTensor,
                                                "resample DY tensor"));
@@ -29,7 +29,7 @@ namespace hipdnn_frontend::detail
     // Unpack dx tensor
     std::shared_ptr<graph::TensorAttributes> dxTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DX_EXT,
+                                               HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC,
                                                tensorMap,
                                                dxTensor,
                                                "resample DX tensor"));
@@ -38,7 +38,7 @@ namespace hipdnn_frontend::detail
     // Unpack index tensor
     std::shared_ptr<graph::TensorAttributes> indexTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_INDEX_EXT,
+                                            HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC,
                                             tensorMap,
                                             indexTensor,
                                             "resample INDEX tensor"));

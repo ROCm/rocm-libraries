@@ -569,6 +569,8 @@ hipdnn_flatbuffers_sdk::data_objects::PaddingMode toSdkPaddingMode(hipdnnPadding
 
     switch(mode)
     {
+    case HIPDNN_PADDING_NOT_SET:
+        return PaddingMode::PADDING_NOT_SET;
     case HIPDNN_PADDING_NEG_INF_PAD:
         return PaddingMode::NEG_INF_PAD;
     case HIPDNN_PADDING_ZERO_PAD:
@@ -584,6 +586,8 @@ hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::Pad
 
     switch(mode)
     {
+    case PaddingMode::PADDING_NOT_SET:
+        return HIPDNN_PADDING_NOT_SET;
     case PaddingMode::NEG_INF_PAD:
         return HIPDNN_PADDING_NEG_INF_PAD;
     case PaddingMode::ZERO_PAD:

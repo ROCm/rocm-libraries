@@ -351,15 +351,17 @@ TEST_F(TestResampleFwdOperationFromNode, FromNodePreservesGenerateIndex)
     auto desc = ResampleFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
 
-    EXPECT_TRUE(desc->getData().generate_index);
+    EXPECT_TRUE(desc->getData().generate_index.has_value());
+    EXPECT_TRUE(desc->getData().generate_index.value());
 
     auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsResampleFwdAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
-    EXPECT_TRUE(rebuiltAttrs->generate_index);
+    ASSERT_TRUE(rebuiltAttrs->generate_index.has_value());
+    EXPECT_TRUE(rebuiltAttrs->generate_index.value());
 }
 
-TEST_F(TestResampleFwdOperationFromNode, BuildNodeDefaultsGenerateIndexToFalse)
+TEST_F(TestResampleFwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
 {
     auto node = createStandardNode();
     auto desc = ResampleFwdOperationDescriptor::fromNode(node, _tensorMap);
@@ -368,7 +370,7 @@ TEST_F(TestResampleFwdOperationFromNode, BuildNodeDefaultsGenerateIndexToFalse)
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsResampleFwdAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
 
-    EXPECT_FALSE(rebuiltAttrs->generate_index);
+    EXPECT_FALSE(rebuiltAttrs->generate_index.has_value());
 }
 
 TEST_F(TestResampleFwdOperationFromNode, GetAttributeWorksAfterFromNode)

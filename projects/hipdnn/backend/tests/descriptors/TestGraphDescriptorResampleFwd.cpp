@@ -19,6 +19,8 @@
 #include <hipdnn_test_sdk/constants/ResampleFwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
+#include <optional>
+
 #include <array>
 #include <memory>
 #include <set>
@@ -39,7 +41,7 @@ std::shared_ptr<HipdnnBackendDescriptor>
                                  HipdnnBackendDescriptor* yDesc,
                                  HipdnnBackendDescriptor* indexDesc,
                                  const std::string& name = "",
-                                 bool generateIndex = false)
+                                 std::optional<bool> generateIndex = std::nullopt)
 {
     auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
@@ -99,8 +101,11 @@ std::shared_ptr<HipdnnBackendDescriptor>
                            name.c_str());
     }
 
-    desc->setAttribute(
-        HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT, HIPDNN_TYPE_BOOLEAN, 1, &generateIndex);
+    if(generateIndex.has_value())
+    {
+        bool val = generateIndex.value();
+        desc->setAttribute(HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT, HIPDNN_TYPE_BOOLEAN, 1, &val);
+    }
 
     desc->finalize();
     return wrapper;
@@ -522,7 +527,8 @@ TEST_F(TestGraphDescriptorResampleFwd, GenerateIndexPreservedInSerialization)
 
     auto* attrs = graphT->nodes[0]->attributes.AsResampleFwdAttributes();
     ASSERT_NE(attrs, nullptr);
-    EXPECT_TRUE(attrs->generate_index);
+    ASSERT_TRUE(attrs->generate_index.has_value());
+    EXPECT_TRUE(attrs->generate_index.value());
 }
 
 } // namespace

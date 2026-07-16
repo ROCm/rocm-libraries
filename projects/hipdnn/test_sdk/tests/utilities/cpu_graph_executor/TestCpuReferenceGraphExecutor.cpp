@@ -395,7 +395,8 @@ public:
 
     static void runResampleFwdTest(bool generateIndex)
     {
-        auto builder = createValidResampleFwdGraph(generateIndex);
+        auto builder
+            = createValidResampleFwdGraph(generateIndex ? std::optional<bool>(true) : std::nullopt);
         const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
 
         Tensor<float> xTensor({1, 1, 4, 4});
