@@ -382,7 +382,7 @@ void add_benchmarks(primbench::executor& executor)
     BENCHMARK_TYPE(int, 256, false);
     BENCHMARK_TYPE(float, 256, false);
     BENCHMARK_TYPE(int8_t, 256, false);
-    BENCHMARK_TYPE(long long, 256, false);
+    BENCHMARK_TYPE(int64_t, 256, false);
     BENCHMARK_TYPE(double, 256, false);
 
     if(!std::is_same_v<Benchmark, subtract_right_partial_tile>)
@@ -390,7 +390,7 @@ void add_benchmarks(primbench::executor& executor)
         BENCHMARK_TYPE(int, 256, true);
         BENCHMARK_TYPE(float, 256, true);
         BENCHMARK_TYPE(int8_t, 256, true);
-        BENCHMARK_TYPE(long long, 256, true);
+        BENCHMARK_TYPE(int64_t, 256, true);
         BENCHMARK_TYPE(double, 256, true);
     }
 }

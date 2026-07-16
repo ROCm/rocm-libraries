@@ -291,7 +291,7 @@ int main(int argc, char* argv[])
     BENCHMARK_FLAGGED_TYPE(int8_t, unsigned char);
     BENCHMARK_FLAGGED_TYPE(int, unsigned char);
     BENCHMARK_FLAGGED_TYPE(float, unsigned char);
-    BENCHMARK_FLAGGED_TYPE(long long, uint8_t);
+    BENCHMARK_FLAGGED_TYPE(int64_t, uint8_t);
     BENCHMARK_FLAGGED_TYPE(double, int8_t);
     BENCHMARK_FLAGGED_TYPE(custom_float2, int8_t);
     BENCHMARK_FLAGGED_TYPE(custom_double2, unsigned char);
@@ -299,7 +299,7 @@ int main(int argc, char* argv[])
     BENCHMARK_PREDICATE_TYPE(int8_t);
     BENCHMARK_PREDICATE_TYPE(int);
     BENCHMARK_PREDICATE_TYPE(float);
-    BENCHMARK_PREDICATE_TYPE(long long);
+    BENCHMARK_PREDICATE_TYPE(int64_t);
     BENCHMARK_PREDICATE_TYPE(double);
     BENCHMARK_PREDICATE_TYPE(custom_float2);
     BENCHMARK_PREDICATE_TYPE(custom_double2);
@@ -307,7 +307,7 @@ int main(int argc, char* argv[])
     BENCHMARK_THREEWAY_TYPE(int8_t);
     BENCHMARK_THREEWAY_TYPE(int);
     BENCHMARK_THREEWAY_TYPE(float);
-    BENCHMARK_THREEWAY_TYPE(long long);
+    BENCHMARK_THREEWAY_TYPE(int64_t);
     BENCHMARK_THREEWAY_TYPE(double);
     BENCHMARK_THREEWAY_TYPE(custom_float2);
     BENCHMARK_THREEWAY_TYPE(custom_double2);

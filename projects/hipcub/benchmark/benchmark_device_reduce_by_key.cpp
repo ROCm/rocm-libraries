@@ -142,17 +142,17 @@ class reduce_by_key_benchmark : public primbench::benchmark_interface
     CREATE_BENCHMARK(int, double, REDUCE_OP);         \
     CREATE_BENCHMARK(int, custom_double2, REDUCE_OP); \
     CREATE_BENCHMARK(int8_t, int8_t, REDUCE_OP);      \
-    CREATE_BENCHMARK(long long, float, REDUCE_OP);    \
-    CREATE_BENCHMARK(long long, double, REDUCE_OP)
+    CREATE_BENCHMARK(int64_t, float, REDUCE_OP);    \
+    CREATE_BENCHMARK(int64_t, double, REDUCE_OP)
 
 template<size_t MaxLength>
 void add_benchmarks(primbench::executor& executor)
 {
     CREATE_BENCHMARKS(benchmark_utils::plus);
-    CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::plus);
+    CREATE_BENCHMARK(int64_t, custom_double2, benchmark_utils::plus);
     CREATE_BENCHMARKS(benchmark_utils::minimum);
 #ifdef HIPCUB_ROCPRIM_API
-    CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::minimum);
+    CREATE_BENCHMARK(int64_t, custom_double2, benchmark_utils::minimum);
 #endif
 }
 

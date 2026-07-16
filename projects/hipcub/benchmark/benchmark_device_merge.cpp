@@ -245,7 +245,7 @@ int main(int argc, char* argv[])
     primbench::executor executor(argc, argv, settings);
 
     CREATE_MERGE_KEYS_BENCHMARK(int);
-    CREATE_MERGE_KEYS_BENCHMARK(long long);
+    CREATE_MERGE_KEYS_BENCHMARK(int64_t);
     CREATE_MERGE_KEYS_BENCHMARK(int8_t);
     CREATE_MERGE_KEYS_BENCHMARK(uint8_t);
     CREATE_MERGE_KEYS_BENCHMARK(short);
@@ -255,7 +255,7 @@ int main(int argc, char* argv[])
     CREATE_MERGE_KEYS_BENCHMARK(custom_double2);
 
     CREATE_MERGE_PAIRS_BENCHMARK(int, int);
-    CREATE_MERGE_PAIRS_BENCHMARK(long long, long long);
+    CREATE_MERGE_PAIRS_BENCHMARK(int64_t, int64_t);
     CREATE_MERGE_PAIRS_BENCHMARK(int8_t, int8_t);
     CREATE_MERGE_PAIRS_BENCHMARK(uint8_t, uint8_t);
     CREATE_MERGE_PAIRS_BENCHMARK(short, short);

@@ -97,7 +97,7 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(double);
     CREATE_BENCHMARK(custom_double2);
     CREATE_BENCHMARK(int8_t);
-    CREATE_BENCHMARK(long long);
+    CREATE_BENCHMARK(int64_t);
 
     executor.run();
 }

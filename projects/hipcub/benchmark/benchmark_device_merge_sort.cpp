@@ -184,7 +184,7 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
 void add_sort_keys_benchmarks(primbench::executor& executor)
 {
     CREATE_SORT_KEYS_BENCHMARK(int);
-    CREATE_SORT_KEYS_BENCHMARK(long long);
+    CREATE_SORT_KEYS_BENCHMARK(int64_t);
     CREATE_SORT_KEYS_BENCHMARK(int8_t);
     CREATE_SORT_KEYS_BENCHMARK(uint8_t);
     CREATE_SORT_KEYS_BENCHMARK(short);
@@ -199,12 +199,12 @@ void add_sort_pairs_benchmarks(primbench::executor& executor)
     CREATE_SORT_PAIRS_BENCHMARK(int, custom_char_double);
     CREATE_SORT_PAIRS_BENCHMARK(int, custom_double_char);
 
-    CREATE_SORT_PAIRS_BENCHMARK(long long, float);
-    CREATE_SORT_PAIRS_BENCHMARK(long long, double);
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_float2);
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_char_double);
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double_char);
-    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, float);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, double);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_float2);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_char_double);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_double_char);
+    CREATE_SORT_PAIRS_BENCHMARK(int64_t, custom_double2);
 
     CREATE_SORT_PAIRS_BENCHMARK(int8_t, int8_t);
     CREATE_SORT_PAIRS_BENCHMARK(uint8_t, uint8_t);

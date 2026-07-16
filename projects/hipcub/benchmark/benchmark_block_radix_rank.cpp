@@ -191,9 +191,9 @@ void add_benchmarks(primbench::executor& executor)
     BENCHMARK_TYPE(uint8_t, 256);
     BENCHMARK_TYPE(uint8_t, 512);
 
-    BENCHMARK_TYPE(long long, 128);
-    BENCHMARK_TYPE(long long, 256);
-    BENCHMARK_TYPE(long long, 512);
+    BENCHMARK_TYPE(int64_t, 128);
+    BENCHMARK_TYPE(int64_t, 256);
+    BENCHMARK_TYPE(int64_t, 512);
 }
 
 int main(int argc, char* argv[])

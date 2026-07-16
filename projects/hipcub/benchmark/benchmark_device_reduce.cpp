@@ -133,7 +133,7 @@ struct Benchmark<T, hipcub::ArgMin>
 
 #define CREATE_BENCHMARKS(REDUCE_OP)        \
     CREATE_BENCHMARK(int, REDUCE_OP);       \
-    CREATE_BENCHMARK(long long, REDUCE_OP); \
+    CREATE_BENCHMARK(int64_t, REDUCE_OP); \
     CREATE_BENCHMARK(float, REDUCE_OP);     \
     CREATE_BENCHMARK(double, REDUCE_OP);    \
     CREATE_BENCHMARK(int8_t, REDUCE_OP)

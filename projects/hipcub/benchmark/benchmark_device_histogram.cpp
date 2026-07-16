@@ -32,7 +32,7 @@
 
 template<class T>
 std::vector<T>
-    generate(size_t items, int entropy_reduction, long long lower_level, long long upper_level)
+    generate(size_t items, int entropy_reduction, int64_t lower_level, int64_t upper_level)
 {
     if(entropy_reduction >= 5)
     {
@@ -438,7 +438,7 @@ void add_even_benchmarks(primbench::executor& executor)
 {
     for(int entropy_reduction : entropy_reductions)
     {
-        BENCHMARK_TYPE(benchmarks, long long);
+        BENCHMARK_TYPE(benchmarks, int64_t);
         BENCHMARK_TYPE(benchmarks, int);
         BENCHMARK_TYPE(benchmarks, unsigned short);
         BENCHMARK_TYPE(benchmarks, uint8_t);

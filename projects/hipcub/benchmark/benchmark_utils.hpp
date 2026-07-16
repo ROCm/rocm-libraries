@@ -600,8 +600,6 @@ PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
 PRIMBENCH_REGISTER_TYPE(uint64_t, "u64")
 PRIMBENCH_REGISTER_TYPE(float, "f32")
 PRIMBENCH_REGISTER_TYPE(double, "f64")
-PRIMBENCH_REGISTER_TYPE(long long, "i64")
-PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")
 PRIMBENCH_REGISTER_TYPE(__half, "f16")
 
 using custom_int_t       = benchmark_utils::custom_type<int>;

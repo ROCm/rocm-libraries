@@ -308,11 +308,11 @@ void add_sort_keys_benchmarks(primbench::executor& executor)
 void add_sort_pairs_benchmarks(primbench::executor& executor)
 {
     BENCHMARK_PAIR_TYPE(int, float);
-    BENCHMARK_PAIR_TYPE(long long, double);
+    BENCHMARK_PAIR_TYPE(int64_t, double);
     BENCHMARK_PAIR_TYPE(int8_t, int8_t);
     BENCHMARK_PAIR_TYPE(uint8_t, uint8_t);
     BENCHMARK_PAIR_TYPE(int, custom_float2);
-    BENCHMARK_PAIR_TYPE(long long, custom_double2);
+    BENCHMARK_PAIR_TYPE(int64_t, custom_double2);
 }
 
 int main(int argc, char* argv[])
