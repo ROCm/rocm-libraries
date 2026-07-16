@@ -86,7 +86,6 @@ namespace
                                                         const API_INT*           group_size,
                                                         rocblas_datatype         compute_type,
                                                         rocblas_gemm_algo        algo,
-                                                        int32_t                  solution_index,
                                                         uint32_t                 flags)
     {
         if(!handle)
@@ -195,71 +194,69 @@ namespace
                                                                               group_size,
                                                                               compute_type,
                                                                               algo,
-                                                                              solution_index,
+                                                                              0,
                                                                               flags);
     }
 }
 
-#define INST_GEMM_GROUPED_BATCHED_EX_C_API(TI_)                                               \
-    extern "C" {                                                                              \
-    rocblas_status                                                                            \
-        ROCBLAS_API(rocblas_gemm_grouped_batched_ex)(rocblas_handle           handle,         \
-                                                     const rocblas_operation* transa_array,   \
-                                                     const rocblas_operation* transb_array,   \
-                                                     const TI_*               m_array,        \
-                                                     const TI_*               n_array,        \
-                                                     const TI_*               k_array,        \
-                                                     const void*              alpha_array,    \
-                                                     const void* const        Aarray[],       \
-                                                     rocblas_datatype         a_type,         \
-                                                     const TI_*               lda_array,      \
-                                                     const void* const        Barray[],       \
-                                                     rocblas_datatype         b_type,         \
-                                                     const TI_*               ldb_array,      \
-                                                     const void*              beta_array,     \
-                                                     const void* const        Carray[],       \
-                                                     rocblas_datatype         c_type,         \
-                                                     const TI_*               ldc_array,      \
-                                                     void* const              Darray[],       \
-                                                     rocblas_datatype         d_type,         \
-                                                     const TI_*               ldd_array,      \
-                                                     TI_                      group_count,    \
-                                                     const TI_*               group_size,     \
-                                                     rocblas_datatype         compute_type,   \
-                                                     rocblas_gemm_algo        algo,           \
-                                                     int32_t                  solution_index, \
-                                                     uint32_t                 flags)          \
-    try                                                                                       \
-    {                                                                                         \
-        return rocblas_gemm_grouped_batched_ex_impl<TI_>(handle,                              \
-                                                         transa_array,                        \
-                                                         transb_array,                        \
-                                                         m_array,                             \
-                                                         n_array,                             \
-                                                         k_array,                             \
-                                                         alpha_array,                         \
-                                                         Aarray,                              \
-                                                         a_type,                              \
-                                                         lda_array,                           \
-                                                         Barray,                              \
-                                                         b_type,                              \
-                                                         ldb_array,                           \
-                                                         beta_array,                          \
-                                                         Carray,                              \
-                                                         c_type,                              \
-                                                         ldc_array,                           \
-                                                         Darray,                              \
-                                                         d_type,                              \
-                                                         ldd_array,                           \
-                                                         group_count,                         \
-                                                         group_size,                          \
-                                                         compute_type,                        \
-                                                         algo,                                \
-                                                         solution_index,                      \
-                                                         flags);                              \
-    }                                                                                         \
-    catch(...)                                                                                \
-    {                                                                                         \
-        return exception_to_rocblas_status();                                                 \
-    }                                                                                         \
+#define INST_GEMM_GROUPED_BATCHED_EX_C_API(TI_)                                             \
+    extern "C" {                                                                            \
+    rocblas_status                                                                          \
+        ROCBLAS_API(rocblas_gemm_grouped_batched_ex)(rocblas_handle           handle,       \
+                                                     const rocblas_operation* transa_array, \
+                                                     const rocblas_operation* transb_array, \
+                                                     const TI_*               m_array,      \
+                                                     const TI_*               n_array,      \
+                                                     const TI_*               k_array,      \
+                                                     const void*              alpha_array,  \
+                                                     const void* const        Aarray[],     \
+                                                     rocblas_datatype         a_type,       \
+                                                     const TI_*               lda_array,    \
+                                                     const void* const        Barray[],     \
+                                                     rocblas_datatype         b_type,       \
+                                                     const TI_*               ldb_array,    \
+                                                     const void*              beta_array,   \
+                                                     const void* const        Carray[],     \
+                                                     rocblas_datatype         c_type,       \
+                                                     const TI_*               ldc_array,    \
+                                                     void* const              Darray[],     \
+                                                     rocblas_datatype         d_type,       \
+                                                     const TI_*               ldd_array,    \
+                                                     TI_                      group_count,  \
+                                                     const TI_*               group_size,   \
+                                                     rocblas_datatype         compute_type, \
+                                                     rocblas_gemm_algo        algo,         \
+                                                     uint32_t                 flags)        \
+    try                                                                                     \
+    {                                                                                       \
+        return rocblas_gemm_grouped_batched_ex_impl<TI_>(handle,                            \
+                                                         transa_array,                      \
+                                                         transb_array,                      \
+                                                         m_array,                           \
+                                                         n_array,                           \
+                                                         k_array,                           \
+                                                         alpha_array,                       \
+                                                         Aarray,                            \
+                                                         a_type,                            \
+                                                         lda_array,                         \
+                                                         Barray,                            \
+                                                         b_type,                            \
+                                                         ldb_array,                         \
+                                                         beta_array,                        \
+                                                         Carray,                            \
+                                                         c_type,                            \
+                                                         ldc_array,                         \
+                                                         Darray,                            \
+                                                         d_type,                            \
+                                                         ldd_array,                         \
+                                                         group_count,                       \
+                                                         group_size,                        \
+                                                         compute_type,                      \
+                                                         algo,                              \
+                                                         flags);                            \
+    }                                                                                       \
+    catch(...)                                                                              \
+    {                                                                                       \
+        return exception_to_rocblas_status();                                               \
+    }                                                                                       \
     } // extern "C"

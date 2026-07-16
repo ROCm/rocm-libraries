@@ -1386,6 +1386,11 @@ try
          "Specific stride of strided_batched vector x, is only applicable to strided batched"
          "BLAS_2: second dimension.")
 
+        ("group_count",
+         value<rocblas_stride>(&arg.stride_x),
+         "Number of groups for gemm_grouped_batched and gemm_grouped_batched_ex."
+         " Alias for stride_x when using grouped batched GEMM.")
+
         ("stride_y",
          value<rocblas_stride>(&arg.stride_y)->default_value(128*128),
          "Specific stride of strided_batched vector y, is only applicable to strided batched"

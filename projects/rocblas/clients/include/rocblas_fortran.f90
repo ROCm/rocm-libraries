@@ -17866,7 +17866,7 @@ contains
                                                      Aarray, a_type, lda_array, Barray, b_type, &
                                                      ldb_array, beta_array, Carray, c_type, ldc_array, &
                                                      Darray, d_type, ldd_array, group_count, group_size, &
-                                                     compute_type, algo, solution_index, flags) &
+                                                     compute_type, algo, flags) &
         bind(c, name='rocblas_gemm_grouped_batched_ex_fortran')
         use iso_c_binding
         use rocblas_enums
@@ -17896,7 +17896,6 @@ contains
         type(c_ptr), value :: group_size
         integer(kind(rocblas_datatype_f16_r)), value :: compute_type
         integer(kind(rocblas_gemm_algo_standard)), value :: algo
-        integer(c_int32_t), value :: solution_index
         integer(c_int32_t), value :: flags
         rocblas_gemm_grouped_batched_ex_fortran = &
             rocblas_gemm_grouped_batched_ex(handle, transa_array, transb_array, &
@@ -17904,7 +17903,7 @@ contains
                                             Aarray, a_type, lda_array, Barray, b_type, &
                                             ldb_array, beta_array, Carray, c_type, ldc_array, &
                                             Darray, d_type, ldd_array, group_count, group_size, &
-                                            compute_type, algo, solution_index, flags)
+                                            compute_type, algo, flags)
     end function rocblas_gemm_grouped_batched_ex_fortran
 
     function rocblas_gemm_grouped_batched_ex_64_fortran(handle, transa_array, transb_array, &
@@ -17912,7 +17911,7 @@ contains
                                                         Aarray, a_type, lda_array, Barray, b_type, &
                                                         ldb_array, beta_array, Carray, c_type, ldc_array, &
                                                         Darray, d_type, ldd_array, group_count, group_size, &
-                                                        compute_type, algo, solution_index, flags) &
+                                                        compute_type, algo, flags) &
         bind(c, name='rocblas_gemm_grouped_batched_ex_64_fortran')
         use iso_c_binding
         use rocblas_enums
@@ -17942,7 +17941,6 @@ contains
         type(c_ptr), value :: group_size
         integer(kind(rocblas_datatype_f16_r)), value :: compute_type
         integer(kind(rocblas_gemm_algo_standard)), value :: algo
-        integer(c_int32_t), value :: solution_index
         integer(c_int32_t), value :: flags
         rocblas_gemm_grouped_batched_ex_64_fortran = &
             rocblas_gemm_grouped_batched_ex_64(handle, transa_array, transb_array, &
@@ -17950,7 +17948,7 @@ contains
                                                Aarray, a_type, lda_array, Barray, b_type, &
                                                ldb_array, beta_array, Carray, c_type, ldc_array, &
                                                Darray, d_type, ldd_array, group_count, group_size, &
-                                               compute_type, algo, solution_index, flags)
+                                               compute_type, algo, flags)
     end function rocblas_gemm_grouped_batched_ex_64_fortran
 
     ! gemm_strided_batched

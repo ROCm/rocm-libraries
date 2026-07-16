@@ -129,6 +129,7 @@ namespace
 
         for(rocblas_int g = 0; g < cfg.group_count; ++g)
         {
+            // add in g to sizes and batch_count to test different group sizes and batch counts
             cfg.m_array[g] = rocblas_int(arg.M + g);
             cfg.n_array[g] = rocblas_int(arg.N + g);
             cfg.k_array[g] = rocblas_int(arg.K + g);
@@ -148,7 +149,7 @@ namespace
                 = grouped_gemm_ldb(cfg.n_array[g], cfg.k_array[g], cfg.transb_array[g], ldb_g);
             cfg.ldc_array[g] = grouped_gemm_ldc(cfg.m_array[g], ldc_g);
 
-            cfg.group_size[g]  = std::max(arg.batch_count, int64_t(0));
+            cfg.group_size[g]  = std::max(arg.batch_count+g, int64_t(0));
             cfg.alpha_array[g] = base_alpha;
             cfg.beta_array[g]  = base_beta;
         }
@@ -548,22 +549,126 @@ void testing_gemm_grouped_batched(const Arguments& arg)
         }
     };
 
-    if(arg.pointer_mode_host)
+    if(arg.unit_check || arg.norm_check)
     {
-        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
-        run_grouped_gemm(cfg.alpha_array.data(), cfg.beta_array.data());
-        CHECK_HIP_ERROR(hC.transfer_from(dC));
-        check_result();
+        if(arg.pointer_mode_host)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+            run_grouped_gemm(cfg.alpha_array.data(), cfg.beta_array.data());
+            CHECK_HIP_ERROR(hC.transfer_from(dC));
+            check_result();
+        }
+
+        if(arg.pointer_mode_device)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(dC.transfer_from(hC_init));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(h_alpha));
+            CHECK_HIP_ERROR(d_beta.transfer_from(h_beta));
+            run_grouped_gemm(d_alpha, d_beta);
+            CHECK_HIP_ERROR(hC.transfer_from(dC));
+            check_result();
+        }
     }
 
-    if(arg.pointer_mode_device)
+    if(arg.timing && arg.api != INTERNAL)
     {
-        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
-        CHECK_HIP_ERROR(dC.transfer_from(hC_init));
-        CHECK_HIP_ERROR(d_alpha.transfer_from(h_alpha));
-        CHECK_HIP_ERROR(d_beta.transfer_from(h_beta));
-        run_grouped_gemm(d_alpha, d_beta);
-        CHECK_HIP_ERROR(hC.transfer_from(dC));
-        check_result();
+        double gpu_time_used     = 0.0;
+        int    number_cold_calls = arg.cold_iters;
+        int    total_calls       = number_cold_calls + arg.iters;
+
+        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+
+        hipStream_t stream;
+        CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
+
+        FrequencyMonitor& freq_monitor = getFrequencyMonitor();
+        freq_monitor.start();
+
+        const std::vector<int64_t> m_array_64     = grouped_gemm_to_int64(cfg.m_array);
+        const std::vector<int64_t> n_array_64     = grouped_gemm_to_int64(cfg.n_array);
+        const std::vector<int64_t> k_array_64     = grouped_gemm_to_int64(cfg.k_array);
+        const std::vector<int64_t> lda_array_64   = grouped_gemm_to_int64(cfg.lda_array);
+        const std::vector<int64_t> ldb_array_64   = grouped_gemm_to_int64(cfg.ldb_array);
+        const std::vector<int64_t> ldc_array_64   = grouped_gemm_to_int64(cfg.ldc_array);
+        const std::vector<int64_t> group_size_64  = grouped_gemm_to_int64(cfg.group_size);
+        const int64_t              group_count_64 = group_count;
+
+        for(int i = 0; i < total_calls; i++)
+        {
+            if(i == number_cold_calls)
+                gpu_time_used = get_time_us_sync(stream); // in microseconds
+
+            if(arg.api & c_API_64)
+            {
+                CHECK_ROCBLAS_ERROR(rocblas_gemm_grouped_batched_fn_64(handle,
+                                                                       cfg.transa_array.data(),
+                                                                       cfg.transb_array.data(),
+                                                                       m_array_64.data(),
+                                                                       n_array_64.data(),
+                                                                       k_array_64.data(),
+                                                                       cfg.alpha_array.data(),
+                                                                       dA.ptr_on_device(),
+                                                                       lda_array_64.data(),
+                                                                       dB.ptr_on_device(),
+                                                                       ldb_array_64.data(),
+                                                                       cfg.beta_array.data(),
+                                                                       dC.ptr_on_device(),
+                                                                       ldc_array_64.data(),
+                                                                       group_count_64,
+                                                                       group_size_64.data()));
+            }
+            else
+            {
+                CHECK_ROCBLAS_ERROR(rocblas_gemm_grouped_batched_fn(handle,
+                                                                    cfg.transa_array.data(),
+                                                                    cfg.transb_array.data(),
+                                                                    cfg.m_array.data(),
+                                                                    cfg.n_array.data(),
+                                                                    cfg.k_array.data(),
+                                                                    cfg.alpha_array.data(),
+                                                                    dA.ptr_on_device(),
+                                                                    cfg.lda_array.data(),
+                                                                    dB.ptr_on_device(),
+                                                                    cfg.ldb_array.data(),
+                                                                    cfg.beta_array.data(),
+                                                                    dC.ptr_on_device(),
+                                                                    cfg.ldc_array.data(),
+                                                                    group_count,
+                                                                    cfg.group_size.data()));
+            }
+        }
+
+        gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        freq_monitor.stop();
+
+        double gflop_count = 0.0;
+        for(rocblas_int g = 0; g < group_count; ++g)
+            gflop_count += cfg.group_size[g]
+                           * gemm_gflop_count<T>(cfg.m_array[g], cfg.n_array[g], cfg.k_array[g]);
+
+        ArgumentModel<e_transA,
+                      e_transB,
+                      e_M,
+                      e_N,
+                      e_K,
+                      e_alpha,
+                      e_lda,
+                      e_beta,
+                      e_ldb,
+                      e_ldc,
+                      e_stride_x,
+                      e_batch_count>{}
+            .log_args<T>(rocblas_cout,
+                         arg,
+                         gpu_time_used,
+                         gflop_count,
+                         ArgumentLogging::NA_value,
+                         ArgumentLogging::NA_value,
+                         ArgumentLogging::NA_value,
+                         ArgumentLogging::NA_value,
+                         ArgumentLogging::NA_value,
+                         ArgumentLogging::NA_value);
     }
 }

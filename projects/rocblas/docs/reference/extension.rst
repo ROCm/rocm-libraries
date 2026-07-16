@@ -98,7 +98,6 @@ rocblas_gemm_grouped_batched_ex
 ============================================
 
 .. doxygenfunction:: rocblas_gemm_grouped_batched_ex
-   :outline:
 
 ``gemm_grouped_batched_ex`` functions support the ``_64`` interface.
 See the :ref:`ILP64 API` section.
