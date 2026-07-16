@@ -24,7 +24,7 @@ template <typename InputDataType,
           typename OutputDataType,
           typename ComputeDataType,
           unsigned int localSize>
-inline std::vector<std::string> buildConvDefines()
+inline std::vector<std::string> buildRMSNormDefines()
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<InputDataType>::VALUE);
@@ -52,16 +52,16 @@ public:
                       hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
                       hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
                       double epsilon = 1e-5,
-                      hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias = nullptr,
-                      hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms = nullptr)
+                      hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms = nullptr,
+                      hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias = nullptr)
     {
-        validateInput(input, scale, output, bias, invRms);
+        validateInput(input, scale, output, invRms, bias);
 
-        auto defines = detail::buildConvDefines<InputDataType,
-                                                ScaleDataType,
-                                                OutputDataType,
-                                                ComputeDataType,
-                                                BLOCK_SIZE>();
+        auto defines = detail::buildRMSNormDefines<InputDataType,
+                                                   ScaleDataType,
+                                                   OutputDataType,
+                                                   ComputeDataType,
+                                                   BLOCK_SIZE>();
 
         launchFprop(input.memory().deviceData(),
                     input.dims(),
@@ -70,8 +70,8 @@ public:
                     scale.dims(),
                     output.memory().deviceData(),
                     defines,
-                    bias ? bias->memory().deviceData() : nullptr,
                     invRms ? invRms->memory().deviceData() : nullptr,
+                    bias ? bias->memory().deviceData() : nullptr,
                     epsilon);
 
         output.memory().markDeviceModified();
@@ -94,8 +94,8 @@ private:
     static void validateConsistentDimensions(const std::vector<int64_t>& inputDims,
                                              const std::vector<int64_t>& scaleDims,
                                              const std::vector<int64_t>& outputDims,
-                                             const std::vector<int64_t>* biasDims,
-                                             const std::vector<int64_t>* invRmsDims)
+                                             const std::vector<int64_t>* invRmsDims,
+                                             const std::vector<int64_t>* biasDims)
     {
         // Validate the tensor ranks
         const auto& nDims = inputDims.size();
@@ -179,8 +179,8 @@ private:
         const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
         const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
         const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
-        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias,
-        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms)
+        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias)
     {
         using hipdnn_data_sdk::utilities::TensorLayout;
 
@@ -251,8 +251,8 @@ private:
     static void validateInput(const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
                               const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
                               const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
-                              const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias,
-                              const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms)
+                              const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms,
+                              const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias)
     {
         const auto& inputDims = input.dims();
         const auto& scaleDims = scale.dims();
@@ -261,8 +261,8 @@ private:
         const auto* biasDims = bias ? &bias->dims() : nullptr;
 
         // Validate tensor dimensions and layouts
-        validateConsistentDimensions(inputDims, scaleDims, outputDims, biasDims, invRmsDims);
-        validateConsistentLayouts(input, scale, output, bias, invRms);
+        validateConsistentDimensions(inputDims, scaleDims, outputDims, invRmsDims, biasDims);
+        validateConsistentLayouts(input, scale, output, invRms, bias);
 
         // Validate data types
         static_assert(IS_SUPPORTED_DATA_TYPE<InputDataType>,
@@ -292,6 +292,17 @@ private:
                || strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NDHWC.strideOrder;
     }
 
+    // normalizeDim marks the split point between outer dimensions and the inner
+    // dimensions over which normalization statistics (invVariance) are computed.
+    // Dimensions [0, ..., normalizeDim-1] are the outer dimensions, and dimensions
+    // [normalizeDim, ..., nDims-1] are the inner dimensions over which normalization
+    // is performed. It is found by matching the input and scale dimensions, starting
+    // from the right, and counting the number of trailing dimensions that match, then
+    // subtracting that count from the total number of dimensions in scaleDims.
+    // If all dimensions match, normalizeDim is set to 1, since there must be
+    // at least one normalization axis.
+    // Examples: 1. inputDims = [2, 4, 8, 8] and scaleDims = [1, 4, 8, 8], then normalizeDim = 4 - 3 = 1.
+    //           2. inputDims = [2, 4, 8, 8] and scaleDims = [1, 1, 8, 8], then normalizeDim = 4 - 2 = 2.
     static size_t getNormalizeDim(const std::vector<int64_t>& inputDims,
                                   const std::vector<int64_t>& scaleDims)
     {
@@ -308,22 +319,20 @@ private:
         return static_cast<size_t>(normalizeDim);
     }
 
-    static int64_t
-        getOuterSize(const std::vector<int64_t>& inputDims, size_t normalizeDim, int64_t stride)
+    // Computes the number of elements in the outer dimensions [0, ..., normalizeDim-1]
+    // of the input tensor i.e. number of independent groups that will be normalized separately.
+    static int64_t getOuterSize(const std::vector<int64_t>& inputDims, size_t normalizeDim)
     {
         int64_t outerSize = 1;
         for(size_t i = 0; i < normalizeDim; ++i)
         {
-            // Add channel size only if there is no stride
-            if(i == 1 && stride != 1)
-            {
-                continue;
-            }
             outerSize *= inputDims[i];
         }
         return outerSize;
     }
 
+    // Computes the number of elements in the inner dimensions [normalizeDim, ..., nDims-1]
+    // of the input tensor i.e. number of elements over which normalization is performed.
     static int64_t getInnerSize(const std::vector<int64_t>& inputDims, size_t normalizeDim)
     {
         int64_t innerSize = 1;
@@ -334,6 +343,11 @@ private:
         return innerSize;
     }
 
+    // Computes the memory stride separating consecutive elements in the trailing
+    // dimensions. The memory stride only matters when normalizeDim > 1 and the layout is
+    // channel-last, since the channel dim is then interleaved between trailing dims rather
+    // than being contiguous and hence the stride should be the size of the channel dimension
+    // to skip over the channel dim when iterating over the trailing elements.
     static int64_t getStride(const std::vector<int64_t>& inputDims,
                              const std::vector<int64_t>& inputStrides,
                              size_t normalizeDim)
@@ -356,8 +370,8 @@ private:
                             const std::vector<int64_t>& scaleDims,
                             void* outputPtr,
                             const std::vector<std::string>& defines,
-                            const void* biasPtr = nullptr,
                             void* invRmsPtr = nullptr,
+                            const void* biasPtr = nullptr,
                             double epsilon = 1e-5);
 };
 

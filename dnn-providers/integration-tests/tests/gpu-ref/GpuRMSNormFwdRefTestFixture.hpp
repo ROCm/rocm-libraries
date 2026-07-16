@@ -31,8 +31,8 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
                            const TensorLayout& layout,
                            double epsilon,
                            float fillRange = 1.0f,
-                           bool includeBias = false,
-                           bool includeInvRms = false)
+                           bool includeInvRms = false,
+                           bool includeBias = false)
 {
     const unsigned int seed = getGlobalTestSeed();
 
@@ -45,15 +45,6 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
         static_cast<InputDataType>(-fillRange), static_cast<InputDataType>(fillRange), seed);
     scaleTensor.fillWithRandomValues(
         static_cast<ScaleDataType>(-fillRange), static_cast<ScaleDataType>(fillRange), seed + 1);
-
-    auto biasTensor
-        = includeBias ? Tensor<ScaleDataType>(scaleDims, layout) : Tensor<ScaleDataType>({});
-    if(includeBias)
-    {
-        biasTensor.fillWithRandomValues(static_cast<ScaleDataType>(-fillRange),
-                                        static_cast<ScaleDataType>(fillRange),
-                                        seed + 2);
-    }
 
     std::vector<int64_t> invRmsDims = ioDims;
     for(size_t i = 0; i < invRmsDims.size(); ++i)
@@ -68,6 +59,15 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
     auto invRmsTensorGpu
         = includeInvRms ? Tensor<ComputeDataType>(invRmsDims, layout) : Tensor<ComputeDataType>({});
 
+    auto biasTensor
+        = includeBias ? Tensor<ScaleDataType>(scaleDims, layout) : Tensor<ScaleDataType>({});
+    if(includeBias)
+    {
+        biasTensor.fillWithRandomValues(static_cast<ScaleDataType>(-fillRange),
+                                        static_cast<ScaleDataType>(fillRange),
+                                        seed + 2);
+    }
+
     CpuFpReferenceRMSNorm::forward<InputDataType, ScaleDataType, OutputDataType, ComputeDataType>(
         inputTensor,
         scaleTensor,
@@ -81,8 +81,8 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
         scaleTensor,
         outputGpu,
         epsilon,
-        includeBias ? &biasTensor : nullptr,
-        includeInvRms ? &invRmsTensorGpu : nullptr);
+        includeInvRms ? &invRmsTensorGpu : nullptr,
+        includeBias ? &biasTensor : nullptr);
 
     assertAllClose(outputCpu, outputGpu, getTolerance<OutputDataType>());
     if(includeInvRms)

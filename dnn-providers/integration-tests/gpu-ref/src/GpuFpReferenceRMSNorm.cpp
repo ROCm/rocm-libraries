@@ -63,8 +63,8 @@ void GpuFpReferenceRMSNorm::launchFprop(const void* inputPtr,
                                         const std::vector<int64_t>& scaleDims,
                                         void* outputPtr,
                                         const std::vector<std::string>& defines,
-                                        const void* biasPtr,
                                         void* invRmsPtr,
+                                        const void* biasPtr,
                                         double epsilon)
 {
     auto& compiler = detail::GpuRefKernelCompiler::instance();
@@ -72,7 +72,7 @@ void GpuFpReferenceRMSNorm::launchFprop(const void* inputPtr,
 
     const auto& normalizeDim = getNormalizeDim(inputDims, scaleDims);
     const auto& stride = getStride(inputDims, inputStrides, normalizeDim);
-    const auto& outerSize = getOuterSize(inputDims, normalizeDim, stride);
+    const auto& outerSize = getOuterSize(inputDims, normalizeDim);
     const auto& innerSize = getInnerSize(inputDims, normalizeDim);
 
     RMSNormFwdArgs args{};
@@ -85,7 +85,7 @@ void GpuFpReferenceRMSNorm::launchFprop(const void* inputPtr,
     args.stride = static_cast<long long>(stride);
     args.eps = epsilon;
 
-    launchKernel(kernel.function(), outerSize * stride, &args, sizeof(args));
+    launchKernel(kernel.function(), outerSize, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

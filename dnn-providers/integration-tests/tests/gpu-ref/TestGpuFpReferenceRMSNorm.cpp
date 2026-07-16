@@ -61,7 +61,7 @@ TEST(TestGpuRMSNormFwdRefValidation, AcceptsValidParamsWithBiasAndInvRms)
     Tensor<float> bias({1, 4, 8, 8});
     Tensor<double> invRms({2, 1, 1, 1});
 
-    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &bias, &invRms));
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &invRms, &bias));
 }
 
 TEST(TestGpuRMSNormFwdRefValidation, AcceptsValidParamsNormalizeDimTwo4D)
@@ -73,7 +73,7 @@ TEST(TestGpuRMSNormFwdRefValidation, AcceptsValidParamsNormalizeDimTwo4D)
     Tensor<float> bias({1, 1, 8, 8});
     Tensor<double> invRms({2, 4, 1, 1});
 
-    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &bias, &invRms));
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &invRms, &bias));
 }
 
 TEST(TestGpuRMSNormFwdRefValidation, AcceptsValidParamsNormalizeDimThree4D)
@@ -95,7 +95,7 @@ TEST(TestGpuRMSNormFwdRefValidation, AcceptsValidParamsNormalizeDimThree5D)
     Tensor<float> bias({1, 1, 1, 8, 8});
     Tensor<double> invRms({2, 4, 8, 1, 1});
 
-    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &bias, &invRms));
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &invRms, &bias));
 }
 
 // --- validateConsistentDimensions() throw paths ---
@@ -138,13 +138,7 @@ TEST(TestGpuRMSNormFwdRefValidation, ThrowsOnInvRmsRankMismatch)
     Tensor<float> y({2, 4, 8, 8});
     Tensor<double> invRms({2, 1, 8});
 
-    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(
-                     x,
-                     scale,
-                     y,
-                     1.0e-5,
-                     static_cast<hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
-                     &invRms),
+    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &invRms),
                  std::invalid_argument);
 }
 
@@ -156,7 +150,13 @@ TEST(TestGpuRMSNormFwdRefValidation, ThrowsOnBiasRankMismatch)
     Tensor<float> y({2, 4, 8, 8});
     Tensor<float> bias({4, 8});
 
-    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &bias),
+    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(
+                     x,
+                     scale,
+                     y,
+                     1.0e-5,
+                     static_cast<hipdnn_data_sdk::utilities::TensorBase<double>*>(nullptr),
+                     &bias),
                  std::invalid_argument);
 }
 
@@ -178,7 +178,13 @@ TEST(TestGpuRMSNormFwdRefValidation, ThrowsOnScaleBiasShapeMismatch)
     Tensor<float> y({2, 4, 8, 8});
     Tensor<float> bias({1, 1, 8, 8});
 
-    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &bias),
+    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(
+                     x,
+                     scale,
+                     y,
+                     1.0e-5,
+                     static_cast<hipdnn_data_sdk::utilities::TensorBase<double>*>(nullptr),
+                     &bias),
                  std::invalid_argument);
 }
 
@@ -205,8 +211,8 @@ TEST(TestGpuRMSNormFwdRefValidation, ThrowsOnInvRmsDimsNotDerivedFromInputAndSca
                      scale,
                      y,
                      1.0e-5,
-                     static_cast<hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
-                     &invRms),
+                     &invRms,
+                     static_cast<hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr)),
                  std::invalid_argument);
 }
 
@@ -261,7 +267,13 @@ TEST(TestGpuRMSNormFwdRefValidation, ThrowsOnBiasLayoutInconsistentWithInput)
     Tensor<float> y({2, 4, 8, 8});
     Tensor<float> bias({1, 4, 8, 8}, TensorLayout::NHWC);
 
-    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y, 1.0e-5, &bias),
+    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(
+                     x,
+                     scale,
+                     y,
+                     1.0e-5,
+                     static_cast<hipdnn_data_sdk::utilities::TensorBase<double>*>(nullptr),
+                     &bias),
                  std::invalid_argument);
 }
 
@@ -278,8 +290,8 @@ TEST(TestGpuRMSNormFwdRefValidation, ThrowsOnInvRmsLayoutInconsistentWithInput)
                      scale,
                      y,
                      1.0e-5,
-                     static_cast<hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
-                     &invRms),
+                     &invRms,
+                     static_cast<hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr)),
                  std::invalid_argument);
 }
 
@@ -417,8 +429,8 @@ TEST(TestGpuRMSNormFwdRefOptionalArgs, WithBias)
         scaleTensor,
         yGpu,
         1e-5,
-        &biasTensor,
-        static_cast<hipdnn_data_sdk::utilities::TensorBase<double>*>(nullptr));
+        static_cast<hipdnn_data_sdk::utilities::TensorBase<double>*>(nullptr),
+        &biasTensor);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
 }
@@ -441,7 +453,7 @@ TEST(TestGpuRMSNormFwdRefOptionalArgs, WithInvRms)
     CpuFpReferenceRMSNorm::forward<float, float, float>(
         xTensor, scaleTensor, yCpu, 1e-5, &invRmsCpu, nullptr);
     GpuFpReferenceRMSNorm::fprop<float, float, float>(
-        xTensor, scaleTensor, yGpu, 1e-5, nullptr, &invRmsGpu);
+        xTensor, scaleTensor, yGpu, 1e-5, &invRmsGpu, nullptr);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
     assertAllClose(invRmsCpu, invRmsGpu, getTolerance<double>());
@@ -486,7 +498,7 @@ TEST(TestGpuRMSNormFwdRefChannelLast, MatchesCpuRefWithBiasAndInvRms)
     CpuFpReferenceRMSNorm::forward<float, float, float>(
         xTensor, scaleTensor, yCpu, 1e-5, &invRmsCpu, &biasTensor);
     GpuFpReferenceRMSNorm::fprop<float, float, float>(
-        xTensor, scaleTensor, yGpu, 1e-5, &biasTensor, &invRmsGpu);
+        xTensor, scaleTensor, yGpu, 1e-5, &invRmsGpu, &biasTensor);
 
     assertAllClose(yCpu, yGpu, getTolerance<float>());
     assertAllClose(invRmsCpu, invRmsGpu, getTolerance<double>());
@@ -494,57 +506,154 @@ TEST(TestGpuRMSNormFwdRefChannelLast, MatchesCpuRefWithBiasAndInvRms)
 
 // --- Test suite instantiations ---
 
-using TestGpuRMSNormFwdRefFp32 = RMSNormFwdTestSuite<float>;
-using TestGpuRMSNormFwdRefFp16 = RMSNormFwdTestSuite<half>;
-using TestGpuRMSNormFwdRefBfp16 = RMSNormFwdTestSuite<bfloat16>;
+using TestGpuRMSNormFwdRefFp324D = RMSNormFwdTestSuite<float>;
+using TestGpuRMSNormFwdRefFp164D = RMSNormFwdTestSuite<half>;
+using TestGpuRMSNormFwdRefBfp164D = RMSNormFwdTestSuite<bfloat16>;
+using TestGpuRMSNormFwdRefFp325D = RMSNormFwdTestSuite<float>;
+using TestGpuRMSNormFwdRefFp165D = RMSNormFwdTestSuite<half>;
+using TestGpuRMSNormFwdRefBfp165D = RMSNormFwdTestSuite<bfloat16>;
 
-TEST_P(TestGpuRMSNormFwdRefFp32, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRefFp324D, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
-TEST_P(TestGpuRMSNormFwdRefFp16, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRefFp164D, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
-TEST_P(TestGpuRMSNormFwdRefBfp16, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRefBfp164D, MatchesCpuRef)
+{
+    this->runRMSNormFwdTest();
+}
+TEST_P(TestGpuRMSNormFwdRefFp325D, MatchesCpuRef)
+{
+    this->runRMSNormFwdTest();
+}
+TEST_P(TestGpuRMSNormFwdRefFp165D, MatchesCpuRef)
+{
+    this->runRMSNormFwdTest();
+}
+TEST_P(TestGpuRMSNormFwdRefBfp165D, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
 
 // ============================================================================
-// 4D (NCHW/NHWC) shape tests
+// 4D (NCHW/NHWC) tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuRMSNormFwdRefFp32,
-                         ::testing::ValuesIn(getRMSnormTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuRMSNormFwdRefFp16,
-                         ::testing::ValuesIn(getRMSnormTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         TestGpuRMSNormFwdRefBfp16,
-                         ::testing::ValuesIn(getRMSnormTestCases()));
+// --- Quick tests ---
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuRMSNormFwdRefFp32,
-                         ::testing::ValuesIn(getRMSnormFullTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuRMSNormFwdRefFp16,
-                         ::testing::ValuesIn(getRMSnormFullTestCases()));
-INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGpuRMSNormFwdRefBfp16,
-                         ::testing::ValuesIn(getRMSnormFullTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuRMSNormFwdRefFp324D,
+                         ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuRMSNormFwdRefFp164D,
+                         ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuRMSNormFwdRefBfp164D,
+                         ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuRMSNormFwdRefFp324D,
+                         ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuRMSNormFwdRefFp164D,
+                         ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuRMSNormFwdRefBfp164D,
+                         ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuRMSNormFwdRefFp324D,
+                         ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuRMSNormFwdRefFp164D,
+                         ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuRMSNormFwdRefBfp164D,
+                         ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp324D, ::testing::ValuesIn([]() {
+                             auto v = getRMSnormSmall4DTestCases();
+                             auto m = getRMSnormMedium4DTestCases();
+                             auto l = getRMSnormLarge4DTestCases();
+                             v.insert(v.end(), m.begin(), m.end());
+                             v.insert(v.end(), l.begin(), l.end());
+                             return v;
+                         }()));
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp164D, ::testing::ValuesIn([]() {
+                             auto v = getRMSnormSmall4DTestCases();
+                             auto m = getRMSnormMedium4DTestCases();
+                             auto l = getRMSnormLarge4DTestCases();
+                             v.insert(v.end(), m.begin(), m.end());
+                             v.insert(v.end(), l.begin(), l.end());
+                             return v;
+                         }()));
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefBfp164D, ::testing::ValuesIn([]() {
+                             auto v = getRMSnormSmall4DTestCases();
+                             auto m = getRMSnormMedium4DTestCases();
+                             auto l = getRMSnormLarge4DTestCases();
+                             v.insert(v.end(), m.begin(), m.end());
+                             v.insert(v.end(), l.begin(), l.end());
+                             return v;
+                         }()));
 
 // ============================================================================
 // 5D (NCDHW/NDHWC) shape tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Smoke3d,
-                         TestGpuRMSNormFwdRefFp32,
-                         ::testing::ValuesIn(getRMSnorm3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke3d,
-                         TestGpuRMSNormFwdRefFp16,
-                         ::testing::ValuesIn(getRMSnorm3dTestCases()));
-INSTANTIATE_TEST_SUITE_P(Smoke3d,
-                         TestGpuRMSNormFwdRefBfp16,
-                         ::testing::ValuesIn(getRMSnorm3dTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuRMSNormFwdRefFp325D,
+                         ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuRMSNormFwdRefFp165D,
+                         ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuRMSNormFwdRefBfp165D,
+                         ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuRMSNormFwdRefFp325D,
+                         ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuRMSNormFwdRefFp165D,
+                         ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuRMSNormFwdRefBfp165D,
+                         ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuRMSNormFwdRefFp325D,
+                         ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuRMSNormFwdRefFp165D,
+                         ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuRMSNormFwdRefBfp165D,
+                         ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp325D, ::testing::ValuesIn([]() {
+                             auto v = getRMSnormSmall5DTestCases();
+                             auto m = getRMSnormMedium5DTestCases();
+                             auto l = getRMSnormLarge5DTestCases();
+                             v.insert(v.end(), m.begin(), m.end());
+                             v.insert(v.end(), l.begin(), l.end());
+                             return v;
+                         }()));
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp165D, ::testing::ValuesIn([]() {
+                             auto v = getRMSnormSmall5DTestCases();
+                             auto m = getRMSnormMedium5DTestCases();
+                             auto l = getRMSnormLarge5DTestCases();
+                             v.insert(v.end(), m.begin(), m.end());
+                             v.insert(v.end(), l.begin(), l.end());
+                             return v;
+                         }()));
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefBfp165D, ::testing::ValuesIn([]() {
+                             auto v = getRMSnormSmall5DTestCases();
+                             auto m = getRMSnormMedium5DTestCases();
+                             auto l = getRMSnormLarge5DTestCases();
+                             v.insert(v.end(), m.begin(), m.end());
+                             v.insert(v.end(), l.begin(), l.end());
+                             return v;
+                         }()));
