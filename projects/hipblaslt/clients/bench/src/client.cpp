@@ -304,9 +304,9 @@ try
     std::string api_method_str  = "";
     std::string algo_method_str = "";
 
-    bool verify  = 0;
-    bool ulp     = 0;
-    bool gpu_ref = 0;
+    bool        verify = 0;
+    bool        ulp    = 0;
+    std::string check_ref;
 
     bool                  grouped_gemm;
     std::vector<int64_t>  m, n, k;
@@ -480,11 +480,11 @@ try
          value<bool>(&ulp)->default_value(false),
          "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
 
-        ("gpu_ref",
-         value<bool>(&gpu_ref)->default_value(false),
-         "Compute the correctness reference on the GPU instead of the CPU (faster). Implies "
-         "--verify. Only supports plain f32/f16 GEMMs with the default epilogue; other configs "
-         "are rejected with an error.")
+        ("check_ref",
+         value<std::string>(&check_ref)->default_value(""),
+         "Where to compute the correctness reference: 'cpu' (default), 'gpu' (faster; plain "
+         "f32/f16 GEMMs with the default epilogue only, else error), or 'both' (cross-check "
+         "against both). Passing any value implies --verify.")
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
@@ -1212,7 +1212,17 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify || ulp || gpu_ref)
+    if(check_ref.empty() || check_ref == "cpu")
+        arg.check_ref = HIPBLASLT_CHECK_REF_CPU;
+    else if(check_ref == "gpu")
+        arg.check_ref = HIPBLASLT_CHECK_REF_GPU;
+    else if(check_ref == "both")
+        arg.check_ref = HIPBLASLT_CHECK_REF_BOTH;
+    else
+        throw std::invalid_argument("Invalid value for --check_ref (expected cpu|gpu|both)");
+
+    // An explicit --check_ref (any value), like --verify, requests verification.
+    if(verify || ulp || !check_ref.empty())
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
@@ -1220,10 +1230,6 @@ try
     if(ulp)
     {
         arg.ulp_check = 1;
-    }
-    if(gpu_ref)
-    {
-        arg.gpu_ref = 1;
     }
 
     switch(api_method)

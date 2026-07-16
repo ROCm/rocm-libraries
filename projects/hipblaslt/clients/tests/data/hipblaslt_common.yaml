@@ -634,7 +634,7 @@ Arguments:
   - unit_check: c_int8
   - ulp_check: c_int8
   - timing: c_int8
-  - gpu_ref: c_int8
+  - check_ref: c_int8
   - transA: c_char
   - transB: c_char
   - activation_type: hipblaslt_activation_type
@@ -737,7 +737,7 @@ Defaults:
   unit_check: 1
   ulp_check: 0
   timing: 0
-  gpu_ref: 0
+  check_ref: 0
   iters: 10
   cold_iters: 2
   # Adaptive-timing preset defaults (used when adaptive=true); keep in sync with
