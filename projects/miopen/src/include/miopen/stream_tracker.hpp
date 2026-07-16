@@ -4,6 +4,8 @@
 #ifndef GUARD_MIOPEN_STREAM_TRACKER_HPP_
 #define GUARD_MIOPEN_STREAM_TRACKER_HPP_
 
+#include <miopen/config.h>
+
 #include <vector>
 #include <hip/hip_runtime_api.h>
 
@@ -11,7 +13,7 @@ namespace miopen {
 
 struct Handle;
 
-struct StreamTracker
+struct MIOPEN_EXPORT StreamTracker
 {
     struct Slot
     {
