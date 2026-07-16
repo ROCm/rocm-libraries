@@ -61,7 +61,7 @@ TEST_F(GPU_StreamTracker_NONE, AbandonAndReclaim)
     EXPECT_EQ(reclaimed.pool_id, abandoned_id);
     tracker.release(reclaimed);
 
-    hipFree(dev_ptr);
+    ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
 }
 
 TEST_F(GPU_StreamTracker_NONE, AbandonStillDraining)
@@ -72,7 +72,7 @@ TEST_F(GPU_StreamTracker_NONE, AbandonStillDraining)
     size_t large_size = 256 * 1024 * 1024;
     ASSERT_EQ(hipMalloc(&dev_ptr, large_size), hipSuccess);
     for(int i = 0; i < 64; ++i)
-        hipMemsetAsync(dev_ptr, 0, large_size, slot.stream);
+        (void)hipMemsetAsync(dev_ptr, 0, large_size, slot.stream);
 
     int abandoned_id = slot.pool_id;
     tracker.abandon(slot);
@@ -87,7 +87,7 @@ TEST_F(GPU_StreamTracker_NONE, AbandonStillDraining)
     EXPECT_EQ(reclaimed.pool_id, abandoned_id);
     tracker.release(reclaimed);
 
-    hipFree(dev_ptr);
+    ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
 }
 
 TEST_F(GPU_StreamTracker_NONE, CascadeAbandonReclaim)
@@ -105,9 +105,7 @@ TEST_F(GPU_StreamTracker_NONE, CascadeAbandonReclaim)
 
     for(int i = 0; i < kCount; ++i)
     {
-        auto& s = slots.emplace_back(tracker.acquire(handle));
-        // Pool may grow since prior abandons may still be draining;
-        // but all should eventually reclaim once drained.
+        slots.emplace_back(tracker.acquire(handle));
     }
 
     // Wait for everything to drain
