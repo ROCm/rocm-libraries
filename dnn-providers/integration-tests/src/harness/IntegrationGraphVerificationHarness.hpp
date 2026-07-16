@@ -35,8 +35,8 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/input_init/SynthesisConfig.hpp"
-#include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/input-init/SynthesisConfig.hpp"
+#include "harness/input-init/SynthesizeInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests
