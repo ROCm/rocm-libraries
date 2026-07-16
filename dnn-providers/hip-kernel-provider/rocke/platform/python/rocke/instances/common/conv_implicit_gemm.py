@@ -456,6 +456,21 @@ class ImplicitGemmConvSpec:
 # ---------------------------------------------------------------------
 
 
+def is_valid_spec_for_problem(
+    spec: ImplicitGemmConvSpec, problem: ConvProblem, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for ``spec`` paired with a specific ``problem`` on ``arch``.
+
+    Extends :func:`is_valid_spec` with problem-aware checks — e.g. tile
+    divisibility against the actual M / N_gemm / K_gemm dimensions,
+    minimum occupancy constraints, or problem-specific LDS pressure.
+
+    Currently delegates entirely to :func:`is_valid_spec`; problem-aware
+    filters will be added here as they are identified.
+    """
+    return is_valid_spec(spec, arch)
+
+
 def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``.
 
@@ -485,6 +500,13 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         return False, (
             f"block_size {spec.block_size} > {target.max_threads_per_block} "
             f"(hardware cap) on {arch}"
+        )
+
+    # Check global store vector size and disable default epilogue for
+    # vec_size_c > 1
+    if spec.vector_size_c > 1 and spec.epilogue == "default":
+        return False, (
+            f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
         )
 
     # The MMA *family* is selected from the target's wave size: CDNA (wave64)
