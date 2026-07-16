@@ -49,7 +49,7 @@ def _parse_gtest_json(path: Path) -> dict:
             full = f"{suite_name}.{case_name}"
             status = case.get("status", "")
             result = case.get("result", "")
-            if status == "NOTRUN" or result == "SUPPRESSED":
+            if status == "NOTRUN" or result in ("SUPPRESSED", "SKIPPED"):
                 results[full] = "SKIP"
             elif case.get("failures"):
                 results[full] = "FAIL"
@@ -129,25 +129,22 @@ def main() -> int:
     # normalized C++ name -> bundle case id (from ported_from metadata)
     ported_by_norm = {_norm(key): cid for key, cid in ported_map.items()}
 
-    # bundle case id -> did it PASS? A case id appears as the gtest case name of
-    # a bundle suite, so scan the bundle results once and index by trailing id.
-    bundle_pass_ids = set()
+    bundle_pass_by_case = {}
     for full, status in bundle_results.items():
         if status == "PASS":
-            bundle_pass_ids.add(full.split(".")[-1])
+            cid = full.split(".")[-1]
+            bundle_pass_by_case.setdefault(cid, set()).add(full)
 
     regressions = []
     matched = 0
 
     for cpp_test in sorted(cpp_pass):
-        # 1. Direct name match (rare — only if a bundle kept the C++ name).
         if cpp_test in bundle_pass:
             matched += 1
             continue
 
-        # 2. ported_from reverse lookup, via normalized names.
         bundle_case_id = ported_by_norm.get(_norm(cpp_test))
-        if bundle_case_id and bundle_case_id in bundle_pass_ids:
+        if bundle_case_id and bundle_case_id in bundle_pass_by_case:
             matched += 1
             continue
 
