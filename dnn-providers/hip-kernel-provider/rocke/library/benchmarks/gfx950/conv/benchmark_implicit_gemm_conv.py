@@ -118,8 +118,7 @@ def parse_miopen_cmd(cmd: str):
             -t 1 -in_layout=NHWC
 
     Only forward-pass (2-D NHWC) convolutions are supported; the function
-    raises ``ValueError`` for unsupported cases (3-D, groups > 1, NCHW).
-
+    raises ``ValueError`` for unsupported cases (3-D, NCHW).
     Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``,
     or ``"fp32"``.
     """
