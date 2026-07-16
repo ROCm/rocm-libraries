@@ -553,6 +553,24 @@ void testing_sygvd_hegvd(Arguments& argus)
     rocblas_stride stARes = (argus.unit_check || argus.norm_check) ? stA : 0;
     rocblas_stride stDRes = (argus.unit_check || argus.norm_check) ? stD : 0;
 
+    {
+        // 0 = auto, 1 = 1-stage (default), 2 = 2-stage
+        const rocsolver_alg_mode hetrd_mode
+            = (argus.hetrd_alg_mode == 2) ? rocsolver_alg_mode_2stage
+            : (argus.hetrd_alg_mode == 1) ? rocsolver_alg_mode_1stage
+                                          : rocsolver_alg_mode_auto;
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_set_alg_mode(handle, rocsolver_function_hetrd, hetrd_mode),
+            rocblas_status_success);
+
+        rocsolver_alg_mode check_mode;
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_get_alg_mode(handle, rocsolver_function_hetrd, &check_mode),
+            rocblas_status_success);
+
+        EXPECT_EQ(check_mode, hetrd_mode);
+    }
+
     // check non-supported values
     if(uplo == rocblas_fill_full || evect == rocblas_evect_tridiagonal)
     {
