@@ -11,7 +11,7 @@
 #include "CpuReferenceGraphExecutorAdapter.hpp"
 #include "IReferenceGraphExecutor.hpp"
 #include "TestConfig.hpp"
-#include "gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 namespace hipdnn_integration_tests
 {

@@ -3973,7 +3973,7 @@ class TestPreloopInitD:
         cfg = make_cfg()
         assert cfg.pgr == pgr
         sched = LogicalScheduler(cfg)
-        sched.emit()
+        sched.build(stop_after=Pass.EMIT)
         preloop = sched.build_preloop()
         initd = [em for em in preloop[0][0]
                  if getattr(em.source, 'label', None) == 'initC_overlap']
