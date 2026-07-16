@@ -126,10 +126,13 @@ void expectFullTensorMocksForDesc(Mock_hipdnn_backend& mock,
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
 
-    EXPECT_CALL(
-        mock,
-        backendGetAttribute(
-            fakeDesc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+    EXPECT_CALL(mock,
+                backendGetAttribute(fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    _,
+                                    _))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
                         Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
@@ -261,10 +264,13 @@ void expectScalarByValueTensorMocks(Mock_hipdnn_backend& mock,
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
 
-    EXPECT_CALL(
-        mock,
-        backendGetAttribute(
-            fakeDesc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+    EXPECT_CALL(mock,
+                backendGetAttribute(fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    _,
+                                    _))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
                         Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
@@ -763,10 +769,13 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dD
                         Return(HIPDNN_STATUS_SUCCESS)));
 
     // IS_RUNTIME_PASS_BY_VALUE: false (compile-time constant)
-    EXPECT_CALL(
-        *_mockBackend,
-        backendGetAttribute(
-            _fakeDesc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_fakeDesc,
+                                    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                    HIPDNN_TYPE_BOOLEAN,
+                                    1,
+                                    _,
+                                    _))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
                         Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,

@@ -112,7 +112,7 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "TensorDescriptor::getAttribute()");
         break;
     }
-    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE:
+    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT:
         getScalar(_data.is_runtime_pass_by_value,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
@@ -183,7 +183,7 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         setTensorValue(attributeType, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE:
+    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT:
         setScalar(_data.is_runtime_pass_by_value,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,

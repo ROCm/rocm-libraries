@@ -461,10 +461,12 @@ hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassB
     if(runtimePassByValue)
     {
         bool flag = true;
-        EXPECT_EQ(
-            hipdnnBackendSetAttribute(
-                xDesc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &flag),
-            HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendSetAttribute(xDesc,
+                                            HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            1,
+                                            &flag),
+                  HIPDNN_STATUS_SUCCESS);
     }
     EXPECT_EQ(hipdnnBackendFinalize(xDesc), HIPDNN_STATUS_SUCCESS);
 

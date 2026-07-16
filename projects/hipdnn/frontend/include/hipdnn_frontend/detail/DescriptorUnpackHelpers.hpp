@@ -481,7 +481,7 @@ template <typename T>
     // is false (no value read), and only the flag is restored here.
     bool isRuntime = false;
     HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(tensorDesc,
-                                               HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
+                                               HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
                                                HIPDNN_TYPE_BOOLEAN,
                                                isRuntime,
                                                "tensor is_runtime_pass_by_value"));

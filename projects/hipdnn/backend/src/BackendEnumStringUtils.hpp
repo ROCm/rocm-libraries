@@ -457,7 +457,7 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_TENSOR_VALUE_EXT";
     case HIPDNN_ATTR_TENSOR_IS_BY_VALUE:
         return "HIPDNN_ATTR_TENSOR_IS_BY_VALUE";
-    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE:
+    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT:
         return "HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE";
 
     // Convolution forward operation attributes

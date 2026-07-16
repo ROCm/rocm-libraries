@@ -253,7 +253,7 @@ read-only and **derived** as **value-presence** (`value.type != NONE`) — i.e.
 back-compatible C-API meaning: a caller querying 1307 to decide whether to read
 `VALUE_EXT` still gets the right answer, and a pure runtime user-supplied tensor
 (flag set, no value) reads `false`. A new
-integer `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` (1308) is true only for
+integer `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT` (1308) is true only for
 the runtime pass-by-value states. Only the runtime bit is stored; 1307 and the
 has-constant query are derived. The "any by-value" umbrella
 (`value present || runtime flag`, true for every by-value state) is **not** 1307;
@@ -1066,7 +1066,7 @@ reject coverage.
 read-only-**derived** as **value-presence** (`value.type != NONE`) — the
 back-compatible C-API "has a baked `VALUE_EXT`" meaning — so existing readers
 that key `VALUE_EXT` reads on it are unaffected. Add a new
-**settable** attribute `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` (1308)
+**settable** attribute `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT` (1308)
 carrying the `is_runtime_pass_by_value` flag (true for the runtime states),
 and update the `BackendEnumStringUtils` string. Keep
 `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306) as-is (value union) and add
@@ -1297,7 +1297,7 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) reads `true` for the two
   value-carrying states (compile-time constant, runtime-with-default) and
   `false` for the pure runtime user-supplied state — it derives value-presence
-  (`value.type != NONE`), not the umbrella. `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE`
+  (`value.type != NONE`), not the umbrella. `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT`
   (1308) reads `true` only for the two runtime states. Confirms 1307 stays
   derived-as-value-presence and only the runtime bit is stored; the by-value
   umbrella is a wrapper-only query (`isByValue()`), which for a pure runtime

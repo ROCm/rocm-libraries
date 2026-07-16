@@ -165,7 +165,7 @@ protected:
             .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
         EXPECT_CALL(*_mockBackend,
                     backendSetAttribute(_,
-                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
+                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
                                         HIPDNN_TYPE_BOOLEAN,
                                         1,
                                         pointsToScalar<bool>(isRuntime)))

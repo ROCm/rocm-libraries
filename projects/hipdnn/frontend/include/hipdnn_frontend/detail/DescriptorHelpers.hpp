@@ -223,7 +223,7 @@ inline Error
     }
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
-                                               HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
+                                               HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
                                                HIPDNN_TYPE_BOOLEAN,
                                                tensor->get_is_runtime_pass_by_value(),
                                                "tensor is_runtime_pass_by_value"));

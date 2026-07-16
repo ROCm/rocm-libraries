@@ -186,3 +186,71 @@ TEST_F(IntegrationPassByValueDelivery, DifferentHostScalarIsDeliveredExactly)
     ASSERT_TRUE(delivered.has_value());
     EXPECT_DOUBLE_EQ(*delivered, static_cast<double>(epsilonValue));
 }
+
+// The frontend contract requires the caller to deliver a host scalar for a
+// pure runtime-user-supplied tensor via its uid in the variant pack. Omitting
+// it must not silently execute with a stale/zero value: resolveScalarOperand()
+// throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) inside the
+// plugin (proven at the SDK level by
+// TestRuntimePassByValue.ThrowsIfPureRuntimeUserSuppliedBufferMissing); this
+// test closes the remaining seam by proving that failure actually propagates
+// out through Graph::execute() to the caller as an Error, rather than being
+// swallowed or crashing.
+TEST_F(IntegrationPassByValueDelivery, MissingRuntimeScalarFailsExecute)
+{
+    const std::vector<int64_t> dims = {2, 3, 8, 8};
+    std::vector<int64_t> scaleDims = dims;
+    scaleDims[0] = 1;
+
+    Graph graph;
+    graph.set_name("PassByValueMissingScalar")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    Tensor<float> xTensor(dims);
+    Tensor<float> scaleTensor(scaleDims);
+    Tensor<float> yTensor(dims);
+    xTensor.fillWithValue(1.0f);
+    scaleTensor.fillWithValue(1.0f);
+
+    auto x = Graph::tensor(makeTensorAttributes("X", DataType::FLOAT, xTensor));
+    auto scale = Graph::tensor(makeTensorAttributes("scale", DataType::FLOAT, scaleTensor));
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("epsilon")
+        .set_dim({1})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT)
+        .set_as_runtime_parameter();
+
+    RMSNormAttributes attrs;
+    attrs.set_name("rmsnorm");
+    attrs.set_epsilon(epsilon);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
+
+    auto outputs = graph.rmsnorm(x, scale, std::move(attrs));
+    const auto& y = outputs[0];
+    y->set_output(true).set_data_type(DataType::FLOAT);
+
+    ASSERT_TRUE(epsilon->get_is_runtime_pass_by_value());
+
+    auto result = graph.validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    result = graph.build(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Deliberately omit epsilon->get_uid() from the variant pack.
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[x->get_uid()] = xTensor.memory().deviceData();
+    variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
+    variantPack[y->get_uid()] = yTensor.memory().deviceData();
+
+    result = graph.execute(_handle, variantPack, nullptr);
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_NE(result.err_msg.find(std::to_string(epsilon->get_uid())), std::string::npos)
+        << "Expected the missing uid in the surfaced error message, got: " << result.err_msg;
+
+    EXPECT_EQ(_recorder->count(), 0u)
+        << "No scalar should have been recorded once resolution failed";
+}
