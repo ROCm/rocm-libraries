@@ -152,17 +152,25 @@ GridAxis parseGridAxis(const Json& value, const char* context)
         return axis;
     }
 
-    if(value.is_object() && value.contains("ceil_div"))
+    if(value.is_object() && (value.contains("ceil_div") || value.contains("floor_div")))
     {
-        const auto& args = value.at("ceil_div");
+        const bool isCeil = value.contains("ceil_div");
+        const char* key = isCeil ? "ceil_div" : "floor_div";
+        const auto& args = value.at(key);
         if(!args.is_array() || args.size() != 2)
         {
-            throw std::runtime_error(std::string(context) + ".ceil_div must have two arguments");
+            throw std::runtime_error(std::string(context) + "." + key + " must have two arguments");
         }
         GridAxis axis;
-        axis.kind = GridAxis::Kind::CEIL_DIV;
+        axis.kind = isCeil ? GridAxis::Kind::CEIL_DIV : GridAxis::Kind::FLOOR_DIV;
         axis.numerator = parseGridValue(args.at(0), context);
         axis.denominator = parseGridValue(args.at(1), context);
+        // Optional "add" term applied to the divided base (e.g. the unified
+        // attention y axis floor_div(total_q, block_q) + num_seqs).
+        if(value.contains("add"))
+        {
+            axis.addend = parseGridValue(value.at("add"), context);
+        }
         return axis;
     }
 
@@ -294,8 +302,8 @@ CompileSpec parseCompileSpec(const Json& value)
         = getRequiredInt(value.at("num_query_heads"), "compile_spec.num_query_heads");
     spec.numKvHeads = getRequiredInt(value.at("num_kv_heads"), "compile_spec.num_kv_heads");
     spec.headSize = getRequiredInt(value.at("head_size"), "compile_spec.head_size");
-    spec.blockSizeQ = getRequiredInt(value.at("block_size_q"), "compile_spec.block_size_q");
-    spec.blockSizeK = getRequiredInt(value.at("block_size_k"), "compile_spec.block_size_k");
+    spec.blockSize = getRequiredInt(value.at("block_size"), "compile_spec.block_size");
+    spec.slidingWindow = getRequiredInt(value.at("sliding_window"), "compile_spec.sliding_window");
     spec.maskMode = getRequiredString(value.at("mask_mode"), "compile_spec.mask_mode");
     return spec;
 }

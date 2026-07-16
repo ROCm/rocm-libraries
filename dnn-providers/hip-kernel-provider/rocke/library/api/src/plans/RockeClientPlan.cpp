@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -120,6 +121,20 @@ void HipModule::reset(hipModule_t module) noexcept
     _module = module;
 }
 
+void HipDeviceBuffer::reset(void* ptr) noexcept
+{
+    if(_ptr != nullptr)
+    {
+        const auto status = hipFree(_ptr);
+        if(status != hipSuccess)
+        {
+            // Destructors cannot surface plugin status; preserve diagnostics on stderr.
+            std::cerr << "rocke-client hipFree failed: " << hipGetErrorString(status) << '\n';
+        }
+    }
+    _ptr = ptr;
+}
+
 RockeClientPlan::RockeClientPlan(dispatcher::AotInstance instance,
                                  const fb::IGraph& graph,
                                  const RockeClientHandle& handle)
@@ -145,9 +160,70 @@ RockeClientPlan::RockeClientPlan(dispatcher::AotInstance instance,
     checkHip(loaded.hipError, "loadKernelFromKpack");
     _module.reset(loaded.module);
     _function = loaded.fn;
+
+    // Synthesize the paged-KV index buffers for this dense problem while the
+    // handle stream's device is current (they are allocated on it and freed with
+    // the plan). Their addresses and block_table_stride complete _bindings.
+    buildPagedKvBuffers(inputs.batch);
 }
 
 RockeClientPlan::~RockeClientPlan() = default;
+
+void RockeClientPlan::buildPagedKvBuffers(std::int64_t batch)
+{
+    const dispatcher::CompileSpec& spec = _instance.compileSpec;
+    if(spec.blockSize <= 0)
+    {
+        throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                         "rocke-client compile_spec.block_size must be positive");
+    }
+
+    // Number of paged blocks per sequence: ceil(seqlen_k / block_size). For the
+    // shipped instances seqlen_k is a multiple of block_size, so the identity
+    // paging below reproduces contiguous BSHD KV addressing exactly.
+    const std::int64_t btStride = (spec.seqlenK + spec.blockSize - 1) / spec.blockSize;
+
+    // seq_lens[b] = seqlen_k: every sequence's KV context length.
+    std::vector<std::int32_t> seqLens(static_cast<std::size_t>(batch),
+                                      static_cast<std::int32_t>(spec.seqlenK));
+
+    // query_start_len[b] = cumulative query tokens (cu_seqlens_q): [0, Sq, 2Sq, ...].
+    std::vector<std::int32_t> queryStartLen(static_cast<std::size_t>(batch) + 1);
+    for(std::int64_t b = 0; b <= batch; ++b)
+    {
+        queryStartLen[static_cast<std::size_t>(b)] = static_cast<std::int32_t>(b * spec.seqlenQ);
+    }
+
+    // block_tables[b, tile] = b*btStride + tile: identity map into a contiguous KV
+    // cache so physical_block = block_tables[seq*btStride + tile] addresses the same
+    // bytes as a dense [B, S, Hkv, D] layout (block `b*btStride+tile` holds tokens
+    // [tile*block_size, (tile+1)*block_size) of sequence b).
+    std::vector<std::int32_t> blockTables(static_cast<std::size_t>(batch * btStride));
+    for(std::int64_t b = 0; b < batch; ++b)
+    {
+        for(std::int64_t tile = 0; tile < btStride; ++tile)
+        {
+            blockTables[static_cast<std::size_t>(b * btStride + tile)]
+                = static_cast<std::int32_t>(b * btStride + tile);
+        }
+    }
+
+    const auto upload
+        = [this](const std::vector<std::int32_t>& host, const char* what) -> std::uint64_t {
+        void* device = nullptr;
+        const std::size_t bytes = host.size() * sizeof(std::int32_t);
+        checkHip(hipMalloc(&device, bytes), what);
+        _pagedBuffers.emplace_back(device);
+        checkHip(hipMemcpy(device, host.data(), bytes, hipMemcpyHostToDevice), what);
+        return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(device));
+    };
+
+    _bindings.pointerValues["block_tables_ptr"] = upload(blockTables, "hipMalloc block_tables");
+    _bindings.pointerValues["seq_lens_ptr"] = upload(seqLens, "hipMalloc seq_lens");
+    _bindings.pointerValues["query_start_len_ptr"]
+        = upload(queryStartLen, "hipMalloc query_start_len");
+    _bindings.scalars["block_table_stride"] = static_cast<std::int64_t>(btStride);
+}
 
 size_t RockeClientPlan::getWorkspaceSize(const RockeClientHandle& /*handle*/) const
 {

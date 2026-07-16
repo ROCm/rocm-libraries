@@ -13,7 +13,7 @@ namespace rocke_client::dispatcher
 {
 
 // Physical tensor layout inferred from a graph tensor's dims + strides.
-// The rocKE SDPA FMHA MFMA family (PR #8866) is canonical-layout "BSHD".
+// The rocKE unified attention 2D-tiled family is canonical-layout "BSHD".
 enum class TensorLayout
 {
     BSHD,

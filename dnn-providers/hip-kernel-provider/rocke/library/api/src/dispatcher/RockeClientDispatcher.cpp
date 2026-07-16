@@ -119,7 +119,7 @@ std::optional<AotInstance> RockeClientDispatcher::selectFromCatalog(const AotCat
         {
             // First match wins (stable catalog order).
             // TODO(heuristics): when >1 instances match and a trained per-arch
-            // FMHA model is available, break ties with the model score instead.
+            // attention model is available, break ties with the model score instead.
             return instance;
         }
     }

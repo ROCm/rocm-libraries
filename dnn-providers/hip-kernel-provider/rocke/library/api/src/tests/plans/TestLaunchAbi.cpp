@@ -67,6 +67,16 @@ GridAxis ceilDivAxis(std::string numerator, std::string denominator)
     return axis;
 }
 
+GridAxis floorDivAxis(std::string numerator, std::string denominator, std::string addend)
+{
+    GridAxis axis;
+    axis.kind = GridAxis::Kind::FLOOR_DIV;
+    axis.numerator = GridValue{.symbol = std::move(numerator), .literal = 0};
+    axis.denominator = GridValue{.symbol = std::move(denominator), .literal = 0};
+    axis.addend = GridValue{.symbol = std::move(addend), .literal = 0};
+    return axis;
+}
+
 TEST(TestLaunchAbi, PacksArgsWithAlignmentPadding)
 {
     // i32 (4B) then a pointer (8B, align 8): the pointer must land at offset 8,
@@ -130,6 +140,23 @@ TEST(TestLaunchAbi, EvalGridResolvesCeilDivAndSymbols)
     EXPECT_EQ(grid[2], 5u);
 }
 
+TEST(TestLaunchAbi, EvalGridResolvesFloorDivWithAddend)
+{
+    // The unified attention y axis: floor(total_q / block_q) + num_seqs.
+    // floor(130 / 16) + 2 = 8 + 2 = 10. x is a bare symbol, z a literal.
+    GridFormula formula;
+    formula.x = symbolAxis("num_kv_heads");
+    formula.y = floorDivAxis("total_q", "block_q", "num_seqs");
+    formula.z = valueAxis(1);
+
+    const std::unordered_map<std::string, std::int64_t> symbols{
+        {"num_kv_heads", 4}, {"total_q", 130}, {"block_q", 16}, {"num_seqs", 2}};
+    const auto grid = evalGrid(formula, symbols);
+    EXPECT_EQ(grid[0], 4u);
+    EXPECT_EQ(grid[1], 10u);
+    EXPECT_EQ(grid[2], 1u);
+}
+
 TEST(TestLaunchAbi, EvalGridUnknownSymbolThrows)
 {
     GridFormula formula;
@@ -182,6 +209,28 @@ TEST(TestLaunchAbi, BindArgsResolvesPointersAndScalarsByName)
     std::int32_t n = 0;
     std::memcpy(&n, packed.data() + 12, sizeof(n));
     EXPECT_EQ(n, 7);
+}
+
+TEST(TestLaunchAbi, BindArgsPrefersRawPointerValueOverUid)
+{
+    // A raw device address the plan already holds (a null optional tensor, or a
+    // paged buffer it allocated itself) is bound directly and takes precedence
+    // over a uid lookup; only uid-bound pointers hit the device buffer map.
+    const std::vector<KernelArgument> signature{
+        makePointer("sink_ptr"), makePointer("block_tables_ptr"), makePointer("query_ptr")};
+    std::byte slot{};
+    void* const qPtr = &slot;
+    const std::unordered_map<std::int64_t, void*> ptrs{{9, qPtr}};
+
+    LaunchBindings bindings;
+    bindings.pointerValues = {{"sink_ptr", 0}, {"block_tables_ptr", 0xABCD}};
+    bindings.pointerUids = {{"query_ptr", 9}};
+
+    const auto values = bindArgs(signature, bindings, ptrs);
+    EXPECT_EQ(std::get<std::uint64_t>(values.at("sink_ptr")), 0u);
+    EXPECT_EQ(std::get<std::uint64_t>(values.at("block_tables_ptr")), 0xABCDu);
+    EXPECT_EQ(std::get<std::uint64_t>(values.at("query_ptr")),
+              static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(qPtr)));
 }
 
 TEST(TestLaunchAbi, BindArgsRejectsUnboundPointer)

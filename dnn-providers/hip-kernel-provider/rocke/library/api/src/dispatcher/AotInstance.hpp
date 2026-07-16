@@ -66,8 +66,10 @@ struct BatchRange
 };
 
 // The exact kernel build parameters (aot_list.json "compile_spec"). The shape
-// fields are matched exactly against a runtime problem; block_size_{q,k} are
-// kernel-internal tiling and are NOT part of selection (kept for completeness).
+// fields are matched exactly against a runtime problem; block_size is the
+// paged-KV tiling granularity and sliding_window is the attention window, both
+// kernel-internal and NOT part of selection (block_size is consumed by the
+// launch path to synthesize the paged-KV block_tables/strides).
 struct CompileSpec
 {
     std::string dtype; // I/O element type (Q/K/V/O), e.g. "fp16". Compute/
@@ -79,8 +81,8 @@ struct CompileSpec
     std::int64_t numQueryHeads = 0;
     std::int64_t numKvHeads = 0;
     std::int64_t headSize = 0;
-    std::int64_t blockSizeQ = 0; // kernel tiling; unused for selection
-    std::int64_t blockSizeK = 0; // kernel tiling; unused for selection
+    std::int64_t blockSize = 0; // paged-KV tiling granularity; drives block_tables
+    std::int64_t slidingWindow = 0; // attention window (0 = dense)
     std::string maskMode; // e.g. "none"
 };
 
@@ -98,13 +100,17 @@ struct GridAxis
     enum class Kind
     {
         VALUE,
-        CEIL_DIV
+        CEIL_DIV,
+        FLOOR_DIV
     };
 
     Kind kind = Kind::VALUE;
-    GridValue value;
-    GridValue numerator;
-    GridValue denominator;
+    GridValue value; // Kind::VALUE
+    GridValue numerator; // Kind::CEIL_DIV / Kind::FLOOR_DIV
+    GridValue denominator; // Kind::CEIL_DIV / Kind::FLOOR_DIV
+    // Optional "add" term applied to the axis base for every kind (the unified
+    // attention grid uses floor_div(total_q, block_q) + num_seqs on the y axis).
+    std::optional<GridValue> addend;
 };
 
 struct GridFormula
@@ -168,12 +174,17 @@ using ScalarValue = std::variant<std::uint64_t, std::int64_t, float>;
 // Op-agnostic launch bindings: the concrete per-launch values an op adapter
 // derives from the graph, keyed by the argument names the kernel's ABI
 // (args_signature) already declares. launch::bindArgs() resolves each signature
-// argument through this table -- pointerUids[name] -> tensor uid (turned into a
-// device address at launch), scalars[name] -> packed scalar. A signature name
-// absent here is a fail-closed error, so no launch runs with a wrong buffer.
+// pointer through one of two maps: pointerUids[name] -> graph tensor uid (turned
+// into a device address via the variant-pack buffer map at launch), or
+// pointerValues[name] -> a raw device address the plan already holds (a null
+// pointer for an unused optional tensor, or a small buffer the plan allocates
+// itself such as the paged-KV block_tables/seq_lens/query_start_len). scalars[name]
+// -> packed scalar. A signature name absent from every map is a fail-closed error,
+// so no launch runs with a wrong buffer.
 struct LaunchBindings
 {
     std::unordered_map<std::string, std::int64_t> pointerUids;
+    std::unordered_map<std::string, std::uint64_t> pointerValues;
     std::unordered_map<std::string, ScalarValue> scalars;
 };
 
@@ -201,7 +212,7 @@ struct AotInstance
 {
     std::string name; // unique within a catalog
     std::string op; // "sdpa_fwd"
-    std::string family; // "fmha_fwd_mfma"
+    std::string family; // "attention_tiled_2d"
     std::string arch; // "gfx942"
     CompileSpec compileSpec;
     BatchRange batch;

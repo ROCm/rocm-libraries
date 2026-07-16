@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <numbers>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -46,8 +45,8 @@ bool isRank4(const TensorAttributes* tensor)
            && tensor->strides() != nullptr && tensor->strides()->size() == RANK;
 }
 
-// Provider-facing dtype spelling for the rocKE FMHA-fwd-MFMA family (matches
-// PR #8866 compile_spec.dtype). Only the family's supported float types map; any
+// Provider-facing dtype spelling for the rocKE unified attention 2D-tiled family
+// (matches compile_spec.dtype). Only the family's supported float types map; any
 // other type returns "" so the caller declines the graph.
 const char* providerDtype(DataType type)
 {
@@ -67,7 +66,7 @@ const char* providerDtype(DataType type)
 // TensorLayout::OTHER (and therefore decline against a BSHD instance).
 //
 // TODO(AICK-1484): confirm whether real hipDNN SDPA graphs arrive as BSHD or BHSD
-// physical and whether the rocKE FMHA MFMA family requires a transpose; the
+// physical and whether the unified attention 2D-tiled family requires a transpose; the
 // canonical_layout "BSHD" convention must be reconciled with the graph
 // contract before this drives production accept/reject.
 TensorLayout inferLayout(const flatbuffers::Vector<std::int64_t>& dims,
@@ -95,7 +94,7 @@ TensorLayout inferLayout(const flatbuffers::Vector<std::int64_t>& dims,
     return TensorLayout::OTHER;
 }
 
-// True when the graph requests any SDPA feature the FMHA-fwd-MFMA family cannot
+// True when the graph requests any SDPA feature the unified attention 2D-tiled family cannot
 // serve today AND that has no representation in the selection contract (no
 // compile_spec/attribute_constraint field). Such a graph must be declined at
 // translate time: capturing it would normalize to a plain-SDPA problem and let
@@ -222,7 +221,7 @@ std::optional<SdpaProblem> translate(const fb::IGraph& graph)
         return std::nullopt; // outside the fp16/bf16 family
     }
 
-    // Accumulation/compute precision. The fmha_fwd_mfma family accumulates in
+    // Accumulation/compute precision. The unified attention 2D-tiled family accumulates in
     // fp32, so the I/O dtype above is the only variable type key. compute_data_type
     // (the node's logical accumulation dtype) must be fp32, declared explicitly;
     // UNSET (unspecified) is not accepted.
@@ -231,7 +230,7 @@ std::optional<SdpaProblem> translate(const fb::IGraph& graph)
         return std::nullopt;
     }
     // mma_core_mode is an optional SDPA matrix-core operand-precision override. It
-    // has no axis in the AOT selection contract and no consumer in the fmha_fwd_mfma
+    // has no axis in the AOT selection contract and no consumer in the unified attention
     // family today, so decline any explicit value; only the unspecified default is
     // served.
     if(attrs.mma_core_mode() != DataType::UNSET)
@@ -358,34 +357,35 @@ std::optional<SdpaLaunchInputs> buildSdpaLaunchInputs(const fb::IGraph& graph)
 
     // Every key MUST match the kernel ABI argument name the AOT packer emits into
     // args_signature (rocke_client_<arch>.json); launch::bindArgs looks each up by
-    // name and fails closed on a mismatch.
+    // name and fails closed on a mismatch. The unified attention kernel takes a
+    // paged-KV ABI: Q/K/V/O are graph tensors (resolved through the variant-pack
+    // buffer map), the unused optional tensors (sink/alibi/qq_bias) are null, and
+    // the paged-cache index buffers (block_tables/seq_lens/query_start_len) plus
+    // block_table_stride are synthesized by RockeClientPlan (they need the device).
     SdpaLaunchInputs inputs;
     LaunchBindings& b = inputs.bindings;
-    b.pointerUids = {{"Q", attrs.q_tensor_uid()},
-                     {"K", attrs.k_tensor_uid()},
-                     {"V", attrs.v_tensor_uid()},
-                     {"O", attrs.o_tensor_uid()}};
+    b.pointerUids = {{"output_ptr", attrs.o_tensor_uid()},
+                     {"query_ptr", attrs.q_tensor_uid()},
+                     {"key_cache_ptr", attrs.k_tensor_uid()},
+                     {"value_cache_ptr", attrs.v_tensor_uid()}};
+    // Optional feature tensors this dense path never uses: bind a null device
+    // pointer so the kernel's readonly params resolve to address 0.
+    b.pointerValues = {{"sink_ptr", 0}, {"alibi_slopes_ptr", 0}, {"qq_bias_ptr", 0}};
 
-    // scale_log2 = (1/sqrt(head_size)) * log2(e): the family's default_1_over_sqrt_d
-    // scale, converted into the log2 domain the kernel's exp2-based softmax expects.
-    // Must stay byte-equal to the numeric oracle aot/tests/sdpa_aot_numeric.py
-    // (`1.0 / math.sqrt(head_size) * math.log2(math.e)`).
-    b.scalars.emplace("scale_log2",
-                      static_cast<float>(1.0 / std::sqrt(static_cast<double>(problem->headSize))
-                                         * std::numbers::log2e));
-    b.scalars.emplace("seqlen_q", static_cast<std::int64_t>(problem->seqlenQ));
-    b.scalars.emplace("seqlen_k", static_cast<std::int64_t>(problem->seqlenK));
-    // Dims are [B, H, S, D]: the token (seqlen) axis is dim 2, the head axis dim 1.
-    // Reading the tensor's own strides keeps the launch correct for any packing
-    // selection accepted (BSHD today), rather than assuming one and re-deriving.
-    b.scalars.emplace("stride_q_token", static_cast<std::int64_t>(q->strides()->Get(2)));
-    b.scalars.emplace("stride_q_head", static_cast<std::int64_t>(q->strides()->Get(1)));
-    b.scalars.emplace("stride_k_token", static_cast<std::int64_t>(k->strides()->Get(2)));
-    b.scalars.emplace("stride_k_head", static_cast<std::int64_t>(k->strides()->Get(1)));
-    b.scalars.emplace("stride_v_token", static_cast<std::int64_t>(v->strides()->Get(2)));
-    b.scalars.emplace("stride_v_head", static_cast<std::int64_t>(v->strides()->Get(1)));
-    b.scalars.emplace("stride_o_token", static_cast<std::int64_t>(o->strides()->Get(2)));
-    b.scalars.emplace("stride_o_head", static_cast<std::int64_t>(o->strides()->Get(1)));
+    // Linear softmax scale = 1/sqrt(head_size). The kernel converts to the log2
+    // domain itself (qk_scale = scale * log2(e) in attention_tiled_2d), so unlike
+    // an exp2-domain ABI this passes the raw linear scale. Must stay byte-equal to
+    // the numeric oracle aot/tests/sdpa_aot_numeric.py (`1.0 / math.sqrt(head_size)`).
+    b.scalars.emplace("scale",
+                      static_cast<float>(1.0 / std::sqrt(static_cast<double>(problem->headSize))));
+    // Dense fp16 has no KV/output requantization; the paging is unfused so no
+    // softcap. num_seqs is the runtime batch the batch-agnostic binary search walks.
+    b.scalars.emplace("k_scale", 1.0F);
+    b.scalars.emplace("v_scale", 1.0F);
+    b.scalars.emplace("out_scale", 1.0F);
+    b.scalars.emplace("softcap", 0.0F);
+    b.scalars.emplace("num_seqs", static_cast<std::int64_t>(problem->batch));
+    b.scalars.emplace("qq_bias_stride_0", static_cast<std::int64_t>(0));
 
     inputs.batch = problem->batch;
     return inputs;
@@ -394,14 +394,27 @@ std::optional<SdpaLaunchInputs> buildSdpaLaunchInputs(const fb::IGraph& graph)
 std::unordered_map<std::string, std::int64_t> sdpaGridSymbols(const CompileSpec& spec,
                                                               std::int64_t batch)
 {
+    // block_q is the number of query token positions a single query block covers.
+    // For the pinned unified-attention defaults the tiling is baked: num_warps=1
+    // and block_m_per_warp=16 give block_m = 16 query rows per block, and each row
+    // packs num_query_heads/num_kv_heads query heads onto one kv head. So a 16-row
+    // block spans block_q = block_m / (num_query_heads / num_kv_heads) positions
+    // (16 for MHA, 4 for the hq8/hkv2 GQA instance). block_m is exposed alongside
+    // for the grid formula's readability.
+    constexpr std::int64_t blockM = 16; // num_warps=1 * block_m_per_warp=16
+    const std::int64_t queriesPerKv
+        = spec.numKvHeads > 0 ? spec.numQueryHeads / spec.numKvHeads : 1;
+    const std::int64_t blockQ = queriesPerKv > 0 ? blockM / queriesPerKv : blockM;
     return {{"batch", batch},
             {"seqlen_q", spec.seqlenQ},
             {"seqlen_k", spec.seqlenK},
             {"num_query_heads", spec.numQueryHeads},
             {"num_kv_heads", spec.numKvHeads},
             {"head_size", spec.headSize},
-            {"block_size_q", spec.blockSizeQ},
-            {"block_size_k", spec.blockSizeK}};
+            {"total_q", batch * spec.seqlenQ},
+            {"num_seqs", batch},
+            {"block_m", blockM},
+            {"block_q", blockQ}};
 }
 
 } // namespace rocke_client::dispatcher

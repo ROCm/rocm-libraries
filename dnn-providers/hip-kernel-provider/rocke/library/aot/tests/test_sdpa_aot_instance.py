@@ -30,11 +30,13 @@ from rocke_client_aot.json_schema import (
 AOT_DIR = Path(__file__).resolve().parents[1]
 LIBRARY_DIR = AOT_DIR.parent
 KERNELS_DIR = LIBRARY_DIR / "kernels"
-HANDLER = KERNELS_DIR / "common" / "fmha_mfma_aot.py"
-SCHEMA_DIR = AOT_DIR / "schemas" / "fmha_fwd_mfma"
+HANDLER = KERNELS_DIR / "common" / "attention_tiled_2d_aot.py"
+SCHEMA_DIR = AOT_DIR / "schemas" / "attention_tiled_2d"
 TOOLS_DIR = AOT_DIR / "tools"
 
-EXPECTED_BASENAME = "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d64_none"
+EXPECTED_BASENAME = (
+    "sdpa_fwd_attention_tiled_2d_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d64_none"
+)
 EXPECTED_COMPILE_SPEC = {
     "dtype": "fp16",
     "canonical_layout": "BSHD",
@@ -43,8 +45,8 @@ EXPECTED_COMPILE_SPEC = {
     "num_query_heads": 4,
     "num_kv_heads": 4,
     "head_size": 64,
-    "block_size_q": 16,
-    "block_size_k": 64,
+    "block_size": 16,
+    "sliding_window": 0,
     "mask_mode": "none",
 }
 EXPECTED_ATTRIBUTE_CONSTRAINTS = {
@@ -66,15 +68,15 @@ EXPECTED_GQA_COMPILE_SPEC = {
 # key on parsed[0]), then d128, then the GQA (hq8/hkv2) instance.
 EXPECTED_INSTANCES = [
     (
-        "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d64_none",
+        "sdpa_fwd_attention_tiled_2d_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d64_none",
         EXPECTED_COMPILE_SPEC,
     ),
     (
-        "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d128_none",
+        "sdpa_fwd_attention_tiled_2d_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d128_none",
         EXPECTED_D128_COMPILE_SPEC,
     ),
     (
-        "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq8_hkv2_d64_none",
+        "sdpa_fwd_attention_tiled_2d_fp16_bshd_{arch}_q64_k64_hq8_hkv2_d64_none",
         EXPECTED_GQA_COMPILE_SPEC,
     ),
 ]
@@ -93,7 +95,7 @@ def _write_json(path: Path, data: Any) -> None:
 
 
 def _aot_list_path(arch: str) -> Path:
-    return KERNELS_DIR / arch / "fmha_fwd_mfma" / "aot_list.json"
+    return KERNELS_DIR / arch / "attention_tiled_2d" / "aot_list.json"
 
 
 def _copy_list(dst_dir: Path, arch: str) -> Path:
@@ -144,32 +146,44 @@ def _load_sdpa_schema(name: str) -> tuple[dict, Path]:
 
 
 def _eval_grid_formula(formula: dict, *, batch: int, instance: dict) -> list[int]:
-    values = {**instance["compile_spec"], "batch": batch}
+    compile_spec = instance["compile_spec"]
+    num_queries_per_kv = compile_spec["num_query_heads"] // compile_spec["num_kv_heads"]
+    values = {
+        **compile_spec,
+        "batch": batch,
+        "total_q": batch * compile_spec["seqlen_q"],
+        "num_seqs": batch,
+        "block_q": 16 // num_queries_per_kv,
+    }
 
     def eval_axis(axis):
         if isinstance(axis, int):
             return axis
         if isinstance(axis, str):
             return int(values[axis])
-        if isinstance(axis, dict) and "ceil_div" in axis:
-            numerator, denominator = axis["ceil_div"]
+        if isinstance(axis, dict) and "floor_div" in axis:
+            numerator, denominator = axis["floor_div"]
             n = int(values[numerator] if isinstance(numerator, str) else numerator)
             d = int(
                 values[denominator] if isinstance(denominator, str) else denominator
             )
-            return (n + d - 1) // d
+            result = n // d
+            if "add" in axis:
+                addend = axis["add"]
+                result += int(values[addend] if isinstance(addend, str) else addend)
+            return result
         raise AssertionError(f"unsupported grid formula axis: {axis!r}")
 
     return [eval_axis(formula[axis]) for axis in ("x", "y", "z")]
 
 
-@pytest.mark.parametrize("arch", ["gfx1151", "gfx942", "gfx950"])
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_checked_in_sdpa_instance_parses_and_name_is_deterministic(arch):
     expected_name = EXPECTED_BASENAME.format(arch=arch)
     list_path = _aot_list_path(arch)
 
     assert list_path.name == "aot_list.json"
-    assert list_path.parent.name == "fmha_fwd_mfma"
+    assert list_path.parent.name == "attention_tiled_2d"
     assert list_path.parent.parent.name == arch
 
     parsed = parse_instance_list(list_path, handler_path=HANDLER)
@@ -188,10 +202,10 @@ def test_checked_in_sdpa_instance_parses_and_name_is_deterministic(arch):
         assert data["schema"] == "rocke.aot.instance/v1"
         assert data["name"] == basename.format(arch=arch)
         assert data["op"] == "sdpa_fwd"
-        assert data["family"] == "fmha_fwd_mfma"
+        assert data["family"] == "attention_tiled_2d"
         assert data["arch"] == arch
         assert data["compile_spec"] == compile_spec
-        assert data["selection"]["batch"] == {"min": 1, "max": 64}
+        assert data["selection"]["batch"] == {"min": 1, "max": 65536}
         assert (
             data["selection"]["attribute_constraints"] == EXPECTED_ATTRIBUTE_CONSTRAINTS
         )
@@ -201,12 +215,14 @@ def test_checked_in_sdpa_instance_parses_and_name_is_deterministic(arch):
         assert entry.test_profiles == data["test_profiles"]
 
 
-@pytest.mark.parametrize("arch", ["gfx1151", "gfx942", "gfx950"])
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_added_instances_present_beyond_baseline(arch):
     instances = _read_json(_aot_list_path(arch))
     specs = {inst["name"]: inst["compile_spec"] for inst in instances}
-    d128_name = f"sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d128_none"
-    gqa_name = f"sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq8_hkv2_d64_none"
+    d128_name = (
+        f"sdpa_fwd_attention_tiled_2d_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d128_none"
+    )
+    gqa_name = f"sdpa_fwd_attention_tiled_2d_fp16_bshd_{arch}_q64_k64_hq8_hkv2_d64_none"
     assert d128_name in specs
     assert gqa_name in specs
     assert specs[d128_name]["head_size"] == 128
@@ -216,7 +232,7 @@ def test_added_instances_present_beyond_baseline(arch):
     )
 
 
-@pytest.mark.parametrize("arch", ["gfx1151", "gfx942", "gfx950"])
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_checked_in_sdpa_instance_matches_json_schema(arch):
     schema, schema_path = _load_sdpa_schema("instance.schema.json")
 
@@ -226,7 +242,7 @@ def test_checked_in_sdpa_instance_matches_json_schema(arch):
 
 @pytest.mark.parametrize("alias", ["fp16", "f16", "half"])
 def test_dtype_aliases_normalize_to_external_fp16(tmp_path, alias):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instances = _read_json(list_path)
     instances[0]["compile_spec"]["dtype"] = alias
     _write_json(list_path, instances)
@@ -268,7 +284,7 @@ def test_attribute_constraints_match_checked_in_sidecar_selection():
     ],
 )
 def test_schema_op_and_family_rejections(tmp_path, mutate):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instances = _read_json(list_path)
     mutate(instances[0])
     _write_json(list_path, instances)
@@ -278,7 +294,7 @@ def test_schema_op_and_family_rejections(tmp_path, mutate):
 
 
 def test_invalid_shape_rejected_during_instance_parsing(tmp_path):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instances = _read_json(list_path)
     instances[0]["compile_spec"]["seqlen_q"] = 63
     _write_json(list_path, instances)
@@ -293,21 +309,19 @@ def test_invalid_shape_rejected_during_instance_parsing(tmp_path):
         (lambda spec: spec.__setitem__("dtype", "bf16"), "unsupported dtype"),
         (lambda spec: spec.__setitem__("canonical_layout", "BHSD"), "canonical_layout"),
         (lambda spec: spec.__setitem__("mask_mode", "causal"), "mask_mode"),
-        (lambda spec: spec.__setitem__("block_size_q", 0), "block_size_q"),
-        (lambda spec: spec.__setitem__("block_size_q", 32), "must be 16"),
         (lambda spec: spec.__setitem__("seqlen_k", 63), "seqlen_k"),
-        (lambda spec: spec.__setitem__("head_size", 96), "head_size"),
+        (lambda spec: spec.__setitem__("head_size", 96), "must be one of"),
         (
             lambda spec: (
                 spec.__setitem__("num_query_heads", 3),
                 spec.__setitem__("num_kv_heads", 2),
             ),
-            "num_query_heads",
+            "must be divisible by",
         ),
     ],
 )
 def test_invalid_compile_spec_fields_are_rejected(tmp_path, mutate, message):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instances = _read_json(list_path)
     mutate(instances[0]["compile_spec"])
     _write_json(list_path, instances)
@@ -317,13 +331,13 @@ def test_invalid_compile_spec_fields_are_rejected(tmp_path, mutate, message):
 
 
 def test_parse_instance_rejects_arch_invalid_spec(tmp_path, monkeypatch):
-    import kernels.common.fmha_mfma as fmha_mfma
+    import kernels.gfx942.attention_tiled_2d as attn2d
 
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     monkeypatch.setattr(
-        fmha_mfma,
-        "is_valid_spec",
-        lambda _spec, _arch: (False, "unit-test rejection"),
+        attn2d,
+        "supports_tiled_2d",
+        lambda **_kwargs: (False, "unit-test rejection"),
     )
 
     with pytest.raises(InstanceError, match="unit-test rejection"):
@@ -331,25 +345,25 @@ def test_parse_instance_rejects_arch_invalid_spec(tmp_path, monkeypatch):
 
 
 def test_instance_name_must_match_compile_spec(tmp_path):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instances = _read_json(list_path)
     instances[0]["compile_spec"]["head_size"] = 128
     _write_json(list_path, instances)
 
-    with pytest.raises(InstanceError, match="SDPA FMHA MFMA basename"):
+    with pytest.raises(InstanceError, match="unified attention 2D basename"):
         parse_instance_list(list_path, handler_path=HANDLER)
 
 
 @pytest.mark.parametrize(
     ("arch", "expected_block"),
-    [("gfx1151", [32, 1, 1]), ("gfx942", [64, 1, 1]), ("gfx950", [64, 1, 1])],
+    [("gfx942", [64, 1, 1]), ("gfx950", [64, 1, 1])],
 )
 def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_block):
     parsed = parse_instance_list(_aot_list_path(arch), handler_path=HANDLER)[0]
     hsaco_bytes = b"not-a-real-hsaco-for-sidecar-unit-tests"
     hsaco_filename = f"{parsed.data['name']}.hsaco"
     artifact = types.SimpleNamespace(
-        kernel_name="rocke_fmha_fwd_mfma_unit_test",
+        kernel_name="rocke_uattn2d_tiled_unit_test",
         hsaco=hsaco_bytes,
         hsaco_bytes=len(hsaco_bytes),
         timings={},
@@ -370,11 +384,13 @@ def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_bloc
     }
     assert sidecar["schema"] == "rocke.aot.sidecar/v1"
     assert sidecar["cache_key"].startswith(
-        "sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:"
+        "sdpa_fwd:attention_tiled_2d:attention_tiled_2d:"
+        "unified_attention_2d_tiled:fp16_bshd_d64_b16_h4kv4:"
+        f"{arch}:"
     )
-    assert ":hipkg-sdpa-fwd-fmha-mfma/v1:" in sidecar["cache_key"]
+    assert ":hipkg-attention-unified/v1:" in sidecar["cache_key"]
     assert sidecar["artifact"]["hsaco_filename"] == hsaco_filename
-    assert sidecar["artifact"]["symbol"] == "rocke_fmha_fwd_mfma_unit_test"
+    assert sidecar["artifact"]["symbol"] == "rocke_uattn2d_tiled_unit_test"
     assert (
         sidecar["artifact"]["hsaco_sha256"] == hashlib.sha256(hsaco_bytes).hexdigest()
     )
@@ -392,23 +408,66 @@ def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_bloc
     }
     assert _eval_grid_formula(
         sidecar["launch"]["grid_formula"], batch=2, instance=parsed.data
-    ) == [4, 4, 2]
+    ) == [4, 10, 1]
     assert sidecar["launch"]["block"] == expected_block
     assert sidecar["launch"]["tile_sizes"]["block_q"] == 16
 
     signature = sidecar["args_signature"]
-    assert [arg["name"] for arg in signature[:4]] == ["Q", "K", "V", "O"]
+    assert [arg["name"] for arg in signature] == [
+        "output_ptr",
+        "query_ptr",
+        "key_cache_ptr",
+        "value_cache_ptr",
+        "sink_ptr",
+        "block_tables_ptr",
+        "seq_lens_ptr",
+        "alibi_slopes_ptr",
+        "qq_bias_ptr",
+        "query_start_len_ptr",
+        "scale",
+        "k_scale",
+        "v_scale",
+        "out_scale",
+        "softcap",
+        "num_seqs",
+        "block_table_stride",
+        "qq_bias_stride_0",
+    ]
+    f16_pointers = {
+        "output_ptr",
+        "query_ptr",
+        "key_cache_ptr",
+        "value_cache_ptr",
+        "sink_ptr",
+    }
+    i32_pointers = {"block_tables_ptr", "seq_lens_ptr", "query_start_len_ptr"}
+    f32_pointers = {"alibi_slopes_ptr", "qq_bias_ptr"}
     pointer_args = [arg for arg in signature if arg["kind"] == "pointer"]
-    assert pointer_args
-    assert all(arg["type"] == "ptr<f16, global>" for arg in pointer_args)
+    assert len(pointer_args) == 10
     assert all(arg["size_bytes"] == 8 and arg["alignment"] == 8 for arg in pointer_args)
+    for arg in pointer_args:
+        if arg["name"] in f16_pointers:
+            assert arg["type"] == "ptr<f16, global>"
+        elif arg["name"] in i32_pointers:
+            assert arg["type"] == "ptr<i32, global>"
+        else:
+            assert arg["name"] in f32_pointers
+            assert arg["type"] == "ptr<f32, global>"
+    f32_scalars = {"scale", "k_scale", "v_scale", "out_scale", "softcap"}
+    i32_scalars = {"num_seqs", "block_table_stride", "qq_bias_stride_0"}
     scalar_args = [arg for arg in signature if arg["kind"] == "scalar"]
-    assert scalar_args
+    assert len(scalar_args) == 8
     assert all(arg["size_bytes"] == 4 and arg["alignment"] == 4 for arg in scalar_args)
+    for arg in scalar_args:
+        if arg["name"] in f32_scalars:
+            assert arg["type"] == "f32"
+        else:
+            assert arg["name"] in i32_scalars
+            assert arg["type"] == "i32"
 
 
 def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypatch):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instance_data = _read_json(list_path)[0]
     build_module = _load_tool("rocke_aot_build")
     calls = []
@@ -417,21 +476,21 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
 
     def fake_build_kernel(spec, *, arch):
         assert spec is fake_spec
-        assert arch == "gfx1151"
+        assert arch == "gfx942"
         return types.SimpleNamespace(name="fake_kernel")
 
     def fake_emit_sidecar(instance, spec, artifact, hsaco_filename):
         assert getattr(instance, "data", instance) == instance_data
         assert spec is fake_spec
-        assert artifact.kernel_name == "rocke_fmha_fwd_mfma_fake_kernel"
+        assert artifact.kernel_name == "rocke_uattn2d_tiled_fake_kernel"
         assert hsaco_filename == f"{instance_data['name']}.hsaco"
         digest = "0" * 64
         return {
             "schema": "rocke.aot.sidecar/v1",
             "cache_key": (
-                "sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:"
-                "fp16_bshd_blockq16_blockk64:gfx1151:"
-                "hipkg-sdpa-fwd-fmha-mfma/v1:"
+                "sdpa_fwd:attention_tiled_2d:attention_tiled_2d:"
+                "unified_attention_2d_tiled:fp16_bshd_d64_b16_h4kv4:gfx942:"
+                "hipkg-attention-unified/v1:"
                 f"{digest}:{digest}"
             ),
             "artifact": {
@@ -442,7 +501,7 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
             },
             "selection": {
                 "op": "sdpa_fwd",
-                "arch": "gfx1151",
+                "arch": "gfx942",
                 "dtypes": {
                     "q": "fp16",
                     "k": "fp16",
@@ -452,7 +511,7 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
                 },
                 "canonical_layout": "BSHD",
                 "shape_constraints": {
-                    "batch": {"min": 1, "max": 64},
+                    "batch": {"min": 1, "max": 65536},
                     "seqlen_q": {"equals": 64, "multiple_of": 16},
                     "seqlen_k": {"equals": 64, "multiple_of": 16},
                     "num_query_heads": {"equals": 4},
@@ -464,21 +523,23 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
             "launch": {
                 "shared_mem_bytes": 0,
                 "grid_formula": {
-                    "x": {"ceil_div": ["seqlen_q", 16]},
-                    "y": "num_query_heads",
-                    "z": "batch",
+                    "x": "num_kv_heads",
+                    "y": {"floor_div": ["total_q", "block_q"], "add": "num_seqs"},
+                    "z": 1,
                 },
-                "block": [32, 1, 1],
+                "block": [64, 1, 1],
                 "tile_sizes": {
-                    "block_q": 16,
-                    "block_k": 64,
+                    "block_size": 16,
                     "head_size": 64,
-                    "wave_size": 32,
+                    "tile_size": 16,
+                    "block_m": 16,
+                    "block_q": 16,
+                    "wave_size": 64,
                 },
             },
             "args_signature": [
                 {
-                    "name": "Q",
+                    "name": "output_ptr",
                     "type": "ptr<f16, global>",
                     "kind": "pointer",
                     "size_bytes": 8,
@@ -504,18 +565,18 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
     def fake_parse_instance_list(path, *, handler_path=None, expected_arch=None):
         assert Path(path) == list_path
         assert Path(handler_path) == HANDLER
-        assert expected_arch == "gfx1151"
+        assert expected_arch == "gfx942"
         return [fake_parsed]
 
     def fake_compile_kernel(kernel, **kwargs):
         calls.append(kwargs)
         assert kernel.name == "fake_kernel"
         return types.SimpleNamespace(
-            kernel_name="rocke_fmha_fwd_mfma_fake_kernel",
+            kernel_name="rocke_uattn2d_tiled_fake_kernel",
             hsaco=b"fake-hsaco",
             hsaco_bytes=len(b"fake-hsaco"),
             timings={},
-            isa="amdgcn-amd-amdhsa--gfx1151",
+            isa="amdgcn-amd-amdhsa--gfx942",
         )
 
     monkeypatch.setattr(
@@ -535,14 +596,14 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
                 "--schema-dir",
                 str(SCHEMA_DIR),
                 "--arch",
-                "gfx1151",
+                "gfx942",
             ]
         )
         == 0
     )
 
     assert calls
-    assert calls[0]["arch"] == "gfx1151"
+    assert calls[0]["arch"] == "gfx942"
     assert calls[0]["backend"] == "python"
     assert calls[0]["capture_ir_text"] is False
     hsaco_path = tmp_path / f"{instance_data['name']}.hsaco"
@@ -561,14 +622,14 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
 def test_build_one_cleans_artifacts_when_sidecar_fails(
     tmp_path, monkeypatch, failure_mode, expected_error
 ):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instance_data = _read_json(list_path)[0]
     build_module = _load_tool("rocke_aot_build")
     fake_spec = object()
 
     def fake_build_kernel(spec, *, arch):
         assert spec is fake_spec
-        assert arch == "gfx1151"
+        assert arch == "gfx942"
         return types.SimpleNamespace(name="fake_kernel")
 
     def fake_emit_sidecar(_instance, _spec, _artifact, _hsaco_filename):
@@ -589,11 +650,11 @@ def test_build_one_cleans_artifacts_when_sidecar_fails(
         build_module,
         "compile_kernel",
         lambda *_args, **_kwargs: types.SimpleNamespace(
-            kernel_name="rocke_fmha_fwd_mfma_fake_kernel",
+            kernel_name="rocke_uattn2d_tiled_fake_kernel",
             hsaco=b"partial-hsaco",
             hsaco_bytes=len(b"partial-hsaco"),
             timings={},
-            isa="amdgcn-amd-amdhsa--gfx1151",
+            isa="amdgcn-amd-amdhsa--gfx942",
         ),
     )
 
@@ -627,10 +688,10 @@ def test_build_module_internal_fallbacks_and_stale_cleanup(tmp_path):
 
     fallback_spec = object()
     assert (
-        build_module._parsed_spec(types.SimpleNamespace(fmha_spec=fallback_spec))
+        build_module._parsed_spec(types.SimpleNamespace(spec=fallback_spec))
         is fallback_spec
     )
-    with pytest.raises(TypeError, match="spec or fmha_spec"):
+    with pytest.raises(TypeError, match="must expose spec"):
         build_module._parsed_spec(object())
 
     stale_hsaco = tmp_path / "old.hsaco"
@@ -686,7 +747,7 @@ def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypa
             "--schema-dir",
             str(SCHEMA_DIR),
             "--arch",
-            "gfx1151",
+            "gfx942",
         ]
     )
     assert result == 1
@@ -702,13 +763,13 @@ def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypa
             "--handler",
             str(missing_handler),
             "--arch",
-            "gfx1151",
+            "gfx942",
         ]
     )
     assert result == 1
     assert "handler module does not exist" in capsys.readouterr().err
 
-    _copy_list(artifact_dir, "gfx1151")
+    _copy_list(artifact_dir, "gfx942")
     monkeypatch.setattr(
         build_module,
         "_schema_path",
@@ -723,7 +784,7 @@ def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypa
             "--schema-dir",
             str(SCHEMA_DIR),
             "--arch",
-            "gfx1151",
+            "gfx942",
         ]
     )
     assert result == 1
@@ -739,7 +800,7 @@ def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypa
 )
 def test_build_one_requires_parsed_name_and_arch(tmp_path, field, value, message):
     build_module = _load_tool("rocke_aot_build")
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instance_data = _read_json(list_path)[0]
     instance_data[field] = value
 
@@ -760,7 +821,7 @@ def test_build_one_requires_parsed_name_and_arch(tmp_path, field, value, message
 def test_build_cli_validates_instance_schema_before_parse(
     tmp_path, monkeypatch, capsys
 ):
-    list_path = _copy_list(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx942")
     instances = _read_json(list_path)
     instances[0]["extra"] = True
     _write_json(list_path, instances)
@@ -782,7 +843,7 @@ def test_build_cli_validates_instance_schema_before_parse(
             "--schema-dir",
             str(SCHEMA_DIR),
             "--arch",
-            "gfx1151",
+            "gfx942",
         ]
     )
 
@@ -791,13 +852,13 @@ def test_build_cli_validates_instance_schema_before_parse(
 
 
 def test_sidecar_accepts_instance_mapping_and_instance_attr_fallback():
-    parsed = parse_instance_list(_aot_list_path("gfx1151"), handler_path=HANDLER)[0]
+    parsed = parse_instance_list(_aot_list_path("gfx942"), handler_path=HANDLER)[0]
     artifact = types.SimpleNamespace(
-        kernel_name="rocke_fmha_fwd_mfma_unit_test",
+        kernel_name="rocke_uattn2d_tiled_unit_test",
         hsaco=b"hsaco",
         hsaco_bytes=len(b"hsaco"),
         timings={},
-        isa="amdgcn-amd-amdhsa--gfx1151",
+        isa="amdgcn-amd-amdhsa--gfx942",
     )
 
     direct = parsed.actions.emit_sidecar(
@@ -814,15 +875,15 @@ def test_sidecar_accepts_instance_mapping_and_instance_attr_fallback():
 
 
 def test_sidecar_rejects_unsupported_kernel_id():
-    parsed = parse_instance_list(_aot_list_path("gfx1151"), handler_path=HANDLER)[0]
+    parsed = parse_instance_list(_aot_list_path("gfx942"), handler_path=HANDLER)[0]
     data = dict(parsed.data)
     data["op"] = "gemm"
     artifact = types.SimpleNamespace(
-        kernel_name="rocke_fmha_fwd_mfma_unit_test",
+        kernel_name="rocke_uattn2d_tiled_unit_test",
         hsaco=b"hsaco",
         hsaco_bytes=len(b"hsaco"),
         timings={},
-        isa="amdgcn-amd-amdhsa--gfx1151",
+        isa="amdgcn-amd-amdhsa--gfx942",
     )
 
     with pytest.raises(ValueError, match="unsupported sidecar kernel id"):
@@ -835,37 +896,39 @@ def test_sidecar_rejects_unsupported_kernel_id():
     ("signature", "message"),
     [
         ([{"name": 1, "type": "i32"}], "string name and type"),
-        ([{"name": "Q", "type": "i64"}], "unsupported scalar ABI type"),
+        ([{"name": "output_ptr", "type": "i64"}], "unsupported scalar ABI type"),
         (
             [
-                {"name": "A", "type": "ptr<f16, global>"},
-                {"name": "K", "type": "ptr<f16, global>"},
-                {"name": "V", "type": "ptr<f16, global>"},
-                {"name": "O", "type": "ptr<f16, global>"},
+                {"name": "wrong_ptr", "type": "ptr<f16, global>"},
+                {"name": "query_ptr", "type": "ptr<f16, global>"},
+                {"name": "key_cache_ptr", "type": "ptr<f16, global>"},
+                {"name": "value_cache_ptr", "type": "ptr<f16, global>"},
             ],
-            "must start with Q/K/V/O",
+            "must start with",
         ),
         (
             [
-                {"name": "Q", "type": "ptr<i32, global>"},
-                {"name": "K", "type": "ptr<f16, global>"},
-                {"name": "V", "type": "ptr<f16, global>"},
-                {"name": "O", "type": "ptr<f16, global>"},
+                {"name": "output_ptr", "type": "ptr<i32, global>"},
+                {"name": "query_ptr", "type": "ptr<f16, global>"},
+                {"name": "key_cache_ptr", "type": "ptr<f16, global>"},
+                {"name": "value_cache_ptr", "type": "ptr<f16, global>"},
             ],
-            "unexpected type",
+            "has unexpected type",
         ),
     ],
 )
 def test_enrich_args_signature_rejects_invalid_abi(monkeypatch, signature, message):
     handler = _load_kernel_handler()
-    monkeypatch.setattr(handler, "fmha_fwd_mfma_signature", lambda _spec: signature)
+    monkeypatch.setattr(
+        handler, "attention_tiled_2d_signature", lambda _spec: signature
+    )
 
     with pytest.raises((TypeError, ValueError), match=message):
         handler.enrich_args_signature(object())
 
 
 def test_build_kernel_delegates_to_rocke_builder(monkeypatch):
-    import kernels.common.fmha_mfma as fmha_mfma
+    import kernels.gfx942.attention_tiled_2d as attn2d
 
     handler = _load_kernel_handler()
     fake_spec = object()
@@ -873,12 +936,12 @@ def test_build_kernel_delegates_to_rocke_builder(monkeypatch):
 
     def fake_build(spec, *, arch):
         assert spec is fake_spec
-        assert arch == "gfx1151"
+        assert arch == "gfx942"
         return fake_kernel
 
-    monkeypatch.setattr(fmha_mfma, "build_fmha_fwd_mfma", fake_build)
+    monkeypatch.setattr(attn2d, "build_unified_attention_2d_tiled", fake_build)
 
-    assert handler.build_kernel(fake_spec, arch="gfx1151") is fake_kernel
+    assert handler.build_kernel(fake_spec, arch="gfx942") is fake_kernel
 
 
 def test_validate_compile_spec_reports_future_required_fields(monkeypatch):
@@ -913,7 +976,7 @@ def test_build_cli_rejects_hipcc_environment(tmp_path, monkeypatch, capsys):
             "--schema-dir",
             str(SCHEMA_DIR),
             "--arch",
-            "gfx1151",
+            "gfx942",
         ]
     )
 
@@ -933,7 +996,7 @@ def test_build_cli_rejects_missing_aot_list(tmp_path, capsys):
             "--schema-dir",
             str(SCHEMA_DIR),
             "--arch",
-            "gfx1151",
+            "gfx942",
         ]
     )
 
@@ -950,8 +1013,8 @@ def _numeric_compile_spec(**overrides):
         "num_query_heads": 2,
         "num_kv_heads": 1,
         "head_size": 32,
-        "block_size_q": 16,
-        "block_size_k": 64,
+        "block_size": 16,
+        "sliding_window": 0,
         "mask_mode": "none",
     }
     spec.update(overrides)
@@ -959,18 +1022,68 @@ def _numeric_compile_spec(**overrides):
 
 
 def _numeric_sidecar():
-    scalar_names = [
-        "seqlen_q",
-        "seqlen_k",
-        "stride_q_token",
-        "stride_q_head",
-        "stride_k_token",
-        "stride_k_head",
-        "stride_v_token",
-        "stride_v_head",
-        "stride_o_token",
-        "stride_o_head",
+    pointer_names = [
+        "output_ptr",
+        "query_ptr",
+        "key_cache_ptr",
+        "value_cache_ptr",
+        "sink_ptr",
+        "block_tables_ptr",
+        "seq_lens_ptr",
+        "alibi_slopes_ptr",
+        "qq_bias_ptr",
+        "query_start_len_ptr",
     ]
+    f16_pointers = {
+        "output_ptr",
+        "query_ptr",
+        "key_cache_ptr",
+        "value_cache_ptr",
+        "sink_ptr",
+    }
+    i32_pointers = {"block_tables_ptr", "seq_lens_ptr", "query_start_len_ptr"}
+
+    def _pointer_type(name):
+        if name in f16_pointers:
+            return "ptr<f16, global>"
+        if name in i32_pointers:
+            return "ptr<i32, global>"
+        return "ptr<f32, global>"
+
+    f32_scalars = ["scale", "k_scale", "v_scale", "out_scale", "softcap"]
+    i32_scalars = ["num_seqs", "block_table_stride", "qq_bias_stride_0"]
+    args_signature = (
+        [
+            {
+                "name": name,
+                "kind": "pointer",
+                "type": _pointer_type(name),
+                "size_bytes": 8,
+                "alignment": 8,
+            }
+            for name in pointer_names
+        ]
+        + [
+            {
+                "name": name,
+                "kind": "scalar",
+                "type": "f32",
+                "size_bytes": 4,
+                "alignment": 4,
+            }
+            for name in f32_scalars
+        ]
+        + [
+            {
+                "name": name,
+                "kind": "scalar",
+                "type": "i32",
+                "size_bytes": 4,
+                "alignment": 4,
+            }
+            for name in i32_scalars
+        ]
+    )
     return {
         "artifact": {
             "hsaco_filename": "kernel.hsaco",
@@ -980,27 +1093,14 @@ def _numeric_sidecar():
         },
         "launch": {
             "grid_formula": {
-                "x": {"ceil_div": ["seqlen_q", 16]},
-                "y": "num_query_heads",
-                "z": "batch",
+                "x": "num_kv_heads",
+                "y": {"floor_div": ["total_q", "block_q"], "add": "num_seqs"},
+                "z": 1,
             },
-            "block": [32, 1, 1],
+            "block": [64, 1, 1],
             "shared_mem_bytes": 0,
         },
-        "args_signature": [
-            {
-                "name": name,
-                "kind": "pointer",
-                "type": "ptr<f16, global>",
-                "size_bytes": 8,
-            }
-            for name in ("Q", "K", "V", "O")
-        ]
-        + [{"name": "scale_log2", "kind": "scalar", "type": "f32", "size_bytes": 4}]
-        + [
-            {"name": name, "kind": "scalar", "type": "i32", "size_bytes": 4}
-            for name in scalar_names
-        ],
+        "args_signature": args_signature,
     }
 
 
@@ -1046,8 +1146,8 @@ class _FakeRuntime:
 
     def launch(self, function, grid, block, packed, *, shared_bytes):
         assert function is not None
-        assert grid == (1, 2, 1)
-        assert block == (32, 1, 1)
+        assert grid == (1, 3, 1)
+        assert block == (64, 1, 1)
         assert packed
         assert shared_bytes == 0
 
@@ -1087,11 +1187,13 @@ def test_numeric_helpers_validate_paths_json_grid_and_args(tmp_path):
         numeric._load_aot_list(object_list)
 
     assert numeric._eval_grid_formula(
-        {"x": {"ceil_div": ["n", 16]}, "y": "heads", "z": 3},
-        {"n": 17, "heads": 2},
-    ) == (2, 2, 3)
-    with pytest.raises(ValueError, match="invalid ceil_div"):
-        numeric._eval_grid_formula({"x": {"ceil_div": ["n"]}, "y": 1, "z": 1}, {"n": 1})
+        {"x": {"floor_div": ["n", 8], "add": "s"}, "y": "heads", "z": 3},
+        {"n": 17, "heads": 2, "s": 1},
+    ) == (3, 2, 3)
+    with pytest.raises(ValueError, match="invalid floor_div"):
+        numeric._eval_grid_formula(
+            {"x": {"floor_div": ["n"]}, "y": 1, "z": 1}, {"n": 1}
+        )
     with pytest.raises(ValueError, match="unsupported"):
         numeric._eval_grid_formula({"x": [], "y": 1, "z": 1}, {})
 
@@ -1105,11 +1207,10 @@ def test_numeric_helpers_validate_paths_json_grid_and_args(tmp_path):
             },
             {"name": "f", "kind": "scalar", "type": "f32", "size_bytes": 4},
             {"name": "i", "kind": "scalar", "type": "i32", "size_bytes": 4},
-            {"name": "q", "kind": "scalar", "type": "i64", "size_bytes": 8},
         ],
-        {"ptr": 7, "f": 1.5, "i": -2, "q": 9},
+        {"ptr": 7, "f": 1.5, "i": -2},
     )
-    assert len(packed) == 24
+    assert len(packed) == 16
     with pytest.raises(ValueError, match="pointer arg"):
         numeric._pack_args(
             [
@@ -1161,7 +1262,7 @@ def test_numeric_verify_profile_success_and_allocation_cleanup(monkeypatch):
     instance = {"compile_spec": _numeric_compile_spec()}
 
     assert numeric._verify_profile(instance, _numeric_sidecar(), b"hsaco", batch=1)
-    assert len(fake_runtime.freed) == 4
+    assert len(fake_runtime.freed) == 7
     assert fake_runtime.module.unloaded
 
     failing_runtime = _FakeRuntime(fail_after=1)
@@ -1222,23 +1323,23 @@ def test_numeric_verify_instance_digest_profiles_and_main(
     _write_json(tmp_path / "aot_list.json", [with_profile])
 
     monkeypatch.setattr(numeric, "_device_arch", lambda: None)
-    assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 77
+    assert numeric.main(["--arch", "gfx942", "--artifact-dir", str(tmp_path)]) == 77
     assert "does not match" in capsys.readouterr().out
 
-    monkeypatch.setattr(numeric, "_device_arch", lambda: "gfx1151")
+    monkeypatch.setattr(numeric, "_device_arch", lambda: "gfx942")
     monkeypatch.setattr(
         numeric, "_verify_instance", lambda _instance, _artifact_dir: False
     )
-    assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 1
+    assert numeric.main(["--arch", "gfx942", "--artifact-dir", str(tmp_path)]) == 1
     monkeypatch.setattr(
         numeric, "_verify_instance", lambda _instance, _artifact_dir: True
     )
-    assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 0
+    assert numeric.main(["--arch", "gfx942", "--artifact-dir", str(tmp_path)]) == 0
 
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     with pytest.raises(SystemExit, match="no aot_list.json"):
-        numeric.main(["--arch", "gfx1151", "--artifact-dir", str(empty_dir)])
+        numeric.main(["--arch", "gfx942", "--artifact-dir", str(empty_dir)])
 
 
 def test_numeric_device_arch_handles_runtime_query_failure(monkeypatch, capsys):

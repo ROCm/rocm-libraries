@@ -80,28 +80,30 @@ def _sidecar(name: str, hsaco: bytes, *, symbol: str, cache_key: str) -> dict:
         "launch": {
             "shared_mem_bytes": 0,
             "grid_formula": {
-                "x": {"ceil_div": ["seqlen_q", 16]},
-                "y": "num_query_heads",
-                "z": "batch",
+                "x": "num_kv_heads",
+                "y": {"floor_div": ["total_q", "block_q"], "add": "num_seqs"},
+                "z": 1,
             },
             "block": [64, 1, 1],
             "tile_sizes": {
-                "block_q": 16,
-                "block_k": 64,
+                "block_size": 16,
                 "head_size": 64,
+                "tile_size": 16,
+                "block_m": 16,
+                "block_q": 16,
                 "wave_size": 64,
             },
         },
         "args_signature": [
             {
-                "name": "Q",
+                "name": "output_ptr",
                 "type": "ptr<f16, global>",
                 "kind": "pointer",
                 "size_bytes": 8,
                 "alignment": 8,
             },
             {
-                "name": "scale_log2",
+                "name": "scale",
                 "type": "f32",
                 "kind": "scalar",
                 "size_bytes": 4,
@@ -116,7 +118,7 @@ def _instance(name: str) -> dict:
         "schema": "rocke.aot.instance/v1",
         "name": name,
         "op": "sdpa_fwd",
-        "family": "fmha_fwd_mfma",
+        "family": "attention_tiled_2d",
         "arch": ARCH,
         "compile_spec": {"dtype": "fp16"},
         "selection": {"attribute_constraints": {"mask_mode": {"equals": "none"}}},
@@ -130,14 +132,14 @@ def _build_artifact_dir(tmp_path: Path, count: int = 2) -> tuple[Path, dict[str,
     instances = []
     sidecars: dict[str, dict] = {}
     for i in range(count):
-        name = f"sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{ARCH}_q64_k64_hq4_hkv4_d64_none_{i}"
+        name = f"sdpa_fwd_attention_tiled_2d_fp16_bshd_{ARCH}_q64_k64_hq4_hkv4_d64_none_{i}"
         hsaco = f"hsaco-bytes-{i}".encode() * (i + 3)
         (artifact_dir / f"{name}.hsaco").write_bytes(hsaco)
         sc = _sidecar(
             name,
             hsaco,
-            symbol=f"rocke_fmha_fwd_mfma_kernel_{i}",
-            cache_key=f"sdpa_fwd:fmha_fwd_mfma:{i}",
+            symbol=f"rocke_uattn2d_tiled_kernel_{i}",
+            cache_key=f"sdpa_fwd:attention_tiled_2d:{i}",
         )
         _write_json(artifact_dir / f"{name}.sidecar.json", sc)
         instances.append(_instance(name))
@@ -154,8 +156,8 @@ def _bundle_schema():
 def test_toc_key_rule_is_deterministic():
     packer = _load_tool("rocke_kpack_pack")
     assert (
-        packer.toc_key("sdpa_fwd", "fmha_fwd_mfma", "inst")
-        == "rocke/sdpa_fwd/fmha_fwd_mfma/inst"
+        packer.toc_key("sdpa_fwd", "attention_tiled_2d", "inst")
+        == "rocke/sdpa_fwd/attention_tiled_2d/inst"
     )
 
 
@@ -280,7 +282,7 @@ def test_pack_arch_rejects_arch_mismatch(tmp_path):
     with pytest.raises(ValueError, match="!= packer arch"):
         packer.pack_arch(
             artifact_dir=artifact_dir,
-            arch="gfx1151",
+            arch="gfx950",
             out_dir=tmp_path / "out",
             engine_build_id="id",
             llvm_flavor="llvm20",

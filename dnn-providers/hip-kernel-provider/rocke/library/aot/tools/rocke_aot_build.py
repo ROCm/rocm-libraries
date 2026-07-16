@@ -102,9 +102,7 @@ def _parsed_spec(parsed: Any) -> Any:
 
     spec = getattr(parsed, "spec", None)
     if spec is None:
-        spec = getattr(parsed, "fmha_spec", None)
-    if spec is None:
-        raise TypeError("parsed instance result must expose spec or fmha_spec")
+        raise TypeError("parsed instance result must expose spec")
     return spec
 
 

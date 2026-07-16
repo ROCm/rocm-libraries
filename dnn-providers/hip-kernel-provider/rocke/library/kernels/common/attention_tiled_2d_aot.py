@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""AOT instance field parser and artifact metadata for SDPA FMHA MFMA."""
+"""AOT instance field parser and artifact metadata for unified attention 2D tiled."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from rocke.core.arch import ArchTarget
-from kernels.common.fmha_mfma import fmha_fwd_mfma_signature
 from rocke_client_aot.instance_schema import (
     InstanceError,
     require_int,
@@ -21,22 +20,17 @@ from rocke_client_aot.instance_schema import (
 from rocke_client_aot.sidecar import canonical_hash, make_sidecar
 
 OP = "sdpa_fwd"
-FAMILY = "fmha_fwd_mfma"
+FAMILY = "attention_tiled_2d"
 LAYOUT_BSHD = "BSHD"
 MASK_MODE_NONE = "none"
 DTYPE_FP16 = "fp16"
-DTYPE_F16 = "f16"
-ABI_VERSION = "hipkg-sdpa-fwd-fmha-mfma/v1"
-ALGORITHM_DENSE_FMHA_FWD = "dense_fmha_fwd"
+ABI_VERSION = "hipkg-attention-unified/v1"
+ALGORITHM = "unified_attention_2d_tiled"
 
 _DTYPE_ALIASES = {
-    "fp16": DTYPE_F16,
-    "f16": DTYPE_F16,
-    "half": DTYPE_F16,
-}
-
-_EXTERNAL_DTYPE = {
-    DTYPE_F16: DTYPE_FP16,
+    "fp16": DTYPE_FP16,
+    "f16": DTYPE_FP16,
+    "half": DTYPE_FP16,
 }
 
 _COMPILE_FIELDS = (
@@ -47,8 +41,8 @@ _COMPILE_FIELDS = (
     "num_query_heads",
     "num_kv_heads",
     "head_size",
-    "block_size_q",
-    "block_size_k",
+    "block_size",
+    "sliding_window",
     "mask_mode",
 )
 _POINTER_SIZE_BYTES = 8
@@ -57,13 +51,14 @@ _SCALAR_ABI = {
     "f32": (4, 4),
     "i32": (4, 4),
 }
-_FIXED_BLOCK_SIZE_Q = 16
+_HEAD_SIZES = (64, 128, 256)
+_BLOCK_SIZES = (16, 32, 64)
 
 
 def parse_instance_fields(
     instance: Mapping[str, Any], source: Path
 ) -> tuple[dict[str, Any], Any, str]:
-    """Validate SDPA FMHA MFMA fields and build the rocKE spec."""
+    """Validate unified attention 2D tiled fields and build the rocKE spec."""
 
     compile_spec = _validate_compile_spec(
         instance.get("compile_spec", {}), context="compile_spec"
@@ -76,60 +71,69 @@ def parse_instance_fields(
         "test_profiles": list(instance.get("test_profiles", [])),
     }
 
-    spec = build_fmha_mfma_spec(compile_spec)
-
-    from kernels.common.fmha_mfma import is_valid_spec
-
     arch = require_string(instance["arch"], "instance arch")
-    ok, reason = is_valid_spec(spec, arch)
+    spec = build_tiled_2d_spec(compile_spec, arch=arch)
+
+    _, _, supports_tiled_2d = _tiled_2d_impl(arch)
+    ok, reason = supports_tiled_2d(
+        head_size=spec.head_size,
+        block_size=spec.block_size,
+        dtype=spec.dtype,
+        num_queries_per_kv=spec.num_queries_per_kv,
+        use_alibi=spec.use_alibi,
+        use_qq_bias=spec.use_qq_bias,
+        use_fp8=False,
+        q_dtype=spec.dtype,
+        arch=arch,
+    )
     if not ok:
-        raise InstanceError(f"invalid FmhaMfmaSpec for {arch}: {reason}")
+        raise InstanceError(f"invalid UnifiedAttention2DTiledSpec for {arch}: {reason}")
     return normalized, spec, reason
 
 
 def build_kernel(spec: Any, *, arch: str) -> Any:
-    """Build the rocKE kernel for this checked-in SDPA FMHA MFMA spec."""
+    """Build the rocKE kernel for this checked-in unified attention 2D spec."""
 
-    from kernels.common.fmha_mfma import build_fmha_fwd_mfma
+    _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
+    return build_unified_attention_2d_tiled(spec, arch=arch)
 
-    return build_fmha_fwd_mfma(spec, arch=arch)
 
+def build_tiled_2d_spec(compile_spec: Mapping[str, Any], *, arch: str) -> Any:
+    """Build the arch ``UnifiedAttention2DTiledSpec`` for a normalized spec.
 
-def build_fmha_mfma_spec(compile_spec: Mapping[str, Any]) -> Any:
-    """Build the rocKE ``FmhaMfmaSpec`` for a normalized compile spec."""
+    Only the semantic/shape knobs are pinned from ``compile_spec``; every other
+    spec field is left at its dataclass default (no perf-knob auto-selection).
+    """
 
-    from kernels import FmhaCommonSpec, FmhaShape
-    from kernels.common.fmha_mfma import FmhaMfmaSpec
-
-    dtype = normalize_dtype(compile_spec["dtype"])
-    common = FmhaCommonSpec(
-        FmhaShape(
-            head_size=require_int(compile_spec["head_size"], "compile_spec.head_size"),
-            num_query_heads=require_int(
-                compile_spec["num_query_heads"], "compile_spec.num_query_heads"
-            ),
-            num_kv_heads=require_int(
-                compile_spec["num_kv_heads"], "compile_spec.num_kv_heads"
-            ),
-            block_size_q=require_int(
-                compile_spec["block_size_q"], "compile_spec.block_size_q"
-            ),
-            block_size_k=require_int(
-                compile_spec["block_size_k"], "compile_spec.block_size_k"
-            ),
+    spec_cls, _, _ = _tiled_2d_impl(arch)
+    return spec_cls(
+        head_size=require_int(compile_spec["head_size"], "compile_spec.head_size"),
+        block_size=require_int(compile_spec["block_size"], "compile_spec.block_size"),
+        num_query_heads=require_int(
+            compile_spec["num_query_heads"], "compile_spec.num_query_heads"
         ),
-        dtype=dtype,
-        mask_mode=require_string(compile_spec["mask_mode"], "compile_spec.mask_mode"),
+        num_kv_heads=require_int(
+            compile_spec["num_kv_heads"], "compile_spec.num_kv_heads"
+        ),
+        dtype=normalize_dtype(compile_spec["dtype"]),
+        use_sinks=False,
+        sliding_window=require_int(
+            compile_spec["sliding_window"], "compile_spec.sliding_window"
+        ),
+        has_softcap=False,
     )
-    return FmhaMfmaSpec(
-        common=common,
-        seqlen_q=require_int(compile_spec["seqlen_q"], "compile_spec.seqlen_q"),
-        seqlen_k=require_int(compile_spec["seqlen_k"], "compile_spec.seqlen_k"),
-    )
+
+
+def _tiled_2d_impl(arch: str) -> tuple[Any, Any, Any]:
+    """Return ``(spec_cls, builder, gate)`` for the arch tiled-2D backend."""
+
+    from kernels.common.attention_unified import _tiled_2d_impl as impl
+
+    return impl(arch)
 
 
 def normalize_dtype(dtype: Any) -> str:
-    """Return the rocKE-internal dtype spelling accepted by FMHA specs."""
+    """Return the rocKE-internal dtype spelling accepted by tiled 2D specs."""
 
     text = require_string(dtype, "dtype").lower()
     try:
@@ -140,16 +144,10 @@ def normalize_dtype(dtype: Any) -> str:
         ) from exc
 
 
-def external_dtype(dtype: Any) -> str:
-    """Return the provider-facing dtype spelling used by checked-in instances."""
-
-    return _EXTERNAL_DTYPE[normalize_dtype(dtype)]
-
-
 def instance_name(envelope: Mapping[str, Any], compile_spec: Mapping[str, Any]) -> str:
-    """Return the canonical artifact basename for an SDPA FMHA MFMA instance."""
+    """Return the canonical artifact basename for a unified attention 2D instance."""
 
-    dtype = external_dtype(compile_spec["dtype"])
+    dtype = normalize_dtype(compile_spec["dtype"])
     layout = require_string(
         compile_spec["canonical_layout"], "compile_spec.canonical_layout"
     ).lower()
@@ -168,19 +166,21 @@ def _validate_instance_name(
     envelope: Mapping[str, Any], compile_spec: Mapping[str, Any]
 ) -> None:
     """Ensure the declared instance name matches the canonical basename."""
+
     name = require_string(envelope.get("name"), "instance name")
     expected = instance_name(envelope, compile_spec)
     if name != expected:
         raise InstanceError(
-            "instance name " f"{name!r} must match SDPA FMHA MFMA basename {expected!r}"
+            f"instance name {name!r} must match unified attention 2D basename "
+            f"{expected!r}"
         )
 
 
 def _validate_compile_spec(spec: Any, *, context: str) -> dict[str, Any]:
-    """Normalize and validate compile-time fields for an SDPA FMHA instance."""
+    """Normalize and validate compile-time fields for a unified attention instance."""
 
     data = dict(require_mapping(spec, context))
-    data["dtype"] = external_dtype(data.get("dtype"))
+    data["dtype"] = normalize_dtype(data.get("dtype"))
     layout = require_string(data.get("canonical_layout"), f"{context}.canonical_layout")
     if layout != LAYOUT_BSHD:
         raise InstanceError(
@@ -200,13 +200,21 @@ def _validate_compile_spec(spec: Any, *, context: str) -> dict[str, Any]:
         "num_query_heads",
         "num_kv_heads",
         "head_size",
-        "block_size_q",
-        "block_size_k",
+        "block_size",
     ):
         value = require_int(data.get(field), f"{context}.{field}")
         if value <= 0:
             raise InstanceError(f"{context}.{field} must be > 0, got {value}")
         data[field] = value
+
+    sliding_window = require_int(
+        data.get("sliding_window"), f"{context}.sliding_window"
+    )
+    if sliding_window < 0:
+        raise InstanceError(
+            f"{context}.sliding_window must be >= 0, got {sliding_window}"
+        )
+    data["sliding_window"] = sliding_window
 
     missing = [field for field in _COMPILE_FIELDS if field not in data]
     if missing:
@@ -217,11 +225,12 @@ def _validate_compile_spec(spec: Any, *, context: str) -> dict[str, Any]:
 
 
 def _validate_shape_constraints(compile_spec: Mapping[str, Any]) -> None:
-    """Validate shape relationships required by SDPA FMHA MFMA kernels."""
+    """Validate shape relationships required by unified attention 2D tiled kernels."""
 
     seqlen_q = require_int(compile_spec["seqlen_q"], "compile_spec.seqlen_q")
     seqlen_k = require_int(compile_spec["seqlen_k"], "compile_spec.seqlen_k")
     head_size = require_int(compile_spec["head_size"], "compile_spec.head_size")
+    block_size = require_int(compile_spec["block_size"], "compile_spec.block_size")
     num_query_heads = require_int(
         compile_spec["num_query_heads"], "compile_spec.num_query_heads"
     )
@@ -236,18 +245,22 @@ def _validate_shape_constraints(compile_spec: Mapping[str, Any]) -> None:
         raise InstanceError(
             f"compile_spec.seqlen_k ({seqlen_k}) must be divisible by 16"
         )
-    if head_size not in (32, 64, 128, 192, 256):
+    if head_size not in _HEAD_SIZES:
         raise InstanceError(
             "compile_spec.head_size "
-            f"({head_size}) must be one of 32, 64, 128, 192, 256"
+            f"({head_size}) must be one of {', '.join(str(h) for h in _HEAD_SIZES)}"
         )
-    block_size_q = require_int(
-        compile_spec["block_size_q"], "compile_spec.block_size_q"
-    )
-    if block_size_q != _FIXED_BLOCK_SIZE_Q:
+    if block_size not in _BLOCK_SIZES:
         raise InstanceError(
-            f"compile_spec.block_size_q must be {_FIXED_BLOCK_SIZE_Q}, "
-            f"got {block_size_q}"
+            "compile_spec.block_size "
+            f"({block_size}) must be one of {', '.join(str(b) for b in _BLOCK_SIZES)}"
+        )
+    if seqlen_k % block_size:
+        raise InstanceError(
+            f"compile_spec.seqlen_k ({seqlen_k}) must be divisible by "
+            f"compile_spec.block_size ({block_size}); the runtime paged-KV index "
+            "map addresses a dense KV cache in whole blocks and a partial trailing "
+            "block would read past it"
         )
     if num_query_heads % num_kv_heads:
         raise InstanceError(
@@ -275,10 +288,20 @@ def _instance_data(instance: Any) -> Mapping[str, Any]:
     return _as_mapping(data, "instance data")
 
 
-def _spec_id(dtype: str, layout: str, block_size_q: int, block_size_k: int) -> str:
+def _spec_id(
+    dtype: str,
+    layout: str,
+    head_size: int,
+    block_size: int,
+    num_query_heads: int,
+    num_kv_heads: int,
+) -> str:
     """Build the stable spec identifier used in sidecar kernel IDs."""
 
-    return f"{dtype}_{layout.lower()}_blockq{block_size_q}_blockk{block_size_k}"
+    return (
+        f"{dtype}_{layout.lower()}_d{head_size}_b{block_size}"
+        f"_h{num_query_heads}kv{num_kv_heads}"
+    )
 
 
 def _cache_key(kernel_id: Mapping[str, Any]) -> str:
@@ -317,11 +340,47 @@ def _signature_size_and_alignment(type_text: str) -> tuple[int, int]:
         raise ValueError(f"unsupported scalar ABI type {type_text!r}") from exc
 
 
+def attention_tiled_2d_signature(spec: Any) -> list[dict[str, Any]]:
+    """Return the 18-arg paged-KV ABI as ordered ``name``/``type`` entries.
+
+    The order matches the kernel's declared params in
+    ``kernels.<arch>.attention_tiled_2d.build_unified_attention_2d_tiled``:
+    ten pointers followed by eight scalars. K/V cache pointers carry the
+    working dtype (no fp8 cache in this AOT pass).
+    """
+
+    from rocke.helpers.spec import SignatureBuilder
+
+    dtype = spec.dtype
+    return (
+        SignatureBuilder()
+        .ptr("output_ptr", dtype)
+        .ptr("query_ptr", dtype)
+        .ptr("key_cache_ptr", dtype)
+        .ptr("value_cache_ptr", dtype)
+        .ptr("sink_ptr", dtype)
+        .ptr("block_tables_ptr", "i32")
+        .ptr("seq_lens_ptr", "i32")
+        .ptr("alibi_slopes_ptr", "f32")
+        .ptr("qq_bias_ptr", "f32")
+        .ptr("query_start_len_ptr", "i32")
+        .scalar("scale", "f32")
+        .scalar("k_scale", "f32")
+        .scalar("v_scale", "f32")
+        .scalar("out_scale", "f32")
+        .scalar("softcap", "f32")
+        .scalar("num_seqs", "i32")
+        .scalar("block_table_stride", "i32")
+        .scalar("qq_bias_stride_0", "i32")
+        .build()
+    )
+
+
 def enrich_args_signature(spec: Any) -> list[dict[str, Any]]:
-    """Add ABI kind, size, and alignment to ``fmha_fwd_mfma_signature``."""
+    """Add ABI kind, size, and alignment to the tiled 2D signature."""
 
     enriched: list[dict[str, Any]] = []
-    for item in fmha_fwd_mfma_signature(spec):
+    for item in attention_tiled_2d_signature(spec):
         entry = _as_mapping(item, "signature entry")
         name = entry.get("name")
         type_text = entry.get("type")
@@ -339,16 +398,17 @@ def enrich_args_signature(spec: Any) -> list[dict[str, Any]]:
             }
         )
 
-    expected_prefix = ["Q", "K", "V", "O"]
+    expected_prefix = ["output_ptr", "query_ptr", "key_cache_ptr", "value_cache_ptr"]
     actual_prefix = [entry["name"] for entry in enriched[:4]]
     if actual_prefix != expected_prefix:
         raise ValueError(
-            "FMHA sidecar ABI must start with Q/K/V/O; " f"got {actual_prefix!r}"
+            "unified attention tiled 2D sidecar ABI must start with "
+            f"output_ptr/query_ptr/key_cache_ptr/value_cache_ptr; got {actual_prefix!r}"
         )
     for entry in enriched[:4]:
         if entry["type"] != "ptr<f16, global>":
             raise ValueError(
-                f"FMHA tensor pointer {entry['name']} has unexpected type "
+                f"tiled 2D tensor pointer {entry['name']} has unexpected type "
                 f"{entry['type']!r}"
             )
     return enriched
@@ -360,12 +420,11 @@ def emit_sidecar(
     artifact: Any,
     hsaco_filename: str,
 ) -> dict[str, Any]:
-    """Build sidecar metadata for one compiled SDPA FMHA AOT artifact."""
+    """Build sidecar metadata for one compiled unified attention 2D AOT artifact."""
 
     data = _instance_data(instance)
     compile_spec = _as_mapping(data.get("compile_spec"), "compile_spec")
     selection = _as_mapping(data.get("selection"), "selection")
-    shape = spec.common.shape
 
     op = require_string(data.get("op"), "instance op")
     family = require_string(data.get("family"), "instance family")
@@ -373,16 +432,16 @@ def emit_sidecar(
     if op != OP or family != FAMILY:
         raise ValueError(f"unsupported sidecar kernel id {op!r}/{family!r}")
 
-    dtype = external_dtype(compile_spec.get("dtype"))
+    dtype = normalize_dtype(compile_spec.get("dtype"))
     layout = str(compile_spec.get("canonical_layout"))
-    block_size_q = int(compile_spec.get("block_size_q", shape.block_size_q))
-    block_size_k = int(compile_spec.get("block_size_k", shape.block_size_k))
-    head_size = int(compile_spec.get("head_size", shape.head_size))
-    seqlen_q = int(compile_spec.get("seqlen_q", spec.seqlen_q))
-    seqlen_k = int(compile_spec.get("seqlen_k", spec.seqlen_k))
-    num_query_heads = int(compile_spec.get("num_query_heads", shape.num_query_heads))
-    num_kv_heads = int(compile_spec.get("num_kv_heads", shape.num_kv_heads))
-    mask_mode = str(compile_spec.get("mask_mode", spec.common.mask_mode))
+    head_size = int(compile_spec.get("head_size", spec.head_size))
+    block_size = int(compile_spec.get("block_size", spec.block_size))
+    seqlen_q = int(compile_spec.get("seqlen_q"))
+    seqlen_k = int(compile_spec.get("seqlen_k"))
+    num_query_heads = int(compile_spec.get("num_query_heads", spec.num_query_heads))
+    num_kv_heads = int(compile_spec.get("num_kv_heads", spec.num_kv_heads))
+    sliding_window = int(compile_spec.get("sliding_window", spec.sliding_window))
+    mask_mode = str(compile_spec.get("mask_mode"))
 
     request_document = dict(data)
     spec_document = {
@@ -393,8 +452,8 @@ def emit_sidecar(
         "num_query_heads": num_query_heads,
         "num_kv_heads": num_kv_heads,
         "head_size": head_size,
-        "block_size_q": block_size_q,
-        "block_size_k": block_size_k,
+        "block_size": block_size,
+        "sliding_window": sliding_window,
         "mask_mode": mask_mode,
     }
     request_hash = canonical_hash(request_document)
@@ -404,8 +463,10 @@ def emit_sidecar(
         "op": op,
         "family": family,
         "candidate": FAMILY,
-        "algorithm": ALGORITHM_DENSE_FMHA_FWD,
-        "spec_id": _spec_id(dtype, layout, block_size_q, block_size_k),
+        "algorithm": ALGORITHM,
+        "spec_id": _spec_id(
+            dtype, layout, head_size, block_size, num_query_heads, num_kv_heads
+        ),
         "arch": arch,
         "abi_version": ABI_VERSION,
         "request_hash": request_hash,
@@ -453,15 +514,17 @@ def emit_sidecar(
         launch={
             "shared_mem_bytes": 0,
             "grid_formula": {
-                "x": {"ceil_div": ["seqlen_q", block_size_q]},
-                "y": "num_query_heads",
-                "z": "batch",
+                "x": "num_kv_heads",
+                "y": {"floor_div": ["total_q", "block_q"], "add": "num_seqs"},
+                "z": 1,
             },
-            "block": [wave_size, 1, 1],
+            "block": [wave_size * spec.num_warps, 1, 1],
             "tile_sizes": {
-                "block_q": block_size_q,
-                "block_k": block_size_k,
+                "block_size": block_size,
                 "head_size": head_size,
+                "tile_size": spec.tile_size_eff,
+                "block_m": spec.block_m,
+                "block_q": spec.block_q,
                 "wave_size": wave_size,
             },
         },

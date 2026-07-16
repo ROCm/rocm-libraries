@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <numbers>
 #include <optional>
 #include <variant>
 
@@ -27,7 +26,7 @@ using test::buildSdpaGraph;
 using test::SdpaGraphConfig;
 
 // ---------------------------------------------------------------------------
-// Accept path: graphs the FMHA-fwd-MFMA family can serve normalize to a problem
+// Accept path: graphs the unified attention_tiled_2d family can serve normalize to a problem
 // ---------------------------------------------------------------------------
 
 TEST(TestSdpaGraphAdapter, TranslatesValidBshdGraph)
@@ -269,7 +268,7 @@ TEST(TestSdpaGraphAdapter, RejectsOverrideShapeEnabled)
 
 TEST(TestSdpaGraphAdapter, RejectsFp32Dtype)
 {
-    // fp32 is outside the FMHA-fwd-MFMA family (fp16/bf16 only).
+    // fp32 is outside the unified attention_tiled_2d family (fp16/bf16 only).
     SdpaGraphConfig config;
     config.dtype = DataType::FLOAT;
     const auto fixture = buildSdpaGraph(config);
@@ -286,7 +285,7 @@ TEST(TestSdpaGraphAdapter, RejectsUnsupportedDtype)
 
 TEST(TestSdpaGraphAdapter, RejectsNonFp32ComputeDtype)
 {
-    // The fmha_fwd_mfma family accumulates in fp32; a non-fp32 compute_data_type
+    // The unified attention 2D-tiled family accumulates in fp32; a non-fp32 compute_data_type
     // has no matching instance.
     SdpaGraphConfig config;
     config.computeDataType = DataType::HALF;
@@ -493,24 +492,35 @@ TEST(TestSdpaGraphAdapter, BuildsLaunchInputsFromAcceptedGraph)
     const std::optional<SdpaLaunchInputs> inputs = buildSdpaLaunchInputs(fixture.graphWrapper());
     ASSERT_TRUE(inputs.has_value());
 
-    // Pointer args are keyed by ABI name -> the graph's Q/K/V/O tensor uids (1..4).
-    EXPECT_EQ(inputs->bindings.pointerUids.at("Q"), 1);
-    EXPECT_EQ(inputs->bindings.pointerUids.at("K"), 2);
-    EXPECT_EQ(inputs->bindings.pointerUids.at("V"), 3);
-    EXPECT_EQ(inputs->bindings.pointerUids.at("O"), 4);
+    // Q/K/V/O graph tensors bind to the paged attention ABI pointer names (uids 1..4).
+    EXPECT_EQ(inputs->bindings.pointerUids.at("query_ptr"), 1);
+    EXPECT_EQ(inputs->bindings.pointerUids.at("key_cache_ptr"), 2);
+    EXPECT_EQ(inputs->bindings.pointerUids.at("value_cache_ptr"), 3);
+    EXPECT_EQ(inputs->bindings.pointerUids.at("output_ptr"), 4);
     EXPECT_EQ(inputs->batch, 2);
 
+    // Unused optional feature tensors bind a null device pointer.
+    EXPECT_EQ(inputs->bindings.pointerValues.at("sink_ptr"), 0u);
+    EXPECT_EQ(inputs->bindings.pointerValues.at("alibi_slopes_ptr"), 0u);
+    EXPECT_EQ(inputs->bindings.pointerValues.at("qq_bias_ptr"), 0u);
+
     const auto& scalars = inputs->bindings.scalars;
-    EXPECT_EQ(std::get<std::int64_t>(scalars.at("seqlen_q")), 64);
-    EXPECT_EQ(std::get<std::int64_t>(scalars.at("seqlen_k")), 64);
-    // BSHD contiguous [B,H,S,D]: token axis (dim2) stride, head axis (dim1) stride.
-    const auto strides
-        = test::detail::contiguousStrides(/*h=*/4, /*s=*/64, /*d=*/64, /*bshd=*/true);
-    EXPECT_EQ(std::get<std::int64_t>(scalars.at("stride_q_token")), strides[2]);
-    EXPECT_EQ(std::get<std::int64_t>(scalars.at("stride_q_head")), strides[1]);
-    EXPECT_EQ(std::get<std::int64_t>(scalars.at("stride_o_token")), strides[2]);
-    EXPECT_FLOAT_EQ(std::get<float>(scalars.at("scale_log2")),
-                    static_cast<float>(1.0 / std::sqrt(64.0) * std::numbers::log2e));
+    // Linear softmax scale = 1/sqrt(head_size); the kernel applies its own log2.
+    EXPECT_FLOAT_EQ(std::get<float>(scalars.at("scale")),
+                    static_cast<float>(1.0 / std::sqrt(64.0)));
+    EXPECT_FLOAT_EQ(std::get<float>(scalars.at("k_scale")), 1.0F);
+    EXPECT_FLOAT_EQ(std::get<float>(scalars.at("v_scale")), 1.0F);
+    EXPECT_FLOAT_EQ(std::get<float>(scalars.at("out_scale")), 1.0F);
+    EXPECT_FLOAT_EQ(std::get<float>(scalars.at("softcap")), 0.0F);
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("num_seqs")), 2);
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("qq_bias_stride_0")), 0);
+
+    // The paged-cache index buffers and their stride are synthesized by the plan
+    // (they need a device), not by the pure graph decode.
+    EXPECT_EQ(inputs->bindings.pointerValues.count("block_tables_ptr"), 0u);
+    EXPECT_EQ(inputs->bindings.pointerValues.count("seq_lens_ptr"), 0u);
+    EXPECT_EQ(inputs->bindings.pointerValues.count("query_start_len_ptr"), 0u);
+    EXPECT_EQ(inputs->bindings.scalars.count("block_table_stride"), 0u);
 }
 
 TEST(TestSdpaGraphAdapter, DeclinesLaunchInputsForRejectedGraph)
@@ -529,8 +539,7 @@ TEST(TestSdpaGraphAdapter, GridSymbolsExposeCompileSpecAndBatch)
     spec.numQueryHeads = 8;
     spec.numKvHeads = 2;
     spec.headSize = 128;
-    spec.blockSizeQ = 64;
-    spec.blockSizeK = 32;
+    spec.blockSize = 16;
 
     const auto symbols = sdpaGridSymbols(spec, /*batch=*/5);
     EXPECT_EQ(symbols.at("batch"), 5);
@@ -539,8 +548,11 @@ TEST(TestSdpaGraphAdapter, GridSymbolsExposeCompileSpecAndBatch)
     EXPECT_EQ(symbols.at("num_query_heads"), 8);
     EXPECT_EQ(symbols.at("num_kv_heads"), 2);
     EXPECT_EQ(symbols.at("head_size"), 128);
-    EXPECT_EQ(symbols.at("block_size_q"), 64);
-    EXPECT_EQ(symbols.at("block_size_k"), 32);
+    EXPECT_EQ(symbols.at("total_q"), 5 * 65); // batch * seqlen_q
+    EXPECT_EQ(symbols.at("num_seqs"), 5); // batch
+    EXPECT_EQ(symbols.at("block_m"), 16); // num_warps=1 * block_m_per_warp=16
+    // block_q = block_m / (num_query_heads / num_kv_heads) = 16 / (8 / 2) = 4.
+    EXPECT_EQ(symbols.at("block_q"), 4);
 }
 
 } // namespace

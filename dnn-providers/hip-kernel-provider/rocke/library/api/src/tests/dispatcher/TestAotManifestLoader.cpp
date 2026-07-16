@@ -27,7 +27,7 @@ const char* kValidManifest = R"JSON(
     {
       "name": "sdpa_fwd_d64",
       "op": "sdpa_fwd",
-      "family": "fmha_fwd_mfma",
+      "family": "attention_tiled_2d",
       "compile_spec": {
         "dtype": "fp16",
         "canonical_layout": "BSHD",
@@ -36,8 +36,8 @@ const char* kValidManifest = R"JSON(
         "num_query_heads": 4,
         "num_kv_heads": 4,
         "head_size": 64,
-        "block_size_q": 64,
-        "block_size_k": 64,
+        "block_size": 16,
+        "sliding_window": 0,
         "mask_mode": "none"
       },
       "selection": {
@@ -45,15 +45,15 @@ const char* kValidManifest = R"JSON(
         "attribute_constraints": {}
       },
       "cache_key": "cache-abc",
-      "toc_key": "sdpa_fwd/fmha_fwd_mfma/sdpa_fwd_d64",
+      "toc_key": "sdpa_fwd/attention_tiled_2d/sdpa_fwd_d64",
       "symbol": "sdpa_fwd_kernel",
       "launch": {
         "grid_formula": {
-          "x": { "ceil_div": ["seqlen_q", "block_size_q"] },
-          "y": "num_query_heads",
-          "z": "batch"
+          "x": "num_kv_heads",
+          "y": { "floor_div": ["total_q", "block_q"], "add": "num_seqs" },
+          "z": 1
         },
-        "block": [256, 1, 1],
+        "block": [64, 1, 1],
         "shared_mem_bytes": 0
       },
       "args_signature": [
@@ -112,9 +112,11 @@ TEST(TestAotManifestLoader, ParsesValidBundleManifest)
     const AotInstance& instance = instances.front();
     EXPECT_EQ(instance.name, "sdpa_fwd_d64");
     EXPECT_EQ(instance.op, "sdpa_fwd");
-    EXPECT_EQ(instance.family, "fmha_fwd_mfma");
+    EXPECT_EQ(instance.family, "attention_tiled_2d");
     EXPECT_EQ(instance.arch, "gfx942");
     EXPECT_EQ(instance.compileSpec.headSize, 64);
+    EXPECT_EQ(instance.compileSpec.blockSize, 16);
+    EXPECT_EQ(instance.compileSpec.slidingWindow, 0);
     EXPECT_EQ(instance.compileSpec.maskMode, "none");
     EXPECT_EQ(instance.batch.min, 1);
     EXPECT_EQ(instance.batch.max, 256);
@@ -123,11 +125,22 @@ TEST(TestAotManifestLoader, ParsesValidBundleManifest)
     EXPECT_TRUE(instance.runtime.kpackPath.ends_with("rocke_client_gfx942.kpack"));
 
     const auto& launch = instance.runtime.launch;
-    EXPECT_EQ(launch.block[0], 256u);
-    EXPECT_EQ(launch.grid.x.kind, GridAxis::Kind::CEIL_DIV);
+    EXPECT_EQ(launch.block[0], 64u);
+    // x is a bare symbol (VALUE), y is floor_div(total_q, block_q) + num_seqs, z=1.
+    EXPECT_EQ(launch.grid.x.kind, GridAxis::Kind::VALUE);
+    ASSERT_TRUE(launch.grid.x.value.symbol.has_value());
+    EXPECT_EQ(*launch.grid.x.value.symbol, "num_kv_heads");
+    EXPECT_EQ(launch.grid.y.kind, GridAxis::Kind::FLOOR_DIV);
+    ASSERT_TRUE(launch.grid.y.numerator.symbol.has_value());
+    EXPECT_EQ(*launch.grid.y.numerator.symbol, "total_q");
+    ASSERT_TRUE(launch.grid.y.denominator.symbol.has_value());
+    EXPECT_EQ(*launch.grid.y.denominator.symbol, "block_q");
+    ASSERT_TRUE(launch.grid.y.addend.has_value());
+    ASSERT_TRUE(launch.grid.y.addend->symbol.has_value());
+    EXPECT_EQ(*launch.grid.y.addend->symbol, "num_seqs");
     EXPECT_EQ(launch.grid.z.kind, GridAxis::Kind::VALUE);
-    ASSERT_TRUE(launch.grid.z.value.symbol.has_value());
-    EXPECT_EQ(*launch.grid.z.value.symbol, "batch");
+    EXPECT_FALSE(launch.grid.z.value.symbol.has_value());
+    EXPECT_EQ(launch.grid.z.value.literal, 1);
     ASSERT_EQ(launch.argsSignature.size(), 2u);
     EXPECT_EQ(launch.argsSignature[0].kind, ArgKind::POINTER);
     EXPECT_EQ(launch.argsSignature[1].kind, ArgKind::SCALAR);

@@ -61,7 +61,7 @@ inline AotInstance makeInstance(const InstanceParams& params)
     AotInstance instance;
     instance.name = params.name;
     instance.op = "sdpa_fwd";
-    instance.family = "fmha_fwd_mfma";
+    instance.family = "attention_tiled_2d";
     instance.arch = params.arch;
     instance.compileSpec.dtype = "fp16";
     instance.compileSpec.canonicalLayout = "BSHD";
@@ -70,8 +70,8 @@ inline AotInstance makeInstance(const InstanceParams& params)
     instance.compileSpec.numQueryHeads = params.numQueryHeads;
     instance.compileSpec.numKvHeads = params.numKvHeads;
     instance.compileSpec.headSize = params.headSize;
-    instance.compileSpec.blockSizeQ = 16;
-    instance.compileSpec.blockSizeK = 64;
+    instance.compileSpec.blockSize = 16;
+    instance.compileSpec.slidingWindow = 0;
     instance.compileSpec.maskMode = "none";
     instance.batch.min = params.batchMin;
     instance.batch.max = params.batchMax;

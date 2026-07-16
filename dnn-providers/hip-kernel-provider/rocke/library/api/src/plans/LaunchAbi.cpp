@@ -28,19 +28,32 @@ std::int64_t evalGridValue(const dispatcher::GridValue& value,
 unsigned int evalGridAxis(const dispatcher::GridAxis& axis,
                           const std::unordered_map<std::string, std::int64_t>& symbols)
 {
+    std::int64_t base = 0;
     if(axis.kind == dispatcher::GridAxis::Kind::VALUE)
     {
-        return static_cast<unsigned int>(evalGridValue(axis.value, symbols));
+        base = evalGridValue(axis.value, symbols);
+    }
+    else
+    {
+        const auto numerator = evalGridValue(axis.numerator, symbols);
+        const auto denominator = evalGridValue(axis.denominator, symbols);
+        if(denominator <= 0)
+        {
+            throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                             "rocKE launch grid divisor must be positive");
+        }
+        base = axis.kind == dispatcher::GridAxis::Kind::CEIL_DIV
+                   ? (numerator + denominator - 1) / denominator
+                   : numerator / denominator;
     }
 
-    const auto numerator = evalGridValue(axis.numerator, symbols);
-    const auto denominator = evalGridValue(axis.denominator, symbols);
-    if(denominator <= 0)
+    // Optional additive term applied uniformly to every axis kind (e.g. the
+    // unified attention y axis floor_div(total_q, block_q) + num_seqs).
+    if(axis.addend.has_value())
     {
-        throwPluginError(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                         "rocKE launch grid ceil_div denominator must be positive");
+        base += evalGridValue(*axis.addend, symbols);
     }
-    return static_cast<unsigned int>((numerator + denominator - 1) / denominator);
+    return static_cast<unsigned int>(base);
 }
 
 void appendBytes(std::vector<std::byte>& packed, const void* source, std::size_t size)
@@ -75,6 +88,15 @@ std::unordered_map<std::string, ScalarValue>
     {
         if(arg.kind == dispatcher::ArgKind::POINTER)
         {
+            // A raw device address the plan already holds (null optional tensors,
+            // or a small buffer the plan allocated itself) takes precedence over
+            // resolving a graph tensor uid through the variant-pack buffer map.
+            const auto valueIter = bindings.pointerValues.find(arg.name);
+            if(valueIter != bindings.pointerValues.end())
+            {
+                values.emplace(arg.name, valueIter->second);
+                continue;
+            }
             const auto iter = bindings.pointerUids.find(arg.name);
             if(iter == bindings.pointerUids.end())
             {

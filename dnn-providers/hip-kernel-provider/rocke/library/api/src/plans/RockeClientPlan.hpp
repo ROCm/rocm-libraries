@@ -10,6 +10,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "RockeClientHandle.hpp"
 #include "dispatcher/AotInstance.hpp"
@@ -64,6 +65,48 @@ private:
     hipModule_t _module = nullptr;
 };
 
+// RAII owner for a plain device allocation (hipMalloc/hipFree). Freeing reports
+// (but never throws on) failure so destruction stays noexcept; a throw partway
+// through the plan constructor still frees any buffer already held.
+class HipDeviceBuffer
+{
+public:
+    HipDeviceBuffer() = default;
+    explicit HipDeviceBuffer(void* ptr) noexcept
+        : _ptr(ptr)
+    {
+    }
+    ~HipDeviceBuffer()
+    {
+        reset();
+    }
+
+    HipDeviceBuffer(HipDeviceBuffer&& other) noexcept
+        : _ptr(std::exchange(other._ptr, nullptr))
+    {
+    }
+    HipDeviceBuffer& operator=(HipDeviceBuffer&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset(std::exchange(other._ptr, nullptr));
+        }
+        return *this;
+    }
+
+    HipDeviceBuffer(const HipDeviceBuffer&) = delete;
+    HipDeviceBuffer& operator=(const HipDeviceBuffer&) = delete;
+
+    void reset(void* ptr = nullptr) noexcept;
+    void* get() const noexcept
+    {
+        return _ptr;
+    }
+
+private:
+    void* _ptr = nullptr;
+};
+
 class RockeClientPlan final : public hipdnn_plugin_sdk::IPlan<RockeClientHandle>
 {
 public:
@@ -85,12 +128,21 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
+    // Build the paged-KV index buffers (block_tables/seq_lens/query_start_len) for
+    // a dense contiguous BSHD problem of `batch` sequences, upload them, and bind
+    // their device addresses plus block_table_stride into _bindings. Called once at
+    // construction (they depend only on the fixed batch/seqlens/block_size).
+    void buildPagedKvBuffers(std::int64_t batch);
+
     dispatcher::AotInstance _instance;
     dispatcher::LaunchBindings _bindings;
     std::unordered_map<std::string, std::int64_t> _gridSymbols;
     int _deviceId = 0;
     HipModule _module;
     hipFunction_t _function = nullptr;
+    // Device-resident paged-KV index buffers, freed with the plan. Their addresses
+    // live in _bindings.pointerValues; these owners keep them alive across launches.
+    std::vector<HipDeviceBuffer> _pagedBuffers;
 };
 
 } // namespace rocke_client

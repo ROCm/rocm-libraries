@@ -34,31 +34,25 @@ endif()
 # arches at kernels/common/<family>_aot.py; family schemas overlay the shared
 # AOT schemas at aot/schemas/<family>/.
 set(_ROCKE_KERNELS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../kernels")
-set(_ROCKE_FMHA_HANDLER "${_ROCKE_KERNELS_DIR}/common/fmha_mfma_aot.py")
-set(_ROCKE_FMHA_SCHEMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas/fmha_fwd_mfma")
+set(_ROCKE_ATTENTION_TILED_2D_HANDLER
+    "${_ROCKE_KERNELS_DIR}/common/attention_tiled_2d_aot.py")
+set(_ROCKE_ATTENTION_TILED_2D_SCHEMA_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/schemas/attention_tiled_2d")
 
 rocke_client_add_aot_instances(
-    NAME sdpa_fwd_fmha_mfma_gfx942
+    NAME sdpa_fwd_attention_tiled_2d_gfx942
     ARCH gfx942
-    ARCH_DIR "${_ROCKE_KERNELS_DIR}/gfx942/fmha_fwd_mfma"
-    HANDLER "${_ROCKE_FMHA_HANDLER}"
-    SCHEMA_DIR "${_ROCKE_FMHA_SCHEMA_DIR}"
+    ARCH_DIR "${_ROCKE_KERNELS_DIR}/gfx942/attention_tiled_2d"
+    HANDLER "${_ROCKE_ATTENTION_TILED_2D_HANDLER}"
+    SCHEMA_DIR "${_ROCKE_ATTENTION_TILED_2D_SCHEMA_DIR}"
 )
 
 rocke_client_add_aot_instances(
-    NAME sdpa_fwd_fmha_mfma_gfx1151
-    ARCH gfx1151
-    ARCH_DIR "${_ROCKE_KERNELS_DIR}/gfx1151/fmha_fwd_mfma"
-    HANDLER "${_ROCKE_FMHA_HANDLER}"
-    SCHEMA_DIR "${_ROCKE_FMHA_SCHEMA_DIR}"
-)
-
-rocke_client_add_aot_instances(
-    NAME sdpa_fwd_fmha_mfma_gfx950
+    NAME sdpa_fwd_attention_tiled_2d_gfx950
     ARCH gfx950
-    ARCH_DIR "${_ROCKE_KERNELS_DIR}/gfx950/fmha_fwd_mfma"
-    HANDLER "${_ROCKE_FMHA_HANDLER}"
-    SCHEMA_DIR "${_ROCKE_FMHA_SCHEMA_DIR}"
+    ARCH_DIR "${_ROCKE_KERNELS_DIR}/gfx950/attention_tiled_2d"
+    HANDLER "${_ROCKE_ATTENTION_TILED_2D_HANDLER}"
+    SCHEMA_DIR "${_ROCKE_ATTENTION_TILED_2D_SCHEMA_DIR}"
 )
 
 if(_ROCKE_CLIENT_ENABLE_TESTS)
@@ -81,9 +75,9 @@ if(_ROCKE_CLIENT_ENABLE_TESTS)
 
     # Numeric verifiers consume the loose build-tree artifacts and skip (CTest
     # code 77) unless the visible HIP device exactly matches --arch.
-    foreach(_arch gfx942 gfx1151 gfx950)
+    foreach(_arch gfx942 gfx950)
         set(_artifact_dir
-            "${CMAKE_CURRENT_BINARY_DIR}/artifacts/${_arch}/sdpa_fwd_fmha_mfma_${_arch}")
+            "${CMAKE_CURRENT_BINARY_DIR}/artifacts/${_arch}/sdpa_fwd_attention_tiled_2d_${_arch}")
         add_test(
             NAME rocke_client_sdpa_aot_numeric_${_arch}
             COMMAND "${ROCKE_PYENV_PYTHON}"

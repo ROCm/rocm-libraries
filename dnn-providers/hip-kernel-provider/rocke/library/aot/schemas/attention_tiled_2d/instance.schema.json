@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "rocke.aot.instance.sdpa_fwd.fmha_fwd_mfma/v1",
-  "title": "SDPA forward FMHA MFMA AOT instance",
+  "$id": "rocke.aot.instance.sdpa_fwd.attention_tiled_2d/v1",
+  "title": "SDPA forward unified attention 2D tiled AOT instance",
   "allOf": [
     {
       "$ref": "../instance.schema.json"
@@ -11,13 +11,13 @@
       "properties": {
         "name": {
           "type": "string",
-          "pattern": "^sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx[0-9A-Za-z]+_q[0-9]+_k[0-9]+_hq[0-9]+_hkv[0-9]+_d(32|64|128|192|256)_none$"
+          "pattern": "^sdpa_fwd_attention_tiled_2d_fp16_bshd_gfx[0-9A-Za-z]+_q[0-9]+_k[0-9]+_hq[0-9]+_hkv[0-9]+_d(64|128|256)_none$"
         },
         "op": {
           "const": "sdpa_fwd"
         },
         "family": {
-          "const": "fmha_fwd_mfma"
+          "const": "attention_tiled_2d"
         },
         "compile_spec": {
           "type": "object",
@@ -30,9 +30,9 @@
             "num_query_heads",
             "num_kv_heads",
             "head_size",
-            "mask_mode",
-            "block_size_q",
-            "block_size_k"
+            "block_size",
+            "sliding_window",
+            "mask_mode"
           ],
           "properties": {
             "dtype": {
@@ -60,18 +60,17 @@
               "minimum": 1
             },
             "head_size": {
-              "enum": [32, 64, 128, 192, 256]
+              "enum": [64, 128, 256]
+            },
+            "block_size": {
+              "enum": [16, 32, 64]
+            },
+            "sliding_window": {
+              "type": "integer",
+              "minimum": 0
             },
             "mask_mode": {
               "const": "none"
-            },
-            "block_size_q": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "block_size_k": {
-              "type": "integer",
-              "minimum": 1
             }
           }
         },

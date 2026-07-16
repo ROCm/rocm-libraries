@@ -72,16 +72,20 @@ def _eval_grid_formula(
             return axis
         if isinstance(axis, str):
             return int(values[axis])
-        if isinstance(axis, dict) and "ceil_div" in axis:
-            args = axis["ceil_div"]
+        if isinstance(axis, dict) and "floor_div" in axis:
+            args = axis["floor_div"]
             if not isinstance(args, list) or len(args) != 2:
-                raise ValueError(f"invalid ceil_div grid formula axis: {axis!r}")
+                raise ValueError(f"invalid floor_div grid formula axis: {axis!r}")
             numerator, denominator = args
             n = int(values[numerator] if isinstance(numerator, str) else numerator)
             d = int(
                 values[denominator] if isinstance(denominator, str) else denominator
             )
-            return (n + d - 1) // d
+            result = n // d
+            if "add" in axis:
+                addend = axis["add"]
+                result += int(values[addend] if isinstance(addend, str) else addend)
+            return result
         raise ValueError(f"unsupported grid formula axis: {axis!r}")
 
     return (eval_axis(formula["x"]), eval_axis(formula["y"]), eval_axis(formula["z"]))
@@ -117,8 +121,6 @@ def _pack_args(signature: list[dict[str, Any]], values: dict[str, Any]) -> bytes
             chunk = struct.pack("<f", float(value))
         elif kind == "scalar" and ty == "i32" and size == 4:
             chunk = struct.pack("<i", int(value))
-        elif kind == "scalar" and ty == "i64" and size == 8:
-            chunk = struct.pack("<q", int(value))
         else:
             raise ValueError(f"unsupported arg signature entry: {arg!r}")
         packed.extend(chunk)
@@ -138,8 +140,16 @@ def _verify_profile(
     num_query_heads = int(compile_spec["num_query_heads"])
     num_kv_heads = int(compile_spec["num_kv_heads"])
     head_size = int(compile_spec["head_size"])
+    block_size = int(compile_spec["block_size"])
     if compile_spec.get("mask_mode") != "none":
         raise ValueError("only mask_mode='none' is supported by this verifier")
+    if num_query_heads % num_kv_heads:
+        raise ValueError("num_query_heads must be divisible by num_kv_heads")
+    if seqlen_k % block_size:
+        raise ValueError("seqlen_k must be a multiple of block_size")
+
+    num_queries_per_kv = num_query_heads // num_kv_heads
+    blocks_per_seq = (seqlen_k + block_size - 1) // block_size
 
     rng = np.random.default_rng(0xA07F00D)
     q = (
@@ -153,17 +163,28 @@ def _verify_profile(
     )
     out = np.zeros((batch, seqlen_q, num_query_heads, head_size), dtype=np.float16)
 
-    stride_q_token = num_query_heads * head_size
-    stride_q_head = head_size
-    stride_k_token = num_kv_heads * head_size
-    stride_k_head = head_size
-    stride_v_token = num_kv_heads * head_size
-    stride_v_head = head_size
-    stride_o_token = num_query_heads * head_size
-    stride_o_head = head_size
-    scale_log2 = float(1.0 / math.sqrt(head_size) * math.log2(math.e))
+    # Paged-KV launch inputs reproducing the contiguous dense KV: each sequence's
+    # blocks map to consecutive physical blocks, so block_tables is an identity
+    # map and query_start_len is the cumulative query offset (cu_seqlens_q).
+    block_tables = np.arange(batch * blocks_per_seq, dtype=np.int32).reshape(
+        batch, blocks_per_seq
+    )
+    seq_lens = np.full((batch,), seqlen_k, dtype=np.int32)
+    query_start_len = (np.arange(batch + 1, dtype=np.int32) * seqlen_q).astype(np.int32)
+    # The kernel applies its own log2 conversion, so pass the linear softmax scale.
+    scale = float(1.0 / math.sqrt(head_size))
 
-    grid_values = {**compile_spec, "batch": batch}
+    grid_values = {
+        "num_kv_heads": num_kv_heads,
+        "num_query_heads": num_query_heads,
+        "head_size": head_size,
+        "seqlen_q": seqlen_q,
+        "seqlen_k": seqlen_k,
+        "total_q": batch * seqlen_q,
+        "num_seqs": batch,
+        "block_q": 16 // num_queries_per_kv,
+        "batch": batch,
+    }
     grid = _eval_grid_formula(sidecar["launch"]["grid_formula"], grid_values)
     block = tuple(int(x) for x in sidecar["launch"]["block"])
     shared_mem = int(sidecar["launch"].get("shared_mem_bytes", 0))
@@ -181,28 +202,44 @@ def _verify_profile(
         device_ptrs.append(vd)
         od = runtime.alloc(out.nbytes)
         device_ptrs.append(od)
+        block_tables_d = runtime.alloc(block_tables.nbytes)
+        device_ptrs.append(block_tables_d)
+        seq_lens_d = runtime.alloc(seq_lens.nbytes)
+        device_ptrs.append(seq_lens_d)
+        query_start_len_d = runtime.alloc(query_start_len.nbytes)
+        device_ptrs.append(query_start_len_d)
 
         runtime.memcpy_h2d(qd, _host_buffer(q), q.nbytes)
         runtime.memcpy_h2d(kd, _host_buffer(k), k.nbytes)
         runtime.memcpy_h2d(vd, _host_buffer(v), v.nbytes)
         runtime.memset(od, 0, out.nbytes)
+        runtime.memcpy_h2d(
+            block_tables_d, _host_buffer(block_tables), block_tables.nbytes
+        )
+        runtime.memcpy_h2d(seq_lens_d, _host_buffer(seq_lens), seq_lens.nbytes)
+        runtime.memcpy_h2d(
+            query_start_len_d, _host_buffer(query_start_len), query_start_len.nbytes
+        )
 
         arg_values = {
-            "Q": qd,
-            "K": kd,
-            "V": vd,
-            "O": od,
-            "scale_log2": scale_log2,
-            "seqlen_q": seqlen_q,
-            "seqlen_k": seqlen_k,
-            "stride_q_token": stride_q_token,
-            "stride_q_head": stride_q_head,
-            "stride_k_token": stride_k_token,
-            "stride_k_head": stride_k_head,
-            "stride_v_token": stride_v_token,
-            "stride_v_head": stride_v_head,
-            "stride_o_token": stride_o_token,
-            "stride_o_head": stride_o_head,
+            "output_ptr": od,
+            "query_ptr": qd,
+            "key_cache_ptr": kd,
+            "value_cache_ptr": vd,
+            "sink_ptr": 0,
+            "block_tables_ptr": block_tables_d,
+            "seq_lens_ptr": seq_lens_d,
+            "alibi_slopes_ptr": 0,
+            "qq_bias_ptr": 0,
+            "query_start_len_ptr": query_start_len_d,
+            "scale": scale,
+            "k_scale": 1.0,
+            "v_scale": 1.0,
+            "out_scale": 1.0,
+            "softcap": 0.0,
+            "num_seqs": batch,
+            "block_table_stride": blocks_per_seq,
+            "qq_bias_stride_0": 0,
         }
         packed = _pack_args(sidecar["args_signature"], arg_values)
         runtime.launch(function, grid, block, packed, shared_bytes=shared_mem)

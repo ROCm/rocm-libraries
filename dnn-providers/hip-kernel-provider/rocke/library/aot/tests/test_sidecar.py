@@ -27,7 +27,7 @@ def test_canonical_hash_uses_canonical_json_bytes():
 
 def test_make_sidecar_uses_common_envelope_and_operation_entries():
     sidecar = make_sidecar(
-        cache_key="sdpa_fwd:fmha_fwd_mfma:example",
+        cache_key="sdpa_fwd:attention_tiled_2d:example",
         artifact={"hsaco_filename": "example.hsaco"},
         selection={"dtypes": {"q": "fp16"}},
         launch={"block": [32, 1, 1]},
@@ -36,7 +36,7 @@ def test_make_sidecar_uses_common_envelope_and_operation_entries():
 
     assert sidecar == {
         "schema": SIDECAR_SCHEMA,
-        "cache_key": "sdpa_fwd:fmha_fwd_mfma:example",
+        "cache_key": "sdpa_fwd:attention_tiled_2d:example",
         "artifact": {"hsaco_filename": "example.hsaco"},
         "selection": {"dtypes": {"q": "fp16"}},
         "launch": {"block": [32, 1, 1]},

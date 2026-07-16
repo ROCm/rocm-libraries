@@ -1,7 +1,47 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "rocke.aot.sidecar.sdpa_fwd.fmha_fwd_mfma/v1",
-  "title": "SDPA forward FMHA MFMA AOT sidecar",
+  "$id": "rocke.aot.sidecar.sdpa_fwd.attention_tiled_2d/v1",
+  "title": "SDPA forward unified attention 2D tiled AOT sidecar",
+  "$defs": {
+    "gridAxis": {
+      "oneOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ceil_div"],
+          "properties": {
+            "ceil_div": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["floor_div"],
+          "properties": {
+            "floor_div": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "add": {
+              "type": ["string", "integer"]
+            }
+          }
+        }
+      ]
+    }
+  },
   "allOf": [
     {
       "$ref": "../sidecar.schema.json"
@@ -11,7 +51,7 @@
       "properties": {
         "cache_key": {
           "type": "string",
-          "pattern": "^sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:fp16_bshd_blockq16_blockk[0-9]+:gfx[0-9A-Za-z]+:hipkg-sdpa-fwd-fmha-mfma/v1:[0-9a-f]{64}:[0-9a-f]{64}$"
+          "pattern": "^sdpa_fwd:attention_tiled_2d:attention_tiled_2d:unified_attention_2d_tiled:fp16_bshd_d(64|128|256)_b(16|32|64)_h[0-9]+kv[0-9]+:gfx[0-9A-Za-z]+:hipkg-attention-unified/v1:[0-9a-f]{64}:[0-9a-f]{64}$"
         },
         "artifact": {
           "type": "object",
@@ -25,11 +65,11 @@
           "properties": {
             "hsaco_filename": {
               "type": "string",
-              "pattern": "^sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx[0-9A-Za-z]+_q[0-9]+_k[0-9]+_hq[0-9]+_hkv[0-9]+_d(32|64|128|192|256)_none\\.hsaco$"
+              "pattern": "^sdpa_fwd_attention_tiled_2d_fp16_bshd_gfx[0-9A-Za-z]+_q[0-9]+_k[0-9]+_hq[0-9]+_hkv[0-9]+_d(64|128|256)_none\\.hsaco$"
             },
             "symbol": {
               "type": "string",
-              "pattern": "^rocke_fmha_fwd_mfma_"
+              "pattern": "^rocke_uattn2d_tiled_"
             },
             "hsaco_sha256": {
               "type": "string",
@@ -170,7 +210,7 @@
                   "required": ["equals"],
                   "properties": {
                     "equals": {
-                      "enum": [32, 64, 128, 192, 256]
+                      "enum": [64, 128, 256]
                     }
                   }
                 }
@@ -201,22 +241,13 @@
               "required": ["x", "y", "z"],
               "properties": {
                 "x": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["ceil_div"],
-                  "properties": {
-                    "ceil_div": {
-                      "type": "array",
-                      "minItems": 2,
-                      "maxItems": 2
-                    }
-                  }
+                  "$ref": "#/$defs/gridAxis"
                 },
                 "y": {
-                  "const": "num_query_heads"
+                  "$ref": "#/$defs/gridAxis"
                 },
                 "z": {
-                  "const": "batch"
+                  "$ref": "#/$defs/gridAxis"
                 }
               }
             },
@@ -232,17 +263,32 @@
             "tile_sizes": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["block_q", "block_k", "head_size", "wave_size"],
+              "required": [
+                "block_size",
+                "head_size",
+                "tile_size",
+                "block_m",
+                "block_q",
+                "wave_size"
+              ],
               "properties": {
-                "block_q": {
-                  "const": 16
+                "block_size": {
+                  "enum": [16, 32, 64]
                 },
-                "block_k": {
+                "head_size": {
+                  "enum": [64, 128, 256]
+                },
+                "tile_size": {
                   "type": "integer",
                   "minimum": 1
                 },
-                "head_size": {
-                  "enum": [32, 64, 128, 192, 256]
+                "block_m": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "block_q": {
+                  "type": "integer",
+                  "minimum": 1
                 },
                 "wave_size": {
                   "enum": [32, 64]
