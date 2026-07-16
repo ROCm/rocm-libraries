@@ -886,6 +886,44 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu)
         << "no-WMMA: all ds_loads must drain before consumer VALUs (no ds,valu,ds interleave)";
 }
 
+// Type-A WAR via elapse-time ordering (replaces the old dsAddrReadLatencyCounters):
+// a VALU that overwrites the ds_load's address reg must be deferred behind other
+// independent VALUs, because that reg was just touched (small elapse) — even though
+// the overwrite is EARLIEST in program order (smallest DAG id, which plain
+// pop()-by-id would pick first). This proves the read->write gap comes from elapse
+// ordering, not a hard counter.
+TEST_F(DAGSchedulerPassTest, WarOverwriteOfDsAddrDeferredByElapse) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    // ds_load reads address v200 (single ds_load so no load-drain effects dominate).
+    createMovableDsLoad(/*destReg=*/8, /*addrReg=*/200, /*ldsToken=*/1);
+    // Overwrite of v200 — created FIRST after the load, so it has the smallest DAG id
+    // among the VALUs. Independent VALUs (disjoint regs) created after it.
+    StinkyInstruction* overwrite = createVAddInBlock(body, arch, /*dst=*/200, /*src0=*/101,
+                                                     /*src1=*/102);
+    for (int i = 0; i < 3; i++)
+        createVAddInBlock(body, arch, /*dst=*/50 + i, /*src0=*/60 + i, /*src1=*/70 + i);
+
+    runPassWithUnrollGemm();
+
+    // Find the scheduled position of the overwrite vs. the independent VALUs.
+    int overwritePos = -1, firstIndependentPos = -1, idx = 0;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst == overwrite)
+            overwritePos = idx;
+        else if (inst->getUnifiedOpcode() == GFX::v_add_f32 && firstIndependentPos < 0)
+            firstIndependentPos = idx;
+        idx++;
+    }
+    ASSERT_GE(overwritePos, 0);
+    ASSERT_GE(firstIndependentPos, 0);
+    EXPECT_GT(overwritePos, firstIndependentPos)
+        << "WAR overwrite of the ds_load address must be deferred behind independent VALUs "
+           "by elapse-time ordering, despite having the smallest DAG id";
+}
+
 // All instructions are preserved regardless of throttle (count invariant).
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     BasicBlock* body = bb;
