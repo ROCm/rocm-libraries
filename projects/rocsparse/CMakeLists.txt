@@ -87,7 +87,7 @@ option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
-option(ROCSPARSE_ENABLE_HANDLE_CREATE "Build the non-blocking rocsparse_handle_create/destroy API" ON)
+option(ROCSPARSE_ENABLE_HANDLE_CREATE "Build rocsparse_handle_create/destroy: non-blocking handle creation on a user-defined stream" ON)
 option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
