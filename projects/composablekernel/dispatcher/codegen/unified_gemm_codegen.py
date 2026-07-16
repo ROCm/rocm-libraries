@@ -202,6 +202,20 @@ class GemmVariant(Enum):
     STANDARD = "standard"
     PRESHUFFLE = "preshuffle"
     MULTI_D = "multi_d"
+    # Stream-K. COVERAGE LIMITATION: the dispatcher does NOT yet emit the full
+    # Old-TE Stream-K tile surface. The kernels generated here are driven by the
+    # tile list passed to this codegen, which is narrower than tile_engine's:
+    # measured per layout, e.g. fp16/bf16 rcr TE=180 vs DISP=73 tiles (124 TE-only,
+    # 17 DISP-only); ccr TE=144 vs DISP=73; fp8/bf8 closer (rcr TE=296 vs DISP=232)
+    # but still short. TE-vs-DISP numeric+perf parity is therefore validated
+    # per matched tile config, NOT over the whole TE tile space -- "functional
+    # equivalence" should be read with that scope. Closing the gap means feeding
+    # the missing TE tiles into the tile list (the codegen handles them); the
+    # divergent DISP-only tiles are configs TE does not enumerate at all.
+    # NOTE: this limitation is inherent only to driving the codegen standalone.
+    # When the bridge is implemented on top of this codegen, the tile list is
+    # supplied by Tile-Engine directly, so the emitted Stream-K surface matches
+    # the full Old-TE tile space by construction and the gap closes.
     STREAM_K = "stream_k"
 
 
@@ -438,12 +452,13 @@ using namespace ck_tile;
     def _kernel_local_types(self, config: KernelConfig) -> str:
         """Generate data type and layout definitions inside kernel namespace"""
         output_dtype = self.tm.get_output_dtype(self.datatype)
+        acc_dtype = self.tm.get_acc_dtype(self.datatype)
 
         return f"""
     // Data types (inside namespace to avoid conflicts across layouts)
     using ADataType = {self.tm.DTYPE_TO_CK[self.datatype]};
     using BDataType = {self.tm.DTYPE_TO_CK[self.datatype]};
-    using AccDataType = float;
+    using AccDataType = {self.tm.DTYPE_TO_CK[acc_dtype]};
     using CDataType = {self.tm.DTYPE_TO_CK[output_dtype]};
 
     // Layouts (inside namespace to avoid conflicts when mixing layouts)
@@ -476,6 +491,7 @@ using GemmMultiDArgs = GemmMultiDHostArgs<NumDTensor>;
         t = config.tile
         tr = config.trait
         output_dtype = self.tm.get_output_dtype(self.datatype)
+        acc_dtype = self.tm.get_acc_dtype(self.datatype)
 
         # Generate unique struct name and namespace from kernel name
         struct_name = f"Kernel_{kernel_name}"
@@ -491,7 +507,7 @@ constexpr const char* KERNEL_NAME = "{kernel_name}";
 // Data types (inside namespace to avoid conflicts across different kernels)
 using ADataType = {self.tm.DTYPE_TO_CK[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK[self.datatype]};
-using AccDataType = float;
+using AccDataType = {self.tm.DTYPE_TO_CK[acc_dtype]};
 using CDataType = {self.tm.DTYPE_TO_CK[output_dtype]};
 
 // Layouts (inside namespace to avoid conflicts when mixing layouts like RCR + RRR)
@@ -546,8 +562,8 @@ using SelectedKernel = {ns_name}::{struct_name};
 constexpr const char* KERNEL_NAME = {ns_name}::KERNEL_NAME;
 using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
-using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.tm.get_output_dtype(self.datatype)]};
-using AccDataType = float;
+using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[output_dtype]};
+using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
 using ALayout = {ns_name}::ALayout;
 using BLayout = {ns_name}::BLayout;
 using CLayout = {ns_name}::CLayout;
@@ -561,7 +577,7 @@ using CLayout = {ns_name}::CLayout;
 #define GEMM_KEY_DTYPE_A "{self.datatype}"
 #define GEMM_KEY_DTYPE_B "{self.datatype}"
 #define GEMM_KEY_DTYPE_C "{output_dtype}"
-#define GEMM_KEY_DTYPE_ACC "fp32"
+#define GEMM_KEY_DTYPE_ACC "{acc_dtype}"
 #define GEMM_KEY_LAYOUT_A "{self.layout[0]}"
 #define GEMM_KEY_LAYOUT_B "{self.layout[1]}"
 #define GEMM_KEY_LAYOUT_C "{self.layout[2]}"
@@ -814,7 +830,23 @@ using CLayout = {ns_name}::CLayout;
             "linear": "Linear",
             "tree": "Tree",
         }[config.reduction_strategy]
-        return f"""
+        # The Atomic strategy zeroes C with a row-major hipMemset2D (pitch =
+        # stride_E rows of N elems). A column-major C would be zeroed incorrectly
+        # and atomic accumulation would then corrupt results, so fail loudly at
+        # compile time rather than silently. Linear/Tree zero the workspace, not C,
+        # so they carry no such requirement.
+        c_rowmajor_assert = (
+            """
+    static_assert(
+        std::is_same_v<ck_tile::remove_cvref_t<CLayout>,
+                       ck_tile::tensor_layout::gemm::RowMajor>,
+        "Stream-K Atomic reduction requires a row-major C: the hipMemset2D C-reset "
+        "assumes row-major layout and would zero a column-major C incorrectly.");
+"""
+            if config.reduction_strategy == "atomic"
+            else ""
+        )
+        return f"""{c_rowmajor_assert}
     // ---- Stream-K kernel type, hoisted to struct scope so the workspace API
     // ---- (GetWorkSpaceSize + external-workspace launch) can reuse the same type. ----
     static constexpr auto SkScheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
@@ -869,12 +901,15 @@ using CLayout = {ns_name}::CLayout;
             if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
                 // Stride-aware: CLayout is row-major with stride_E elems/row, so a
                 // padded C is zeroed correctly (not just the contiguous M*N case).
-                (void)hipMemset2DAsync(args.e_ptr,
+                if(hipMemset2DAsync(args.e_ptr,
                     args.stride_E * sizeof(CDataType),
                     0,
                     args.N * sizeof(CDataType),
                     args.M,
-                    stream.stream_id_);
+                    stream.stream_id_) != hipSuccess) {{
+                    throw std::runtime_error(
+                        "stream-k: hipMemset2DAsync failed to reset C between iterations");
+                }}
             }} else {{
                 workspace_dev.SetZero();
             }}
@@ -909,14 +944,20 @@ using CLayout = {ns_name}::CLayout;
             if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
                 // Stride-aware: CLayout is row-major with stride_E elems/row, so a
                 // padded C is zeroed correctly (not just the contiguous M*N case).
-                (void)hipMemset2DAsync(args.e_ptr,
+                if(hipMemset2DAsync(args.e_ptr,
                     args.stride_E * sizeof(CDataType),
                     0,
                     args.N * sizeof(CDataType),
                     args.M,
-                    stream.stream_id_);
+                    stream.stream_id_) != hipSuccess) {{
+                    throw std::runtime_error(
+                        "stream-k: hipMemset2DAsync failed to reset C between iterations");
+                }}
             }} else {{
-                (void)hipMemsetAsync(workspace, 0, ws_size, stream.stream_id_);
+                if(hipMemsetAsync(workspace, 0, ws_size, stream.stream_id_) != hipSuccess) {{
+                    throw std::runtime_error(
+                        "stream-k: hipMemsetAsync failed to reset reduction workspace");
+                }}
             }}
         }};
         std::function<void()> preprocess = reset_data_buffers;
@@ -944,7 +985,7 @@ using CLayout = {ns_name}::CLayout;
             tuple<>, CLayout, element_wise::PassThrough,
             TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
-            TransposeC, NumWaveGroups, false, 1, 1, DoubleSmemBuffer>;
+            TransposeC, NumWaveGroups>;
         using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
         else:
             return """
@@ -975,6 +1016,7 @@ class DispatcherWrapperGenerator:
         """Generate dispatcher wrapper"""
         kernel_name = KernelNaming.generate(config, self.datatype, self.layout)
         output_dtype = self.tm.get_output_dtype(self.datatype)
+        acc_dtype = self.tm.get_acc_dtype(self.datatype)
         rel_path = kernel_path.relative_to(output_dir)
 
         # Stream-K kernels need the Stream-K backend (StreamKHostArgs launch) and
@@ -1046,7 +1088,7 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.signature.dtype_a = {self.tm.DTYPE_TO_DISPATCHER[self.datatype]};
     key.signature.dtype_b = {self.tm.DTYPE_TO_DISPATCHER[self.datatype]};
     key.signature.dtype_c = {self.tm.DTYPE_TO_DISPATCHER[output_dtype]};
-    key.signature.dtype_acc = DataType::FP32;
+    key.signature.dtype_acc = {self.tm.DTYPE_TO_DISPATCHER[acc_dtype]};
     key.signature.layout_a = {self.tm.LAYOUT_TO_DISPATCHER[self.layout[0]]};
     key.signature.layout_b = {self.tm.LAYOUT_TO_DISPATCHER[self.layout[1]]};
     key.signature.layout_c = {self.tm.LAYOUT_TO_DISPATCHER[self.layout[2]]};

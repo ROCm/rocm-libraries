@@ -33,25 +33,12 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
+#include "streamk_driver_common.hpp"
+
 // The generated stream-K kernel header is injected on the command line with
 // -include and -DCK_TILE_SINGLE_KERNEL_INCLUDE. It exports into the global
 // namespace: SelectedKernel, ADataType, BDataType, CDataType, AccDataType,
 // ALayout, BLayout, CLayout, and KERNEL_NAME.
-
-template <typename Layout>
-static constexpr inline auto is_row_major(Layout)
-{
-    return ck_tile::bool_constant<
-        std::is_same_v<ck_tile::remove_cvref_t<Layout>, ck_tile::tensor_layout::gemm::RowMajor>>{};
-}
-
-static std::string get_opt(int argc, char** argv, const std::string& key, const std::string& def)
-{
-    for(int i = 1; i < argc - 1; ++i)
-        if(key == argv[i])
-            return argv[i + 1];
-    return def;
-}
 
 int main(int argc, char** argv)
 {
@@ -141,34 +128,19 @@ int main(int argc, char** argv)
         ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(a_host, b_host, ref);
         const float maxv = *std::max_element(ref.mData.begin(), ref.mData.end());
 
-        // Stream-K splits K across CUs and reduces partials. Atomic reduction
-        // accumulates those partials directly into low-precision C, so the
-        // verification tolerance must account for the split-K accumulation
-        // error -- exactly as the tile_engine verifier does in
-        // tile_engine/include/utility/validation.hpp::calculate_rtol_atol.
-        // kbatch is the number of workgroups reducing into a single output
-        // tile, taken from the kernel's own tile partitioner so the driver and
-        // tile_engine agree on the split factor.
-        auto kargs = SelectedKernel::StreamKGemmKernel::MakeKernelArgs(args);
-        const ck_tile::index_t kbatch =
-            std::max<ck_tile::index_t>(1, kargs.tile_partitioner.estimate_num_wgs_per_tile());
-
+        // num_wgs_per_tile is the number of workgroups reducing into a single
+        // output tile (Stream-K has no fixed split-k), taken from the kernel's
+        // own tile partitioner so the driver and tile_engine agree on the split
+        // factor. streamk_tolerance() then widens the verify tolerance for the
+        // split-K accumulation error (see streamk_driver_common.hpp).
         using ComputeType =
             std::conditional_t<sizeof(ADataType) < sizeof(BDataType), ADataType, BDataType>;
-        const ck_tile::index_t k_per_split = ck_tile::integer_divide_ceil(K, kbatch);
-        // single-pass (per-split) tolerance
-        const auto rtol_base =
-            ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(k_per_split);
-        const auto atol_base = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
-            maxv / kbatch, k_per_split);
-        // error contributed by reducing kbatch partials in low-precision C
-        const auto rtol_split_k =
-            ck_tile::get_relative_threshold<CDataType, CDataType, CDataType>(kbatch);
-        const auto atol_split_k =
-            ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(maxv, kbatch);
-        const auto rtol = std::max(rtol_base, rtol_split_k);
-        const auto atol = std::max(atol_base, atol_split_k);
-        pass            = ck_tile::check_err(c_host, ref, "streamk", rtol, atol);
+        auto kargs = SelectedKernel::StreamKGemmKernel::MakeKernelArgs(args);
+        const ck_tile::index_t num_wgs_per_tile =
+            std::max<ck_tile::index_t>(1, kargs.tile_partitioner.estimate_num_wgs_per_tile());
+        const auto tol =
+            streamk_tolerance<ComputeType, CDataType, AccDataType>(K, num_wgs_per_tile, maxv);
+        pass = ck_tile::check_err(c_host, ref, "streamk", tol.rtol, tol.atol);
         std::cout << "Verification: " << (pass ? "PASS" : "FAIL") << "\n";
     }
 

@@ -8,10 +8,7 @@ of the [rocm-libraries GitHub](https://github.com/ROCm/rocm-libraries) repositor
 > [!NOTE]
 > The published MIOpen documentation is available at [MIOpen](https://rocm.docs.amd.com/projects/MIOpen/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the MIOpen/docs folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
-MIOpen supports these programming models (backends):
-
-* [HIP](https://rocm.docs.amd.com/projects/HIP/en/latest/)
-* OpenCL (deprecated)
+MIOpen supports the [HIP](https://rocm.docs.amd.com/projects/HIP/en/latest/) programming model (backend).
 
 ## Building our documentation
 
@@ -32,9 +29,8 @@ python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 To install MIOpen, you must first install these prerequisites:
 
 * A [ROCm](https://rocm.docs.amd.com/)-enabled platform
-* A base software stack that includes either:
+* A base software stack that includes:
   * HIP (HIP and HCC libraries and header files)
-  * OpenCL (OpenCL libraries and header files)--this is now deprecated
 * [ROCm CMake](https://github.com/ROCm/rocm-cmake): provides CMake modules for common build
   tasks needed for the ROCm software stack
 * [Half](http://half.sourceforge.net/): IEEE 754-based, half-precision floating-point library
@@ -55,13 +51,6 @@ To install MIOpen, you must first install these prerequisites:
 ### Installing with pre-built packages
 
 You can install MIOpen on Ubuntu using `apt-get install miopen-hip`.
-
-If using OpenCL, you can use `apt-get install miopen-opencl` (but this is not recommended, as OpenCL
-is deprecated).
-
-Note that you can't install both backends on the same system simultaneously. If you want a different
-backend other than what currently exists, completely uninstall the existing backend prior to installing
-the new backend.
 
 ### Installing with a kernels package
 
@@ -123,17 +112,16 @@ You can use this prefix to specify the dependency path during the configuration 
 
 MIOpen's HIP backend uses [rocBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas) by default. You can install
 rocBLAS' minimum release using `apt-get install rocblas`. To disable rocBLAS, set the configuration flag
-`-DMIOPEN_USE_ROCBLAS=Off`. rocBLAS is **not** available with OpenCL.
+`-DMIOPEN_USE_ROCBLAS=Off`.
 
 MIOpen's HIP backend can use [hipBLASLt](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt). You can install hipBLASLt's minimum
 release using ``apt-get install hipblaslt``. In addition to needing hipblaslt, you will also need to install [hipBLAS](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas).
 You can install hipBLAS's minimum release using ``apt-get install hipblas``.
 To disable hipBLASLt, set the configuration flag ``-DMIOPEN_USE_HIPBLASLT=Off``.
-hipBLASLt is **not** available with OpenCL.
 
 ## Building MIOpen from source
 
-You can build MIOpen form source with a HIP backend or an OpenCL backend.
+You can build MIOpen from source using the HIP backend.
 
 ### HIP backend
 
@@ -162,31 +150,6 @@ cmake -DMIOPEN_BACKEND=HIP -DCMAKE_PREFIX_PATH="/opt/rocm/;/opt/rocm/hip;/root/M
 >[!NOTE]
 >When specifying the path for the `CMAKE_PREFIX_PATH` variable, **do not** use the tilde (`~`)
 >shorthand to represent the home directory.
-
-### OpenCL backend
-
->[!NOTE]
-> OpenCL is deprecated. We recommend using a HIP backend and following the instructions listed in
-> the preceding section.
-
-First, run:
-
-``` shell
-cmake -DMIOPEN_BACKEND=OpenCL ..
-```
-
-The preceding code assumes OpenCL is installed in one of the standard locations. If not, then manually
-set these CMake variables:
-
-```shell
-cmake -DMIOPEN_BACKEND=OpenCL -DMIOPEN_HIP_COMPILER=<hip-compiler-path> -DOPENCL_LIBRARIES=<opencl-library-path> -DOPENCL_INCLUDE_DIRS=<opencl-headers-path> ..
-```
-
-Here's an example dependency path for an environment in ROCm 3.5 and later:
-
-```shell
-cmake -DMIOPEN_BACKEND=OpenCL -DMIOPEN_HIP_COMPILER=/opt/rocm/llvm/bin/clang++ -DCMAKE_PREFIX_PATH="/opt/rocm/;/opt/rocm/hip;/root/MIOpen/install_dir" ..
-```
 
 ### Setting up locations
 

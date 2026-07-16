@@ -29,6 +29,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -72,29 +73,35 @@ STRATEGIES = {
 # Datatypes the Stream-K dispatcher codegen supports end-to-end. fp8/bf8 inputs
 # accumulate in fp32 and write an fp16 C tensor (get_output_dtype), matching
 # Tile Engine; the registry identifier keys on the input dtype (dtype_a), so the
-# expected encode_identifier prefix is "{dtype}_rcr" for each.
+# expected encode_identifier prefix is "{dtype}_{layout}" for each.
 DATATYPES = ["fp16", "bf16", "fp8", "bf8"]
+
+# Layouts Tile Engine builds Stream-K for (all keep C row-major, which the atomic
+# C-reset relies on). Full coverage = DATATYPES x LAYOUTS x STRATEGIES.
+LAYOUTS = ["rcr", "rrr", "ccr", "crr"]
 
 
 def detect_arch(fallback=None):
-    try:
-        sys.path.insert(0, str(DISPATCHER_DIR / "python"))
-        from dispatcher_common import detect_gpu_arch  # noqa: E402
-
-        return detect_gpu_arch()
-    except Exception:
-        out = shutil.which("rocminfo")
-        if out:
+    # Resolve the gfx target without shelling out to rocminfo. Preference order:
+    # the arch the build already configured with (passed via --arch from
+    # CMakeLists.txt) is handled by the caller; here we fall back to the standard
+    # ROCm environment variables and then the amdgpu-arch / offload-arch LLVM
+    # tools, which query the driver directly and ship with the ROCm/LLVM toolchain.
+    for env in ("PYTORCH_ROCM_ARCH", "HCC_AMDGPU_TARGET", "AMDGPU_TARGETS", "GPU_TARGETS"):
+        val = os.environ.get(env)
+        if val:
+            return re.split(r"[;,]", val)[0].strip()
+    for tool in ("amdgpu-arch", "offload-arch"):
+        exe = shutil.which(tool)
+        if exe:
             try:
-                txt = subprocess.run(
-                    ["rocminfo"], capture_output=True, text=True, timeout=30
-                ).stdout
-                for line in txt.splitlines():
-                    if "gfx" in line and "Name:" in line:
-                        return line.split("gfx")[1].split()[0].join(["gfx", ""])
+                out = run([exe], timeout=30).stdout
+                m = re.search(r"\bgfx[0-9a-f]+\b", out)
+                if m:
+                    return m.group(0)
             except Exception:
                 pass
-        return fallback
+    return fallback
 
 
 def run(cmd, **kw):
@@ -107,7 +114,17 @@ def main():
     ap.add_argument("--m", type=int, default=3840)
     ap.add_argument("--n", type=int, default=4096)
     ap.add_argument("--k", type=int, default=2048)
+    ap.add_argument(
+        "--datatypes", default=",".join(DATATYPES),
+        help="Comma-separated datatypes to test (default: all TE-equivalent).",
+    )
+    ap.add_argument(
+        "--layouts", default=",".join(LAYOUTS),
+        help="Comma-separated layouts to test (default: all TE-equivalent).",
+    )
     args = ap.parse_args()
+    datatypes = [d.strip() for d in args.datatypes.split(",") if d.strip()]
+    layouts = [l.strip() for l in args.layouts.split(",") if l.strip()]
 
     hipcc = shutil.which("hipcc")
     if not hipcc:
@@ -136,10 +153,11 @@ def main():
                 return 1
 
         failures = []
-        for dtype in DATATYPES:
-            failures += run_for_dtype(
-                dtype, td, arch, args, hipcc, inc, reg_o, disp_o
-            )
+        for dtype in datatypes:
+            for layout in layouts:
+                failures += run_for_combo(
+                    dtype, layout, td, arch, args, hipcc, inc, reg_o, disp_o
+                )
 
         if failures:
             print("\nSTREAM-K REGISTRY TEST FAILED:")
@@ -148,24 +166,30 @@ def main():
             return 1
 
     print(
-        "All Stream-K datatypes "
-        f"({', '.join(DATATYPES)}) registered, dispatched, and verified."
+        "All Stream-K combos registered, dispatched, and verified "
+        f"(datatypes: {', '.join(datatypes)} | layouts: {', '.join(layouts)})."
     )
     return 0
 
 
-def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
-    """Generate + build + run all reduction strategies for one datatype.
+def run_for_combo(dtype, layout, td, arch, args, hipcc, inc, reg_o, disp_o):
+    """Generate + build + run all reduction strategies for one (dtype, layout).
 
     Returns a list of failure strings (empty on success)."""
     failures = []
-    gen = Path(td) / f"gen_{dtype}"
+    # Verify each built kernel against the CLI shape AND a small-M/N, large-K
+    # shape. The latter maximizes the Stream-K split factor, which is exactly
+    # where the split-K-aware verification tolerance matters: a plain single-pass
+    # tolerance spuriously FAILs correct atomic results on this shape. The driver
+    # binary is shape-independent, so this only adds runs, not rebuilds.
+    shapes = [(args.m, args.n, args.k), (128, 128, 16384)]
+    gen = Path(td) / f"gen_{dtype}_{layout}"
 
     # 1) generate all three strategy headers from one tile config
     g = run(
         [
             sys.executable, str(CODEGEN),
-            "--datatype", dtype, "--layout", "rcr",
+            "--datatype", dtype, "--layout", layout,
             "--gpu-target", arch, "--variants", "stream_k",
             "--tile-config-json", TILE_CONFIG_JSON,
             "--output-dir", str(gen),
@@ -173,19 +197,19 @@ def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
         timeout=600,
     )
     if g.returncode != 0:
-        return [f"{dtype}: codegen failed\n" + g.stderr[-2000:]]
+        return [f"{dtype}/{layout}: codegen failed\n" + g.stderr[-2000:]]
 
     for strat, (variant, want_suffix) in STRATEGIES.items():
-        tag = f"{dtype}/{strat}"
+        tag = f"{dtype}/{layout}/{strat}"
         header = gen / (
-            f"gemm_{dtype}_rcr_compv3_cshuffle_intrawave_"
+            f"gemm_{dtype}_{layout}_compv3_cshuffle_intrawave_"
             f"False_False_False_False_{TILE}_{variant}.hpp"
         )
         if not header.exists():
             failures.append(f"{tag}: generated header missing ({header.name})")
             continue
 
-        stem = f"{dtype}_{variant}"
+        stem = f"{dtype}_{layout}_{variant}"
         drv_o, exe = Path(td) / f"d_{stem}.o", Path(td) / f"skreg_{stem}"
         c = run(
             [hipcc, "-std=c++17", f"--offload-arch={arch}", "-O3",
@@ -206,26 +230,34 @@ def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
             failures.append(f"{tag}: link failed\n{l.stderr[-1500:]}")
             continue
 
-        r = run(
-            [str(exe), "--m", str(args.m), "--n", str(args.n),
-             "--k", str(args.k), "--strategy", strat, "--validate", "1"],
-            timeout=300,
-        )
-        out = r.stdout
-        ok_verify = "Verification: PASS" in out
-        ok_suffix = f"identifier={dtype}_rcr" in out and want_suffix in out.split(
-            "identifier="
-        )[1].split()[0]
-        if r.returncode != 0 or not ok_verify or not ok_suffix:
-            failures.append(
-                f"{tag}: rc={r.returncode} verify={ok_verify} "
-                f"suffix_ok={ok_suffix}\n{out[-800:]}{r.stderr[-400:]}"
+        for (sm, sn, sk) in shapes:
+            r = run(
+                [str(exe), "--m", str(sm), "--n", str(sn),
+                 "--k", str(sk), "--strategy", strat, "--validate", "1"],
+                timeout=300,
             )
-        else:
-            tflops = next(
-                (ln for ln in out.splitlines() if "TFlops" in ln), ""
-            ).strip()
-            print(f"  PASS {dtype:5s} {strat:6s} -> {want_suffix}  | {tflops}")
+            out = r.stdout
+            ok_verify = "Verification: PASS" in out
+            # Guard the identifier parse: a crashed/silent driver prints no
+            # "identifier=" token, so split(...)[1] would raise IndexError and
+            # abort the run instead of recording a clean failure.
+            ok_suffix = False
+            if f"identifier={dtype}_{layout}" in out and "identifier=" in out:
+                token = out.split("identifier=", 1)[1].split()[0]
+                ok_suffix = want_suffix in token
+            if r.returncode != 0 or not ok_verify or not ok_suffix:
+                failures.append(
+                    f"{tag} @ {sm}x{sn}x{sk}: rc={r.returncode} verify={ok_verify} "
+                    f"suffix_ok={ok_suffix}\n{out[-800:]}{r.stderr[-400:]}"
+                )
+            else:
+                tflops = next(
+                    (ln for ln in out.splitlines() if "TFlops" in ln), ""
+                ).strip()
+                print(
+                    f"  PASS {dtype:5s} {layout:4s} {strat:6s} {sm}x{sn}x{sk} "
+                    f"-> {want_suffix}  | {tflops}"
+                )
 
     return failures
 
