@@ -283,6 +283,7 @@ struct HandleImpl
     Allocator allocator{};
     KernelCache cache;
     TargetProperties target_properties;
+    mutable StreamTracker stream_tracker_;
 };
 
 Handle::Handle(miopenAcceleratorQueue_t stream) : impl(std::make_unique<HandleImpl>())
@@ -398,6 +399,37 @@ miopenAcceleratorQueue_t Handle::GetStream() const
     // locking only if handle in multistream mode
     std::shared_lock<std::shared_timed_mutex> lock(this->impl->stream_pool_mutex);
     return this->impl->ms_resourse_ptr->stream_pool.at(meopenHandle_current_stream_id - 1).get();
+}
+
+StreamTracker& Handle::GetStreamTracker() const { return impl->stream_tracker_; }
+
+StreamTracker::Slot StreamTracker::acquire(const Handle& handle)
+{
+    if(available_.empty())
+    {
+        for(auto it = draining_.begin(); it != draining_.end();)
+        {
+            if(hipStreamQuery(it->stream) == hipSuccess)
+            {
+                available_.push_back(*it);
+                it = draining_.erase(it);
+            }
+            else
+                ++it;
+        }
+    }
+
+    if(!available_.empty())
+    {
+        auto slot = available_.back();
+        available_.pop_back();
+        return slot;
+    }
+
+    int id = next_id_++;
+    handle.ReserveExtraStreamsInPool(id);
+    handle.SetStreamFromPool(id);
+    return {id, handle.GetStream()};
 }
 
 void Handle::SetAllocator(miopenAllocatorFunction allocator,

@@ -38,6 +38,7 @@
 #include <miopen/simple_hash.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/stringutils.hpp>
+#include <miopen/stream_tracker.hpp>
 #include <miopen/target_properties.hpp>
 
 #include <cstdio>
@@ -93,6 +94,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void SetStream(miopenAcceleratorQueue_t streamID) const;
     void SetStreamFromPool(int streamID) const;
     void ReserveExtraStreamsInPool(int cnt) const;
+
+    StreamTracker& GetStreamTracker() const;
 
     void SetAllocator(miopenAllocatorFunction allocator,
                       miopenDeallocatorFunction deallocator,

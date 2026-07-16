@@ -33,6 +33,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMPILE_ONLY)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE)
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_TIMEOUT, true)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_NAIVE_TIMEOUT_FACTOR, 300)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
@@ -208,34 +209,33 @@ const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 
 } // namespace conv
 
-/// Launch a naive solver's warmup on a disposable stream with a wall-clock
-/// budget of 3x the best non-naive time.  Returns the warmup elapsed time in
-/// ms on success, or < 0 if the kernel exceeded the budget (in which case the
-/// stream is handed to a detached thread for async cleanup).
 static float TryNaiveWithTimeout(const Handle& handle,
                                  const Invoker& invoker,
                                  const AnyInvokeParams& invoke_ctx,
                                  float best_time)
 {
-    hipStream_t naive_stream = nullptr;
-    auto status = hipStreamCreateWithFlags(&naive_stream, hipStreamNonBlocking);
-    if(status != hipSuccess)
-        MIOPEN_THROW_HIP_STATUS(status, "Failed to create naive bailout stream");
+    auto& tracker = handle.GetStreamTracker();
+    auto slot     = tracker.acquire(handle);
 
-    const auto orig_stream = handle.GetStream();
-    handle.SetStream(naive_stream);
+    handle.SetStreamFromPool(slot.pool_id);
     handle.EnableProfiling(false);
 
     HipEventPtr ev_start = make_hip_event();
     HipEventPtr ev_stop  = make_hip_event();
-    hipEventRecord(ev_start.get(), naive_stream);
-    invoker(handle, invoke_ctx);
-    hipEventRecord(ev_stop.get(), naive_stream);
 
-    const float naive_budget = best_time * 3.0f;
-    const auto deadline =
-        std::chrono::steady_clock::now() +
-        std::chrono::microseconds(static_cast<long long>(naive_budget * 1000));
+    auto ev_status = hipEventRecord(ev_start.get(), slot.stream);
+    if(ev_status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive start event");
+    invoker(handle, invoke_ctx);
+    ev_status = hipEventRecord(ev_stop.get(), slot.stream);
+    if(ev_status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(ev_status, "Failed to record naive stop event");
+
+    const float timeout_factor =
+        static_cast<float>(env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)) / 100.0f;
+    const float naive_budget = best_time * timeout_factor;
+    const auto deadline      = std::chrono::steady_clock::now() +
+                          std::chrono::microseconds(static_cast<long long>(naive_budget * 1000));
     bool finished = false;
     while(std::chrono::steady_clock::now() < deadline)
     {
@@ -247,22 +247,19 @@ static float TryNaiveWithTimeout(const Handle& handle,
         std::this_thread::yield();
     }
 
-    handle.SetStream(orig_stream);
+    handle.SetStreamFromPool(0);
     handle.EnableProfiling(true);
 
-    if(!finished)
+    if(finished)
     {
-        std::thread([naive_stream]() {
-            hipStreamSynchronize(naive_stream);
-            hipStreamDestroy(naive_stream);
-        }).detach();
-        return -1.0f;
+        tracker.release(slot);
+        float warmup_elapsed = 0.0f;
+        (void)hipEventElapsedTime(&warmup_elapsed, ev_start.get(), ev_stop.get());
+        return warmup_elapsed;
     }
 
-    float warmup_elapsed = 0.0f;
-    hipEventElapsedTime(&warmup_elapsed, ev_start.get(), ev_stop.get());
-    hipStreamDestroy(naive_stream);
-    return warmup_elapsed;
+    tracker.abandon(slot);
+    return -1.0f;
 }
 
 /// Register invoker only for the best solution within algorithm.
@@ -384,14 +381,15 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
             if(cutoff_naive)
             {
-                const float warmup =
-                    TryNaiveWithTimeout(handle, invoker, invoke_ctx,
-                                        core_result.find_search_best_time);
+                const float warmup = TryNaiveWithTimeout(
+                    handle, invoker, invoke_ctx, core_result.find_search_best_time);
                 if(warmup < 0)
                 {
                     MIOPEN_LOG_I("Timeout: Naive Solver "
                                  << algorithm_name.ToString() << ":" << sol.solver_id
-                                 << " exceeded 3x best budget");
+                                 << " exceeded " << env::value(MIOPEN_NAIVE_TIMEOUT_FACTOR)
+                                 << "% best budget (" << core_result.find_search_best_time
+                                 << " ms)");
                     continue;
                 }
                 first_elapsed = warmup;
@@ -406,8 +404,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                 if(i > 0)
                 {
                     samples.push_back(handle.GetKernelTime());
-                    if(i == 1 && using_search_cutoff &&
-                       samples.front() > 1.0f && samples.front() > skip_time)
+                    if(i == 1 && using_search_cutoff && samples.front() > 1.0f &&
+                       samples.front() > skip_time)
                     {
                         MIOPEN_LOG_I("Skipping (Slow) Solver: "
                                      << algorithm_name.ToString() << ":" << sol.solver_id << " "
