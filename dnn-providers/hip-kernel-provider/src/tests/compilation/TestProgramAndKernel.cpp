@@ -7,6 +7,7 @@
 #include "compilation/Kernel.hpp"
 #include "compilation/Program.hpp"
 
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <vector>
@@ -18,9 +19,24 @@ TEST(TestProgram, CompilesAndGetsKernel)
 {
     SKIP_IF_NO_DEVICES();
 
-    const Program program("vector_add.cpp", {"-O3"});
+    const Program program("vector_add.cpp", {"-O3", "-DFLOAT=float"});
     hipFunction_t kernel = program.getKernel("vector_add");
     EXPECT_NE(nullptr, kernel);
+}
+
+TEST(TestProgram, InvalidProgramName)
+{
+    SKIP_IF_NO_DEVICES();
+    EXPECT_THROW(Program("bad_filename.cpp", {"-O3", "-DFLOAT=float"}),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestProgram, CompileFails)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Missing "TYPE" macro definition
+    EXPECT_THROW(Program("vector_add.cpp", {"-O3"}), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestKernel, LaunchesVectorAdd)
@@ -45,7 +61,7 @@ TEST(TestKernel, LaunchesVectorAdd)
     ASSERT_EQ(hipSuccess, hipMemcpy(devB, hostB.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
     // Launch kernel
-    const Program program("vector_add.cpp", {"-O3"});
+    const Program program("vector_add.cpp", {"-O3", "-DFLOAT=float"});
     Kernel kernel(program, "vector_add");
     kernel.setBlockSize(256);
     kernel.setGridSize(1);

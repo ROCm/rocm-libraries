@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -102,10 +103,11 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     const bool runScheduler = optLevel != OptLevel::O0;
     if (runScheduler || moduleOptions.EnableESM2) {
-        // strip delay_alu before scheduling
-        pm.addPass(createRemoveDelayAluPass());
-        // strip s_wait_alu before scheduling
-        pm.addPass(createRemoveWaitAluPass());
+        // strip delay_alu before scheduling (whole-kernel: entry + callable functions,
+        // so stale delay_alu does not survive into the emitted stream)
+        pm.addPass(createRemoveDelayAluPass(module.getFunctions()));
+        // strip s_wait_alu before scheduling (whole-kernel)
+        pm.addPass(createRemoveWaitAluPass(module.getFunctions()));
     }
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
@@ -117,6 +119,16 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         if (runScheduler) {
             passFeatureConfig.loopConfig.unrollGemm = true;
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
+            passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
+            passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
+            passFeatureConfig.dagFeatures.globalReadQueueDepth = moduleOptions.GlobalReadQueueDepth;
+            passFeatureConfig.dagFeatures.globalReadDrainLatency =
+                moduleOptions.GlobalReadDrainLatency;
+            if (moduleOptions.DsReadPerWmma >= 0)
+                passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
+            if (moduleOptions.DsReadOrder >= 0)
+                passFeatureConfig.dagFeatures.dsReadOrder =
+                    static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
         }
 
         PassManager innerPM;
@@ -175,7 +187,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // inherit the loop's src C MSB).
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createRegionClonePass(moduleOptions.CloneList));
-    pm.addPass(createInsertVgprMsbPass());
+    // Pass the whole-kernel function list so MSB is materialized for the entry function and
+    // every callable function (each function owns its VGPR MSB hardware state).
+    pm.addPass(createInsertVgprMsbPass(module.getFunctions()));
 
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
@@ -186,7 +200,17 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     }
     pm.addPass(createEstimateAsmCyclesPass());
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
-    pm.addPass(createSetMatrixReusePass());
+    // Pass the whole-kernel function list so the pass walks the entry plus callable functions,
+    // each in isolation (reuse never chains across a call site or a function boundary).
+    pm.addPass(createSetMatrixReusePass(module.getFunctions()));
+
+    // Re-merge callable functions into the entry at their ASM placement markers so
+    // SwPrefetchInsertionPass sees a single linear stream / legacy emission
+    // order. After the multi-function passes above; no-op with no callable functions.
+    //
+    // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
+    // SwPrefetchInsertionPass handles multiple functions directly.
+    pm.addPass(createFlattenCalleesPass(module.getFunctions()));
     if (moduleOptions.EnableSwPrefetchInsertion) {
         pm.addPass(createSwPrefetchInsertionPass(module));
     }
@@ -194,7 +218,10 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));
 
-    if (auto pass = createRemoveInstructionPass(moduleOptions.RemoveInstructions)) {
+    // Pass the whole-kernel function list so removal applies kernel-wide
+    // (entry + callable functions).
+    if (auto pass =
+            createRemoveInstructionPass(moduleOptions.RemoveInstructions, module.getFunctions())) {
         pm.addPass(std::move(pass));
     }
 

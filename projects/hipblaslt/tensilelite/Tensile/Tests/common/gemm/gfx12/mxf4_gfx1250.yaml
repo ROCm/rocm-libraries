@@ -24,6 +24,7 @@ GlobalParameters:
   Architecture: gfx1250
   # KeepBuildTmp: True
   PrintLevel: 2
+  DisableAsmComments: True
 
 
 BenchmarkProblems:
@@ -64,6 +65,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  2, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256, 512]
         - TDMInst: [3]
         - TDMIterateMode: [0, 3]
@@ -87,7 +90,7 @@ BenchmarkProblems:
         - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
@@ -95,7 +98,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 1024]
+          - Exact: [512, 512, 1, 1536]
           - Exact: [512, 512, 1, 1056]
           - Exact: [514, 512, 1, 1024]
           - Exact: [512, 514, 1, 1024]
@@ -137,6 +140,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  2, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - TDMInst: [3]
         - LocalReadVectorWidth: [32]
@@ -159,7 +164,7 @@ BenchmarkProblems:
         - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 16 ] # no tail
       BenchmarkForkParameters:
@@ -208,6 +213,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 4,  4, 1]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  2, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - TDMInst: [3]
         - LocalReadVectorWidth: [32]
@@ -230,7 +237,7 @@ BenchmarkProblems:
         - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
@@ -279,6 +286,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 4,  4, 1]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  2, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - TDMInst: [3]
         - LocalReadVectorWidth: [32]
@@ -301,7 +310,7 @@ BenchmarkProblems:
         - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 16 ]
       BenchmarkForkParameters:
@@ -350,6 +359,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 4,  4, 1]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  2, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - TDMInst: [3]
         - LocalReadVectorWidth: [32]
@@ -372,7 +383,7 @@ BenchmarkProblems:
         - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 32 ]
       BenchmarkForkParameters:
@@ -421,6 +432,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  1, 4,  4, 1]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [32, 16, 128, 1,  1,  1, 2,  2, 1]
+          - [32, 16, 128, 1,  1,  4, 8,  2, 2]
         - DepthU: [128, 256]
         - TDMInst: [3]
         - LocalReadVectorWidth: [32]
@@ -443,7 +456,7 @@ BenchmarkProblems:
         - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [true]
+        - SourceSwap: [true, false]
         - WavefrontSize: [32]
         - AssertSummationElementMultiple: [ 16 ]
       BenchmarkForkParameters:
