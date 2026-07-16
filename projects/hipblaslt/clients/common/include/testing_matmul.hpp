@@ -43,6 +43,7 @@
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
+#include "gpu_compare.hpp"
 #include "near.hpp"
 #include "norm.hpp"
 #include "reference_device.hpp"
