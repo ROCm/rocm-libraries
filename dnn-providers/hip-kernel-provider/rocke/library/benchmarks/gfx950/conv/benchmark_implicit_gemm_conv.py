@@ -92,7 +92,7 @@ def _grid_for_spec(spec, p):
     gx = (N_gemm + spec.tile_n - 1) // spec.tile_n
     gy = (M + spec.tile_m - 1) // spec.tile_m
     # grid_order="NM": x=N-tile, y=M-tile (mirrors bake_off_implicit_gemm)
-    return (gx, gy, 1)
+    return (gx, gy, p.groups)
 
 
 # ---------------------------------------------------------------------------
