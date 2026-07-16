@@ -7,6 +7,8 @@ add_library(
     RockeClientHandle.cpp
     PluginPublic.cpp
     engines/RockeClientEngine.cpp
+    plans/RockeClientPlan.cpp
+    plans/LaunchAbi.cpp
     dispatcher/AotCatalog.cpp
     dispatcher/KpackModuleLoader.cpp
     dispatcher/PluginModuleDir.cpp
@@ -33,7 +35,7 @@ target_include_directories(rocke_client_private PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/include
 )
-target_link_libraries(rocke_client_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk rocke_client_impl rocm::rocm_kpack)
+target_link_libraries(rocke_client_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk nlohmann_json::nlohmann_json rocm::rocm_kpack rocke_client_impl)
 
 add_library(rocke_client SHARED $<TARGET_OBJECTS:rocke_client_impl>)
 target_link_libraries(rocke_client PRIVATE hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk rocm::rocm_kpack ${CMAKE_DL_LIBS})

@@ -72,11 +72,10 @@ TEST(TestRockeClientEngine, ExecutionContextCreationRejectsSkeletonEngine)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestRockeClientEngine, IsApplicableRejectsValidSdpaGraphWithEmptyCatalog)
+TEST(TestRockeClientEngine, IsApplicableRejectsValidSdpaGraphWithoutInstalledCatalog)
 {
-    // The default engine's AOT catalog is empty (kpack not landed), so even a
-    // structurally valid SDPA graph is declined. This exercises the real
-    // adapter + dispatcher path, not a hardcoded false.
+    // Unit-test binaries do not have arch_content/rocke beside them, so the
+    // production loader finds no installed kpack catalog and the engine declines.
     const rocke_client::dispatcher::test::SdpaGraphFixture fixture
         = rocke_client::dispatcher::test::buildSdpaGraph(
             rocke_client::dispatcher::test::SdpaGraphConfig{});

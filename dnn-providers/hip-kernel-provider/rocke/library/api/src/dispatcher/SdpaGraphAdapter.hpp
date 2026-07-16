@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <unordered_map>
 
+#include "dispatcher/AotInstance.hpp"
 #include "dispatcher/SdpaProblem.hpp"
 
 namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
@@ -39,5 +43,32 @@ namespace rocke_client::dispatcher
 // problem; the dispatcher's AOT catalog makes the final accept/reject decision.
 std::optional<SdpaProblem>
     translate(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph);
+
+// The op-agnostic launch bindings a captured SDPA node yields, plus the runtime
+// batch dimension. The bindings carry the Q/K/V/O tensor uids and the SDPA launch
+// scalars (log2-domain scale, seqlens, per-tensor token/head strides), each keyed
+// by the kernel ABI's argument name so launch::bindArgs consumes them with no SDPA
+// knowledge. `batch` is a grid dimension, not a kernel argument, so it lives here
+// rather than in the bindings; sdpaGridSymbols() feeds it to launch::evalGrid.
+// Dims are [B, H, S, D]; the token axis is dim 2 and the head axis dim 1, so
+// strideToken = strides[2] and strideHead = strides[1]. Pure POD: no HIP handles.
+struct SdpaLaunchInputs
+{
+    LaunchBindings bindings;
+    std::int64_t batch = 0;
+};
+
+// Launch-oriented read of the single SDPA node translate() accepts: captures the
+// concrete Q/K/V/O uids, per-tensor strides, seqlens and derived log2 scale into a
+// LaunchBindings keyed by the FMHA ABI argument names. Returns std::nullopt for
+// any graph translate() rejects, so a caller can rely on selection having accepted
+// the graph before inputs are produced. Pure graph decode: NO HIP calls.
+std::optional<SdpaLaunchInputs>
+    buildSdpaLaunchInputs(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph);
+
+// Grid symbol table (symbol name -> value) for an SDPA kernel, from its compile
+// spec and the runtime batch, ready to feed launch::evalGrid().
+std::unordered_map<std::string, std::int64_t> sdpaGridSymbols(const CompileSpec& spec,
+                                                              std::int64_t batch);
 
 } // namespace rocke_client::dispatcher

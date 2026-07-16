@@ -125,6 +125,10 @@ def _entry_from_sidecar(
         raise ValueError(f"{name}: sidecar artifact must be an object")
     key = toc_key(op, family, name)
     entry = {
+        "name": name,
+        "op": op,
+        "family": family,
+        "compile_spec": instance["compile_spec"],
         "cache_key": _require_str(
             sidecar.get("cache_key"), f"{name}: sidecar cache_key"
         ),

@@ -3,7 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <cstdint>
+#include <numbers>
 #include <optional>
+#include <variant>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
@@ -477,6 +481,66 @@ TEST(TestSdpaGraphAdapter, RejectsMaxSeqLenKv)
     config.maxSeqLenKv = 4096;
     const auto fixture = buildSdpaGraph(config);
     EXPECT_FALSE(translate(fixture.graphWrapper()).has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Launch inputs: an accepted graph yields op-agnostic bindings keyed by ABI name
+// ---------------------------------------------------------------------------
+
+TEST(TestSdpaGraphAdapter, BuildsLaunchInputsFromAcceptedGraph)
+{
+    const auto fixture = buildSdpaGraph(SdpaGraphConfig{});
+    const std::optional<SdpaLaunchInputs> inputs = buildSdpaLaunchInputs(fixture.graphWrapper());
+    ASSERT_TRUE(inputs.has_value());
+
+    // Pointer args are keyed by ABI name -> the graph's Q/K/V/O tensor uids (1..4).
+    EXPECT_EQ(inputs->bindings.pointerUids.at("Q"), 1);
+    EXPECT_EQ(inputs->bindings.pointerUids.at("K"), 2);
+    EXPECT_EQ(inputs->bindings.pointerUids.at("V"), 3);
+    EXPECT_EQ(inputs->bindings.pointerUids.at("O"), 4);
+    EXPECT_EQ(inputs->batch, 2);
+
+    const auto& scalars = inputs->bindings.scalars;
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("seqlen_q")), 64);
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("seqlen_k")), 64);
+    // BSHD contiguous [B,H,S,D]: token axis (dim2) stride, head axis (dim1) stride.
+    const auto strides
+        = test::detail::contiguousStrides(/*h=*/4, /*s=*/64, /*d=*/64, /*bshd=*/true);
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("stride_q_token")), strides[2]);
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("stride_q_head")), strides[1]);
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("stride_o_token")), strides[2]);
+    EXPECT_FLOAT_EQ(std::get<float>(scalars.at("scale_log2")),
+                    static_cast<float>(1.0 / std::sqrt(64.0) * std::numbers::log2e));
+}
+
+TEST(TestSdpaGraphAdapter, DeclinesLaunchInputsForRejectedGraph)
+{
+    SdpaGraphConfig config;
+    config.dropoutProbability = 0.25F; // an unsupported feature translate() declines
+    const auto fixture = buildSdpaGraph(config);
+    EXPECT_FALSE(buildSdpaLaunchInputs(fixture.graphWrapper()).has_value());
+}
+
+TEST(TestSdpaGraphAdapter, GridSymbolsExposeCompileSpecAndBatch)
+{
+    CompileSpec spec;
+    spec.seqlenQ = 65;
+    spec.seqlenK = 130;
+    spec.numQueryHeads = 8;
+    spec.numKvHeads = 2;
+    spec.headSize = 128;
+    spec.blockSizeQ = 64;
+    spec.blockSizeK = 32;
+
+    const auto symbols = sdpaGridSymbols(spec, /*batch=*/5);
+    EXPECT_EQ(symbols.at("batch"), 5);
+    EXPECT_EQ(symbols.at("seqlen_q"), 65);
+    EXPECT_EQ(symbols.at("seqlen_k"), 130);
+    EXPECT_EQ(symbols.at("num_query_heads"), 8);
+    EXPECT_EQ(symbols.at("num_kv_heads"), 2);
+    EXPECT_EQ(symbols.at("head_size"), 128);
+    EXPECT_EQ(symbols.at("block_size_q"), 64);
+    EXPECT_EQ(symbols.at("block_size_k"), 32);
 }
 
 } // namespace

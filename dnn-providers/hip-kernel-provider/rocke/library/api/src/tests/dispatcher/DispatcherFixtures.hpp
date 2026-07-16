@@ -61,6 +61,7 @@ inline AotInstance makeInstance(const InstanceParams& params)
     AotInstance instance;
     instance.name = params.name;
     instance.op = "sdpa_fwd";
+    instance.family = "fmha_fwd_mfma";
     instance.arch = params.arch;
     instance.compileSpec.dtype = "fp16";
     instance.compileSpec.canonicalLayout = "BSHD";

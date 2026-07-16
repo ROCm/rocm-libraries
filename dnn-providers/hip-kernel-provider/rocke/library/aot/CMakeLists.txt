@@ -53,6 +53,14 @@ rocke_client_add_aot_instances(
     SCHEMA_DIR "${_ROCKE_FMHA_SCHEMA_DIR}"
 )
 
+rocke_client_add_aot_instances(
+    NAME sdpa_fwd_fmha_mfma_gfx950
+    ARCH gfx950
+    ARCH_DIR "${_ROCKE_KERNELS_DIR}/gfx950/fmha_fwd_mfma"
+    HANDLER "${_ROCKE_FMHA_HANDLER}"
+    SCHEMA_DIR "${_ROCKE_FMHA_SCHEMA_DIR}"
+)
+
 if(_ROCKE_CLIENT_ENABLE_TESTS)
     rocke_client_aot_pythonpath_environment(_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT)
 
@@ -73,7 +81,7 @@ if(_ROCKE_CLIENT_ENABLE_TESTS)
 
     # Numeric verifiers consume the loose build-tree artifacts and skip (CTest
     # code 77) unless the visible HIP device exactly matches --arch.
-    foreach(_arch gfx942 gfx1151)
+    foreach(_arch gfx942 gfx1151 gfx950)
         set(_artifact_dir
             "${CMAKE_CURRENT_BINARY_DIR}/artifacts/${_arch}/sdpa_fwd_fmha_mfma_${_arch}")
         add_test(

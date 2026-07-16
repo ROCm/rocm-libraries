@@ -268,6 +268,8 @@ function(_rocke_client_aot_pack_and_install NAME ARCH)
     set(_KPACK_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/kpack/${ARCH}")
     set(_KPACK_FILE "${_KPACK_OUTPUT_DIR}/rocke_client_${ARCH}.kpack")
     set(_KPACK_MANIFEST "${_KPACK_OUTPUT_DIR}/rocke_client_${ARCH}.json")
+    set(_BUILD_TREE_PLUGIN_ROOT
+        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/arch_content/rocke/${ARCH}")
     add_custom_command(
         OUTPUT "${_KPACK_FILE}" "${_KPACK_MANIFEST}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_KPACK_OUTPUT_DIR}"
@@ -279,6 +281,9 @@ function(_rocke_client_aot_pack_and_install NAME ARCH)
                 --engine-build-id "${ROCKE_AOT_ENGINE_BUILD_ID}"
                 --llvm-flavor "${ROCKE_AOT_LLVM_FLAVOR}"
                 --bundle-schema "${_ROCKE_CLIENT_AOT_BUNDLE_SCHEMA}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_BUILD_TREE_PLUGIN_ROOT}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_KPACK_FILE}" "${_KPACK_MANIFEST}"
+                "${_BUILD_TREE_PLUGIN_ROOT}"
         DEPENDS "${ROCKE_PYENV_STAMP}"
                 "${_BUILD_STAMP}"
                 ${_SIDECAR_OUTPUTS}
@@ -293,6 +298,9 @@ function(_rocke_client_aot_pack_and_install NAME ARCH)
         COMMENT "Pack ${NAME} kpack + manifest"
     )
     add_dependencies("${NAME}_kpack" "${NAME}")
+    if(TARGET rocke-pyenv)
+        add_dependencies("${NAME}_kpack" rocke-pyenv)
+    endif()
     add_dependencies(rocke_client_aot_kpack "${NAME}_kpack")
 
     # Per-arch, single source of truth: the .kpack + its manifest only. The
@@ -396,6 +404,9 @@ function(rocke_client_add_aot_instances)
         DEPENDS "${_BUILD_STAMP}" ${_GENERATED_OUTPUTS}
         COMMENT "Build ${ARG_NAME} AOT artifacts"
     )
+    if(TARGET rocke-pyenv)
+        add_dependencies("${ARG_NAME}" rocke-pyenv)
+    endif()
     add_dependencies(rocke_client_aot_artifacts "${ARG_NAME}")
 
     # kpack pack + bundle manifest + install rules (split out to keep this

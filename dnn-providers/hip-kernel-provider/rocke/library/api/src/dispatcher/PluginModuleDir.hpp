@@ -10,7 +10,7 @@ namespace rocke_client::dispatcher
 
 /// Return the directory that contains the rocke-client plugin DSO (or DLL on
 /// Windows). The result is weakly-canonical and absolute, matching the
-/// convention used by defaultArtifactRoot() for bundle resolution.
+/// convention used by aotBundleDir() for bundle resolution.
 ///
 /// Mirrors hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
 /// from projects/hipdnn/backend/src/PlatformUtils.linux/windows.cpp.

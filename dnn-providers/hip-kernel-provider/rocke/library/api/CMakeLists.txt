@@ -82,9 +82,6 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
-if(NOT TARGET rocm::rocm_kpack)
-    find_package(rocm-kpack CONFIG REQUIRED)
-endif()
 
 if(NOT TARGET hipdnn_data_sdk)
     find_package(hipdnn_data_sdk CONFIG REQUIRED)
@@ -97,6 +94,82 @@ if(NOT TARGET hipdnn_plugin_sdk)
 endif()
 if(NOT TARGET nlohmann_json::nlohmann_json)
     find_package(nlohmann_json CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    find_package(nlohmann_json CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET rocm::rocm_kpack)
+    find_package(rocm-kpack CONFIG QUIET)
+endif()
+if(NOT TARGET rocm::rocm_kpack)
+    set(_ROCKE_KPACK_RUNTIME_DIR "")
+    if(DEFINED ROCKE_KPACK_RUNTIME_DIR AND NOT "${ROCKE_KPACK_RUNTIME_DIR}" STREQUAL "")
+        set(_ROCKE_KPACK_RUNTIME_DIR "${ROCKE_KPACK_RUNTIME_DIR}")
+    elseif(DEFINED ENV{ROCKE_KPACK_RUNTIME_DIR} AND NOT "$ENV{ROCKE_KPACK_RUNTIME_DIR}" STREQUAL "")
+        set(_ROCKE_KPACK_RUNTIME_DIR "$ENV{ROCKE_KPACK_RUNTIME_DIR}")
+    elseif(DEFINED ROCKE_KPACK_PYTHON_DIR AND NOT "${ROCKE_KPACK_PYTHON_DIR}" STREQUAL "")
+        get_filename_component(_ROCKE_KPACK_SOURCE_DIR "${ROCKE_KPACK_PYTHON_DIR}/.." ABSOLUTE)
+        set(_ROCKE_KPACK_RUNTIME_DIR "${_ROCKE_KPACK_SOURCE_DIR}/runtime")
+    elseif(DEFINED ENV{ROCKE_KPACK_PYTHON_DIR} AND NOT "$ENV{ROCKE_KPACK_PYTHON_DIR}" STREQUAL "")
+        get_filename_component(_ROCKE_KPACK_SOURCE_DIR "$ENV{ROCKE_KPACK_PYTHON_DIR}/.." ABSOLUTE)
+        set(_ROCKE_KPACK_RUNTIME_DIR "${_ROCKE_KPACK_SOURCE_DIR}/runtime")
+    endif()
+
+    if("${_ROCKE_KPACK_RUNTIME_DIR}" STREQUAL ""
+       OR NOT EXISTS "${_ROCKE_KPACK_RUNTIME_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "rocKE client requires the rocm-kpack C runtime. Provide rocm-kpack "
+            "as a CMake package or set ROCKE_KPACK_RUNTIME_DIR (or "
+            "ROCKE_KPACK_PYTHON_DIR=<kpack>/python so the runtime can be derived).")
+    endif()
+
+    if(NOT TARGET msgpack-cxx)
+        find_package(msgpack-cxx CONFIG QUIET)
+    endif()
+    if(NOT TARGET msgpack-cxx)
+        include(FetchContent)
+        fetchcontent_declare(
+            rocke_msgpack_cxx
+            URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/msgpack-cxx-7.0.0.tar.gz
+            URL_HASH SHA256=7504b7af7e7b9002ce529d4f941e1b7fb1fb435768780ce7da4abaac79bb156f
+        )
+        fetchcontent_getproperties(rocke_msgpack_cxx)
+        if(NOT rocke_msgpack_cxx_POPULATED)
+            fetchcontent_populate(rocke_msgpack_cxx)
+        endif()
+        add_library(msgpack-cxx INTERFACE IMPORTED)
+        set_target_properties(msgpack-cxx PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${rocke_msgpack_cxx_SOURCE_DIR}/include")
+        target_compile_definitions(msgpack-cxx INTERFACE MSGPACK_NO_BOOST)
+    endif()
+
+    if(NOT TARGET zstd::libzstd)
+        find_package(zstd CONFIG QUIET)
+        if(TARGET zstd::libzstd_shared)
+            add_library(zstd::libzstd INTERFACE IMPORTED)
+            target_link_libraries(zstd::libzstd INTERFACE zstd::libzstd_shared)
+        elseif(TARGET zstd::libzstd_static)
+            add_library(zstd::libzstd INTERFACE IMPORTED)
+            target_link_libraries(zstd::libzstd INTERFACE zstd::libzstd_static)
+        endif()
+    endif()
+    if(NOT TARGET zstd::libzstd)
+        find_path(_ROCKE_ZSTD_INCLUDE_DIR zstd.h REQUIRED)
+        find_library(_ROCKE_ZSTD_LIBRARY zstd REQUIRED)
+        add_library(zstd::libzstd UNKNOWN IMPORTED)
+        set_target_properties(zstd::libzstd PROPERTIES
+            IMPORTED_LOCATION "${_ROCKE_ZSTD_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${_ROCKE_ZSTD_INCLUDE_DIR}")
+    endif()
+
+    add_subdirectory(
+        "${_ROCKE_KPACK_RUNTIME_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/rocm-kpack-runtime"
+        EXCLUDE_FROM_ALL)
+    if(TARGET rocm_kpack AND NOT TARGET rocm::rocm_kpack)
+        add_library(rocm::rocm_kpack ALIAS rocm_kpack)
+    endif()
 endif()
 
 include(CheckToolVersion)
