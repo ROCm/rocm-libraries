@@ -5850,9 +5850,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         timing,
                         timingAbort);
                 }
-                // gpu time is reported per hot call; log_perf divides by hot_calls,
-                // so scale the mean back up to a total here.
-                gpu_time_used = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                gpu_time_used = timing.median_us;
                 perf_monitor->stop();
             }
             else
@@ -5921,8 +5919,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         stream,
                         timing,
                         timingAbort);
-                    gpu_time_used
-                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                    gpu_time_used = timing.median_us;
                     perf_monitor->stop();
                 }
                 else
@@ -5980,8 +5977,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         stream,
                         timing,
                         timingAbort);
-                    gpu_time_used
-                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
+                    gpu_time_used = timing.median_us;
                     perf_monitor->stop();
                 }
             }

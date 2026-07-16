@@ -82,12 +82,8 @@ public:
 
         constexpr bool has_batch_count = has(e_batch_count);
         int64_t        batch_count     = has_batch_count ? arg.batch_count : 1;
-        int64_t        hot_calls       = arg.iters < 1 ? 1 : arg.iters;
 
-        // gpu time is total cumulative over hot calls, cpu is not
-        if(hot_calls > 1)
-            gpu_us /= hot_calls;
-
+        // both gpu_us and cpu_us are per-call time
         if(flush_us > 0)
         {
             gpu_us -= flush_us;
