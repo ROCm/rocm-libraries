@@ -4534,6 +4534,31 @@ class MXMFMAInstruction(Instruction):
         return clone
 
 
+def _smfma_type_convert(it: Any) -> str:
+    """Port of rocisa ``SMFMAInstruction::typeConvert`` (mfma.hpp:1007-1034).
+
+    The sparse (v_smfmac_/v_swmmac_) 8-bit float families take *two* input
+    format suffixes (A_B), e.g. ``bf8_bf8`` / ``fp8_bf8`` -- unlike the generic
+    ``_inst_type_to_str`` which returns a single token (``bf8``) and would emit
+    a mnemonic with no ISA opcode (e.g. v_swmmac_f32_16x16x128_bf8). Integer
+    inputs map to ``iu8`` (U8) / ``i8`` (I8) like rocisa."""
+    mapping = {
+        InstType.INST_F16: "f16",
+        InstType.INST_F32: "f32",
+        InstType.INST_BF16: "bf16",
+        InstType.INST_I8: "i8",
+        InstType.INST_U8: "iu8",
+        InstType.INST_I32: "i32",
+        InstType.INST_F8: "fp8_fp8",
+        InstType.INST_BF8: "bf8_bf8",
+        InstType.INST_F8_BF8: "fp8_bf8",
+        InstType.INST_BF8_F8: "bf8_fp8",
+    }
+    if it in mapping:
+        return mapping[it]
+    return _inst_type_to_str(it)
+
+
 class SMFMAInstruction(Instruction):
     """``v_smfma_*`` shim (rocisa ``SMFMAInstruction``)."""
 
@@ -4562,7 +4587,7 @@ class SMFMAInstruction(Instruction):
         k = self.variant[2] if len(self.variant) > 2 else 0
         blocks = self.variant[3] if len(self.variant) > 3 else 1
         return _st.SMFMA(
-            _inst_type_to_str(self.instType),
+            _smfma_type_convert(self.instType),
             _inst_type_to_str(self.accType),
             m, n, k, blocks, self.neg,
             _to_stinky_register(self.acc),
