@@ -26,6 +26,7 @@ pybind11>=3.0
 # --- test / dev --------------------------------------------------------------
 pytest>=7.0
 pytest-subtests>=0.11
+pandas>=1.5  # needed by test_fmha_featurizer_roundtrip and feature_engine
 
 # --- optional: kernel-selection heuristics training --------------------------
 # lightgbm>=4.0
