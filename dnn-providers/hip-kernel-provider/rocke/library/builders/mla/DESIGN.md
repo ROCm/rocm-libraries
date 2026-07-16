@@ -612,9 +612,9 @@ def ref_mla_prefill(q_latent, c_kv, k_rope, W_UQ, W_UK, cu_seqlens, causal=True)
 
 def ref_mla_decode_absorb(c_q, c_kv, k_rope, W_abs, W_rope_proj, W_UV):
     q_rope = c_q @ W_rope_proj.T              # [B, H_q, d_rope]
-    K_nope_score = (c_q @ W_abs.T) * c_kv    # absorbed: [B, H_q, r_Q] · [r_Q, r_KV] · [S, r_KV]^T
-    # (implement as batched matmul chain)
-    scores = scale * (K_nope_score.sum(-1) + (q_rope @ k_rope.T))
+    q_abs  = torch.einsum("bhr,hrk->bhk", c_q, W_abs)           # [B, H_q, r_KV]
+    scores = scale * (torch.einsum("bhk,sk->bhs", q_abs, c_kv) + (q_rope @ k_rope.T))
+    # softmax(scores) @ (c_kv @ W_UV.T)
     V = c_kv @ W_UV.T
     return softmax(scores) @ V
 ```
