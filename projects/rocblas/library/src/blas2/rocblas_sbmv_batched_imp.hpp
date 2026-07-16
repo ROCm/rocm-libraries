@@ -176,27 +176,28 @@ namespace
                 return sbmv_check_numerics_status;
         }
 
-        rocblas_status status = ROCBLAS_API(rocblas_internal_sbmv_launcher)<T>(handle,
-                                                                               uplo,
-                                                                               n,
-                                                                               k,
-                                                                               alpha,
-                                                                               handle->get_stride_alpha(),
-                                                                               A,
-                                                                               0,
-                                                                               lda,
-                                                                               0,
-                                                                               x,
-                                                                               0,
-                                                                               incx,
-                                                                               0,
-                                                                               beta,
-                                                                               handle->get_stride_beta(),
-                                                                               y,
-                                                                               0,
-                                                                               incy,
-                                                                               0,
-                                                                               batch_count);
+        rocblas_status status
+            = ROCBLAS_API(rocblas_internal_sbmv_launcher)<T>(handle,
+                                                             uplo,
+                                                             n,
+                                                             k,
+                                                             alpha,
+                                                             handle->get_stride_alpha(),
+                                                             A,
+                                                             0,
+                                                             lda,
+                                                             0,
+                                                             x,
+                                                             0,
+                                                             incx,
+                                                             0,
+                                                             beta,
+                                                             handle->get_stride_beta(),
+                                                             y,
+                                                             0,
+                                                             incy,
+                                                             0,
+                                                             batch_count);
         if(status != rocblas_status_success)
             return status;
 

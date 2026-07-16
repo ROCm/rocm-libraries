@@ -208,27 +208,28 @@ namespace
                 return hemv_check_numerics_status;
         }
 
-        rocblas_status status = ROCBLAS_API(rocblas_internal_hemv_template)(handle,
-                                                                            uplo,
-                                                                            n,
-                                                                            alpha,
-                                                                            handle->get_stride_alpha(),
-                                                                            A,
-                                                                            0,
-                                                                            lda,
-                                                                            stride_A,
-                                                                            x,
-                                                                            0,
-                                                                            incx,
-                                                                            stride_x,
-                                                                            beta,
-                                                                            handle->get_stride_beta(),
-                                                                            y,
-                                                                            0,
-                                                                            incy,
-                                                                            stride_y,
-                                                                            batch_count,
-                                                                            (T*)w_mem);
+        rocblas_status status
+            = ROCBLAS_API(rocblas_internal_hemv_template)(handle,
+                                                          uplo,
+                                                          n,
+                                                          alpha,
+                                                          handle->get_stride_alpha(),
+                                                          A,
+                                                          0,
+                                                          lda,
+                                                          stride_A,
+                                                          x,
+                                                          0,
+                                                          incx,
+                                                          stride_x,
+                                                          beta,
+                                                          handle->get_stride_beta(),
+                                                          y,
+                                                          0,
+                                                          incy,
+                                                          stride_y,
+                                                          batch_count,
+                                                          (T*)w_mem);
         if(status != rocblas_status_success)
             return status;
 
