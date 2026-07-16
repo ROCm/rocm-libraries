@@ -116,8 +116,8 @@ TEST(GPU_NaiveTimeout_FP32, NaivePresentWhenTimeoutDisabled)
     for(const auto& s : solvers)
         all_names += (all_names.empty() ? "" : ", ") + s;
     EXPECT_TRUE(any_naive)
-        << "Expected at least one naive solver in results with MIOPEN_NAIVE_TIMEOUT=0"
-        << "; got: [" << all_names << "]";
+        << "Expected at least one naive solver in results with MIOPEN_NAIVE_TIMEOUT=0" << "; got: ["
+        << all_names << "]";
 }
 
 // With MIOPEN_NAIVE_TIMEOUT=1 and MIOPEN_DEBUG_FIND_ONLY_SOLVER restricting the candidate
