@@ -613,7 +613,7 @@ struct hipfftxt_test_params_t
             if(rank == 2)
                 // C2R: cuFFT produces null data pointers; rocFFT rejects instead
                 return c2r ? (rocfft_backend ? xt_alloc_expectation_t::rejected
-                                            : xt_alloc_expectation_t::accepted_but_nullptrs)
+                                             : xt_alloc_expectation_t::accepted_but_nullptrs)
                            : xt_alloc_expectation_t::accepted; // "Y"
             // rank == 3
             return xt_alloc_expectation_t::accepted; // "Y"
@@ -628,7 +628,7 @@ struct hipfftxt_test_params_t
             if(rank == 2)
                 // R2C: cuFFT produces null data pointers; rocFFT rejects instead
                 return r2c ? (rocfft_backend ? xt_alloc_expectation_t::rejected
-                                            : xt_alloc_expectation_t::accepted_but_nullptrs)
+                                             : xt_alloc_expectation_t::accepted_but_nullptrs)
                            : xt_alloc_expectation_t::accepted; // "Y"
             // rank == 3
             return xt_alloc_expectation_t::accepted; // "Y"
