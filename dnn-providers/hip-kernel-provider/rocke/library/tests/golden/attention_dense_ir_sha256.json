@@ -1,0 +1,29 @@
+{
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "attention_dense/default_causal_sq512": {
+          "bytes": 320191,
+          "sha256": "454a7ab4aec162e1d7dccc3fa8ca5a186ee74508d7763275823bde47723532b3"
+        },
+        "attention_dense/persistent_causal_sq512": {
+          "bytes": 313398,
+          "sha256": "9b4e796e22a7475f4339c1cc521337f68b15d837301adb43672ba756d5638873"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "attention_dense/default_causal_sq512": {
+          "bytes": 320295,
+          "sha256": "eb781b077fb7944788a71d2636e2d2e139913b3f0f27ef48d2856467dfdb71ac"
+        },
+        "attention_dense/persistent_causal_sq512": {
+          "bytes": 313502,
+          "sha256": "1f089fb980de6ef2a7d25bb61c1665adbebeafed36ae73d981092f3a37fcf978"
+        }
+      }
+    }
+  },
+  "schema": "attention_dense.ir_golden_sha256/v1"
+}

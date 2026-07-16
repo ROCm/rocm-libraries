@@ -301,6 +301,96 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
 ATTENTION_REGISTRY.register(_make_gfx942_dense_pipe_candidate())
 
 
+def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
+    """Dense CK-1 persistent flash-attn prefill on gfx950 (bf16/fp16, causal/full).
+
+    OPT-IN ONLY: matches solely when the request explicitly names
+    ``algorithm="attention_dense"`` (or ``spec_id="gfx950_attention_dense"``), so it
+    never auto-overrides the generic unified_2d path (no change to default routing).
+    Launch geometry + ABI are real (``attention_dense_grid`` / ``_block`` /
+    ``_signature``); end-to-end launch is ``run_attention_dense_torch``.
+    """
+    spec_id = "gfx950_attention_dense"
+    name = "attention_gfx950_dense"
+
+    def _dense_spec(req: OperatorRequest):
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        assert isinstance(req, AttentionRequest)
+        return AttentionDenseSpec(
+            batch=int(req.batch),
+            seqlen_q=int(req.seqlen_q),
+            seqlen_kv=int(req.seqlen_k),
+            num_query_heads=int(req.nhead_q),
+            num_kv_heads=int(req.nhead_k),
+            head_size=int(req.hdim_q),
+            causal=(int(req.mask_type) != 0),
+            dtype=req.dtype.lower(),
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, AttentionRequest)
+        # Opt-in: never selected under algorithm/spec_id "auto".
+        if req.algorithm.strip().lower() != "attention_dense" and (
+            req.spec_id.strip().lower() != spec_id
+        ):
+            return False, "attention_dense is opt-in (algorithm='attention_dense')"
+        if req.arch != "gfx950":
+            return False, f"attention_dense requires gfx950 (got {req.arch!r})"
+        if req.dtype.lower() not in ("bf16", "fp16"):
+            return False, f"attention_dense is bf16/fp16 only (got {req.dtype!r})"
+        if int(req.sliding_window) or bool(req.use_sinks):
+            return False, "attention_dense is dense (no sliding-window / sinks)"
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        try:
+            spec = _dense_spec(req)
+        except ValueError as e:
+            return False, str(e)
+        ok, why = supports_attention_dense(spec, arch=req.arch)
+        if not ok:
+            return False, why
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> AttentionSpec:
+        ok, why = support(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, AttentionRequest)
+        problem = _problem(req)
+        return AttentionSpec(
+            path="2d",
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            dtype=problem.dtype,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            name="rocke_attention_dense",
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="attention_dense",
+        spec_id=spec_id,
+        abi_version=ATTENTION_ABI_VERSION,
+        priority=3,
+        supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=lambda spec, req: (0, 0, 0),
+        block=lambda spec: (0, 0, 0),
+        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+    )
+    return candidate
+
+
+ATTENTION_REGISTRY.register(_make_gfx950_attention_dense_candidate())
+
+
 def attention_candidates() -> Tuple[KernelCandidate, ...]:
     return ATTENTION_REGISTRY.candidates()
 

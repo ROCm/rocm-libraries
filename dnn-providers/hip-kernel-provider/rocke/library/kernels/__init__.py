@@ -35,6 +35,18 @@ from .gfx950.attention_tiled_2d import (  # noqa: F401
     UnifiedAttention2DTiledSpec,
 )
 
+# Dense flash-attention prefill (gfx950-only): productized CK-1 persistent kernel.
+# See ``kernels/gfx950/attention_dense.py``.
+from .gfx950.attention_dense import (  # noqa: F401
+    AttentionDenseSpec,
+    attention_dense_block,
+    attention_dense_grid,
+    attention_dense_signature,
+    build_attention_dense,
+    run_attention_dense_torch,
+    supports_attention_dense,
+)
+
 
 def build_unified_attention_2d_tiled(spec, *, arch: str = "gfx950"):
     """Arch-aware wrapper: dispatch the tiled-2D builder on ``arch``.

@@ -16,11 +16,19 @@ step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
   * **diagonal-only causal masking** — a mask-free body loop over below-diagonal KV
     tiles (~94% at Sq=8192) plus a masked diagonal tail.
   * **depth-1 cluster split** fusing exp2 into the PV MFMA loop for MFMA/VALU co-exec.
+  * **partial-vmcnt software prefetch** — the per-tile K/V DMA drain is a partial
+    `vmcnt` (keeps the freshest V prefetch in flight across the barrier) instead of a
+    full `vmcnt(0)` serialize; raises MfmaUtil, bit-identical.
+  * **PV-only `s_setprio`** — the PV MFMA cluster is bracketed at raised priority so
+    it wins issue slots; paired with the prefetch this is a measured ~+3.5%.
   * **vectorized O store**.
 
-Measured on MI355X: **521 TFLOPS @ Sq=8192, bf16, D=128, causal, 0 spill**, error
-~1.46e-3 vs SDPA. Shape (batch/seqlen/heads/head_dim) is baked at build time (dense,
-compile-time-sized ABI); only the KV tile and occupancy hint are tunable knobs.
+Measured on MI355X (bf16, D=128, causal, 0 spill, err ~1.46e-3 vs SDPA):
+**~543 TFLOPS @ Sq=8192** for the default one-CTA-per-query-block grid, and
+**~877 TFLOPS @ Sq=8192** for the persistent grid-stride variant
+(``persistent=True``). Shape (batch/seqlen/heads/head_dim) is baked at build time
+(dense, compile-time-sized ABI); the KV tile, occupancy hint, and persistent knobs
+are the tunable parameters.
 
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
 staging, score truncation, s_setprio, PV V-prefetch, lazy rescale) are intentionally
@@ -495,14 +503,18 @@ def build_attention_dense(
         vbuf_prev = b.mod(b.add(j, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
         pbuf = b.mod(b.add(j, b.const_i32(1)), b.const_i32(NBUF))
 
-        b.s_waitcnt(vmcnt=0)
+        # PF (partial-vmcnt prefetch): keep the freshest V(j) DMA in flight so it
+        # overlaps compute instead of a full vmcnt(0) serialize (bit-identical).
+        b.s_waitcnt(vmcnt=V_DMA_PASSES)
         b.s_barrier_bare()
         s = do_qk(kbuf)
         if masked:
             do_mask(s, j)
         m_new, alpha = softmax_max(s, m_i)
         b.sched_barrier(0)  # depth-1 fence: m_new region-live-in
+        b.s_setprio(1)  # PV-only s_setprio (paired with PF ~+3.5%)
         o_acc, p_vals, l_tile = pv_fused_exp(o_acc, p_prev, vbuf_prev, s, m_new)
+        b.s_setprio(0)
         l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
         o_acc = rescale_o(o_acc, alpha)
         p_packs = relayout_p(p_vals)
@@ -540,6 +552,9 @@ def build_attention_dense(
     o_acc = list(res[2 : 2 + D_TILES])
     p_prev = list(res[2 + D_TILES : 2 + D_TILES + KK_STEPS])
 
+    # PF: drain the last iter's in-flight V prefetch before the epilogue do_pv.
+    b.s_waitcnt(vmcnt=0)
+    b.s_barrier_bare()
     last_vbuf = b.mod(b.add(n_upper, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
     o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
@@ -894,14 +909,21 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             kbuf = b.mod(j, b.const_i32(NBUF))
             vbuf_prev = b.mod(b.add(j, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
 
-            b.s_waitcnt(vmcnt=0)
+            # PF (partial-vmcnt prefetch): keep the freshest V(j) DMA in flight
+            # (drain only V(j-1)+K(j), both older) so DMA overlaps compute instead
+            # of a full vmcnt(0) serialize. Bit-identical, raises MfmaUtil.
+            b.s_waitcnt(vmcnt=V_DMA_PASSES)
             b.s_barrier_bare()
             s = do_qk(kbuf)
             if masked:
                 do_mask(s, j)
             m_new, alpha = softmax_max(s, m_i)
             b.sched_barrier(0)
+            # PV-only s_setprio: the PV MFMA cluster wins issue slots; paired with
+            # PF this converts to ~+3.5% (Sq=8192 causal, ~852 -> ~877 TFLOPS).
+            b.s_setprio(1)
             o_acc, p_vals, l_tile = pv_fused_exp(o_acc, p_prev, vbuf_prev, s, m_new)
+            b.s_setprio(0)
             l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
             o_acc = rescale_o(o_acc, alpha)
             p_packs = relayout_p(p_vals)
@@ -966,6 +988,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         o_acc = list(res[2 : 2 + D_TILES])
         p_prev = list(res[2 + D_TILES : 2 + D_TILES + KK_STEPS])
 
+        # PF: drain the last iter's in-flight V prefetch before the epilogue do_pv.
+        b.s_waitcnt(vmcnt=0)
+        b.s_barrier_bare()
         last_vbuf = b.mod(b.add(n_upper, b.const_i32(NBUF - 1)), b.const_i32(NBUF))
         o_acc = do_pv(o_acc, p_prev, last_vbuf)
 
@@ -995,3 +1020,89 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
     b.ret()
     return b.kernel
+
+
+# --------------------------------------------------------------------------- #
+# Public launch geometry + ABI (promoted from the prefill builder so the kernel
+# is dispatchable / framework-callable without the host script).
+# --------------------------------------------------------------------------- #
+
+
+def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
+    """Launch grid for ``spec``. Persistent = 1-D grid of ``num_persistent`` CTAs;
+    default = one CTA per (query-block, query-head, batch)."""
+    if spec.persistent:
+        return (spec.num_persistent, 1, 1)
+    return (spec.seqlen_q // _BLOCK_M, spec.num_query_heads, spec.batch)
+
+
+def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
+    """CTA block dims: ``num_waves`` wave64s (= 512 threads)."""
+    return (spec.num_waves * 64, 1, 1)
+
+
+def attention_dense_signature(spec: AttentionDenseSpec):
+    """ABI signature (q/k/v/o pointers + f32 scale) for :class:`KernelLauncher`."""
+    from rocke.helpers.spec import SignatureBuilder
+
+    return (
+        SignatureBuilder()
+        .ptr("q_ptr", spec.dtype)
+        .ptr("k_ptr", spec.dtype)
+        .ptr("v_ptr", spec.dtype)
+        .ptr("o_ptr", spec.dtype)
+        .scalar("scale", "f32")
+        .build()
+    )
+
+
+_DENSE_LAUNCHER_CACHE: dict = {}
+
+
+def run_attention_dense_torch(
+    *,
+    spec: AttentionDenseSpec,
+    q,
+    k,
+    v,
+    out,
+    scale: float,
+    stream: int = 0,
+    arch: str = "gfx950",
+):
+    """High-level framework entry: compile (cached) + launch the dense prefill
+    kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
+    tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
+    softmax scale (1/sqrt(D)). Returns ``out``. torch is imported lazily by the
+    launcher — this module stays torch-free at import time."""
+    ok, why = supports_attention_dense(spec, arch=arch)
+    if not ok:
+        raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime import KernelLauncher, LaunchConfig
+
+    key = spec.kernel_name()
+    launcher = _DENSE_LAUNCHER_CACHE.get(key)
+    if launcher is None:
+        art = compile_kernel(
+            build_attention_dense(spec, arch=arch),
+            arch=arch,
+            backend="python",
+            capture_ir_text=False,
+        )
+        launcher = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=attention_dense_signature(spec),
+        )
+        _DENSE_LAUNCHER_CACHE[key] = launcher
+    vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    launcher(
+        vals,
+        config=LaunchConfig(
+            grid=attention_dense_grid(spec),
+            block=attention_dense_block(spec),
+            stream=int(stream),
+        ),
+    )
+    return out
