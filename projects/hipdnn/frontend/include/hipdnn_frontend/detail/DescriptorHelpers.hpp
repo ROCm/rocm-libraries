@@ -222,11 +222,20 @@ inline Error
             tensor->get_value_variant()));
     }
 
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
-                                               HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
-                                               HIPDNN_TYPE_BOOLEAN,
-                                               tensor->get_is_runtime_pass_by_value(),
-                                               "tensor is_runtime_pass_by_value"));
+    // Only send the runtime pass-by-value extension attribute when the flag is
+    // actually set. A non-pass-by-value tensor never needs it, and sending it
+    // unconditionally would break lowering against a pre-1.2.0 backend that
+    // does not recognize HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT.
+    // This mirrors the guarded tensor-value send above: extension attributes
+    // floor the backend only for graphs that actually use them.
+    if(tensor->get_is_runtime_pass_by_value())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                                   HIPDNN_TYPE_BOOLEAN,
+                                                   true,
+                                                   "tensor is_runtime_pass_by_value"));
+    }
 
     HIPDNN_CHECK_ERROR(finalizeDescriptor(desc.get(), "tensor descriptor"));
 

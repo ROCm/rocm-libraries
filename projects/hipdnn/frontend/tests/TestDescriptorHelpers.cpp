@@ -163,13 +163,20 @@ protected:
                                         1,
                                         pointsToScalar<bool>(false)))
             .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-        EXPECT_CALL(*_mockBackend,
-                    backendSetAttribute(_,
-                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
-                                        HIPDNN_TYPE_BOOLEAN,
-                                        1,
-                                        pointsToScalar<bool>(isRuntime)))
-            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        // Lowering only sends the runtime pass-by-value extension attribute when
+        // the flag is set (see createOrFindTensorDesc); a non-pass-by-value
+        // tensor never touches it, keeping graphs compatible with a pre-1.2.0
+        // backend.
+        if(isRuntime)
+        {
+            EXPECT_CALL(*_mockBackend,
+                        backendSetAttribute(_,
+                                            HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            1,
+                                            pointsToScalar<bool>(true)))
+                .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        }
     }
 
     static std::shared_ptr<TensorAttributes> makeTensor(int64_t uid)
