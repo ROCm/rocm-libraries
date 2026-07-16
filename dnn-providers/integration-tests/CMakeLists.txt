@@ -137,15 +137,15 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
-    src/harness/input_init/SynthesizeInputs.cpp
+    src/harness/input-init/SynthesizeInputs.cpp
 )
 
-add_subdirectory(src/integration_tests)
+add_subdirectory(src/integration-tests)
 
 target_include_directories(${INTEGRATION_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(${INTEGRATION_TESTS_EXE} SYSTEM PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/argparse
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/tomlplusplus
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/argparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/tomlplusplus
 )
 
 target_link_libraries(${INTEGRATION_TESTS_EXE}
@@ -163,7 +163,7 @@ target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARN
 
 clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
-add_subdirectory(gpu_ref)
+add_subdirectory(gpu-ref)
 add_subdirectory(tests)
 
 # Finalize test targets with prefix to avoid collisions in superbuild mode
