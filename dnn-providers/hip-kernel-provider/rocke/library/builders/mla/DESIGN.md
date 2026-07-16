@@ -321,8 +321,7 @@ GEMMs (`[B·H_q, r_Q] × [r_Q, r_KV]` and `[B·H_q, r_Q] × [r_Q, d_rope]`) and 
 be fused into a single batched GEMM kernel or executed as a pre-kernel. They are
 **not inside the flash loop** — they run once per request.
 
-The absorbed weight `W_abs[H_q, r_Q, r_KV]` is `H_q × 1536 × 512` elements = 1536
-MB at bf16 — too large to live in LDS. It is used only in the pre-step GEMM, not
+The absorbed weight `W_abs[H_q, r_Q, r_KV]` is `H_q × 1536 × 512` elements; for `H_q=128` this is ~192 MiB (~201 MB) at bf16 — too large to live in LDS. It is used only in the pre-step GEMM, not
 streamed per KV tile. The main scheduling constraint for the decode flash loop is
 `W_UV` staging (see §5).
 
