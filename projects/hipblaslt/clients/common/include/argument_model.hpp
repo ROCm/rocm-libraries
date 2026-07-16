@@ -67,7 +67,6 @@ public:
                   hipblaslt_internal_ostream& val_line,
                   const Arguments&            arg,
                   double                      gpu_us,
-                  double                      flush_us,
                   double                      gflops,
                   double                      gbytes,
                   double                      cpu_us,
@@ -84,14 +83,12 @@ public:
         int64_t        batch_count     = has_batch_count ? arg.batch_count : 1;
 
         // both gpu_us and cpu_us are per-call time
-        if(flush_us > 0)
-        {
-            gpu_us -= flush_us;
-        }
-
-        // per/us to per/sec *10^6
-        double hipblaslt_gflops = gflops * batch_count / gpu_us * 1e6;
-        double hipblaslt_GBps   = gbytes / gpu_us * 1e6;
+        // per/us to per/sec *10^6; gpu_us can be <= 0 due to the flush-overhead correction,
+        // so guard the division.
+        const bool valid_gpu_us = gpu_us > 0.0;
+        double     hipblaslt_gflops
+            = valid_gpu_us ? gflops * batch_count / gpu_us * 1e6 : ArgumentLogging::NA_value;
+        double hipblaslt_GBps = valid_gpu_us ? gbytes / gpu_us * 1e6 : ArgumentLogging::NA_value;
 
         // append performance fields
         if(gflops != ArgumentLogging::NA_value)
@@ -176,7 +173,6 @@ public:
                   uint32_t                    splitK,
                   uint32_t                    wgm,
                   double                      gpu_us,
-                  double                      flush_us,
                   double                      gflops,
                   double                      gbytes = ArgumentLogging::NA_value,
                   double                      cpu_us = ArgumentLogging::NA_value,
@@ -285,7 +281,6 @@ public:
                      value_list,
                      arg,
                      gpu_us,
-                     flush_us,
                      gflops,
                      gbytes,
                      cpu_us,

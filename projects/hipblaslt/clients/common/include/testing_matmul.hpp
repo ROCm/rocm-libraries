@@ -5571,6 +5571,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 flush_time_used = flush_times_cache[device_uuid];
             }
         }
+        timingCfg.flush_us = flush_time_used;
 
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
         {
@@ -6156,7 +6157,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     (uint32_t)tuningVec[heuristicTuningIndex[sol]].getSplitK(),
                     (uint32_t)tuningVec[heuristicTuningIndex[sol]].getWgm(),
                     gpu_time_used,
-                    flush_time_used,
                     flops,
                     gpu_mem_gbytes,
                     cpu_time_used,
@@ -6220,7 +6220,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getSplitK(),
                 (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getWgm(),
                 best_gpu_time,
-                flush_time_used,
                 best_flops,
                 gpu_mem_gbytes,
                 cpu_time_used,

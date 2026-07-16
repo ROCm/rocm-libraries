@@ -34,6 +34,7 @@ namespace hipblaslt_bench
         int32_t stability_window    = 0; // rel_iqr readings tested for the plateau (>= 2)
         int32_t stability_interval  = 0; // record a rel_iqr reading every N samples (>= 1)
         bool    use_gpu_timer       = false; // hipEvent timing vs CPU wall clock
+        double  flush_us            = 0.0; // per-launch flush_icache overhead, subtracted/sample
     };
 
     // Validate the semantic constraints of an adaptive TimingConfig. Returns an empty
