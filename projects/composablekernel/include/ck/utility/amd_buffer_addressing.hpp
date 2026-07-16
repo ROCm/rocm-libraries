@@ -549,7 +549,10 @@ __device__ void amd_global_atomic_add_impl(const typename vector_type<T, N>::typ
                                            T* addr)
 {
     static_assert((is_same<T, bhalf_t>::value && (N == 2 || N == 4 || N == 8)) ||
-                      (is_same<T, half_t>::value && (N == 2 || N == 4 || N == 8)),
+                      (is_same<T, half_t>::value && (N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, float>::value && (N == 1 || N == 2 || N == 4 || N == 8)) ||
+                      (is_same<T, double>::value && (N == 1 || N == 2)) ||
+                      (is_same<T, int32_t>::value && (N == 1 || N == 2 || N == 4 || N == 8)),
                   "wrong! not implemented");
 
     if constexpr(is_same<T, half_t>::value)
@@ -570,6 +573,27 @@ __device__ void amd_global_atomic_add_impl(const typename vector_type<T, N>::typ
         });
     }
 #endif
+    else if constexpr(is_same<T, float>::value)
+    {
+        vector_type<float, N> tmp{src_thread_data};
+        static_for<0, N, 1>{}([&](auto i) {
+            atomicAdd(c_style_pointer_cast<float*>(addr) + i, tmp.template AsType<float>()[i]);
+        });
+    }
+    else if constexpr(is_same<T, double>::value)
+    {
+        vector_type<double, N> tmp{src_thread_data};
+        static_for<0, N, 1>{}([&](auto i) {
+            atomicAdd(c_style_pointer_cast<double*>(addr) + i, tmp.template AsType<double>()[i]);
+        });
+    }
+    else if constexpr(is_same<T, int32_t>::value)
+    {
+        vector_type<int32_t, N> tmp{src_thread_data};
+        static_for<0, N, 1>{}([&](auto i) {
+            atomicAdd(c_style_pointer_cast<int32_t*>(addr) + i, tmp.template AsType<int32_t>()[i]);
+        });
+    }
 }
 
 template <typename T, index_t N>
@@ -908,11 +932,6 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
                       const bool dst_thread_element_valid,
                       const index_t dst_element_space_size)
 {
-    const int32x4_t dst_wave_buffer_resource =
-        make_wave_buffer_resource(p_dst_wave, dst_element_space_size);
-
-    index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
-
     using vector_t                = typename vector_type_maker<T, N>::type::type;
     using scalar_t                = typename scalar_type<vector_t>::type;
     constexpr index_t vector_size = scalar_type<vector_t>::vector_size;
@@ -925,8 +944,22 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
                 src_thread_data, p_dst_wave + dst_thread_element_offset);
         }
     }
+#if defined(__gfx125__)
+    // gfx1250 uses a different buffer descriptor format; fall back to flat global atomics.
+    else if(dst_thread_element_valid)
+    {
+        (void)dst_element_space_size;
+        amd_global_atomic_add_impl<scalar_t, vector_size>(src_thread_data,
+                                                          p_dst_wave + dst_thread_element_offset);
+    }
+#else
     else
     {
+        const int32x4_t dst_wave_buffer_resource =
+            make_wave_buffer_resource(p_dst_wave, dst_element_space_size);
+
+        index_t dst_thread_addr_offset = dst_thread_element_offset * sizeof(T);
+
 #if CK_EXPERIMENTAL_USE_BUFFER_ATOMIC_ADD_OOB_CHECK_OFFSET_TRICK
         uint32_t dst_addr_shift = dst_thread_element_valid ? 0 : 0x80000000;
 
@@ -940,6 +973,7 @@ amd_buffer_atomic_add(const typename vector_type_maker<T, N>::type::type src_thr
         }
 #endif
     }
+#endif // defined(__gfx125__)
 }
 
 // buffer_atomic_max requires:
