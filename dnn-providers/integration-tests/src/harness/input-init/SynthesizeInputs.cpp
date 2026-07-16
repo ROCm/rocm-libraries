@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/input-init/SynthesizeInputs.hpp"
 
 #include <algorithm>
 #include <random>

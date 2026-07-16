@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include <hipdnn-gpu-ref/detail/ShallowDeviceOnlyMigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_gpu_ref/detail/ShallowDeviceOnlyMigratableMemory.hpp>
 
 #include <cstddef>
 #include <cstdint>

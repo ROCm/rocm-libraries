@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
-#include <hipdnn_gpu_ref/ShallowGpuTensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <array>
