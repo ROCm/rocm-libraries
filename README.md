@@ -1,8 +1,5 @@
 # hipThreads : C++-style concurrency library for AMD GPUs
 
-> [!CAUTION]
-> This release is an *early-access* software technology preview. Running production workloads is *not* recommended.
-
 ## Introduction
 
 hipThreads is a C++-style concurrency library for AMD GPUs that brings familiar threading abstractions to GPU programming by implementing C++ threading and synchronization primitives for GPU code.
@@ -21,53 +18,14 @@ If you have existing CPU code using `std::thread`, porting to GPU with hipThread
 
 The familiar threading model remains the same, making GPU acceleration accessible without rewriting your concurrency logic. See the `examples/` directory for detailed porting examples.
 
-## Prerequisites
+## Installation
 
-hipThreads requires the following:
+hipThreads ships as part of ROCm. If you install ROCm 10 or later, hipThreads is bundled with it, so
+no separate installation is needed. [TheRock](https://github.com/ROCm/TheRock) nightly builds also
+include hipThreads in each nightly.
 
-- Linux OS (Ubuntu 24.04 recommended)
-- CMake 3.21+
-- Build tools (e.g., `make` or `ninja`)
-- **ROCm 7.12+** — hipThreads depends on HIP and libhipcxx. The code samples also use rocThrust utilities. All are included in TheRock builds.
-
-### Installing ROCm
-> [!NOTE]
-> ROCm 7.12 is part of a technology preview release stream (starting from 7.9.0) and is separate from the 7.0–7.2 production releases. The last supported ROCm 7 production release is 7.0.2. For ROCm 7.0.2 setup instructions, see the [0.1.0 release prerequisites](https://github.com/ROCm/hipThreads/blob/release/0.1.0/README.md#prerequisites).
-
-1. Follow the [ROCm 7.12 installation guide](https://rocm.docs.amd.com/en/7.12.0-preview/install/rocm.html) for your GPU and distribution. Install at least the **core-dev** package for your GPU architecture (e.g., `amdrocm-core-dev7.12-gfx120x`). The full **core-sdk** package (e.g., `amdrocm-core-sdk-gfx120x`) also works.
-
-2. Configure your environment:
-
-    ```bash
-    export ROCM_PATH=/opt/rocm/core
-    export PATH=$PATH:$ROCM_PATH/bin
-    export LD_LIBRARY_PATH=$ROCM_PATH/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-    ```
-
-    To make this persistent across sessions, add the lines above to `~/.bashrc` and run `source ~/.bashrc`.
-
-3. Verify the installation:
-
-    ```bash
-    hipcc --version         # Should print the clang/HIP version
-    rocminfo                # Should list detected GPUs and HSA agents
-    amd-smi version         # Should show AMDSMI and ROCm version info
-    ```
-
-## Build and Installation
-
-By default, hipThreads installs under `$ROCM_PATH` (matching other ROCm components). You can override this by adding `-DCMAKE_INSTALL_PREFIX=<path>` to the CMake configure command.
-
-```bash
-git clone https://github.com/ROCm/hipThreads.git
-cd hipThreads
-cmake -B build
-cmake --build ./build
-sudo cmake --install ./build
-```
-
-> [!NOTE]
-> Installing to `$ROCM_PATH` usually requires `sudo`.
+- To install hipThreads on its own, see [Install hipThreads](https://rocm.docs.amd.com/projects/hipThreads/en/latest/install/install.html).
+- To build hipThreads from source (on Linux or Windows), see [Build from source](https://rocm.docs.amd.com/projects/hipThreads/en/latest/install/source-build.html). Building from source requires ROCm 7.12 or later.
 
 ## Usage
 
@@ -144,60 +102,17 @@ Run inference or start a chat session:
 
 ## Documentation
 
-Documentation is available in multiple forms:
-- **API Reference**: Doxygen-generated documentation in the `docs/` directory
-- **Source Documentation**: Since the library uses Doxygen-style comments throughout the source files.
-You can browse the `inc/` and `src/` directories directly to read the API documentation inline with the code.
-- **Tutorials and Examples**: See [our ROCm™ Blogs post](https://rocm.blogs.amd.com/software-tools-optimization/hipthreads-introduction/README.html) for an introduction with detailed examples
+Full documentation — getting started, the `std::` → `hip::` mapping, limitations, and the complete API reference — is available at [rocm.docs.amd.com/projects/hipThreads](https://rocm.docs.amd.com/projects/hipThreads/en/latest/).
 
-### Viewing API Documentation Locally
-
-The API reference is generated with Doxygen. Since we're unable to host it online currently, you can view it locally using any of these methods:
-
-**Option 1: Open .html files directly in browser**
-
-**Option 2: Local HTTP server (recommended for full functionality)**:
-```bash
-python3 -m http.server 5500 --directory docs/doxygen/html
-# Then open http://localhost:5500 in your browser
-```
-
-> [!NOTE]
-> Opening HTML files directly works for most documentation browsing. Use the HTTP server method if you encounter issues with search functionality or cross-file navigation.
+For an introduction with detailed examples, see [our ROCm™ Blogs post](https://rocm.blogs.amd.com/software-tools-optimization/hipthreads-introduction/README.html).
 
 ## Key Limitations and Best Practices
 
-While hipThreads mimics the C++ standard library, GPU hardware constraints impose specific rules:
+GPU hardware imposes constraints that have no counterpart on the CPU (avoiding deadlocks from synchronous HIP calls, `__device__` lambda requirements, TriviallyCopyable arguments, cooperative-only synchronization, and more). These are not compile-time errors, so read them before writing hipThreads code: see [Limitations](https://rocm.docs.amd.com/projects/hipThreads/en/latest/reference/limitations.html).
 
-### 1. Avoiding Deadlocks: Synchronous Calls and Scoping
-The creation of a `hip::thread` launches a persistent kernel (scheduler) that polls for work. Consequently, calling synchronous HIP functions (like `hipDeviceSynchronize`, synchronous `hipMemcpy`, or `thrust::copy`) will cause deadlocks because they wait for *all* GPU tasks to finish—including the persistent idle kernel.
+## Performance Tuning
 
-*   **Solution A (Async APIs)**: Use async HIP functions (e.g., `hipMemcpyAsync`, `hipMemsetAsync`) which do not wait for the idle loop to terminate.
-*   **Solution B (Scoping)**: If you must use synchronous calls (e.g., when mixing with rocThrust), wrap your `hip::thread` objects in a **scoped block (`{ ... }`)**. This ensures threads are joined and the persistent kernel is destroyed *before* the synchronous call is made.
-
-### 2. Lambda Annotations
-A `hip::thread` constructed on the host cannot accept standard host function pointers or standard lambdas.
-*   **Requirement**: You must use **extended lambdas** annotated with `__device__`. 
-*   **Device Functions**: Host code cannot reference `__device__` functions directly. To call a device function, wrap it inside a `[] __device__ { ... }` lambda.
-
-### 3. Memory and Data Transfer
-Arguments passed to the `hip::thread` constructor must be **TriviallyCopyable** as they are copied by value to the device.
-*   **No Complex Types**: Do not pass structures containing `std::vector` or other standard containers.
-*   **Raw Pointers**: If passing a pointer, it **must** point to GPU-accessible memory (allocated via `hipMalloc` or similar). Passing a host pointer will cause a crash.
-*   **Stack Isolation**: GPU threads have private stacks. 
-**Never capture by reference (`[&]`)** if the variable resides on the launching thread's stack. Other threads cannot access that memory. 
-Shared data must exist in heap/global memory.
-
-### 4. Synchronization Behavior
-GPU synchronization primitives are approximations of their CPU counterparts:
-*   **No Preemption or Blocking**: The GPU does not support blocking or hardware preemption. `condition_variable::wait` spins or yields rather than blocking.
-*   **Pseudo Yield**: `this_thread::yield` only returns control to the caller when the yieldee has finished. The yieldee will not be interrupted and cannot yield back to the caller.
-
-
-> [!NOTE]
-> For practical demonstrations of these concepts, explore the `examples/` directory. 
-> For detailed usage of specific primitives and implementation of edge cases, refer to the unit tests in the `test/` directory.
-
+hipThreads launches a fixed number of scheduler slots ("vcores"), reported by `hip::thread::hardware_concurrency()`. The number of vcores per WGP defaults to `16`, which works well across the bundled samples on Navi (Radeon) cards, but the best value is architecture- and workload-dependent. You can tune it without rebuilding by setting the `HIPTHREADS_VCORES_PER_WGP` environment variable, or change the compiled-in default with `-DHIPTHREADS_DEFAULT_VCORES_PER_WGP=<n>` when building from source. See [Tune scheduler concurrency](https://rocm.docs.amd.com/projects/hipThreads/en/latest/how-to/tune-scheduler-concurrency.html) for details.
 
 ## License
 
