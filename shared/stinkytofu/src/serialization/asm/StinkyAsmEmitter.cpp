@@ -742,14 +742,6 @@ static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst) 
     }
 }
 
-// SMEM atomics signal return via glc, not th:, so they are excluded (see
-// isReturningAtomic() in StinkyAsmIR.hpp, the single shared source of truth
-// for "does this atomic return a value" used by both this emitter and the
-// waitcnt dataflow's CK_Buffer classification).
-static bool needThAtomicReturn(const StinkyInstruction& inst) {
-    return isReturningAtomic(inst);
-}
-
 static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& inst) {
 #define EMIT_TRAILING_MODIFIER(TYPE_ENUM, CLASS_PREFIX)                \
     case Modifier::Type::TYPE_ENUM:                                    \
@@ -774,7 +766,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
     }
 #undef EMIT_TRAILING_MODIFIER
 
-    if (needThAtomicReturn(inst)) {
+    if (isReturningAtomic(inst)) {
         os << " th:TH_ATOMIC_RETURN";
     }
 }

@@ -458,17 +458,21 @@ inline bool isGlobalMemStore(const StinkyInstruction& inst) {
     return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst);
 }
 
-/// A destination register is implicit (not printed, not a real result) when it
-/// was added solely for dependency tracking. Shared between the assembly
-/// emitter (decides whether to print `th:TH_ATOMIC_RETURN`) and the waitcnt
-/// dataflow (decides whether an atomic's destination is a trackable value) so
-/// both agree on exactly the same "does this atomic return a value" answer.
+/// A destination register is implicit (not printed) when it was added solely
+/// for dependency tracking. Shared between the assembly emitter (decides
+/// whether to print `th:TH_ATOMIC_RETURN`) and the waitcnt dataflow (decides
+/// whether an atomic's destination is a trackable value) so both agree on
+/// exactly the same "does this atomic return a value" answer.
 inline bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& inst) {
     if (reg.dataType != StinkyRegister::Type::Register) return false;
 
     RegType t = reg.reg.type;
 
-    if (t == RegType::SCC) return true;
+    if (t == RegType::SCC) {
+        assert(inst.is(InstFlag::IF_ImplicitWriteSCC) &&
+               "SCC should always be an implicit dest or src");
+        return true;
+    }
 
     if ((t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI) &&
         inst.is(InstFlag::IF_ImplicitWriteEXEC)) {
