@@ -48,7 +48,8 @@ def _register_win_dll_dirs() -> None:
     Since Python 3.8 the loader resolves an extension module's dependent DLLs
     only from the system directories, the directory containing the .pyd, and
     directories added via os.add_dll_directory() -- PATH is ignored. Mirrors the
-    runtime resolver in dnn-providers/hip-kernel-provider.
+    runtime resolver in
+    dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/runtime/hip_module.py.
     """
     import os
 
@@ -65,6 +66,8 @@ def _register_win_dll_dirs() -> None:
                 pass
 
 
+# Must run BEFORE the _rocisa import below: it registers the directories of
+# _rocisa's dependent DLLs so the extension loads on Windows (WinError 126).
 if sys.platform == "win32":
     _register_win_dll_dirs()
 
