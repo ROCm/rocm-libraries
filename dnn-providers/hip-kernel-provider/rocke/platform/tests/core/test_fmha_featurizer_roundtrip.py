@@ -19,15 +19,8 @@ import tempfile
 import numpy as np
 import pytest
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_HEUR = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "python", "rocke", "heuristics")
-)
-if _HEUR not in sys.path:
-    sys.path.insert(0, _HEUR)
-
-import gen_fmha_featurizer as gen  # noqa: E402
-from feature_engine import FmhaFeatureEngine  # noqa: E402
+from rocke.heuristics import gen_fmha_featurizer as gen
+from rocke.heuristics.feature_engine import FmhaFeatureEngine
 
 # FMHA feature vector length (FmhaFeatureEngine.NUM_FEATURES).
 # Centralize this to avoid scattering the literal across test assertions.

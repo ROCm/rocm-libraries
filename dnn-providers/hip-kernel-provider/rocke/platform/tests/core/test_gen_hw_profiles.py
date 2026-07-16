@@ -6,18 +6,11 @@ and generated C++ supplements.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# Add the heuristics module to path
-_HERE = Path(__file__).resolve().parent
-_HEUR = _HERE.parent.parent / "python" / "rocke" / "heuristics"
-if str(_HEUR) not in sys.path:
-    sys.path.insert(0, str(_HEUR))
-
-import gen_hw_profiles as ghp  # noqa: E402
+from rocke.heuristics import gen_hw_profiles as ghp
 
 
 def test_checksum_computation_is_deterministic():

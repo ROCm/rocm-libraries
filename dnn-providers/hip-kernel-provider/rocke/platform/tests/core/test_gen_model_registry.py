@@ -12,20 +12,12 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_HEUR = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "python", "rocke", "heuristics")
-)
-if _HEUR not in sys.path:
-    sys.path.insert(0, _HEUR)
-
-import gen_model_registry as gmr  # noqa: E402
+from rocke.heuristics import gen_model_registry as gmr
 
 _CC = shutil.which("cc") or shutil.which("gcc")
 requires_cc = pytest.mark.skipif(_CC is None, reason="no C compiler")
