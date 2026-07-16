@@ -47,6 +47,8 @@ from gemm_utils import (  # noqa: E402
     _bf16_u16_to_fp32,
     _fp32_to_fp8_u8,
     _fp8_u8_to_fp32,
+    _fp32_to_bf8_u8,
+    _bf8_u8_to_fp32,
 )
 import numpy as np  # noqa: E402
 
@@ -96,9 +98,12 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
                 if kdt == "bf16":
                     Aq = _bf16_u16_to_fp32(_fp32_to_bf16_u16(A))
                     Bq = _bf16_u16_to_fp32(_fp32_to_bf16_u16(B))
-                elif kdt in ("fp8", "bf8"):
-                    Aq = _fp8_u8_to_fp32(_fp32_to_fp8_u8(A, kdt), kdt)
-                    Bq = _fp8_u8_to_fp32(_fp32_to_fp8_u8(B, kdt), kdt)
+                elif kdt == "fp8":
+                    Aq = _fp8_u8_to_fp32(_fp32_to_fp8_u8(A))
+                    Bq = _fp8_u8_to_fp32(_fp32_to_fp8_u8(B))
+                elif kdt == "bf8":
+                    Aq = _bf8_u8_to_fp32(_fp32_to_bf8_u8(A))
+                    Bq = _bf8_u8_to_fp32(_fp32_to_bf8_u8(B))
                 else:  # fp16
                     Aq = A.astype(np.float16).astype(np.float32)
                     Bq = B.astype(np.float16).astype(np.float32)
