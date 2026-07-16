@@ -27,9 +27,9 @@ include: hipsparse_common.yaml
 
 Tests:
 # Quick
-- name: dense_to_sparse_bell
+- name: dense_to_sparse_bell_no_set_pointers
   category: quick
-  function: dense_to_sparse_bell
+  function: dense_to_sparse_bell_no_set_pointers
   indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [325]
@@ -39,9 +39,9 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
-- name: dense_to_sparse_bell
+- name: dense_to_sparse_bell_no_set_pointers
   category: quick
-  function: dense_to_sparse_bell
+  function: dense_to_sparse_bell_no_set_pointers
   indextype: *i64
   precision: *single_double_precisions_complex_real
   M: [512]
@@ -52,15 +52,9 @@ Tests:
   dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
 # Pre-checkin
-- name: dense_to_sparse_bell_bad_arg
+- name: dense_to_sparse_bell_no_set_pointers
   category: pre_checkin
-  function: dense_to_sparse_bell_bad_arg
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-
-- name: dense_to_sparse_bell
-  category: pre_checkin
-  function: dense_to_sparse_bell
+  function: dense_to_sparse_bell_no_set_pointers
   indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [1287]
@@ -70,22 +64,10 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
-- name: dense_to_sparse_bell
-  category: pre_checkin
-  function: dense_to_sparse_bell
-  indextype: *i64
-  precision: *single_only_precisions
-  M: [2000]
-  N: [2000]
-  block_dim: [40, 45, 50, 55, 60, 65, 70, 75, 80]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
-  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
-
 # Nightly
-- name: dense_to_sparse_bell
+- name: dense_to_sparse_bell_no_set_pointers
   category: nightly
-  function: dense_to_sparse_bell
+  function: dense_to_sparse_bell_no_set_pointers
   indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [2576]

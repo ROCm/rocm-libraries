@@ -27,9 +27,9 @@ include: hipsparse_common.yaml
 
 Tests:
 # Quick
-- name: dense_to_sparse_bell
+- name: dense_to_sparse_bell_no_set_pointers
   category: quick
-  function: dense_to_sparse_bell
+  function: dense_to_sparse_bell_no_set_pointers
   indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [325]
@@ -39,9 +39,9 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
-- name: dense_to_sparse_bell
+- name: dense_to_sparse_bell_no_set_pointers
   category: quick
-  function: dense_to_sparse_bell
+  function: dense_to_sparse_bell_no_set_pointers
   indextype: *i64
   precision: *single_double_precisions_complex_real
   M: [512]
@@ -52,9 +52,9 @@ Tests:
   dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
 # Pre-checkin
-- name: dense_to_sparse_bell
+- name: dense_to_sparse_bell_no_set_pointers
   category: pre_checkin
-  function: dense_to_sparse_bell
+  function: dense_to_sparse_bell_no_set_pointers
   indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [1287]

@@ -99,6 +99,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_rot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spvv.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell_no_set_pointers.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_coo.cpp"
