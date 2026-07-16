@@ -569,7 +569,7 @@ struct uninitialized_array
 
   _CCCL_HOST_DEVICE T (&as_array())[N]
   {
-    return static_cast<T(&)[N]>(data_)
+    return static_cast<T(&)[N]>(data_);
   }
 };
 
