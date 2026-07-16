@@ -1640,8 +1640,6 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with multiple summation indices")
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
-        if state.get("SuppressNoLoadLoop", False):
-          reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop")
         if state["ProblemType"]["Sparse"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
@@ -4242,6 +4240,10 @@ class Solution(collections.abc.Mapping):
         _disableRuntimeStaggerU(state)
 
     _disableUnsupportedRuntimeStaggerU(state)
+
+    if state["PrefetchAcrossPersistent"] and state["SuppressNoLoadLoop"]:
+      reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop")
+      return
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
