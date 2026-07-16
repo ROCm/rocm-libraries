@@ -264,7 +264,7 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
     T* dval = (T*)dval_managed.get();
 
     CHECK_HIP_ERROR(hipMemcpy(
-        dcol, hbell_col_ind_cpu.data(), sizeof(T) * bell_col_ind_size, hipMemcpyHostToDevice));
+        dcol, hbell_col_ind_cpu.data(), sizeof(I) * bell_col_ind_size, hipMemcpyHostToDevice));
 
     // Create blocked ELL descriptor with null pointers; ellCols is discovered during analysis.
     hipsparseSpMatDescr_t matB;
