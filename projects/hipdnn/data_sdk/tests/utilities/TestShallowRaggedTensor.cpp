@@ -31,7 +31,7 @@ TYPED_TEST(ShallowRaggedTensorTyped, Addressing)
 {
     auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     checkAddressing(tensor, K_DIMS, K_STRIDES, K_OFFSETS);
 }
@@ -40,7 +40,7 @@ TYPED_TEST(ShallowRaggedTensorTyped, Iteration)
 {
     auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     checkIteration(tensor, K_OFFSETS);
 }
@@ -49,7 +49,7 @@ TYPED_TEST(ShallowRaggedTensorTyped, Reporting)
 {
     auto aux = makeOffsetAux<TypeParam>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    const ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    const ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     checkReporting(tensor, K_OFFSETS.back());
 }
@@ -62,7 +62,7 @@ TEST(TestShallowRaggedTensor, WrapsBorrowedBuffer)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     EXPECT_EQ(tensor.memory().hostData(), backing.data());
 
@@ -74,7 +74,7 @@ TEST(TestShallowRaggedTensor, FillWithValueFillsBorrowedBuffer)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, -1.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     tensor.fillWithValue(3.0f);
     for(const auto& v : backing)
@@ -91,7 +91,7 @@ TEST(TestShallowRaggedTensor, EmptyBatchSkipped)
 
     auto aux = makeOffsetAux<int32_t>(offsets);
     std::vector<float> backing(8, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), dims, strides, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), dims, strides, BSHD_SEQ_AXIS, aux);
 
     EXPECT_EQ(tensor.elementCount(), 8u);
     checkIteration(tensor, offsets);
@@ -105,7 +105,7 @@ TEST(TestShallowRaggedTensor, FillWithRandomValuesThrows)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     EXPECT_THROW(tensor.fillWithRandomValues(0.0f, 1.0f, 1337), std::runtime_error);
 }
@@ -114,7 +114,7 @@ TEST(TestShallowRaggedTensor, FillWithDataThrows)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     std::vector<float> data(20, 1.0f);
     EXPECT_THROW(tensor.fillWithData(data.data(), data.size() * sizeof(float)), std::runtime_error);
@@ -124,7 +124,7 @@ TEST(TestShallowRaggedTensor, DeviceAccessThrows)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     EXPECT_THROW(tensor.memory().deviceData(), std::runtime_error);
 }
@@ -136,16 +136,17 @@ TEST(TestShallowRaggedTensor, DeviceAccessThrows)
 TEST(TestShallowRaggedTensor, ValidationNullAuxThrows)
 {
     std::vector<float> backing(20, 0.0f);
-    EXPECT_THROW(
-        const ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, nullptr),
-        std::invalid_argument);
+    EXPECT_THROW(const ShallowRaggedTensor<float> tensor(
+                     backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, nullptr),
+                 std::invalid_argument);
 }
 
 TEST(TestShallowRaggedTensor, ValidationWrongElementCountThrows)
 {
     auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{2, 1, 1, 1});
     std::vector<float> backing(20, 0.0f);
-    EXPECT_THROW(const ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux),
+    EXPECT_THROW(const ShallowRaggedTensor<float> tensor(
+                     backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
 
@@ -153,7 +154,8 @@ TEST(TestShallowRaggedTensor, ValidationWrongRankThrows)
 {
     auto aux = std::make_shared<Tensor<int32_t>>(std::vector<int64_t>{3, 1, 1});
     std::vector<float> backing(20, 0.0f);
-    EXPECT_THROW(const ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux),
+    EXPECT_THROW(const ShallowRaggedTensor<float> tensor(
+                     backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux),
                  std::invalid_argument);
 }
 
@@ -161,6 +163,7 @@ TEST(TestShallowRaggedTensor, ValidationBadElementSizeThrows)
 {
     auto aux = std::make_shared<Tensor<int16_t>>(std::vector<int64_t>{3, 1, 1, 1});
     std::vector<float> backing(20, 0.0f);
-    EXPECT_THROW(const ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux),
+    EXPECT_THROW(const ShallowRaggedTensor<float> tensor(
+                     backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux),
                  std::invalid_argument);
 }

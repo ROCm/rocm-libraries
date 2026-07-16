@@ -467,7 +467,7 @@ TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
 TEST(TestTypeErasedIteratorRagged, UsesRaggedCompositeIndex)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
-    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, 1, aux);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     auto it = tensor.begin();
 
@@ -493,7 +493,7 @@ TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
     // Same geometry, over a borrowed buffer.
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     std::vector<float> backing(20, 0.0f);
-    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, 1, aux);
+    ShallowRaggedTensor<float> tensor(backing.data(), K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
 
     auto it = tensor.begin();
 

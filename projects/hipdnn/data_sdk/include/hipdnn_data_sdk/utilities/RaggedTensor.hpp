@@ -22,28 +22,9 @@ namespace hipdnn_data_sdk::utilities
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
-/**
- * @brief Derives the sequence (ragged) axis from a layout's stride order.
- *
- * `strideOrder` is a permutation of [0, rank) where a lower value means tighter packing
- * (smaller stride). The batch axis carries the largest stride (value rank-1) and the
- * sequence axis carries the next-largest (value rank-2), so the sequence axis is simply
- * whichever axis holds the value rank-2 — no assumption about the batch axis's position.
- */
-inline int sequenceAxisFromStrideOrder(const std::vector<int64_t>& strideOrder, size_t rank)
-{
-    const int64_t seqOrder = static_cast<int64_t>(rank) - 2;
-    for(size_t i = 0; i < strideOrder.size(); ++i)
-    {
-        if(strideOrder[i] == seqOrder)
-        {
-            return static_cast<int>(i);
-        }
-    }
-    throw std::invalid_argument("strideOrder must contain the sequence axis (value "
-                                + std::to_string(seqOrder) + " for rank " + std::to_string(rank)
-                                + ")");
-}
+/// Sequence-axis index for the ragged-legal BSHD layout [B, S, H, D]: S is the
+/// outermost non-batch axis, so each batch occupies one contiguous run.
+inline constexpr int BSHD_SEQ_AXIS = 1;
 
 /**
  * @brief Shared, ragged-aware base for RaggedTensor<T> and ShallowRaggedTensor<T>.
@@ -91,18 +72,6 @@ public:
                 + ") must equal ragged_offset[B] (" + std::to_string(_iteratedElementCount) + ")");
         }
         _physicalElementCount = _iteratedElementCount;
-    }
-
-    RaggedTensorBase(const std::vector<int64_t>& paddedDims,
-                     const TensorLayout& layout,
-                     std::shared_ptr<ITensor> raggedOffset,
-                     std::optional<size_t> physicalElementCount)
-        : RaggedTensorBase(paddedDims,
-                           generateStrides(paddedDims, layout.strideOrder),
-                           sequenceAxisFromStrideOrder(layout.strideOrder, paddedDims.size()),
-                           std::move(raggedOffset),
-                           physicalElementCount)
-    {
     }
 
     const std::vector<int64_t>& dims() const override
@@ -310,15 +279,6 @@ public:
                               seqAxis,
                               std::move(raggedOffset),
                               physicalElementCount)
-    {
-        _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(this->elementSpace());
-    }
-
-    RaggedTensor(const std::vector<int64_t>& paddedDims,
-                 const TensorLayout& layout,
-                 std::shared_ptr<ITensor> raggedOffset,
-                 std::optional<size_t> physicalElementCount = std::nullopt)
-        : RaggedTensorBase<T>(paddedDims, layout, std::move(raggedOffset), physicalElementCount)
     {
         _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(this->elementSpace());
     }

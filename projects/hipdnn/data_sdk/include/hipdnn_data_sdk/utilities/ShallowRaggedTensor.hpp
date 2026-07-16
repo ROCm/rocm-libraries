@@ -46,16 +46,6 @@ public:
         _memory = ShallowHostOnlyMigratableMemory<T>(data, this->elementSpace());
     }
 
-    ShallowRaggedTensor(void* data,
-                        const std::vector<int64_t>& paddedDims,
-                        const TensorLayout& layout,
-                        std::shared_ptr<ITensor> raggedOffset,
-                        std::optional<size_t> physicalElementCount = std::nullopt)
-        : RaggedTensorBase<T>(paddedDims, layout, std::move(raggedOffset), physicalElementCount)
-    {
-        _memory = ShallowHostOnlyMigratableMemory<T>(data, this->elementSpace());
-    }
-
     ShallowRaggedTensor(const ShallowRaggedTensor&) = delete;
     ShallowRaggedTensor& operator=(const ShallowRaggedTensor&) = delete;
 

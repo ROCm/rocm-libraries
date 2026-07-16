@@ -90,9 +90,8 @@ inline void checkAddressing(TensorBase<T>& tensor,
 
 /// Iterating begin()..end() visits exactly `ragged_offset[B]` physical elements, each
 /// exactly once. The visited offsets are the union of all per-batch ranges
-/// `[ragged_offset[b], ragged_offset[b+1])`, which partitions `[0, off[B])`. The visit
-/// order is ascending for BSHD but a per-batch permutation for BHSD (the logical and
-/// physical axis orders differ), so this checks the visited *set*, not the order.
+/// `[ragged_offset[b], ragged_offset[b+1])`, which partitions `[0, off[B])`. This checks
+/// the visited *set*, not the order.
 template <typename T>
 inline void checkIteration(TensorBase<T>& tensor, const std::vector<int64_t>& offsets)
 {
