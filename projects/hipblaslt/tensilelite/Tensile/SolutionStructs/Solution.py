@@ -1672,6 +1672,8 @@ class Solution(collections.abc.Mapping):
                "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
+      if state["ClusterDim"] != [1, 1]:
+        reject(state, printRejectionReason, "Stream-K does not support ClusterDim != [1, 1]")
       _validateStreamKForceDPOnly(state, printRejectionReason)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
