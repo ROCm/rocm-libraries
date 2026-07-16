@@ -10,8 +10,13 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: using main until full migration, then switch to pinned SHA (TheRock#3343)
-# NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
+# TheRock ref: the setup job resolves the live tip of ROCm/TheRock@main to one
+# concrete SHA (needs.setup.outputs.ref) and every downstream build/test job
+# consumes that SHA so the whole run is locked to a single TheRock commit. See
+# ROCm/rocm-libraries#9507 (this supersedes the earlier pinned-SHA plan in
+# TheRock#3343). The `uses: ...@main` lines below are the workflow-definition
+# ref (Actions forbids an expression there) and are deliberately separate from
+# the build-source `ref:` inputs.
 
 on:
   schedule:
@@ -44,6 +49,21 @@ jobs:
       ref: main
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
+  log_therock_ref:
+    name: Locked TheRock ref
+    needs: [setup]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Surface locked TheRock ref
+        run: |
+          RESOLVED_REF="${{ needs.setup.outputs.ref }}"
+          echo "Locked TheRock ref for this run: ${RESOLVED_REF}"
+          {
+            echo "### Locked TheRock ref"
+            echo ""
+            echo "Every build/test job in this run is locked to ROCm/TheRock commit \`${RESOLVED_REF}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
     needs: [setup]
@@ -63,7 +83,8 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: main
+      # Concrete SHA resolved once by setup; do not re-resolve main here.
+      ref: ${{ needs.setup.outputs.ref }}
     permissions:
       contents: read
       id-token: write
@@ -87,7 +108,8 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: main
+      # Concrete SHA resolved once by setup; do not re-resolve main here.
+      ref: ${{ needs.setup.outputs.ref }}
     permissions:
       contents: read
       id-token: write
@@ -105,7 +127,8 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: main
+          # Concrete SHA resolved once by setup; do not re-resolve main here.
+          ref: ${{ needs.setup.outputs.ref }}
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
