@@ -163,7 +163,7 @@ def _eval_grid_formula(formula: dict, *, batch: int, instance: dict) -> list[int
     return [eval_axis(formula[axis]) for axis in ("x", "y", "z")]
 
 
-@pytest.mark.parametrize("arch", ["gfx1151", "gfx942"])
+@pytest.mark.parametrize("arch", ["gfx1151", "gfx942", "gfx950"])
 def test_checked_in_sdpa_instance_parses_and_name_is_deterministic(arch):
     expected_name = EXPECTED_BASENAME.format(arch=arch)
     list_path = _aot_list_path(arch)
@@ -201,7 +201,7 @@ def test_checked_in_sdpa_instance_parses_and_name_is_deterministic(arch):
         assert entry.test_profiles == data["test_profiles"]
 
 
-@pytest.mark.parametrize("arch", ["gfx1151", "gfx942"])
+@pytest.mark.parametrize("arch", ["gfx1151", "gfx942", "gfx950"])
 def test_added_instances_present_beyond_baseline(arch):
     instances = _read_json(_aot_list_path(arch))
     specs = {inst["name"]: inst["compile_spec"] for inst in instances}
@@ -216,7 +216,7 @@ def test_added_instances_present_beyond_baseline(arch):
     )
 
 
-@pytest.mark.parametrize("arch", ["gfx1151", "gfx942"])
+@pytest.mark.parametrize("arch", ["gfx1151", "gfx942", "gfx950"])
 def test_checked_in_sdpa_instance_matches_json_schema(arch):
     schema, schema_path = _load_sdpa_schema("instance.schema.json")
 
@@ -342,7 +342,7 @@ def test_instance_name_must_match_compile_spec(tmp_path):
 
 @pytest.mark.parametrize(
     ("arch", "expected_block"),
-    [("gfx1151", [32, 1, 1]), ("gfx942", [64, 1, 1])],
+    [("gfx1151", [32, 1, 1]), ("gfx942", [64, 1, 1]), ("gfx950", [64, 1, 1])],
 )
 def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_block):
     parsed = parse_instance_list(_aot_list_path(arch), handler_path=HANDLER)[0]
