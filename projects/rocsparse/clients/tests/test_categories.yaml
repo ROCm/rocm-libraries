@@ -82,6 +82,11 @@ test_categories:
     description: "Quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -91,6 +96,13 @@ test_categories:
     description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
+      - "quick/bsrmm.*"
+      - "quick/csrmm.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -100,6 +112,11 @@ test_categories:
     description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -109,6 +126,13 @@ test_categories:
     description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
+      - "quick/bsrmm.*"
+      - "quick/csrmm.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -133,7 +157,7 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 300
-    standard: 1800
+    standard: 3600
     comprehensive: 14400
     full: 28800
     ffm-quick: 7200

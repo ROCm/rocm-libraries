@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
 /*! \ingroup conv_module
 *  This function is used as the first step in converting a CSR matrix to a compressed CSR matrix.
 *
@@ -78,7 +78,7 @@ extern "C" {
 *              pointer is invalid.
 */
 /**@{*/
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSnnz_compress(hipsparseHandle_t         handle,
                                          int                       m,
@@ -89,7 +89,7 @@ hipsparseStatus_t hipsparseSnnz_compress(hipsparseHandle_t         handle,
                                          int*                      nnzC,
                                          float                     tol);
 
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDnnz_compress(hipsparseHandle_t         handle,
                                          int                       m,
@@ -100,7 +100,7 @@ hipsparseStatus_t hipsparseDnnz_compress(hipsparseHandle_t         handle,
                                          int*                      nnzC,
                                          double                    tol);
 
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCnnz_compress(hipsparseHandle_t         handle,
                                          int                       m,
@@ -111,7 +111,7 @@ hipsparseStatus_t hipsparseCnnz_compress(hipsparseHandle_t         handle,
                                          int*                      nnzC,
                                          hipComplex                tol);
 
-DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
+DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZnnz_compress(hipsparseHandle_t         handle,
                                          int                       m,

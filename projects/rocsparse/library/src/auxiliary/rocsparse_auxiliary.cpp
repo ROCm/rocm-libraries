@@ -2587,8 +2587,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols > cols), rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -2660,8 +2662,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, ell_cols > cols, rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, rows * ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -4102,6 +4106,46 @@ try
     descr->const_row_data = bsr_row_ptr;
     descr->const_col_data = bsr_col_ind;
     descr->const_val_data = bsr_val;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_bell_set_pointers sets the sparse Blocked ELL matrix data pointers.
+ *******************************************************************************/
+rocsparse_status
+    rocsparse_bell_set_pointers(rocsparse_spmat_descr descr, void* bell_col_ind, void* bell_val)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+
+    const int64_t brows = (descr->rows + descr->block_dim - 1) / descr->block_dim;
+
+    ROCSPARSE_CHECKARG(1,
+                       bell_col_ind,
+                       brows * descr->ell_cols / descr->block_dim > 0 && bell_col_ind == nullptr,
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(2,
+                       bell_val,
+                       brows * descr->ell_cols > 0 && bell_val == nullptr,
+                       rocsparse_status_invalid_pointer);
+
+    // Sparsity structure might have changed, analysis is required before calling SpMV
+    descr->analysed = false;
+
+    descr->col_data = bell_col_ind;
+    descr->val_data = bell_val;
+
+    descr->const_col_data = bell_col_ind;
+    descr->const_val_data = bell_val;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
