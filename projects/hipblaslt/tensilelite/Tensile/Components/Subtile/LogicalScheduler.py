@@ -3273,27 +3273,53 @@ class LogicalScheduler:
                     ))
         return result
 
+    def _make_initC_op(self) -> InlineModuleOp:
+        """Create an InlineModuleOp that zeros accumulator registers (initC).
+
+        For PGR>=1 the op is placed between GR issue and WaitGR in the preloop
+        so the MFMA zeroing instructions execute while global reads are in
+        flight, hiding their latency behind the memory access time. For PGR=0
+        there are no global reads, so this op is the entire preloop and simply
+        zeros the accumulators before the mainloop's first accumulating MFMA.
+        """
+        def _build_initC(emitter):
+            from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+            return initVgprTilesToZero(emitter.writer, emitter.kernel,
+                                       emitter.dtileInfo)
+        return InlineModuleOp(build=_build_initC, label="initC_overlap")
+
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
-        PGR=0: no preloop (mainloop only).
+        PGR=0: initC only (no GR/LR pipeline, but accumulators must be zeroed
+               before the first MFMA in the mainloop).
 
         PGR=1 sequence:
-          GR(MT 0)  — all tensors, all tiles
-          LR        — first partition, subIterK=0
+          GR(MT 0)    — all tensors, all tiles (× numUnroll if unrolled)
+          initC       — accumulator zeroing, overlapped with in-flight GR
+          WaitGR      — wait for global reads to land in LDS
+          Sync        — barrier
+          LR          — first partition, subIterK=0
           skip(LE 1, NLL)
 
         PGR=2 sequence:
-          GR(MT 0)  — all tensors, all tiles
-          LR        — first partition, subIterK=0
+          GR(MT 0)    — all tensors, all tiles (× numUnroll if unrolled)
+          initC       — accumulator zeroing, overlapped with in-flight GR
+          WaitGR      — wait for global reads to land in LDS
+          Sync        — barrier
+          LR          — first partition, subIterK=0
           skip(LE 1, NLL)
-          GR(MT 1)  — first partition tiles
+          GR(MT 1)    — first partition tiles (× numUnroll if unrolled)
           skip(LE 2, NGLL)
 
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
         """
         if self.config.pgr == 0:
-            self._preloop_emitted = [[[]]]
+            # PGR=0 has no GR/LR pipeline, but the mainloop's first MFMA still
+            # accumulates into D, so the accumulators must be zeroed first.
+            # Emit an initC-only preloop (the PRELOOP itself is still emitted
+            # unconditionally in emitMainAndExitLoops).
+            self._preloop_emitted = [[self._to_emitted([self._make_initC_op()])]]
             return self._preloop_emitted
 
         cfg = self.config
@@ -3311,6 +3337,8 @@ class LogicalScheduler:
             lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
             lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
 
+        initC_op = self._make_initC_op()
+
         if cfg.pgr == 1:
             maxUnroll = max(cfg.numUnroll.values()) if cfg.numUnroll else 1
             if maxUnroll > 1:
@@ -3320,6 +3348,7 @@ class LogicalScheduler:
                     preloop_ops.extend(self._make_depops_uid(GRIncOp, uid))
                 emitted = self._to_emitted([
                     *preloop_ops,
+                    initC_op,
                     WaitGROp(wait_gr_counts=WaitGRCounts()),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
@@ -3328,6 +3357,7 @@ class LogicalScheduler:
             else:
                 emitted = self._to_emitted([
                     *self._make_gr_all_tensors(0, all_tiles),
+                    initC_op,
                     WaitGROp(wait_gr_counts=WaitGRCounts()),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
@@ -3352,6 +3382,7 @@ class LogicalScheduler:
                     mt1_ops.extend(self._make_depops_uid(GRIncOp, uid))
                 emitted = self._to_emitted([
                     *preloop_ops,
+                    initC_op,
                     WaitGROp(wait_gr_counts=WaitGRCounts()),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
@@ -3364,6 +3395,7 @@ class LogicalScheduler:
                 emitted = self._to_emitted([
                     *self._make_gr_all_tensors(0, all_tiles),
                     *self._make_depops_all_tensors(GRIncOp),
+                    initC_op,
                     WaitGROp(wait_gr_counts=WaitGRCounts()),
                     SyncOp(),
                     *self._make_lr_all_tensors(lr_tiles),
@@ -3581,17 +3613,48 @@ class LogicalScheduler:
 
             return emitted_3d
 
-        # ── Skip preloop/mainloop/NGLL/NLL when K < DepthU ──
+        # ── accumulator init (initC) ──
+        # initC happens in preloop, between GR issue and WaitGR so the zeroing
+        # MFMAs overlap the in-flight global reads. Every path must reach initC (mirrors the non-Subtile flow):
+        #   PGR>=1, K>=DepthU : GR issue -> initC -> rest of preloop -> mainloop
+        #   PGR=0             : preloop is just initC -> mainloop
+        #   K<DepthU          : skip the prefetch GR to initC, then jump to tail
         endLabel = Label("SkipToEnd", "")
-        if not kernel["NoTailLoop"]:
+        skipGRLabel = Label("SkipPreloopGR", "")
+        skipGRForTail = (not kernel["NoTailLoop"]) and self.config.pgr >= 1
+        if skipGRForTail:
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                 comment="K < DepthU? skip to tail loop"))
-            module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
-                                    comment="K < DepthU: only tail loop runs"))
+                                 comment="K < DepthU? skip prefetch GR to initC"))
+            module.add(SCBranchSCC1(labelName=skipGRLabel.getLabelName(),
+                                    comment="K < DepthU: skip prefetch GR, still run initC"))
 
-        # ── Preloop ──
+        # ── Preloop (initC + tail jump woven around the single init op) ──
+        # Operate on a copy so self._preloop_emitted (read by PAP and the
+        # per-unroll copies) stays untouched.
+        preloop_emitted = copy.deepcopy(self._preloop_emitted)
+        if not kernel["NoTailLoop"]:
+            em_list = preloop_emitted[0][0]
+            init_idx = next((i for i, em in enumerate(em_list)
+                             if getattr(em.source, 'label', None) == 'initC_overlap'), None)
+            assert init_idx is not None, "preloop must contain the canonical initC op"
+            next_id = max(em.moduleId for em in em_list) + 1
+            # After initC, jump to the tail loop when K < DepthU.
+            em_list.insert(init_idx + 1, EmittedModule(
+                moduleId=next_id,
+                instructions=[
+                    SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
+                                comment="K < DepthU? initC done, run tail only"),
+                    SCBranchSCC1(labelName=endLabel.getLabelName(),
+                                    comment="K < DepthU: jump to tail loop"),
+                ]))
+            next_id += 1
+            if skipGRForTail:
+                # Land the skip-GR guard right before initC.
+                em_list.insert(init_idx, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[skipGRLabel]))
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
-                                  self._preloop_emitted, schedule=False))
+                                  preloop_emitted, schedule=False))
 
         # ── Mainloop ──
         module.addComment0("MAINLOOP")

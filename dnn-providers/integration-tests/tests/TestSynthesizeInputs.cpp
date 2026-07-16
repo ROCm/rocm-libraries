@@ -11,7 +11,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-#include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/input-init/SynthesizeInputs.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
