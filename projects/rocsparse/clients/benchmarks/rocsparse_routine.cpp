@@ -97,10 +97,6 @@ rocsparse_status rocsparse_routine::dispatch_indextype(const char cindextype, co
     const bool                mixed     = (cindextype == 'm');
     switch(indextype)
     {
-    case rocsparse_indextype_u16:
-    {
-        break;
-    }
     case rocsparse_indextype_i32:
     {
         return dispatch_call<FNAME, T, int32_t>(arg);
@@ -305,6 +301,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_dense2coo.hpp"
 #include "testing_dense2csc.hpp"
 #include "testing_dense2csr.hpp"
+#include "testing_dense_to_sparse_bell.hpp"
 #include "testing_dense_to_sparse_coo.hpp"
 #include "testing_dense_to_sparse_csc.hpp"
 #include "testing_dense_to_sparse_csr.hpp"
@@ -577,6 +574,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T(dense2coo);
         DEFINE_CASE_T(dense2csc);
         DEFINE_CASE_T(dense2csr);
+        DEFINE_CASE_IT(dense_to_sparse_bell);
         DEFINE_CASE_IT(dense_to_sparse_coo);
         DEFINE_CASE_IJT(dense_to_sparse_csc);
         DEFINE_CASE_IJT(dense_to_sparse_csr);
