@@ -62,8 +62,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
-import pandas as pd
-
 from ..core.lower_llvm import lower_kernel_to_llvm
 from ..runtime.comgr import build_hsaco_from_llvm_ir
 
@@ -604,7 +602,7 @@ def generate(
     isa: Optional[str] = None,
     adapter: Optional["OpAdapter"] = None,
     **gemm_kwargs: object,
-) -> pd.DataFrame:
+) -> "pd.DataFrame":
     """Sweep one op family and write its training parquet.
 
     For ``op == "gemm"`` this delegates to :func:`gen_gemm_sweep_data.generate`
@@ -715,6 +713,7 @@ def generate(
         flush=True,
     )
 
+    import pandas as pd
     df = pd.DataFrame(rows)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

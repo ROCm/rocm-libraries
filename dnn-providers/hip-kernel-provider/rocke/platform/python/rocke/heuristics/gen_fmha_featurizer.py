@@ -32,7 +32,7 @@ from pathlib import Path
 
 # The 69 feature names in order -- pulled live from the engine so the struct and
 # array order can never diverge from the training contract.
-from feature_engine import FMHA_DTYPE_MAP, FmhaFeatureEngine  # noqa: E402
+from rocke.heuristics.feature_engine import FMHA_DTYPE_MAP, FmhaFeatureEngine
 
 
 def _dtype_bytes_cpp() -> str:
