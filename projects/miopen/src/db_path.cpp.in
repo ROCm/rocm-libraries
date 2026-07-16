@@ -48,7 +48,10 @@ fs::path GetLibPath()
     fs::path path;
     Dl_info info;
 
-    if(dladdr(reinterpret_cast<void*>(miopenCreate), &info) != 0)
+    // Use a symbol defined in this (private) library. Referencing the public
+    // wrapper symbol miopenCreate here would leave libMIOpen_private.so with an
+    // undefined symbol, since that entry point lives only in libMIOpen.so.
+    if(dladdr(reinterpret_cast<void*>(&GetLibPath), &info) != 0)
     {
         path = fs::canonical(fs::path{info.dli_fname});
         MIOPEN_LOG_I2("Lib Path: " << path);
