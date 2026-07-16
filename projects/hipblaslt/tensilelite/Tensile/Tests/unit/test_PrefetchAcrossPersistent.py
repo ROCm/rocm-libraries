@@ -372,6 +372,7 @@ _CLASSIC_KERNEL_BASE = {
     "EdgeType": "None",
     "GuaranteeNoPartialA": False,
     "GuaranteeNoPartialB": False,
+    "NoTailLoop": False,
     "PrefetchGlobalRead": 2,
     "PrefetchGL2": 0,
     "ProblemType": _problem_type(),
