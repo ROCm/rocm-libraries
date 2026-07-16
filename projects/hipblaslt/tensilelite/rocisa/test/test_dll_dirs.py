@@ -16,34 +16,27 @@ from rocisa import _candidate_dll_dirs
 _J = os.path.join
 
 
-def test_dep_dirs_then_sdk_then_ext_dir_in_order():
+def test_dep_dirs_then_ext_dir_in_order():
     dirs = _candidate_dll_dirs(
         [_J("a", "origami.dll"), _J("b", "amdhip64_7.dll")],
-        {"ROCM_PATH": "rocm"},
         "extdir",
     )
-    assert dirs == ["a", "b", _J("rocm", "bin"), "extdir"]
+    assert dirs == ["a", "b", "extdir"]
 
 
 def test_dedup_preserves_first_occurrence_order():
     # Two deps in the same directory, and ext_dir equal to a dep dir.
     dirs = _candidate_dll_dirs(
         [_J("lib", "one.dll"), _J("lib", "two.dll")],
-        {},
         "lib",
     )
     assert dirs == ["lib"]
 
 
-def test_hip_path_precedes_rocm_path():
-    dirs = _candidate_dll_dirs([], {"HIP_PATH": "hip", "ROCM_PATH": "rocm"}, "ext")
-    assert dirs == [_J("hip", "bin"), _J("rocm", "bin"), "ext"]
-
-
-def test_empty_deps_and_env_yields_only_ext_dir():
-    assert _candidate_dll_dirs([], {}, "ext") == ["ext"]
+def test_empty_deps_yields_only_ext_dir():
+    assert _candidate_dll_dirs([], "ext") == ["ext"]
 
 
 def test_falsy_dep_entries_are_skipped():
-    dirs = _candidate_dll_dirs([""], {}, "ext")
+    dirs = _candidate_dll_dirs([""], "ext")
     assert dirs == ["ext"]

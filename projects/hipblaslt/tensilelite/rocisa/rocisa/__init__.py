@@ -15,23 +15,18 @@ if any(_Path(__file__).parent.glob("_rocisa.abi3.*")) and sys.version_info < (3,
 del _Path
 
 
-def _candidate_dll_dirs(dep_dlls, environ, ext_dir):
+def _candidate_dll_dirs(dep_dlls, ext_dir):
     """Ordered, de-duplicated directories to search for _rocisa's dependent DLLs.
 
     In resolution order: the directories of the build-supplied dependency DLLs
-    (origami, HIP runtime, comgr, stinkytofu — scattered across per-subproject
-    dirs in a source/integrated build), then the installed ROCm SDK bin
-    (HIP_PATH/ROCM_PATH), then the extension's own directory. Pure and
-    host-agnostic (no filesystem or os.add_dll_directory side effects) so it can
-    be unit-tested off Windows. Extracted from _register_win_dll_dirs.
+    (origami, HIP runtime, comgr, stinkytofu -- scattered across per-subproject
+    dirs in a source/integrated build), then the extension's own directory.
+    Pure and host-agnostic (no filesystem or os.add_dll_directory side effects)
+    so it can be unit-tested off Windows. Extracted from _register_win_dll_dirs.
     """
     import os
 
     dirs = [os.path.dirname(p) for p in dep_dlls if p]
-    for var in ("HIP_PATH", "ROCM_PATH"):
-        root = environ.get(var)
-        if root:
-            dirs.append(os.path.join(root, "bin"))
     dirs.append(ext_dir)
     ordered = []
     seen = set()
@@ -57,8 +52,8 @@ def _register_win_dll_dirs() -> None:
         # Source/integrated build: CMake emits the resolved dependency DLL paths.
         from ._dll_dirs import DEP_DLLS
     except ImportError:
-        DEP_DLLS = []  # Installed package: resolve via ROCm SDK / merged bin.
-    for d in _candidate_dll_dirs(DEP_DLLS, os.environ, os.path.dirname(__file__)):
+        DEP_DLLS = []  # Installed package: deps resolve via the merged layout.
+    for d in _candidate_dll_dirs(DEP_DLLS, os.path.dirname(__file__)):
         if os.path.isdir(d):
             try:
                 os.add_dll_directory(d)

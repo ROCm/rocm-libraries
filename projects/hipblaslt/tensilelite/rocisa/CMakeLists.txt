@@ -241,7 +241,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # deps (origami, hip, comgr, stinkytofu) live in scattered per-subproject
     # directories. TARGET_RUNTIME_DLLS resolves the full set (direct + transitive)
     # from the linked/imported targets. Build-tree only, like _build_info.py; not
-    # installed -- packaged builds resolve via ROCM_PATH/HIP_PATH and merged bin/.
+    # installed -- packaged builds resolve deps via the merged install layout.
     if(WIN32)
         file(GENERATE
             OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_dll_dirs.py"
