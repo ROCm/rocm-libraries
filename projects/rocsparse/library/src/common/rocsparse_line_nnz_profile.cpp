@@ -102,9 +102,10 @@ namespace rocsparse
         // Pass 1 writes exactly BLOCKSIZE partial maxima (one per block), so the
         // workspace holds BLOCKSIZE entries; every entry is written by pass 1
         // (idle blocks write the max identity 0), so no pre-seeding is needed.
-        uint64_t* workspace = nullptr;
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            (void**)&workspace, sizeof(uint64_t) * BLOCKSIZE, handle->stream));
+        // Reuse the handle's preallocated device buffer (at least 1 MB, so it
+        // comfortably holds BLOCKSIZE uint64_t entries) instead of a separate
+        // allocation, as done in rocsparse_doti.
+        uint64_t* workspace = reinterpret_cast<uint64_t*>(handle->buffer);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::line_nnz_profile_part1<BLOCKSIZE, I>),
                                            dim3(BLOCKSIZE),
@@ -126,7 +127,6 @@ namespace rocsparse
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(
             &h_max, workspace, sizeof(uint64_t), hipMemcpyDeviceToHost, handle->stream));
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace, handle->stream));
 
         profile.max = static_cast<int64_t>(h_max);
 
