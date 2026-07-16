@@ -1945,6 +1945,142 @@ namespace TensileLite
         numWorkGroups.y = CeilDivide(numWorkGroups.y, sizeMapping.macroTile.y);
     }
 
+    // Temporary: restored from develop. Builds the kernarg buffer via the
+    // hand-written per-feature path (singleCallArgs) rather than the generic
+    // CustomKernel.args iteration in generateCustomCall. Used for all
+    // Tensile-generated kernels (see gating in solve()) so their launch
+    // arguments are byte-identical to develop while generateCustomCall is
+    // validated for newer features.
+    template <bool T_Debug>
+    KernelInvocation
+        ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
+                                                ContractionInputs const&            inputs,
+                                                Hardware const&                     hardware,
+                                                StreamKSettings const&              sk,
+                                                GSUSettings const&                  gsuSettings) const
+    {
+        KernelInvocation rv;
+
+        rv.isSingleCall = true;
+
+        rv.args = KernelArguments(T_Debug);
+
+        rv.args.reserve(1024, 128);
+
+        rv.kernelName = kernelName;
+
+        calculateGrid(rv.workGroupSize, rv.numWorkGroups, problem);
+
+        dim3 problemNumGroupTiles = rv.numWorkGroups;
+
+        uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
+        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        if(gsu > 0)
+            rv.numWorkGroups.y *= gsu;
+
+        if(sizeMapping.streamK != 0)
+        {
+            rv.numWorkGroups.x = sk.grid;
+            rv.numWorkGroups.y = 1;
+            rv.numWorkGroups.z = 1;
+        }
+
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(!enableCluster)
+        {
+            if(internalArgsSupport.version >= 1)
+            {
+                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
+        }
+
+        rv.clusterDim = sizeMapping.clusterDim;
+
+        rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
+        rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
+        rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
+
+        rv.sharedMemBytes = 0;
+
+        if(internalArgsSupport.useUniversalArgs)
+        {
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK]
+                = calculateAutoWGM(problem, &hardware, sk.grid);
+            auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+                = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
+            if(T_Debug)
+            {
+                std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
+                          << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
+                std::cout << "StaggerUMapping: " << autoStaggerUMapping
+                          << ", StaggerU: " << autoStaggerU
+                          << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
+            }
+            AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, &hardware);
+            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
+            {
+                kernelArgs<T_Debug, false>( 1,
+                                            3,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal,
+                                            ntab);
+            }
+            else
+            {
+                kernelArgs<T_Debug, false>( 1,
+                                            0,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal,
+                                            ntab);
+            }
+        }
+        singleCallArgs<T_Debug, true>(
+            problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
+
+        if(gsuSettings.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
+        {
+            rv.args.append<void const*>("dstD", inputs.d);
+            // MBSK: synchronizer address, MB: null address
+            rv.args.append<void const*>("Synchronizer",
+                                        gsuSettings.globalAccumulation == 3
+                                        ? inputs.Synchronizer
+                                        : NULL);
+            rv.args.append<uint32_t>("GSUSync", 0);
+        }
+
+        if(problemType.stochasticRounding)
+        {
+            // generate seed from random generator
+            std::random_device                      rd;
+            std::mt19937                            gen(rd());
+            std::uniform_int_distribution<uint32_t> distribution(0, 0xFFFFFFFF);
+            uint32_t                                seed = distribution(gen);
+            rv.args.append<uint32_t>("RNDSeed", seed);
+        }
+        rv.codeObjectFile = codeObjectFilename.load();
+        return rv;
+    }
+
     template <bool T_Debug>
     KernelInvocation ContractionSolution::generateCustomCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
@@ -2066,7 +2202,12 @@ namespace TensileLite
                     dim = tiles.x * tiles.y * tiles.z * (gsu > 0 ? gsu : 1);
                     break;
                 case CustomGridSize::StreamKWithBatch:
-                    dim = customKernel.generated ? sk.grid : sk.grid * tiles.z;
+                    // generateCustomCall is only used for handwritten/external
+                    // custom kernels; Tensile-generated kernels are routed to
+                    // generateSingleCall in solve().  For a batched handwritten
+                    // Stream-K custom kernel, sk.grid is per-batch and must be
+                    // expanded by the batch tile count.
+                    dim = sk.grid * tiles.z;
                     break;
                 case CustomGridSize::StreamKNoBatch:
                     dim = sk.grid;
@@ -3929,10 +4070,28 @@ namespace TensileLite
         GSUSettings gsuSettings;
         gsuSettings.globalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        if(debug)
-            rv.push_back(generateCustomCall<true>(problem, inputs, hardware, sk));
+        // Temporary gating: only genuine handwritten/external custom kernels use
+        // the generic generateCustomCall path (they have no other path). All
+        // Tensile-generated kernels — including newer features like subtile,
+        // gfx950, and StreamK work-stealing whose argument shapes have not been
+        // fully validated through generateCustomCall — go through the proven
+        // generateSingleCall path restored from develop, so their launch
+        // arguments stay byte-identical to develop.
+        bool useCustomCall = !customKernel.name.empty() && !customKernel.generated;
+        if(useCustomCall)
+        {
+            if(debug)
+                rv.push_back(generateCustomCall<true>(problem, inputs, hardware, sk));
+            else
+                rv.push_back(generateCustomCall<false>(problem, inputs, hardware, sk));
+        }
         else
-            rv.push_back(generateCustomCall<false>(problem, inputs, hardware, sk));
+        {
+            if(debug)
+                rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk, gsuSettings));
+            else
+                rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
+        }
 
         if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
            || sk.reduction == origami::reduction_t::parallel)

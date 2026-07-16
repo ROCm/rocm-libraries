@@ -688,6 +688,18 @@ namespace TensileLite
                                             Hardware const&          hardware,
                                             StreamKSettings const&   sk) const;
 
+        // Temporary: the proven per-feature argument-packing path, restored from
+        // develop and used for all Tensile-generated kernels while the generic
+        // generateCustomCall path is validated for newer features (subtile,
+        // gfx950, StreamK work-stealing). Handwritten/external custom kernels
+        // still go through generateCustomCall. See gating in solve().
+        template <bool T_Debug>
+        KernelInvocation generateSingleCall(Problem const&           problem,
+                                            ContractionInputs const& inputs,
+                                            Hardware const&          hardware,
+                                            StreamKSettings const&   sk,
+                                            GSUSettings const&       gsuSettings) const;
+
         template <bool T_Debug, typename KA>
         KernelInvocation generateSingleCallGroupedGemm(std::vector<Problem> const& problems,
                                                        GroupedInputs const&        inputs,
