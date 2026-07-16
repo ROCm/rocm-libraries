@@ -52,20 +52,25 @@ from .ir import (
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
 # -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
-# wired arch shares one datalayout, but the buffer-fat-pointer address
-# space (``p8``) gained an index-width field between LLVM 20 (ROCm
-# 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
+# wired arch shares one datalayout, but two fields drift between LLVM 20
+# (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22):
 #
-#   LLVM 20:  ...-p8:128:128-...
-#   LLVM 22:  ...-p8:128:128:128:48-...
+#   * the ELF symbol-mangling spec ``m:e`` was added to the LLVM 21+
+#     AMDGPU datalayout (absent under LLVM 20):
+#         LLVM 20:  e-p:64:64-...
+#         LLVM 22:  e-m:e-p:64:64-...
+#   * the buffer-fat-pointer address space (``p8``) gained an index-width
+#     field:
+#         LLVM 20:  ...-p8:128:128-...
+#         LLVM 22:  ...-p8:128:128:128:48-...
 #
-# On the textual-IR (comgr SOURCE) path the parser is lenient: it
-# overrides the module datalayout with the target's canonical one, so a
-# stale-but-well-formed ``p8`` compiles to byte-identical HSACO and the
-# drift is invisible at runtime. That leniency is not a contract -- it is
-# one field on one ingestion path (bitcode input or a stricter verifier
-# can reject a mismatch), so we emit the correct ``p8`` up front. The two
-# strings are otherwise identical; pick by :data:`LLVM_FLAVOR_*` via
+# (Both confirmed against clang 20 and clang 23 amdgcn output.) On the
+# textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
+# module datalayout with the target's canonical one, so a stale-but-well-
+# formed string compiles to byte-identical HSACO and the drift is
+# invisible at runtime. That leniency is not a contract -- bitcode input
+# or a stricter verifier can reject a mismatch, so we emit the correct
+# string up front. Pick by :data:`LLVM_FLAVOR_*` via
 # :func:`_datalayout_for_flavor`. A drift guard
 # (``test_datalayout_matches_hipcc_emitted_ir``) re-derives both from the
 # installed toolchain; if it fails, regenerate with the clang command above.
@@ -76,7 +81,7 @@ _DATALAYOUT_LLVM20 = (
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
 _DATALAYOUT_LLVM22 = (
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+    "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
     "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
@@ -109,11 +114,11 @@ def _flavor_for_rocm(major: int, minor: int) -> str:
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
-    The only field that drifts between flavors is the buffer-fat-pointer
-    address space ``p8`` (see :data:`_DATALAYOUT_LLVM20` /
-    :data:`_DATALAYOUT_LLVM22`). LLVM22 is the default for unknown values
-    so a typo'd override degrades to the modern layout rather than the
-    legacy one.
+    Two fields drift between flavors: the ELF mangling spec ``m:e`` (added
+    under LLVM 21+) and the buffer-fat-pointer address space ``p8`` (see
+    :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22`). LLVM22 is the
+    default for unknown values so a typo'd override degrades to the modern
+    layout rather than the legacy one.
     """
     return _DATALAYOUT_LLVM20 if flavor == LLVM_FLAVOR_LLVM20 else _DATALAYOUT_LLVM22
 
@@ -125,7 +130,7 @@ def _torch_hip_version() -> Optional[Tuple[int, int]]:
     bundle their own ``libamd_comgr.so`` whose LLVM version follows the
     wheel's ROCm release, not the system ``/opt/rocm`` one. When rocke
     is paired with a torch-bundled comgr (see
-    :func:`runtime.hip_module._torch_bundled_lib`), the flavor must
+    :func:`runtime.runtime_coexistence._torch_bundled_lib`), the flavor must
     match torch's ROCm vintage or comgr will reject the IR or
     silently auto-upgrade declares the lowerer didn't intend.
     """

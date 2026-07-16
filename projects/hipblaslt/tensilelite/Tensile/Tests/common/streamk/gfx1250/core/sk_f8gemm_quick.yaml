@@ -3,6 +3,7 @@ TestParameters:
 
 GlobalParameters:
   SyncsPerBenchmark: 0
+  Architecture: gfx1250
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: False
@@ -60,7 +61,7 @@ BenchmarkProblems:
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [3, 4]
         - SourceSwap: [true]
         - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
