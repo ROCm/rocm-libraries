@@ -714,6 +714,7 @@ def generate(
     )
 
     import pandas as pd
+
     df = pd.DataFrame(rows)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
