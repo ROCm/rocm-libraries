@@ -1266,7 +1266,19 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
         src1_reg = _to_stinky_register(self.srcs[1])
         src2_reg = _to_stinky_register(self.srcs[2])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+        inst = factory(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
+        # Propagate VOP3P packed modifiers (op_sel / op_sel_hi / byte_sel).
+        # e.g. GlobalWriteBatch emits ``v_fma_mix_f32 ... op_sel:[..] op_sel_hi:[0,1,0]``
+        # for the beta-scale mix-precision FMA; dropping op_sel_hi makes the
+        # kernel read the wrong fp16 half and produces incorrect results.
+        v = getattr(self, "vop3", None)
+        if v is not None:
+            inst.set_vop3(
+                op_sel=list(getattr(v, "op_sel", None) or []),
+                op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
+                byte_sel=list(getattr(v, "byte_sel", None) or []),
+            )
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
