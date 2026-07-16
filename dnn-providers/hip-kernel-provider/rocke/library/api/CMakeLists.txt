@@ -171,20 +171,28 @@ if(ROCKE_CLIENT_ENABLE_TESTS)
             OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_tests_test")
         set_target_properties(rocke_client_integration_tests PROPERTIES
             OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_integration_tests_test")
-        # Build one string: set_property(APPEND_STRING) joins multiple value
-        # arguments with ";", which corrupts the generated CTestTestfile.
-        set(_ROCKE_CLIENT_CTEST_ENTRIES "\n# rocke-client installed tests\n")
-        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-            "add_test(rocke_client_tests \"../${_rocke_client_parent_prefix}_rocke_client_tests_test\")\n")
-        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-            "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n")
-        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-            "add_test(rocke_client_integration_tests \"../${_rocke_client_parent_prefix}_rocke_client_integration_tests_test\")\n")
-        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
-            "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
-        set_property(GLOBAL APPEND_STRING PROPERTY
-            "EXTERNAL_TEST_INSTALL_STAGING_${_rocke_client_parent_prefix}"
-            "${_ROCKE_CLIENT_CTEST_ENTRIES}")
+        # This hand-rolled staging is superseded by YAML-based categorization
+        # (apply_test_category_labels() in the parent's src/CMakeLists.txt,
+        # Step 5d) when it's active: that path stages one add_test() per tier
+        # suite (quick/standard/comprehensive/full) using the renamed
+        # OUTPUT_NAME set above, instead of these two flat quick-only entries.
+        # Guard against emitting both.
+        if(NOT HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            # Build one string: set_property(APPEND_STRING) joins multiple value
+            # arguments with ";", which corrupts the generated CTestTestfile.
+            set(_ROCKE_CLIENT_CTEST_ENTRIES "\n# rocke-client installed tests\n")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                "add_test(rocke_client_tests \"../${_rocke_client_parent_prefix}_rocke_client_tests_test\")\n")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                "add_test(rocke_client_integration_tests \"../${_rocke_client_parent_prefix}_rocke_client_integration_tests_test\")\n")
+            string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+                "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
+            set_property(GLOBAL APPEND_STRING PROPERTY
+                "EXTERNAL_TEST_INSTALL_STAGING_${_rocke_client_parent_prefix}"
+                "${_ROCKE_CLIENT_CTEST_ENTRIES}")
+        endif()
     else()
         # Standalone build: rocke-client is the top-level project, so it owns
         # finalize_test_targets and its own installed CTestTestfile under
