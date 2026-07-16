@@ -692,15 +692,22 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
     }
 
     // Step 5: each group's interval is [afterThreshold - wmmaWindowsNeeded, afterThreshold).
-    // Only compare each barrier group with the groups that appear after it (i < j). For an
-    // overlapping pair, decide which is the later barrier by afterThreshold; on a tie the
-    // earlier-appearing group (smaller index) is treated as the front (earlier) one:
+    // Process groups in ascending afterThreshold order so that a "front" (earlier) barrier is
+    // always fully resolved before the "later" barriers that it pushes back. A stable_sort
+    // keeps groups with equal afterThreshold in their original appearance order, which gives
+    // the tie-break: the earlier-appearing group is treated as the front (earlier) one.
+    // After sorting, for any pair i < j we have afterThreshold[i] <= afterThreshold[j], so j is
+    // always the later barrier and i the earlier one:
     //   - the later barrier (larger afterThreshold) is pushed back until its interval start
     //     clears the overlapping earlier barrier's end (== that barrier's afterThreshold):
     //     newAfterThreshold = maxEarlierAfterThreshold + wmmaWindowsNeeded.
     //   - the earlier barrier (smaller afterThreshold) keeps the prior behavior of extending
     //     afterThreshold by the shared overlap length.
     // Results are capped at issuedCount.
+    std::stable_sort(overlapChecks.begin(), overlapChecks.end(),
+                     [](const BarrierAfterSummary& a, const BarrierAfterSummary& b) {
+                         return a.afterThreshold < b.afterThreshold;
+                     });
     const size_t n = overlapChecks.size();
     // pushedStart[i] starts at the barrier's own interval start; overlapping earlier barriers
     // push it up to their end so (pushedStart + wmmaWindowsNeeded) clears the overlap.
@@ -716,12 +723,9 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             const int overlapLen = std::min(endI, endJ) - std::max(pushedStart[i], pushedStart[j]);
             if (overlapLen <= 0) continue;
 
-            // On a tie, the earlier-appearing group (i) is the front one, so j is the later.
-            const size_t later = endJ >= endI ? j : i;
-            const size_t earlier = later == j ? i : j;
-            pushedStart[later] =
-                std::max(pushedStart[later], overlapChecks[earlier].afterThreshold);
-            frontOverlapBudget[earlier] += overlapLen;
+            // Sorted ascending, so j is the later barrier and i the earlier (front) one.
+            pushedStart[j] = std::max(pushedStart[j], overlapChecks[i].afterThreshold);
+            frontOverlapBudget[i] += overlapLen;
         }
     }
 
