@@ -197,6 +197,11 @@ __device__ void run_syevj(const rocblas_int dimx,
                 // eigenvectors lose orthogonality for workgroups above ~512 threads (silent,
                 // info=0). Recomputing per-thread avoids the LDS round-trip entirely and is
                 // free in practice (the apply below is memory-bound).
+                //
+                // Workaround only: once llvm/llvm-project#207883 is fixed, revert to the
+                // compute-once form -- guard this block with `tiy == 0`, restore the
+                // `cosines_res[tix] = c; sines_diag[tix] = s1;` stores below, and reload
+                // c/s1 from LDS after the __syncthreads(). See ROCm/rocm-libraries#9135.
                 if(i < n && j < n)
                 {
                     aij = Acpy[i + j * n];
