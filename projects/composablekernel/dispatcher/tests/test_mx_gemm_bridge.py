@@ -145,6 +145,21 @@ class TestE8m0Codec(unittest.TestCase):
         with np.errstate(over="ignore"):
             self.assertTrue(np.isnan(float(e8m0_to_float(255))))
 
+    def test_non_positive_raises(self):
+        # Contract is a strictly-positive power-of-two; a 0.0/negative scale is a
+        # caller bug and must fail loudly rather than silently encode 1.0.
+        for bad in (0.0, -1.0, -0.0):
+            with self.assertRaises(ValueError):
+                float_to_e8m0(np.float32(bad))
+        with self.assertRaises(ValueError):
+            float_to_e8m0(np.array([1.0, 0.0, 2.0], np.float32))
+
+    def test_non_finite_raises(self):
+        with np.errstate(invalid="ignore"):
+            for bad in (np.inf, np.nan):
+                with self.assertRaises(ValueError):
+                    float_to_e8m0(np.float32(bad))
+
 
 class TestFp8Codec(unittest.TestCase):
     def test_known_bytes(self):
@@ -155,6 +170,19 @@ class TestFp8Codec(unittest.TestCase):
         grid = np.array([-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0], np.float32)
         vals = np.tile(grid, (4, 1))
         self.assertTrue(np.array_equal(dequantize_fp8(quantize_fp8(vals)), vals))
+
+    def test_off_grid_raises(self):
+        # The vectorized codec must reject values not on the exact e4m3 grid
+        # instead of snapping them to a neighbour byte.
+        with self.assertRaises(KeyError):
+            quantize_fp8(np.array([[0.3]], np.float32))
+
+    def test_neg_zero_collapses_to_zero_byte(self):
+        self.assertEqual(int(quantize_fp8(np.array([-0.0], np.float32))[0]), 0x00)
+
+    def test_shape_preserved_2d(self):
+        vals = np.full((3, 5), 1.0, np.float32)
+        self.assertEqual(quantize_fp8(vals).shape, (3, 5))
 
 
 class TestFp4Codec(unittest.TestCase):
@@ -172,6 +200,11 @@ class TestFp4Codec(unittest.TestCase):
         packed = quantize_fp4_packed(vals)
         self.assertEqual(packed.shape, (4, 4))
         self.assertTrue(np.array_equal(dequantize_fp4_packed(packed, 8), vals))
+
+    def test_off_grid_raises(self):
+        # 2.5 exists in fp8 e4m3 but NOT in the fp4 e2m1 grid -> must reject.
+        with self.assertRaises(KeyError):
+            quantize_fp4_packed(np.array([[2.5, 1.0]], np.float32))
 
 
 class TestReference(unittest.TestCase):

@@ -81,7 +81,15 @@ int dispatcher_initialize()
 }
 int dispatcher_init() { return dispatcher_initialize(); }
 
-const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
+const char* dispatcher_get_kernel_name()
+{
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+    return KERNEL_NAME;
+#else
+    // No kernel force-included (CMake no-kernel fallback): report an empty name.
+    return "";
+#endif
+}
 int dispatcher_get_kernel_count() { return 1; }
 
 void dispatcher_cleanup() { g_initialized = false; }
@@ -107,6 +115,24 @@ int dispatcher_run_mx_gemm(const void* A,
                            int k_batch,
                            float* time_ms)
 {
+#ifndef CK_TILE_SINGLE_KERNEL_INCLUDE
+    // No kernel was force-included (see the CMake no-kernel fallback). The body
+    // below needs SelectedKernel/MxGemmHostArgs/ScaleType/... which only exist
+    // under -DCK_TILE_SINGLE_KERNEL_INCLUDE, so this build cannot run anything:
+    // report "unsupported" (-2) instead of failing to compile/link.
+    (void)A;
+    (void)B;
+    (void)C;
+    (void)scale_a;
+    (void)scale_b;
+    (void)M;
+    (void)N;
+    (void)K;
+    (void)k_batch;
+    (void)time_ms;
+    std::cerr << "dispatcher_run_mx_gemm: library built without a kernel; unsupported\n";
+    return -2;
+#else
     if(!g_initialized)
     {
         std::cerr << "dispatcher_run_mx_gemm: not initialized\n";
@@ -316,6 +342,7 @@ int dispatcher_run_mx_gemm(const void* A,
         *time_ms = exec_time;
 
     return 0;
+#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 }
 
 } // extern "C"

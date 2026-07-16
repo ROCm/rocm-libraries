@@ -138,9 +138,20 @@ def e8m0_to_float(byte) -> np.ndarray:
 
 
 def float_to_e8m0(scale) -> np.ndarray:
-    """Encode a power-of-two float scale to an e8m0 byte (round exponent)."""
+    """Encode a strictly-positive power-of-two float scale to an e8m0 byte.
+
+    The e8m0 format only encodes 2^(e-127) for e in [0, 254] (255 == NaN), so
+    the contract is a positive, finite input. A non-positive or non-finite value
+    is a caller bug (e.g. a zeroed/garbage scale); fail loudly rather than
+    silently substituting 1.0, which would emit a wrong scale byte.
+    """
     s = np.asarray(scale, dtype=np.float32)
-    e = np.rint(np.log2(np.where(s > 0, s, 1.0))).astype(np.int32) + 127
+    if not np.all(np.isfinite(s)) or np.any(s <= 0.0):
+        raise ValueError(
+            "float_to_e8m0 requires strictly positive, finite scales "
+            "(power-of-two); got a non-positive or non-finite value"
+        )
+    e = np.rint(np.log2(s)).astype(np.int32) + 127
     e = np.clip(e, 0, 254).astype(np.uint8)
     return e
 
@@ -352,7 +363,16 @@ class MxGemmDispatcherLib:
     def run(self, A, B, C, scale_a, scale_b, prob: MxGemmProblem) -> float:
         A = np.ascontiguousarray(A)
         B = np.ascontiguousarray(B)
-        C = np.ascontiguousarray(C)
+        # C is the OUTPUT buffer: the kernel writes results into it in place via a
+        # raw pointer. ascontiguousarray() would silently redirect the write into a
+        # throwaway copy and leave the caller's array unchanged -- a surprising bug
+        # for an output API. Require a contiguous, writeable ndarray instead.
+        if not isinstance(C, np.ndarray):
+            raise TypeError(f"C output must be a numpy.ndarray, got {type(C).__name__}")
+        if not C.flags["C_CONTIGUOUS"]:
+            raise ValueError("C output must be C-contiguous (results are written in place)")
+        if not C.flags["WRITEABLE"]:
+            raise ValueError("C output must be writeable (results are written in place)")
         sa = np.ascontiguousarray(scale_a, dtype=np.uint8)
         sb = np.ascontiguousarray(scale_b, dtype=np.uint8)
         tms = ctypes.c_float(0.0)
@@ -385,6 +405,32 @@ class MxGemmDispatcherLib:
 # =============================================================================
 
 
+def _map_grid_to_bytes(vals: np.ndarray, value_to_byte: dict, grid_name: str) -> np.ndarray:
+    """Vectorized exact-grid float -> byte code lookup (uint8, flattened).
+
+    The inputs are drawn from a small fixed grid (see make_inputs), so instead of
+    a per-element Python loop -- which dominates runtime for realistic M*K -- we
+    round to the grid resolution and index a sorted LUT with a single
+    searchsorted. Off-grid values are a caller contract violation, so raise
+    (mirrors the old dict-KeyError) rather than silently snapping to a neighbour.
+    """
+    keys = np.array(sorted(value_to_byte), dtype=np.float32)
+    byts = np.array([value_to_byte[float(k)] for k in keys], dtype=np.uint8)
+
+    r = np.round(np.asarray(vals, dtype=np.float32), 3)
+    r = r + np.float32(0.0)  # collapse -0.0 -> +0.0 so it matches the 0.0 key
+    flat = r.reshape(-1)
+
+    idx = np.clip(np.searchsorted(keys, flat), 0, keys.size - 1)
+    if not np.all(keys[idx] == flat):
+        bad = flat[keys[idx] != flat]
+        raise KeyError(
+            f"{grid_name}: value(s) not on the exact quantization grid: "
+            f"{np.unique(bad)[:8].tolist()}"
+        )
+    return byts[idx]
+
+
 def quantize_fp8(vals: np.ndarray) -> np.ndarray:
     """Grid float values -> raw OCP e4m3 bytes (uint8), one per element.
 
@@ -395,14 +441,7 @@ def quantize_fp8(vals: np.ndarray) -> np.ndarray:
     compiled with CK_TILE_USE_OCP_FP8 == 1 (gfx950/gfx12 default). See the codec
     comment above and assert_fp8_ocp_supported(); GpuMxGemmRunner enforces this.
     """
-    flat = vals.reshape(-1)
-    out = np.empty(flat.shape, dtype=np.uint8)
-    for i, v in enumerate(flat):
-        fv = float(v)
-        if fv == 0.0:
-            fv = 0.0  # collapse -0.0
-        out[i] = _FP8_OCP_VALUE_TO_BYTE[round(fv, 3)]
-    return out.reshape(vals.shape)
+    return _map_grid_to_bytes(vals, _FP8_OCP_VALUE_TO_BYTE, "fp8 e4m3").reshape(vals.shape)
 
 
 def dequantize_fp8(bytes_arr: np.ndarray) -> np.ndarray:
@@ -427,13 +466,7 @@ def quantize_fp4_packed(vals: np.ndarray) -> np.ndarray:
     """
     M, K = vals.shape
     assert K % 2 == 0, "fp4 packs two K elements per byte"
-    codes = np.empty((M, K), dtype=np.uint8)
-    flat = vals.reshape(-1)
-    for i, v in enumerate(flat):
-        fv = float(v)
-        if fv == 0.0:
-            fv = 0.0
-        codes.reshape(-1)[i] = _FP4_VALUE_TO_CODE[round(fv, 3)]
+    codes = _map_grid_to_bytes(vals, _FP4_VALUE_TO_CODE, "fp4 e2m1").reshape(M, K)
     lo = codes[:, 0::2]
     hi = codes[:, 1::2]
     return ((hi << 4) | (lo & 0x0F)).astype(np.uint8)

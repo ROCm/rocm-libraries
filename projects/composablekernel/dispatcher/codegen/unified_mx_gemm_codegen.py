@@ -27,12 +27,13 @@ fixed 16x16x128 warp tile.
 """
 
 import argparse
+import contextlib
 import json
 import logging
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Iterator, Optional, Tuple
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -166,29 +167,36 @@ _AUTOGEN_BANNER = """\
 """
 
 
-def _make_builder(cfg: dict):
-    """Instantiate MxGemmKernelBuilder against a temp working dir + temp config.
+@contextlib.contextmanager
+def _make_builder(cfg: dict) -> Iterator["object"]:
+    """Yield an MxGemmKernelBuilder bound to a self-cleaning temp working dir.
 
     The Old-TE __init__ loads config_json only when it is an existing FILE path,
     and _generate_kernel_instance reads config.get("k_block_per_cu"). So we write
     a minimal config file (carrying k_block_per_cu) and hand its path to the
-    builder. The builder's own side-effect .hpp lands in working_path (ignored).
+    builder. The builder's own side-effect .hpp lands in the working dir (ignored).
+
+    This is a context manager (not a plain factory) because it owns a temp dir:
+    kernel_name()/generate_kernel() are shelled frequently (e.g. --list-name), so
+    a leaked mkdtemp() per call would pile up mx_gemm_codegen_* dirs under /tmp.
+    The builder is only used inside the `with` block, so cleanup on exit is safe.
     """
     MxGemmKernelBuilder = _load_mx_builder()
 
-    work_dir = Path(tempfile.mkdtemp(prefix="mx_gemm_codegen_"))
-    tmp_cfg = {"k_block_per_cu": int(cfg.get("k_block_per_cu", 1))}
-    cfg_path = work_dir / "mx_gemm_codegen_config.json"
-    cfg_path.write_text(json.dumps(tmp_cfg))
+    with tempfile.TemporaryDirectory(prefix="mx_gemm_codegen_") as work_dir_str:
+        work_dir = Path(work_dir_str)
+        tmp_cfg = {"k_block_per_cu": int(cfg.get("k_block_per_cu", 1))}
+        cfg_path = work_dir / "mx_gemm_codegen_config.json"
+        cfg_path.write_text(json.dumps(tmp_cfg))
 
-    return MxGemmKernelBuilder(
-        KERNEL_NAME_PREFIX,
-        work_dir,
-        cfg.get("gpu_target", "gfx950"),
-        cfg["datatype"],
-        cfg["layout"],
-        config_json=str(cfg_path),
-    )
+        yield MxGemmKernelBuilder(
+            KERNEL_NAME_PREFIX,
+            work_dir,
+            cfg.get("gpu_target", "gfx950"),
+            cfg["datatype"],
+            cfg["layout"],
+            config_json=str(cfg_path),
+        )
 
 
 def _fix_includes(code: str) -> str:
@@ -210,20 +218,20 @@ def _fix_includes(code: str) -> str:
 def _generate(cfg: dict) -> Tuple[str, str]:
     """Return (kernel_name, instance_code) for the given concrete config."""
     _validate(cfg)
-    builder = _make_builder(cfg)
     tile_config = _tile_config_from_cfg(cfg)
     trait_combo = _trait_combo_from_cfg(cfg)
-    name, code = builder._generate_kernel_instance(tile_config, trait_combo)
+    with _make_builder(cfg) as builder:
+        name, code = builder._generate_kernel_instance(tile_config, trait_combo)
     return name, _fix_includes(code)
 
 
 def kernel_name(cfg: dict) -> str:
     """Compute the kernel name without generating/writing code."""
     _validate(cfg)
-    builder = _make_builder(cfg)
     tile_config = _tile_config_from_cfg(cfg)
     trait_combo = _trait_combo_from_cfg(cfg)
-    return builder._format_kernel_name(trait_combo, tile_config)
+    with _make_builder(cfg) as builder:
+        return builder._format_kernel_name(trait_combo, tile_config)
 
 
 def generate_kernel(output_dir: Path, cfg: dict) -> Optional[Path]:
