@@ -1948,9 +1948,12 @@ namespace TensileLite
             case InitMode::TrigIndAbsSin:
             case InitMode::TrigIndAbsCos:
                 return "TrigonometricFromFloat";
-            // Random* all map to Bounded[-1,1] (the window generateMXInput is
-            // already pinned to). Closest match: RandomNegPosLimited.
+            // Random maps to rand_int (per-dtype integer range) so low-precision
+            // MX validation stays exact, matching the legacy integer init.
             case InitMode::Random:
+                return "rand_int";
+            // RandomNarrow/RandomNegPosLimited map to Bounded[-1,1] (the window
+            // generateMXInput is already pinned to).
             case InitMode::RandomNarrow:
             case InitMode::RandomNegPosLimited:
                 return "Bounded";
