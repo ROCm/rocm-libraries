@@ -34,8 +34,10 @@ silently half-built):
              ``Experimental/<feature>/`` tree.
   gen-logic  Run the Tensile benchmark+analyze flow to emit ``3_LibraryLogic``
              and classify failures: kernel-generation error vs. all-solutions
-             rejected by Solution validation. Benchmarks on the target-arch GPU
-             (fails fast if that arch is not present on the host).
+             rejected by Solution validation vs. an unedited placeholder
+             ``ProblemSizes`` left over from extracting a ``Prediction``-type
+             source. Benchmarks on the target-arch GPU (fails fast if that
+             arch is not present on the host).
   build-lib  Run ``Tensile.TensileCreateLibrary --experimental`` to turn the
              staged logic into a loadable device library.
   patch-logic
@@ -86,6 +88,19 @@ real parameter, and --skip-validation for a parameter not yet in the registry):
 
 Omit the ``--set`` / use ``gen-logic`` + ``build-lib`` directly to just rebuild
 the selected family as-is into one experimental library.
+
+Origami/Prediction-logic A/B example -- toggle a parameter on every matching
+solution across several shipped files (e.g. one per transpose) and get back
+two libraries that differ only in that parameter, with no re-benchmark:
+
+  python -m Tensile.ExperimentalLibrary patch-logic \\
+      --logic-src <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bjlk_*.yaml \\
+                  <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bljk_*.yaml \\
+      --where StreamK=5 --set PrefetchAcrossPersistent=1 \\
+      --matched-pair --skip-unbuildable \\
+      --arch gfx950 --out work/pap --feature-name sk5_pap1
+      # prints both HIPBLASLT_TENSILE_LIBPATH exports and writes
+      # work/pap/patch_manifest.csv (per-solution applied/skipped + reason)
 """
 
 from __future__ import annotations
@@ -546,9 +561,26 @@ def select_indices(
     ]
 
 
-def summarize_solution(state: Dict[str, Any]) -> str:
-    """One-line digest of a solution's notable parameters for listing."""
-    parts = [f"{k}={state[k]}" for k in _SUMMARY_KEYS if k in state]
+def _dedup_keys(*key_lists: Sequence[str]) -> List[str]:
+    """Flatten several key lists into one, keeping first occurrence order."""
+    seen = set()
+    result = []
+    for keys in key_lists:
+        for k in keys:
+            if k not in seen:
+                seen.add(k)
+                result.append(k)
+    return result
+
+
+def summarize_solution(state: Dict[str, Any], extra_keys: Sequence[str] = ()) -> str:
+    """One-line digest of a solution's notable parameters for listing.
+
+    ``extra_keys`` (e.g. the active ``--where`` names) are shown first, followed
+    by ``_SUMMARY_KEYS``, de-duplicated; only keys present in ``state`` appear.
+    """
+    keys = _dedup_keys(extra_keys, _SUMMARY_KEYS)
+    parts = [f"{k}={state[k]}" for k in keys if k in state]
     return " ".join(parts) if parts else "(no summary keys)"
 
 
@@ -723,7 +755,7 @@ def cmd_list_solutions(args: argparse.Namespace) -> int:
     for path, states, idxs, library_type in per_file:
         print(f"== {path} [{library_type or 'unknown'}] ({len(idxs)}/{len(states)} match) ==")
         for i in idxs:
-            print(f"{i}\t{summarize_solution(states[i])}")
+            print(f"{i}\t{summarize_solution(states[i], extra_keys=[name for name, _ in wheres])}")
 
     total_matched = sum(len(idxs) for _, _, idxs, _ in per_file)
     total_states = sum(len(states) for _, states, _, _ in per_file)
@@ -760,6 +792,11 @@ def cmd_merge(args: argparse.Namespace) -> int:
     return 0
 
 
+def _augment_staging_path(staging: str, arch: str, feature_name: str, config_basename: str) -> str:
+    """Default augment output path when ``--out`` is not given."""
+    return os.path.join(staging, "Logic", arch, "Experimental", feature_name, config_basename)
+
+
 def _do_augment(args: argparse.Namespace) -> str:
     """Shared augment implementation; returns the output config path."""
     sets = [parse_set_arg(s) for s in args.set]
@@ -780,9 +817,7 @@ def _do_augment(args: argparse.Namespace) -> str:
     else:
         staging = os.path.realpath(args.staging)
         base = os.path.basename(args.config)
-        out_path = os.path.join(
-            staging, "Logic", args.arch, "Experimental", args.name, base
-        )
+        out_path = _augment_staging_path(staging, args.arch, args.name, base)
     dump_config_with_header(config, out_path, args.name)
     return out_path
 
@@ -846,7 +881,7 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
             raise ExperimentalLibraryError(
                 f"Config {config} has BenchmarkProblems group(s) "
                 f"{placeholder_groups} with an unedited placeholder "
-                "ProblemSizes ([{'Exact': [1, 1, 1, 1]}]), left over from "
+                f"ProblemSizes ({_PLACEHOLDER_PROBLEM_SIZES}), left over from "
                 "extracting a 'Prediction'-type source with no real per-size "
                 "table. Set real ProblemSizes for those group(s) before "
                 "benchmarking, or use patch-logic instead to toggle a "
@@ -1204,9 +1239,8 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
         if not args.skip_validation:
             validate_sets(sets)
         print(f"[dry-run] augment: inject {sets} into {args.config}")
-        augmented = os.path.join(
-            out_root, "Logic", args.arch, "Experimental", args.feature_name,
-            os.path.basename(args.config),
+        augmented = _augment_staging_path(
+            out_root, args.arch, args.feature_name, os.path.basename(args.config)
         )
     else:
         augmented = _do_augment(augment_ns)
@@ -1253,8 +1287,8 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-# Columns emitted per matching solution in patch_manifest.csv, after the fixed
-# (logic_file, solution_index, status, reason) prefix.
+# Diagnostic-context columns for patch_manifest.csv, appended after whatever
+# --set/--where names the run actually queried (see cmd_patch_logic).
 _PATCH_MANIFEST_PARAMS = (
     "StreamK",
     "MacroTile0",
@@ -1265,6 +1299,11 @@ _PATCH_MANIFEST_PARAMS = (
     "DirectToLdsA",
     "DirectToLdsB",
 )
+
+# A probe builds exactly one solution, so its internal TensileCreateLibrary -j
+# gains nothing from scaling with probe concurrency (that would multiply out
+# to concurrency * this many processes).
+_PROBE_INTERNAL_JOBS = 1
 
 
 def _apply_overrides(state: Dict[str, Any], sets: Sequence[Tuple[str, List[Any]]]) -> None:
@@ -1335,13 +1374,13 @@ def _probe_override(
         str(out_dir),
         args.arch,
         experimental=True,
-        jobs=args.jobs,
+        jobs=_PROBE_INTERNAL_JOBS,
     )
 
     log_path = str(Path(probe_dir) / "probe.log")
-    rc, output = run_command(
-        cmd, dry_run=args.dry_run, verbose=args.verbose, log_path=log_path
-    )
+    # The caller only invokes _probe_override when not args.dry_run, so this
+    # always runs for real.
+    rc, output = run_command(cmd, verbose=args.verbose, log_path=log_path)
     if rc == 0:
         return True, ""
     low = output.lower()
@@ -1362,8 +1401,9 @@ def cmd_patch_logic(args: argparse.Namespace) -> int:
         raise ExperimentalLibraryError("patch-logic requires --feature-name.")
     wheres = [parse_set_arg(w) for w in args.where]
     if not wheres:
-        raise ExperimentalLibraryError(
-            "patch-logic requires at least one --where NAME=v1[,v2]."
+        sys.stderr.write(
+            "patch-logic: warning: no --where given; --set will be applied to "
+            "every solution in --logic-src.\n"
         )
     sets = [parse_set_arg(s) for s in args.set]
     if not sets:
@@ -1379,6 +1419,13 @@ def cmd_patch_logic(args: argparse.Namespace) -> int:
             )
     if not args.skip_validation:
         validate_sets(sets)
+
+    # Manifest columns: the --set/--where names the user actually queried come
+    # first (what they care about), _PATCH_MANIFEST_PARAMS fills in the rest as
+    # diagnostic context, with no duplicate columns for overlapping names.
+    manifest_params = _dedup_keys(
+        [name for name, _ in sets], [name for name, _ in wheres], _PATCH_MANIFEST_PARAMS
+    )
 
     files = _resolve_logic_sources(args.logic_src)
     out_root = os.path.realpath(args.out)
@@ -1435,7 +1482,7 @@ def cmd_patch_logic(args: argparse.Namespace) -> int:
                 probe_dir = os.path.join(probe_root, f"{fi_idx}_{pos}")
                 tasks.append((fi_idx, pos, override_state, probe_dir))
         results: Dict[Tuple[int, int], Tuple[bool, str]] = {}
-        max_workers = args.jobs if (args.jobs and args.jobs > 0) else 1
+        max_workers = args.jobs if (args.jobs and args.jobs > 0) else (os.cpu_count() or 1)
         if tasks:
             print(
                 f"patch-logic: probing {len(tasks)} override(s) for buildability "
@@ -1494,7 +1541,7 @@ def cmd_patch_logic(args: argparse.Namespace) -> int:
             sol_index = base_state.get("SolutionIndex", pos)
             manifest_rows.append(
                 [fi["path"], sol_index, status, row_reason]
-                + [base_state.get(k, "") for k in _PATCH_MANIFEST_PARAMS]
+                + [base_state.get(k, "") for k in manifest_params]
             )
 
         if not args.dry_run:
@@ -1520,8 +1567,7 @@ def cmd_patch_logic(args: argparse.Namespace) -> int:
         with open(manifest_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(
-                ["logic_file", "solution_index", "status", "reason"]
-                + list(_PATCH_MANIFEST_PARAMS)
+                ["logic_file", "solution_index", "status", "reason"] + manifest_params
             )
             writer.writerows(manifest_rows)
         print(f"patch-logic: manifest written to {manifest_path}")
@@ -1563,12 +1609,13 @@ def cmd_patch_logic(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _add_global_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument(
-        "--python",
-        default=None,
-        help="Interpreter to drive Tensile (default: repo venv if present, else current).",
-    )
+def _add_global_flags(p: argparse.ArgumentParser, *, include_python: bool = True) -> None:
+    if include_python:
+        p.add_argument(
+            "--python",
+            default=None,
+            help="Interpreter to drive Tensile (default: repo venv if present, else current).",
+        )
     p.add_argument("--dry-run", action="store_true", help="Print commands/env without executing.")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose logging.")
 
@@ -1628,7 +1675,10 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument(
         "--feature-name", default=None, help="Optional header annotation."
     )
-    _add_global_flags(pm)
+    pm.add_argument(
+        "--dry-run", action="store_true",
+        help="Print what would be merged without writing the output.",
+    )
     pm.set_defaults(func=cmd_merge)
 
     # augment
@@ -1655,7 +1705,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip --set validation against validParameters (no rocisa needed; "
         "pure config editing).",
     )
-    _add_global_flags(pa)
+    pa.add_argument(
+        "--dry-run", action="store_true",
+        help="Print what would be injected without writing the output.",
+    )
     pa.set_defaults(func=cmd_augment)
 
     # gen-logic
@@ -1700,9 +1753,10 @@ def build_parser() -> argparse.ArgumentParser:
         "globbed for *.yaml recursively).",
     )
     ppl.add_argument(
-        "--where", action="append", default=[], required=True, metavar="NAME=v1[,v2]",
+        "--where", action="append", default=[], metavar="NAME=v1[,v2]",
         help="Select solutions to patch (repeatable; AND across keys, OR within "
-        "values), e.g. --where StreamK=5.",
+        "values), e.g. --where StreamK=5. Omit to select every solution in "
+        "--logic-src.",
     )
     ppl.add_argument(
         "--set", action="append", default=[], required=True, metavar="NAME=value",
@@ -1724,7 +1778,10 @@ def build_parser() -> argparse.ArgumentParser:
     ppl.add_argument("--feature-name", required=True, help="Experimental staging dir component.")
     ppl.add_argument(
         "--jobs", "-j", dest="jobs", type=int, default=None,
-        help="Parallel jobs: TensileCreateLibrary -j and max concurrent probes.",
+        help="Parallel jobs: TensileCreateLibrary -j for the final build(s), and "
+        "max concurrent probes with --skip-unbuildable (each probe builds a "
+        "single solution regardless of this value). Default: all CPUs for "
+        "probing, whatever TensileCreateLibrary's own default is for builds.",
     )
     ppl.add_argument(
         "--skip-validation", action="store_true",
@@ -1746,7 +1803,7 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--arch", default="gfx950", help="GPU target (default gfx950).")
     pf.add_argument("--bench", default=None, help="Path to hipblaslt-bench.")
     pf.add_argument("extra", nargs=argparse.REMAINDER, help="Problem args after --.")
-    _add_global_flags(pf)
+    _add_global_flags(pf, include_python=False)
     pf.set_defaults(func=cmd_find_index)
 
     # bench
@@ -1760,7 +1817,7 @@ def build_parser() -> argparse.ArgumentParser:
     pbn.add_argument("--bench", required=True, help="Path to hipblaslt-bench.")
     pbn.add_argument("--solution-index", required=True, type=int, help="Solution index to run.")
     pbn.add_argument("extra", nargs=argparse.REMAINDER, help="Problem args after --.")
-    _add_global_flags(pbn)
+    _add_global_flags(pbn, include_python=False)
     pbn.set_defaults(func=cmd_bench)
 
     # pipeline
