@@ -229,10 +229,10 @@ def main() -> int:
         help="print top-N results ranked by TFLOPS (default: 10)",
     )
     parser.add_argument(
-        "--warmup", type=int, default=3, help="warmup iterations (default: 5)"
+        "--warmup", type=int, default=3, help="warmup iterations (default: 3)"
     )
     parser.add_argument(
-        "--iters", type=int, default=10, help="timed iterations (default: 100)"
+        "--iters", type=int, default=10, help="timed iterations (default: 10)"
     )
     parser.add_argument(
         "--verify",
