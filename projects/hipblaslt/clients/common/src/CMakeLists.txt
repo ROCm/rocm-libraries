@@ -13,6 +13,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_arguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_random.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init_device.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/reference_device.cpp"
 )
 
 if(HIPBLASLT_ENABLE_BLIS)

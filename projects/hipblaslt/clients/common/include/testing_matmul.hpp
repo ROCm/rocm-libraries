@@ -45,6 +45,7 @@
 #endif
 #include "near.hpp"
 #include "norm.hpp"
+#include "reference_device.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -1462,6 +1463,101 @@ void check(hipStream_t                   stream,
         hipblaslt_avg_ulp = ulp_sum_total / ulp_count_total;
 }
 
+// GPU correctness path (opt-in via --gpu_ref): compares the GPU output `dD`
+// against a device-computed reference `dD_gold` entirely on the device, filling
+// the same error accumulators as check() and asserting under gtest. The device
+// reference GEMM is computed once by the caller (see run_reference_gemm_device);
+// this only performs the device-side reduction/reporting (piece B). Restricted
+// to configurations accepted by gpu_ref_supported().
+inline void gpu_reference_report(hipStream_t                   stream,
+                                 const Arguments&              arg,
+                                 const uint32_t&               gemm_count,
+                                 const std::vector<int64_t>&   M,
+                                 const std::vector<int64_t>&   N,
+                                 const std::vector<int64_t>&   ldd,
+                                 const std::vector<int64_t>&   stride_d,
+                                 const std::vector<int>&       num_batches,
+                                 std::vector<HipDeviceBuffer>& dD_gold,
+                                 std::vector<HipDeviceBuffer>& dD,
+                                 const std::vector<double>&    tol,
+                                 double&                       hipblaslt_error,
+                                 double&                       hipblaslt_atol,
+                                 double&                       hipblaslt_rtol,
+                                 hipDataType                   To)
+{
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+    for(uint32_t gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+    {
+        const GpuRefResult res = compare_gemm_device(dD[gemmIdx].buf(),
+                                                     dD_gold[gemmIdx].buf(),
+                                                     To,
+                                                     M[gemmIdx],
+                                                     N[gemmIdx],
+                                                     ldd[gemmIdx],
+                                                     stride_d[gemmIdx],
+                                                     num_batches[gemmIdx],
+                                                     stream);
+
+        if(arg.norm_check)
+        {
+            double norm_error = (res.num_nan_mismatch > 0)
+                                    ? std::numeric_limits<double>::infinity()
+                                    : res.norm_error();
+            hipblaslt_error += norm_error;
+            if(arg.norm_check_assert)
+                CHECK_SUCCESS(
+                    norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+        }
+
+        if(arg.allclose_check)
+        {
+            // Reproduce allclose_check_general()'s ascending atol-outer/rtol-inner
+            // search over the shared candidate grid; res.allclose_g[k] is the
+            // smallest atol admissible for rtol = GPU_REF_TOL_GRID[k].
+            double foundAtol = 1.0, foundRtol = 1.0;
+            if(res.num_nan_mismatch == 0)
+            {
+                for(int ai = 0; ai < GPU_REF_TOL_GRID_N && foundAtol == 1.0; ++ai)
+                {
+                    const double atol = GPU_REF_TOL_GRID[ai];
+                    for(int ri = 0; ri < GPU_REF_TOL_GRID_N; ++ri)
+                    {
+                        if(res.allclose_g[ri] <= atol)
+                        {
+                            foundAtol = atol;
+                            foundRtol = GPU_REF_TOL_GRID[ri];
+                            break;
+                        }
+                    }
+                }
+            }
+            hipblaslt_atol = foundAtol;
+            hipblaslt_rtol = foundRtol;
+        }
+
+#ifdef GOOGLE_TEST
+        if(arg.unit_check)
+        {
+            ASSERT_EQ(res.num_nan_mismatch, 0ull);
+            if(tol[gemmIdx] != 0)
+            {
+                // near_check: every element within the absolute tolerance
+                // (aggregate max is exactly equivalent to per-element ASSERT_NEAR).
+                hipblaslt_near_compare_double(0.0, res.max_abs_error, tol[gemmIdx]);
+            }
+            else
+            {
+                // unit_check: per-element 4-ULP compare, matching ASSERT_FLOAT_EQ
+                // (the naive f32 reference is not bit-identical to the kernel, so a
+                // strict max==0 would be stricter than the CPU path it replaces).
+                ASSERT_EQ(res.num_unit_fail, 0ull);
+            }
+        }
+#endif
+    }
+}
+
 // A function to determine the default bias_type
 hipDataType derive_unset_bias_type(const Arguments& arg)
 {
@@ -1951,6 +2047,23 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<HipDeviceBuffer>  dA, dB, dC, dD, dE, dBias;
     std::vector<HipDeviceBuffer>* dDp;
+    // Device-side correctness reference (opt-in via --gpu_ref); computed once
+    // from dA/dB/dC into dD_gold and reused for every solution's check.
+    std::vector<HipDeviceBuffer> dD_gold;
+    const bool                   use_gpu_ref
+        = arg.gpu_ref && (arg.unit_check || arg.norm_check || arg.allclose_check);
+    if(use_gpu_ref)
+    {
+        std::string reason;
+        if(!gpu_ref_supported(arg, reason))
+        {
+#ifdef GOOGLE_TEST
+            FAIL() << "--gpu_ref: unsupported configuration: " << reason;
+#else
+            throw std::invalid_argument("--gpu_ref: unsupported configuration: " + reason);
+#endif
+        }
+    }
     std::vector<HipDeviceBuffer>  dScaleAlphaVec, dScaleA, dScaleB, dScaleC, dScaleD, dScaleE,
         dAmaxD;
 
@@ -4847,8 +4960,54 @@ void testing_matmul_with_bias(const Arguments& arg,
         exit(EXIT_FAILURE);
     }
 
+    // get GPU reference result (opt-in --gpu_ref): compute D_gold on the device
+    // once from the device inputs; reused by every solution's check below. This
+    // replaces the CPU cblas_gemm reference for supported f32/f16 GEMMs.
+    if(use_gpu_ref)
+    {
+        if(arg.timing)
+            cpu_time_used = get_time_us_no_sync();
+
+        for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+        {
+            dD_gold.emplace_back(To, size_D[gemmIdx] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(dD_gold.back().memcheck());
+
+            run_reference_gemm_device(
+                transA == HIPBLAS_OP_N,
+                transB == HIPBLAS_OP_N,
+                M[gemmIdx],
+                N[gemmIdx],
+                K[gemmIdx],
+                static_cast<float>(get_computeInterface(h_alpha[gemmIdx], Tc)),
+                static_cast<float>(get_computeInterface(h_beta[gemmIdx], Tc)),
+                dA[gemmIdx].buf(),
+                arg.a_type,
+                lda[gemmIdx],
+                stride_a[gemmIdx],
+                dB[gemmIdx].buf(),
+                arg.b_type,
+                ldb[gemmIdx],
+                stride_b[gemmIdx],
+                dC[gemmIdx].buf(),
+                arg.c_type,
+                ldc[gemmIdx],
+                stride_c[gemmIdx],
+                dD_gold[gemmIdx].buf(),
+                arg.d_type,
+                ldd[gemmIdx],
+                stride_d[gemmIdx],
+                num_batches[gemmIdx],
+                stream);
+        }
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+        if(arg.timing)
+            cpu_time_used = get_time_us_no_sync() - cpu_time_used;
+    }
+
     // get CPU result
-    if(arg.unit_check || arg.norm_check || arg.allclose_check)
+    if((arg.unit_check || arg.norm_check || arg.allclose_check) && !use_gpu_ref)
     {
         if(arg.timing)
         {
@@ -5407,48 +5566,69 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
-                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
+                if(use_gpu_ref)
                 {
-                    copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                    gpu_reference_report(stream,
+                                         arg,
+                                         gemm_count,
+                                         M,
+                                         N,
+                                         ldd,
+                                         stride_d,
+                                         num_batches,
+                                         dD_gold,
+                                         (*dDp),
+                                         tol,
+                                         hipblaslt_error,
+                                         hipblaslt_atol,
+                                         hipblaslt_rtol,
+                                         To);
                 }
                 else
                 {
-                    copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
+                    {
+                        copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                    }
+                    else
+                    {
+                        copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    }
+                    check(stream,
+                          arg,
+                          gemm_count,
+                          M,
+                          N,
+                          ldd,
+                          lde,
+                          stride_d,
+                          stride_e,
+                          num_batches,
+                          size_bias,
+                          hD_gold,
+                          hD_1,
+                          (*dDp),
+                          hAmaxD_gold,
+                          hAmaxD,
+                          dAmaxD,
+                          hE_gold,
+                          hE,
+                          dE,
+                          hBias_gold,
+                          hBias,
+                          dBias,
+                          tol,
+                          hipblaslt_error,
+                          hipblaslt_atol,
+                          hipblaslt_rtol,
+                          hipblaslt_max_ulp,
+                          hipblaslt_avg_ulp,
+                          To,
+                          Tbias,
+                          Taux,
+                          Talpha,
+                          batchMode);
                 }
-                check(stream,
-                      arg,
-                      gemm_count,
-                      M,
-                      N,
-                      ldd,
-                      lde,
-                      stride_d,
-                      stride_e,
-                      num_batches,
-                      size_bias,
-                      hD_gold,
-                      hD_1,
-                      (*dDp),
-                      hAmaxD_gold,
-                      hAmaxD,
-                      dAmaxD,
-                      hE_gold,
-                      hE,
-                      dE,
-                      hBias_gold,
-                      hBias,
-                      dBias,
-                      tol,
-                      hipblaslt_error,
-                      hipblaslt_atol,
-                      hipblaslt_rtol,
-                      hipblaslt_max_ulp,
-                      hipblaslt_avg_ulp,
-                      To,
-                      Tbias,
-                      Taux,
-                      Talpha,
-                      batchMode);
             }
         }
     }
@@ -6024,60 +6204,81 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
-                if(arg.dump_matrix)
+                if(use_gpu_ref)
                 {
-                    for(int batchId = 0; batchId < num_batches[0]; batchId++)
-                    {
-                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                    To,
-                                                    M[0],
-                                                    N[0],
-                                                    ldd[0],
-                                                    hD_1[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
-                                                    "batch_" + std::to_string(batchId) + "_D_output.txt");
-                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                    To,
-                                                    M[0],
-                                                    N[0],
-                                                    ldd[0],
-                                                    hD_gold[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
-                                                    "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
-                    }
+                    gpu_reference_report(stream,
+                                         arg,
+                                         gemm_count,
+                                         M,
+                                         N,
+                                         ldd,
+                                         stride_d,
+                                         num_batches,
+                                         dD_gold,
+                                         (*dDp),
+                                         tol,
+                                         hipblaslt_error,
+                                         hipblaslt_atol,
+                                         hipblaslt_rtol,
+                                         To);
                 }
-                check(stream,
-                      arg,
-                      gemm_count,
-                      M,
-                      N,
-                      ldd,
-                      lde,
-                      stride_d,
-                      stride_e,
-                      num_batches,
-                      size_bias,
-                      hD_gold,
-                      hD_1,
-                      (*dDp),
-                      hAmaxD_gold,
-                      hAmaxD,
-                      dAmaxD,
-                      hE_gold,
-                      hE,
-                      dE,
-                      hBias_gold,
-                      hBias,
-                      dBias,
-                      tol,
-                      hipblaslt_error,
-                      hipblaslt_atol,
-                      hipblaslt_rtol,
-                      hipblaslt_max_ulp,
-                      hipblaslt_avg_ulp,
-                      To,
-                      Tbias,
-                      Taux,
-                      Talpha,
-                      batchMode);
+                else
+                {
+                    if(arg.dump_matrix)
+                    {
+                        for(int batchId = 0; batchId < num_batches[0]; batchId++)
+                        {
+                            hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                        To,
+                                                        M[0],
+                                                        N[0],
+                                                        ldd[0],
+                                                        hD_1[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                        "batch_" + std::to_string(batchId) + "_D_output.txt");
+                            hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                        To,
+                                                        M[0],
+                                                        N[0],
+                                                        ldd[0],
+                                                        hD_gold[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                        "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
+                        }
+                    }
+                    check(stream,
+                          arg,
+                          gemm_count,
+                          M,
+                          N,
+                          ldd,
+                          lde,
+                          stride_d,
+                          stride_e,
+                          num_batches,
+                          size_bias,
+                          hD_gold,
+                          hD_1,
+                          (*dDp),
+                          hAmaxD_gold,
+                          hAmaxD,
+                          dAmaxD,
+                          hE_gold,
+                          hE,
+                          dE,
+                          hBias_gold,
+                          hBias,
+                          dBias,
+                          tol,
+                          hipblaslt_error,
+                          hipblaslt_atol,
+                          hipblaslt_rtol,
+                          hipblaslt_max_ulp,
+                          hipblaslt_avg_ulp,
+                          To,
+                          Tbias,
+                          Taux,
+                          Talpha,
+                          batchMode);
+                }
             }
 
 #define argument_param                                                                            \

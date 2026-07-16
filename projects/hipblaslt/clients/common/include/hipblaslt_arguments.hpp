@@ -165,6 +165,7 @@ struct Arguments
     int8_t unit_check;
     int8_t ulp_check;
     int8_t timing;
+    int8_t gpu_ref; // compute the correctness reference on the GPU instead of the CPU
 
     char transA;
     char transB;
@@ -289,6 +290,7 @@ struct Arguments
     OPER(unit_check) SEP             \
     OPER(ulp_check) SEP              \
     OPER(timing) SEP                 \
+    OPER(gpu_ref) SEP                \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
     OPER(activation_type) SEP        \

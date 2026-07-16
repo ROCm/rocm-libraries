@@ -304,8 +304,9 @@ try
     std::string api_method_str  = "";
     std::string algo_method_str = "";
 
-    bool verify = 0;
-    bool ulp    = 0;
+    bool verify  = 0;
+    bool ulp     = 0;
+    bool gpu_ref = 0;
 
     bool                  grouped_gemm;
     std::vector<int64_t>  m, n, k;
@@ -478,6 +479,12 @@ try
         ("ulp",
          value<bool>(&ulp)->default_value(false),
          "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
+
+        ("gpu_ref",
+         value<bool>(&gpu_ref)->default_value(false),
+         "Compute the correctness reference on the GPU instead of the CPU (faster). Implies "
+         "--verify. Only supports plain f32/f16 GEMMs with the default epilogue; other configs "
+         "are rejected with an error.")
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
@@ -1205,7 +1212,7 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify || ulp)
+    if(verify || ulp || gpu_ref)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
@@ -1213,6 +1220,10 @@ try
     if(ulp)
     {
         arg.ulp_check = 1;
+    }
+    if(gpu_ref)
+    {
+        arg.gpu_ref = 1;
     }
 
     switch(api_method)

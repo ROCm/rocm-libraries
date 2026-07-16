@@ -115,6 +115,7 @@ void Arguments::init()
     unit_check     = 1;
     ulp_check      = 0;
     timing         = 0;
+    gpu_ref        = 0;
 
     transA = '*';
     transB = '*';
