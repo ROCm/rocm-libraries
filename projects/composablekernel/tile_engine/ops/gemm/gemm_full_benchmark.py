@@ -368,8 +368,13 @@ def main():
     print(f"  Variant: {args.variant}")
     print(f"  Configs: {', '.join(config_paths)}")
 
+    if args.variant == "grouped_gemm":
+        print(
+            "  ERROR: grouped_gemm is not supported by this driver; "
+            "use tile_engine/ops/gemm/grouped_gemm/grouped_gemm_benchmark.py"
+        )
+        return 1
     codegen_variant = CODEGEN_VARIANT[args.variant]
-
     # Per-variant dtype/layout guards (e.g. preshuffle is rcr-only, no fp32).
     ok_dtypes = VARIANT_SUPPORTED_DTYPES.get(args.variant)
     if ok_dtypes and args.dtype not in ok_dtypes:
