@@ -51,6 +51,7 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         write_output_tensor: bool = True,
         write_tensor_manifest: bool = False,
         metadata: dict[str, object] | None = None,
+        nodes: list[dict[str, object]] | None = None,
     ) -> Path:
         bundle_dir = root / relative_dir
         bundle_dir.mkdir(parents=True)
@@ -66,7 +67,7 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
         )
 
         graph = {
-            "nodes": [{"outputs": {"y_tensor_uid": 1}}],
+            "nodes": nodes if nodes is not None else [{"outputs": {"y_tensor_uid": 1}}],
             "tensors": [
                 {
                     "uid": 0,
@@ -257,6 +258,50 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.write_bundle(
                 root,
                 Path("quick/BatchnormFwdInference/nchw/fp32/Small"),
+                output_bytes=struct.pack("<f", float("nan")),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("tensor uid 1", completed.stderr)
+            self.assertIn("output tensor contains NaN/Inf", completed.stderr)
+
+    def test_flat_output_uid_node_type_is_valid(self) -> None:
+        # ReductionAttributes puts "out_tensor_uid" directly on the node instead
+        # of nesting it under an "outputs" object like every other node type.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/Reduction/nchw/fp32/Small"),
+                nodes=[
+                    {
+                        "type": "ReductionAttributes",
+                        "in_tensor_uid": 0,
+                        "out_tensor_uid": 1,
+                    }
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertNotIn("outputs is required", completed.stderr)
+
+    def test_flat_output_uid_node_type_nan_output_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_bundle(
+                root,
+                Path("quick/Reduction/nchw/fp32/Small"),
+                nodes=[
+                    {
+                        "type": "ReductionAttributes",
+                        "in_tensor_uid": 0,
+                        "out_tensor_uid": 1,
+                    }
+                ],
                 output_bytes=struct.pack("<f", float("nan")),
             )
 

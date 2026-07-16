@@ -21,6 +21,16 @@ CASE_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
 PLACEHOLDER_PATTERN = re.compile(r"^\$\{case\.([A-Za-z0-9_.]+)\}$")
 TEMPLATE_TENSOR_FIELDS = ("dims", "strides", "data_type")
 
+# Node types whose real hipDNN JSON schema declares output tensor uids as flat
+# scalar fields directly on the node, instead of nesting them under an `outputs`
+# object like every other attribute type. See
+# flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/ReductionAttributes.hpp
+# to_json/from_json, backed by reduction_attributes.fbs (`in_tensor_uid`/
+# `out_tensor_uid` are plain scalar fields on ReductionAttributes, not a map).
+FLAT_OUTPUT_UID_FIELDS: dict[str, tuple[str, ...]] = {
+    "ReductionAttributes": ("out_tensor_uid",),
+}
+
 
 DTYPE_BYTE_SIZE = {
     "float": 4,
@@ -276,6 +286,18 @@ def extract_output_tensor_uids(
     for index, node in enumerate(nodes):
         if not isinstance(node, dict):
             result.error(path, f"node {index} is not an object")
+            continue
+
+        flat_fields = FLAT_OUTPUT_UID_FIELDS.get(node.get("type"))
+        if flat_fields is not None:
+            for field_name in flat_fields:
+                value = node.get(field_name)
+                if value is None:
+                    continue
+                if not is_integer(value):
+                    result.error(path, f"'{field_name}' must be an integer tensor uid")
+                    continue
+                output_tensor_uids.add(value)
             continue
 
         outputs = node.get("outputs")
