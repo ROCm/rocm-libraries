@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_test_sdk/HipTestMacros.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "dispatcher/HardwareProfile.hpp"
 

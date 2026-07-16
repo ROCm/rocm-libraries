@@ -6,7 +6,7 @@
 #include <optional>
 #include <vector>
 
-#include <hipdnn_test_sdk/HipTestMacros.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "RockeClientHandle.hpp"
 #include "dispatcher/RockeClientDispatcher.hpp"
