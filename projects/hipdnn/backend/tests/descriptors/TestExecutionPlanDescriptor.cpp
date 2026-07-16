@@ -505,6 +505,54 @@ TEST_F(TestExecutionPlanDescriptor, GetEngineGlobalIndexExtReturnsDeserializedEn
     ASSERT_EQ(engineGlobalIndex, ENGINE_ID);
 }
 
+TEST_F(TestExecutionPlanDescriptor, GetIsOverrideShapeEnabledExtReturnsDeserializedFlagFalse)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false, false, false);
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce([](int64_t, const hipdnnPluginConstData_t*) { return getExecutionContext(); });
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+
+    bool isOverrideShapeEnabled = true;
+    int64_t count = 0;
+    ASSERT_NO_THROW(plan->getAttribute(HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &count,
+                                       &isOverrideShapeEnabled));
+    ASSERT_EQ(count, 1);
+    ASSERT_FALSE(isOverrideShapeEnabled);
+}
+
+TEST_F(TestExecutionPlanDescriptor, GetIsOverrideShapeEnabledExtReturnsDeserializedFlagTrue)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan(1, 1024, true, true, false, false, true);
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce([](int64_t, const hipdnnPluginConstData_t*) { return getExecutionContext(); });
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+
+    bool isOverrideShapeEnabled = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(plan->getAttribute(HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &count,
+                                       &isOverrideShapeEnabled));
+    ASSERT_EQ(count, 1);
+    ASSERT_TRUE(isOverrideShapeEnabled);
+}
+
 TEST_F(TestExecutionPlanDescriptor, SerializeRejectsUnfinalizedPlan)
 {
     auto plan = getExecutionPlanDescriptor();

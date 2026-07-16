@@ -308,7 +308,7 @@ size_t grid_analytical(const problem_t& problem,
   double best_latency = std::numeric_limits<double>::infinity();
 
   for (size_t split = 1; split <= MAX_SPLIT; ++split) {
-    double latency = compute_total_latency(problem, hardware, config, max_cus);
+    double latency = gemm::compute_total_latency(problem, hardware, config, max_cus);
 
     if (latency < best_latency) {
       best_latency = latency;
@@ -469,40 +469,47 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target) {
-  // The hybrid-mode thresholds were derived from a regression over random
-  // problems on MI350X (gfx950). Other architectures keep the static (SK3)
-  // sub-path until they are tuned in a follow-up PR.
+  // Fit on gfx950 (MI350X) sweeps only; other architectures stay static
+  // until tuned in a follow-up PR.
   if (hardware.arch != hardware_t::architecture_t::gfx950)
     return hybrid_mode_t::static_;
 
-  const size_t MT_M = config.mt.m;
-  const size_t MT_N = config.mt.n;
+  const size_t MT_M  = config.mt.m;
+  const size_t MT_N  = config.mt.n;
+  const size_t batch = std::max<size_t>(problem.batch, 1);
+  const size_t tiles = compute_number_of_output_tiles(
+      MT_M, MT_N, problem.size.m, problem.size.n, batch);
 
-  // Small macrotiles always use the static sub-path: dynamic per-XCD work
-  // queueing is not beneficial at these tile sizes.
-  if (MT_M == 16 && MT_N == 16) return hybrid_mode_t::static_;
-  if (MT_M == 32 && MT_N == 32) return hybrid_mode_t::static_;
+  // Too little work in the grid for dynamic rebalancing to be worth its
+  // overhead.
+  if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
 
   size_t available_cus = (sm_count_target > 0)
                              ? std::min<size_t>(sm_count_target, hardware.N_CU)
                              : hardware.N_CU;
   if (available_cus == 0) available_cus = hardware.N_CU;
 
-  const size_t batch = std::max<size_t>(problem.batch, 1);
-  const size_t tiles = compute_number_of_output_tiles(
-      MT_M, MT_N, problem.size.m, problem.size.n, batch);
+  // No cotenant means static already matches the full CU count -- nothing
+  // left for dynamic to rebalance.
+  const bool has_cotenant = available_cus < hardware.N_CU;
+  if (!has_cotenant) return hybrid_mode_t::static_;
+
+  // Few wavefronts resident per CU means little overlap to absorb a
+  // cotenant's CU-count mismatch on its own, so dynamic rebalancing helps
+  // regardless of tiles_per_cu. (occupancy <= 0 means "unknown" -- fall
+  // through to the tiles_per_cu check instead.)
+  if (config.occupancy > 0 &&
+      config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
+    return hybrid_mode_t::dynamic;
+
+  // At higher occupancy that overlap already absorbs small mismatches, so
+  // dynamic only pays off once the grid is heavily overloaded relative to
+  // the CUs actually available to it.
   const double tiles_per_cu =
       static_cast<double>(tiles) / static_cast<double>(available_cus);
-
-  double threshold;
-  if      (MT_M ==  64 && MT_N ==  64) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_64X64;
-  else if (MT_M == 128 && MT_N == 128) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_128X128;
-  else if (MT_M == 128 && MT_N == 256) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_128X256;
-  else if (MT_M == 256 && MT_N == 128) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_256X128;
-  else                                 threshold = streamk_hybrid_defaults_t::THRESHOLD_DEFAULT;
-
-  return (tiles_per_cu < threshold) ? hybrid_mode_t::static_
-                                    : hybrid_mode_t::dynamic;
+  return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
+             ? hybrid_mode_t::dynamic
+             : hybrid_mode_t::static_;
 }
 }  // namespace streamk
 }  // namespace origami
