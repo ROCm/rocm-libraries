@@ -234,6 +234,22 @@ public:
     {
         return math_mode;
     }
+    /**
+     * @brief Custom equality hook for wgrad-specific attributes
+     */
+    bool logicallyEqualsImpl(const ConvWgradAttributes& other) const
+    {
+        return pre_padding == other.pre_padding && post_padding == other.post_padding
+               && stride == other.stride && dilation == other.dilation
+               && math_mode == other.math_mode;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const ConvWgradAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 
 typedef ConvWgradAttributes Conv_wgrad_attributes; ///< @brief Compatibility alias
