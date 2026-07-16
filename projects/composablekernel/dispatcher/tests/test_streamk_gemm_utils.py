@@ -90,11 +90,18 @@ class TestCtypesSourceRouting(unittest.TestCase):
     """Each variant routes to the ctypes bridge .cpp matching its launch ABI."""
 
     def test_streamk_gets_dedicated_source(self):
-        self.assertEqual(_ctypes_source_name("stream_k"), "streamk_gemm_ctypes_lib.cpp")
+        cfg = GemmKernelConfig(variant="stream_k")
+        self.assertEqual(_ctypes_source_name(cfg), "streamk_gemm_ctypes_lib.cpp")
 
     def test_standard_uses_default_source(self):
-        self.assertEqual(_ctypes_source_name("standard"), "gemm_ctypes_lib.cpp")
-        self.assertEqual(_ctypes_source_name("preshuffle"), "gemm_ctypes_lib.cpp")
+        self.assertEqual(
+            _ctypes_source_name(GemmKernelConfig(variant="standard")),
+            "gemm_ctypes_lib.cpp",
+        )
+        self.assertEqual(
+            _ctypes_source_name(GemmKernelConfig(variant="preshuffle")),
+            "gemm_ctypes_lib.cpp",
+        )
 
 
 if __name__ == "__main__":
