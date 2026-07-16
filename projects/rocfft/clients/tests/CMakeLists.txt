@@ -415,6 +415,8 @@ set_target_properties(rocfft-test
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
 
+rocm_install(TARGETS rocfft-test COMPONENT tests)
+
 #Ctest based Test Filter Standardization using test_categories.yaml
 
 set( _ROCFFT_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" )
