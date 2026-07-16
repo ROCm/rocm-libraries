@@ -1465,9 +1465,11 @@ void check(hipStream_t                   stream,
 }
 
 // GPU correctness path (--check_ref gpu|both): compares the GPU output `dD`
-// against the device reference `dD_gold` on the device, filling the same error
-// accumulators as check() and asserting under gtest. dD_gold is computed once by
-// the caller (run_reference_gemm_device). Restricted to gpu_ref_supported() configs.
+// against the device reference `dD_gold` on the device and asserts under gtest.
+// dD_gold is computed once by the caller (run_reference_gemm_device). When
+// `report` is true it also fills the reported error/atol/rtol columns; in 'both'
+// mode the CPU check() owns those, so the GPU leg asserts only (report=false).
+// Restricted to gpu_ref_supported() configs.
 inline void gpu_reference_report(hipStream_t                   stream,
                                  const Arguments&              arg,
                                  const uint32_t&               gemm_count,
@@ -1482,7 +1484,8 @@ inline void gpu_reference_report(hipStream_t                   stream,
                                  double&                       hipblaslt_error,
                                  double&                       hipblaslt_atol,
                                  double&                       hipblaslt_rtol,
-                                 hipDataType                   To)
+                                 hipDataType                   To,
+                                 bool                          report)
 {
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
@@ -1503,13 +1506,14 @@ inline void gpu_reference_report(hipStream_t                   stream,
             double norm_error = (res.num_nan_mismatch > 0)
                                     ? std::numeric_limits<double>::infinity()
                                     : res.norm_error();
-            hipblaslt_error += norm_error;
+            if(report)
+                hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
                 CHECK_SUCCESS(
                     norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
         }
 
-        if(arg.allclose_check)
+        if(arg.allclose_check && report)
         {
             // Reproduce allclose_check_general()'s ascending atol-outer/rtol-inner
             // search over the shared candidate grid; res.allclose_g[k] is the
@@ -2054,21 +2058,25 @@ void testing_matmul_with_bias(const Arguments& arg,
     const bool use_gpu_ref = want_check
                              && (arg.check_ref == HIPBLASLT_CHECK_REF_GPU
                                  || arg.check_ref == HIPBLASLT_CHECK_REF_BOTH);
-    const bool use_cpu_ref = want_check
-                             && (arg.check_ref == HIPBLASLT_CHECK_REF_CPU
-                                 || arg.check_ref == HIPBLASLT_CHECK_REF_BOTH);
+    // CPU reference runs for cpu/both and as the fallback for any unknown mode, so
+    // a check is never silently skipped.
+    const bool use_cpu_ref = want_check && arg.check_ref != HIPBLASLT_CHECK_REF_GPU;
     if(use_gpu_ref)
     {
         std::string reason;
-        if(!gpu_ref_supported(arg, reason))
-        {
+        auto        fail_gpu_ref = [&](const std::string& why) {
 #ifdef GOOGLE_TEST
-            FAIL() << "--check_ref: unsupported configuration for GPU reference: " << reason;
+            FAIL() << "--check_ref: " << why;
 #else
-            throw std::invalid_argument(
-                "--check_ref: unsupported configuration for GPU reference: " + reason);
+            throw std::invalid_argument("--check_ref: " + why);
 #endif
-        }
+        };
+        if(!gpu_ref_supported(arg, reason))
+            fail_gpu_ref("unsupported configuration for GPU reference: " + reason);
+        // ULP reporting needs the CPU reference; it is only available when the CPU
+        // leg also runs (cpu/both), not in gpu-only mode.
+        else if(arg.ulp_check && !use_cpu_ref)
+            fail_gpu_ref("ULP check requires the CPU reference (use --check_ref both)");
     }
     std::vector<HipDeviceBuffer>  dScaleAlphaVec, dScaleA, dScaleB, dScaleC, dScaleD, dScaleE,
         dAmaxD;
@@ -5632,7 +5640,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                          hipblaslt_error,
                                          hipblaslt_atol,
                                          hipblaslt_rtol,
-                                         To);
+                                         To,
+                                         /*report=*/!use_cpu_ref);
                 }
             }
         }
@@ -6282,7 +6291,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                          hipblaslt_error,
                                          hipblaslt_atol,
                                          hipblaslt_rtol,
-                                         To);
+                                         To,
+                                         /*report=*/!use_cpu_ref);
                 }
             }
 

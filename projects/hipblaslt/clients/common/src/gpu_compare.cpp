@@ -89,7 +89,15 @@ namespace
                                    int32_t   batchCount,
                                    DevAccum* out)
     {
-        const double rtol[GPU_REF_TOL_GRID_N] = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+        // Tied to GPU_REF_TOL_GRID so the kernel and the host-side allclose search
+        // (gpu_reference_report) never drift.
+        static_assert(GPU_REF_TOL_GRID_N == 6, "update the rtol initializer below");
+        const double rtol[GPU_REF_TOL_GRID_N] = {GPU_REF_TOL_GRID[0],
+                                                 GPU_REF_TOL_GRID[1],
+                                                 GPU_REF_TOL_GRID[2],
+                                                 GPU_REF_TOL_GRID[3],
+                                                 GPU_REF_TOL_GRID[4],
+                                                 GPU_REF_TOL_GRID[5]};
 
         double l_max = 0.0, l_sref = 0.0, l_sdiff = 0.0;
         double l_g[GPU_REF_TOL_GRID_N];

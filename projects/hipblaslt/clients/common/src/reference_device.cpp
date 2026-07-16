@@ -179,9 +179,6 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
         return fail("in-place C==D");
     if(arg.rotating != 0)
         return fail("rotating buffers");
-    if(arg.ulp_check)
-        // ULP reporting needs the host reference, which the GPU path does not populate.
-        return fail("ULP check (--ulp)");
 
     reason.clear();
     return true;
