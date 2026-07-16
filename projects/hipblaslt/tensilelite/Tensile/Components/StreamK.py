@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2
+from ..Common import print2, ceilDivide, log2, clusterEnabled
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -2512,8 +2512,10 @@ class StreamKTwoTileDPFirst(StreamK):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
-        # Workaround for gfx12
-        if writer.states.archCaps["WorkGroupIdFromTTM"]:
+        # Skip the gfx12 ttmp reread under clustering: defineAndResources already left
+        # the cluster-decoded rank in WorkGroup0/1/2, and rereading ttmp9 (cluster_x here)
+        # would collide StreamKIdx across the cluster.
+        if writer.states.archCaps["WorkGroupIdFromTTM"] and not clusterEnabled(kernel["ClusterDim"]):
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
@@ -2926,8 +2928,10 @@ class StreamKDynamic(StreamK):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
-        # Workaround for gfx12
-        if writer.states.archCaps["WorkGroupIdFromTTM"]:
+        # Skip the gfx12 ttmp reread under clustering: defineAndResources already left
+        # the cluster-decoded rank in WorkGroup0/1/2, and rereading ttmp9 (cluster_x here)
+        # would collide StreamKIdx across the cluster.
+        if writer.states.archCaps["WorkGroupIdFromTTM"] and not clusterEnabled(kernel["ClusterDim"]):
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
@@ -3555,7 +3559,10 @@ class StreamKHybrid(StreamK):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
-        if writer.states.archCaps["WorkGroupIdFromTTM"]:
+        # Skip the gfx12 ttmp reread under clustering: defineAndResources already left
+        # the cluster-decoded rank in WorkGroup0/1/2, and rereading ttmp9 (cluster_x here)
+        # would collide StreamKIdx across the cluster.
+        if writer.states.archCaps["WorkGroupIdFromTTM"] and not clusterEnabled(kernel["ClusterDim"]):
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
