@@ -438,6 +438,8 @@ class CKTileKernelGenerator:
         if config.variant == GemmVariant.BATCHED:
             includes += """
 #include "ck_tile/ops/gemm/kernel/batched_gemm_kernel.hpp"
+"""
+
         if config.variant == GemmVariant.STREAM_K:
             includes += """
 #include <functional>
@@ -746,16 +748,22 @@ using CLayout = {ns_name}::CLayout;
             // zero at the start of EVERY kernel invocation. The benchmarking
             // timing loop re-runs the kernel cold_niters + nrepeat times, so a
             // single pre-launch memset is not enough -- C accumulates across
-            // iterations. Pass a hipMemset callable as the first callable to
-            // launch_kernel (the documented ck_tile pattern, see
+            // iterations. Pass a hipMemsetAsync callable as the first callable
+            // to launch_kernel (the documented ck_tile pattern, see
             // kernel_launch.hpp) so C is re-zeroed before each timed launch.
-            // Only the batch slices actually written (M*N per batch) need
-            // clearing; use the batch stride to cover padded layouts.
+            // Use hipMemsetAsync on the launch stream (sc.stream_id_): the
+            // synchronous hipMemset ignores stream_config and would serialise
+            // onto the default stream, skewing timing/correctness whenever a
+            // non-default stream is used. Only the batch slices actually
+            // written (M*N per batch) need clearing; use the batch stride to
+            // cover padded layouts.
             const std::size_t c_bytes =
                 static_cast<std::size_t>(args.batch_stride_E) *
                 static_cast<std::size_t>(args.batch_count) * sizeof(CDataType);
             ave_time = launch_kernel(stream,
-                [=](const stream_config&) {{ (void)hipMemset(args.e_ptr, 0, c_bytes); }},
+                [=](const stream_config& sc) {{
+                    (void)hipMemsetAsync(args.e_ptr, 0, c_bytes, sc.stream_id_);
+                }},
                 make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
         }} else {{
             // k_batch == 1 (the Old-TE parity default): byte-identical to the

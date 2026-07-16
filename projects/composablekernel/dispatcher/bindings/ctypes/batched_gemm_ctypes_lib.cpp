@@ -180,13 +180,21 @@ int dispatcher_run_batched(const void* A,
     const std::int64_t sb = default_stride(K, N, stride_B, operand_is_row_major(kLayoutB));
     const std::int64_t sc = default_stride(M, N, stride_C, operand_is_row_major(kLayoutC));
 
-    // Batch strides: <= 0 -> packed default (contiguous per-batch slab). A
-    // caller may pass a LARGER batch stride than the packed size (e.g. padding
-    // between per-batch slabs); the element-count / allocation below is sized
-    // from the resolved batch stride so a non-packed layout is honoured.
-    const std::int64_t bsa = batch_stride_A > 0 ? batch_stride_A : M * K;
-    const std::int64_t bsb = batch_stride_B > 0 ? batch_stride_B : K * N;
-    const std::int64_t bsc = batch_stride_C > 0 ? batch_stride_C : M * N;
+    // Batch strides: <= 0 -> packed default (contiguous per-batch slab). The
+    // packed slab spans the RESOLVED leading stride (sa/sb/sc), not the bare
+    // shape, so a non-packed leading stride (padded rows/cols) is honoured: a
+    // row-major operand's slab is rows*leading and a col-major operand's slab is
+    // cols*leading. Deriving the default from M*K/K*N/M*N would under-size the
+    // buffer and cause out-of-bounds access whenever stride_A/B/C is padded. A
+    // caller may still pass an even LARGER batch stride (extra inter-slab
+    // padding); the element-count / allocation below is sized from the resolved
+    // value so that layout is honoured too.
+    const std::int64_t bsa =
+        batch_stride_A > 0 ? batch_stride_A : (operand_is_row_major(kLayoutA) ? M : K) * sa;
+    const std::int64_t bsb =
+        batch_stride_B > 0 ? batch_stride_B : (operand_is_row_major(kLayoutB) ? K : N) * sb;
+    const std::int64_t bsc =
+        batch_stride_C > 0 ? batch_stride_C : (operand_is_row_major(kLayoutC) ? M : N) * sc;
 
     // Total element counts across all batches, sized from the RESOLVED batch
     // stride so that a padded (non-packed) batch stride allocates enough for the
