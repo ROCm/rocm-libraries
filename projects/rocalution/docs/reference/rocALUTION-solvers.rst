@@ -13,9 +13,7 @@ This document provides a category-wise listing of the solver APIs along with the
 Code structure
 ==============
 
-.. doxygenclass:: rocalution::Solver
-
-It provides an interface for:
+:cpp:class:`rocalution::Solver` is the base class for all solvers. It provides an interface for:
 
 .. doxygenfunction:: rocalution::Solver::SetOperator
 .. doxygenfunction:: rocalution::Solver::Build
@@ -29,9 +27,7 @@ It provides an interface for:
 Iterative linear solvers
 ========================
 
-.. doxygenclass:: rocalution::IterativeLinearSolver
-
-It provides an interface for:
+:cpp:class:`rocalution::IterativeLinearSolver` is the base class for all iterative linear solvers. It provides an interface for:
 
 .. doxygenfunction:: rocalution::IterativeLinearSolver::Init(double, double, double, int)
 .. doxygenfunction:: rocalution::IterativeLinearSolver::Init(double, double, double, int, int)
@@ -52,7 +48,7 @@ Each iterative solver consists of a building step and a solving step. During the
 
 When the initial matrix associated with the solver is on the accelerator, the solver tries to build everything on the accelerator. However, some preconditioners and solvers (such as FSAI and AMG) must be constructed on the host before being transferred to the accelerator. If the initial matrix is on the host and you want to run the solver on the accelerator, then you need to move the solver to the accelerator, matrix, right-hand side, and solution vector.
 
-.. note:: 
+.. note::
 
   If you have a preconditioner associated with the solver, it is moved automatically to the accelerator when you move the solver.
 
@@ -111,11 +107,11 @@ Clear function and destructor
 
 The :cpp:func:`rocalution::Solver::Clear` function clears all the data which is in the solver, including the associated preconditioner. Thus, the solver is not anymore associated with this preconditioner.
 
-.. note:: 
+.. note::
 
   The preconditioner is not deleted (via destructor), only a :cpp:func:`rocalution::Preconditioner::Clear` is called.
 
-.. note:: 
+.. note::
 
   When the destructor of the solver class is called, it automatically calls the *Clear()* function. Be careful, when declaring your solver and preconditioner in different places - we highly recommend to manually call the *Clear()* function of the solver and not rely on the destructor of the solver.
 
@@ -127,78 +123,35 @@ Some preconditioners require two phases in the their construction: an algebraic 
 Fixed-Point iteration
 =====================
 
-.. doxygenclass:: rocalution::FixedPoint
 .. doxygenfunction:: rocalution::FixedPoint::SetRelaxation
 
 Krylov subspace solvers
 =======================
 
-CG
---
-.. doxygenclass:: rocalution::CG
-
-CR
---
-.. doxygenclass:: rocalution::CR
-
 GMRES
 -----
-.. doxygenclass:: rocalution::GMRES
 .. doxygenfunction:: rocalution::GMRES::SetBasisSize
 
 FGMRES
 ------
-.. doxygenclass:: rocalution::FGMRES
 .. doxygenfunction:: rocalution::FGMRES::SetBasisSize
-
-BiCGStab
---------
-.. doxygenclass:: rocalution::BiCGStab
 
 IDR
 ---
-.. doxygenclass:: rocalution::IDR
 .. doxygenfunction:: rocalution::IDR::SetShadowSpace
-
-FCG
----
-.. doxygenclass:: rocalution::FCG
-
-QMRCGStab
----------
-.. doxygenclass:: rocalution::QMRCGStab
 
 BiCGStab(l)
 -----------
-.. doxygenclass:: rocalution::BiCGStabl
 .. doxygenfunction:: rocalution::BiCGStabl::SetOrder
-
-Chebyshev iteration scheme
-==========================
-
-.. doxygenclass:: rocalution::Chebyshev
-
-Mixed-precision defect correction scheme
-========================================
-
-.. doxygenclass:: rocalution::MixedPrecisionDC
 
 MultiGrid solvers
 =================
 
 The library provides algebraic multigrid and a skeleton for geometric multigrid methods. The ``BaseMultigrid`` class itself doesn't construct data for the method. It contains the solution procedure for V, W and K-cycles. The AMG has two different versions for Local (non-MPI) and for Global (MPI) type of computations.
 
-.. doxygenclass:: rocalution::BaseMultiGrid
-
-Geometric multiGrid
--------------------
-
-.. doxygenclass:: rocalution::MultiGrid
-
 Algebraic multiGrid
 -------------------
 
-.. doxygenclass:: rocalution::BaseAMG
 .. doxygenfunction:: rocalution::BaseAMG::BuildHierarchy
 .. doxygenfunction:: rocalution::BaseAMG::BuildSmoothers
 .. doxygenfunction:: rocalution::BaseAMG::SetCoarsestLevel
@@ -211,38 +164,30 @@ Algebraic multiGrid
 Unsmoothed aggregation AMG
 ==========================
 
-.. doxygenclass:: rocalution::UAAMG
 .. doxygenfunction:: rocalution::UAAMG::SetCouplingStrength
 .. doxygenfunction:: rocalution::UAAMG::SetOverInterp
 
 Smoothed aggregation AMG
 ========================
 
-.. doxygenclass:: rocalution::SAAMG
 .. doxygenfunction:: rocalution::SAAMG::SetCouplingStrength
 .. doxygenfunction:: rocalution::SAAMG::SetInterpRelax
 
 Ruge-stueben AMG
 ================
 
-.. doxygenclass:: rocalution::RugeStuebenAMG
 .. doxygenfunction:: rocalution::RugeStuebenAMG::SetStrengthThreshold
 
 Pairwise AMG
 ============
 
-.. doxygenclass:: rocalution::PairwiseAMG
 .. doxygenfunction:: rocalution::PairwiseAMG::SetBeta
 .. doxygenfunction:: rocalution::PairwiseAMG::SetOrdering
 .. doxygenfunction:: rocalution::PairwiseAMG::SetCoarseningFactor
 
 Direct linear solvers
 =====================
-.. doxygenclass:: rocalution::DirectLinearSolver
-.. doxygenclass:: rocalution::LU
-.. doxygenclass:: rocalution::QR
-.. doxygenclass:: rocalution::Inversion
 
-.. note:: 
+.. note::
 
   These methods can only be used with local-type problems.
