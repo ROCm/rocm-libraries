@@ -1,6 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+from .util import check_headers, include_roots
+
+
+__all__ = ["check_headers", "include_roots", "__version__"]
+
 
 def __version__():
     import subprocess
