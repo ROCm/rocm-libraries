@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
-#include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 
 #include <stdexcept>
 

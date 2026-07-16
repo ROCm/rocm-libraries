@@ -12,16 +12,16 @@
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include <hipdnn_gpu_ref/GpuFpReferenceConvolution.hpp>
+#include <hipdnn-gpu-ref/GpuFpReferenceConvolution.hpp>
 
 #include <string>
 #include <vector>
 
 // ============================================================================
-// Shared infrastructure for forward convolution GPU-vs-CPU reference tests.
+// Shared infrastructure for weight-gradient (wgrad) GPU-vs-CPU reference tests.
 // ============================================================================
 
-namespace gpu_conv_fwd_ref_test
+namespace gpu_conv_wgrad_ref_test
 {
 
 using namespace hipdnn_data_sdk::utilities;
@@ -31,15 +31,15 @@ using namespace hipdnn_gpu_ref;
 
 using gpu_conv_ref_test::assertAllClose;
 using gpu_conv_ref_test::ConvShapeCase;
-using ConvFwdShapeCase = ConvShapeCase;
+using ConvWgradShapeCase = ConvShapeCase;
 
-// Core helper: fills tensors, runs GPU and CPU convolution, compares results.
-// Separate template params support mixed input/weight types (WDataType != XDataType).
-template <typename XDataType, typename WDataType, typename YDataType, typename ComputeDataType>
-void compareGpuVsCpuConvFwd(Tensor<XDataType>& xTensor,
-                            Tensor<WDataType>& wTensor,
-                            Tensor<YDataType>& yCpu,
-                            Tensor<YDataType>& yGpu,
+// Core helper: fills x and dy tensors, runs GPU and CPU wgrad, compares dw results.
+// For wgrad: x and dy are inputs, dw is the output (weight gradient).
+template <typename XDataType, typename DwDataType, typename DyDataType, typename ComputeDataType>
+void compareGpuVsCpuConvWrw(Tensor<XDataType>& xTensor,
+                            Tensor<DyDataType>& dyTensor,
+                            Tensor<DwDataType>& dwCpu,
+                            Tensor<DwDataType>& dwGpu,
                             const std::vector<int64_t>& strides,
                             const std::vector<int64_t>& dilations,
                             const std::vector<int64_t>& prePadding,
@@ -50,32 +50,25 @@ void compareGpuVsCpuConvFwd(Tensor<XDataType>& xTensor,
     const unsigned int seed = 42;
     xTensor.fillWithRandomValues(
         static_cast<XDataType>(-fillRange), static_cast<XDataType>(fillRange), seed);
-    wTensor.fillWithRandomValues(
-        static_cast<WDataType>(-fillRange), static_cast<WDataType>(fillRange), seed + 1);
+    dyTensor.fillWithRandomValues(
+        static_cast<DyDataType>(-fillRange), static_cast<DyDataType>(fillRange), seed + 1);
 
-    CpuFpReferenceConvolution::fprop<XDataType, WDataType, YDataType, ComputeDataType>(
-        xTensor, wTensor, yCpu, strides, dilations, prePadding, postPadding);
+    CpuFpReferenceConvolution::wgrad<XDataType, DwDataType, DyDataType, ComputeDataType>(
+        xTensor, dwCpu, dyTensor, strides, dilations, prePadding, postPadding);
 
-    GpuFpReferenceConvolution::fprop<XDataType, WDataType, YDataType, ComputeDataType>(
-        xTensor, wTensor, yGpu, strides, dilations, prePadding, postPadding);
+    GpuFpReferenceConvolution::wgrad<XDataType, DwDataType, DyDataType, ComputeDataType>(
+        xTensor, dwGpu, dyTensor, strides, dilations, prePadding, postPadding);
 
-    assertAllClose(yCpu, yGpu, tolerance);
+    assertAllClose(dwCpu, dwGpu, tolerance);
 }
 
-// --- Forward convolution helper overloads ---
-// fillRange controls the magnitude of random fill values [-fillRange, +fillRange].
-// For small output types (e.g. fp8), reduce fillRange to prevent overflow:
-// each output element accumulates cPerGroup * Kh * Kw products, so
-// max output ~ numMACs * fillRange^2. Keep numMACs * fillRange^2 < type max.
-
-// Asymmetric padding with optional layout.
-// When layout is non-null, input/output tensors use channel-last strides (e.g. NHWC, NDHWC)
-// generated via Tensor(dims, layout). Weights always use default packed (KCRS) strides.
-// When layout is null, all tensors use default packed strides (NCHW/NCDHW).
+// Convenience wrapper for uniform-type wgrad tests.
+// When layout is non-null, x and dy use channel-last strides.
+// dw (weight gradient) always uses default packed (KCRS) strides.
 template <typename DataType, typename ComputeDataType = double>
-void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
+void runGpuVsCpuConvWrw(const std::vector<int64_t>& xDims,
                         const std::vector<int64_t>& wDims,
-                        const std::vector<int64_t>& yDims,
+                        const std::vector<int64_t>& dyDims,
                         const std::vector<int64_t>& strides,
                         const std::vector<int64_t>& dilations,
                         const std::vector<int64_t>& prePadding,
@@ -85,14 +78,15 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
                         float fillRange = 1.0f)
 {
     auto xTensor = layout != nullptr ? Tensor<DataType>(xDims, *layout) : Tensor<DataType>(xDims);
-    auto wTensor = Tensor<DataType>(wDims);
-    auto yCpu = layout != nullptr ? Tensor<DataType>(yDims, *layout) : Tensor<DataType>(yDims);
-    auto yGpu = layout != nullptr ? Tensor<DataType>(yDims, *layout) : Tensor<DataType>(yDims);
+    auto dyTensor
+        = layout != nullptr ? Tensor<DataType>(dyDims, *layout) : Tensor<DataType>(dyDims);
+    auto dwCpu = Tensor<DataType>(wDims);
+    auto dwGpu = Tensor<DataType>(wDims);
 
-    compareGpuVsCpuConvFwd<DataType, DataType, DataType, ComputeDataType>(xTensor,
-                                                                          wTensor,
-                                                                          yCpu,
-                                                                          yGpu,
+    compareGpuVsCpuConvWrw<DataType, DataType, DataType, ComputeDataType>(xTensor,
+                                                                          dyTensor,
+                                                                          dwCpu,
+                                                                          dwGpu,
                                                                           strides,
                                                                           dilations,
                                                                           prePadding,
@@ -102,29 +96,30 @@ void runGpuVsCpuConvFwd(const std::vector<int64_t>& xDims,
 }
 
 // ============================================================================
-// ConvFwdShapeSuite — parameterized fixture for shape-based GPU-vs-CPU tests
+// ConvWgradShapeSuite — parameterized fixture for shape-based GPU-vs-CPU tests
 // ============================================================================
 
 template <typename DataType>
-class ConvFwdShapeSuite : public ::testing::TestWithParam<ConvFwdShapeCase>
+class ConvWgradShapeSuite : public ::testing::TestWithParam<ConvWgradShapeCase>
 {
 protected:
-    static float tolerance(const ConvFwdShapeCase& tc)
+    static float tolerance(const ConvWgradShapeCase& tc)
     {
         constexpr double FILL_RANGE = 1.0;
+        auto dyDims = tc.computeOutputDims();
         return hipdnn_test_sdk::utilities::conv::
-            calculateConvFpropTolerance<DataType, DataType, double>(
-                -FILL_RANGE, FILL_RANGE, -FILL_RANGE, FILL_RANGE, tc.wDims);
+            calculateConvWrwTolerance<DataType, DataType, double>(
+                -FILL_RANGE, FILL_RANGE, -FILL_RANGE, FILL_RANGE, dyDims);
     }
 
-    void runConvFwdShapeTest()
+    void runConvWgradShapeTest()
     {
         SKIP_IF_NO_DEVICES();
         const auto& tc = GetParam();
-        auto yDims = tc.computeOutputDims();
-        runGpuVsCpuConvFwd<DataType>(tc.xDims,
+        auto dyDims = tc.computeOutputDims();
+        runGpuVsCpuConvWrw<DataType>(tc.xDims,
                                      tc.wDims,
-                                     yDims,
+                                     dyDims,
                                      tc.strides,
                                      tc.dilations,
                                      tc.padding,
@@ -134,4 +129,4 @@ protected:
     }
 };
 
-} // namespace gpu_conv_fwd_ref_test
+} // namespace gpu_conv_wgrad_ref_test

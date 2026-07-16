@@ -12,7 +12,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-#include "harness/input_init/SynthesisConfig.hpp"
+#include "harness/input-init/SynthesisConfig.hpp"
 
 namespace hipdnn_integration_tests
 {
