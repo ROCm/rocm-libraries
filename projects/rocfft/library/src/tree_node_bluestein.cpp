@@ -86,7 +86,7 @@ BluesteinType BluesteinNode::DecideBlueType()
     if(scheme == CS_L1D_CC)
     {
         // Fused path can't represent inner-batched layouts, use non-fused there.
-        bool innerBatched = is_inner_batched(batch, inStride, iDist, outStride, oDist);
+        const bool innerBatched = is_inner_batched(batch, inStride, iDist, outStride, oDist);
 
         auto fusedBluesteinAllow = (parent || innerBatched) ? false : true;
 
@@ -154,6 +154,10 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     }
     case BT_MULTI_KERNEL_FUSED:
     {
+        // Guard against inner-batched layouts so a removed DecideBlueType check fails here, not at runtime.
+        if(is_inner_batched(batch, inStride, iDist, outStride, oDist))
+            throw std::runtime_error("fused Bluestein cannot represent inner-batched layouts");
+
         typeBlue = BluesteinType::BT_MULTI_KERNEL_FUSED;
 
         // first node: fused chirp + padding + forward fft
