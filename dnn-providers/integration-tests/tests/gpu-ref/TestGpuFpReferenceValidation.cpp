@@ -8,7 +8,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include <hipdnn_gpu_ref/GpuReferenceValidationFactory.hpp>
+#include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
 
 #include <cmath>
 #include <cstdint>

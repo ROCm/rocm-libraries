@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include <hipdnn-gpu-ref/GpuFpReferenceValidation.hpp>
+#include <hipdnn-gpu-ref/GpuIntReferenceValidation.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_gpu_ref/GpuFpReferenceValidation.hpp>
-#include <hipdnn_gpu_ref/GpuIntReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
 #include <limits>
