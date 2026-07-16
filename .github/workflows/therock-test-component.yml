@@ -161,7 +161,7 @@ jobs:
           # Direct instrumented binaries to write profraw into the container's
           # coverage-profraw dir (consumed by the report step in this same job).
           # if [[ "${{ inputs.coverage_enabled }}" == "true" ]]; then
-            export LLVM_PROFILE_FILE="${GITHUB_WORKSPACE}/coverage-profraw/${TEST_COMPONENT}-shard${{ matrix.shard }}-%p-%m.profraw"
+            # export LLVM_PROFILE_FILE="${GITHUB_WORKSPACE}/coverage-profraw/${TEST_COMPONENT}-shard${{ matrix.shard }}-%p-%m.profraw"
           # fi
 
           # Run test and capture output (still display to console)
