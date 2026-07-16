@@ -173,6 +173,8 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        const StinkyRegister& mxsb,\n";
     out << "        bool reuseA = false,\n";
     out << "        bool reuseB = false,\n";
+    out << "        const std::string& matrixAFmt = \"\",\n";
+    out << "        const std::string& matrixBFmt = \"\",\n";
     out << "        const std::string& comment = \"\")\n";
     out << "    {\n";
     out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MXMFMA);\n";
@@ -188,7 +190,8 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        // Create and set special data\n";
     out << "        auto* data = new MXMFMAData(instType, accType, mxScaleATypeStr, "
            "mxScaleBTypeStr,\n";
-    out << "                                    m, n, k, block, reuseA, reuseB);\n";
+    out << "                                    m, n, k, block, reuseA, reuseB, matrixAFmt, "
+           "matrixBFmt);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";

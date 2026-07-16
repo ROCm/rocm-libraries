@@ -659,15 +659,18 @@ NB_MODULE(_stinkytofu, m) {
            const std::string& mxScaleATypeStr, const std::string& mxScaleBTypeStr, int m, int n,
            int k, int block, const StinkyRegister& acc, const StinkyRegister& a,
            const StinkyRegister& b, const StinkyRegister& acc2, const StinkyRegister& mxsa,
-           const StinkyRegister& mxsb, bool reuseA, bool reuseB, const std::string& comment) {
+           const StinkyRegister& mxsb, bool reuseA, bool reuseB, const std::string& matrixAFmt,
+           const std::string& matrixBFmt, const std::string& comment) {
             return makeLogicalInstructionShared(MXMFMA(instType, accType, mxScaleATypeStr,
                                                        mxScaleBTypeStr, m, n, k, block, acc, a, b,
-                                                       acc2, mxsa, mxsb, reuseA, reuseB, comment));
+                                                       acc2, mxsa, mxsb, reuseA, reuseB, matrixAFmt,
+                                                       matrixBFmt, comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("mxScaleATypeStr"),
         nb::arg("mxScaleBTypeStr"), nb::arg("m"), nb::arg("n"), nb::arg("k"), nb::arg("block"),
         nb::arg("acc"), nb::arg("a"), nb::arg("b"), nb::arg("acc2"), nb::arg("mxsa"),
         nb::arg("mxsb"), nb::arg("reuseA") = false, nb::arg("reuseB") = false,
+        nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "",
         nb::arg("comment") = "", "Create an MXMFMA instruction");
 
     // SMFMA - Sparse Matrix Fused Multiply-Add

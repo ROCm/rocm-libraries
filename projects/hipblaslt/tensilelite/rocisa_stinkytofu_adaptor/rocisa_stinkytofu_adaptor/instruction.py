@@ -4243,6 +4243,13 @@ def _wmma_type_convert(it: Any, m: int, n: int, k: int, has_wmma_v3: bool) -> st
         return "f8f6f4" if k >= f8f6f4_k else "bf8_fp8"
     if it == InstType.INST_F4:
         return "f8f6f4" if (m < f4_t and n < f4_t) else "f4"
+    # rocisa MFMAInstruction::typeConvert maps the 8-bit integer inputs to the
+    # unified "iu8" WMMA suffix (I8 stays "i8"); the generic table would emit
+    # "u8", which has no gfx1250 ISA opcode (e.g. v_wmma_i32_16x16x64_iu8).
+    if it == InstType.INST_U8:
+        return "iu8"
+    if it == InstType.INST_I8:
+        return "i8"
     return _inst_type_to_str(it)
 
 
@@ -4372,7 +4379,7 @@ class MXMFMAInstruction(Instruction):
     """``v_wmma_scale_*`` / ``v_mfma_scale_*`` shim (rocisa ``MXMFMAInstruction``)."""
 
     __slots__ = ("accType", "mxScaleAType", "mxScaleBType", "variant",
-                 "acc", "a", "b", "acc2", "mxsa", "mxsb", "vop3", "mxCBSZ")
+                 "acc", "a", "b", "acc2", "mxsa", "mxsb", "vop3", "mxCBSZ", "block")
 
     def __init__(self, *, instType: Any = None, accType: Any = None,
                  variant: Any = None, acc: Any = None,
@@ -4380,7 +4387,7 @@ class MXMFMAInstruction(Instruction):
                  acc2: Any = None, mxsa: Any = None, mxsb: Any = None,
                  vop3: Any = None,
                  mxScaleAType: Any = None, mxScaleBType: Any = None,
-                 mxCBSZ: int = 0,
+                 mxCBSZ: int = 0, block: int = 32,
                  comment: str = "", **kw):
         _ = kw
         super().__init__(instType, comment)
@@ -4396,25 +4403,43 @@ class MXMFMAInstruction(Instruction):
         self.mxsb = mxsb
         self.vop3 = vop3
         self.mxCBSZ = mxCBSZ
+        # MX scale block size (16 or 32); selects v_wmma_scale vs v_wmma_scale16.
+        # rocisa passes this via `block=max(MXBlockA, MXBlockB)`. It is distinct
+        # from variant[3] (the MI blocks count, typically 1).
+        self.block = block
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
+        from .base import getAsmCaps
         m = self.variant[0] if len(self.variant) > 0 else 0
         n = self.variant[1] if len(self.variant) > 1 else 0
         k = self.variant[2] if len(self.variant) > 2 else 0
-        blocks = self.variant[3] if len(self.variant) > 3 else 1
+        # rocisa MXMFMAInstruction::typeConvert derives the v_wmma_scale suffix
+        # purely from the tile dims (fixed 32 threshold), NOT from the input
+        # datatype: 16x16 -> "f8f6f4", 32x16 -> "f4". Passing the raw input
+        # abbreviation (e.g. "f4") emits v_wmma_scale_f32_16x16x128_f4, which has
+        # no gfx1250 ISA opcode (only the _f8f6f4 form exists for 16x16).
+        mx_type_str = "f8f6f4" if (m < 32 and n < 32) else "f4"
+        # rocisa MXMFMAInstruction::wmmaInputPermuteStr: the f8f6f4-family scaled
+        # WMMA needs per-matrix input formats (matrix_a_fmt:MATRIX_FMT_FP4 ...);
+        # without them the assembler assumes FP8 and rejects the FP4 tuple size.
+        has_wmma_v3 = bool(getAsmCaps().get("HasWMMA_V3", 0))
+        matrix_a_fmt, matrix_b_fmt = _wmma_matrix_fmts(
+            self.instType, m, n, k, has_wmma_v3)
         return _st.MXMFMA(
-            _inst_type_to_str(self.instType),
+            mx_type_str,
             _inst_type_to_str(self.accType),
             _inst_type_to_str(self.mxScaleAType) if self.mxScaleAType else "f32",
             _inst_type_to_str(self.mxScaleBType) if self.mxScaleBType else "f32",
-            m, n, k, blocks,
+            m, n, k, self.block,
             _to_stinky_register(self.acc),
             _to_stinky_register(self.a),
             _to_stinky_register(self.b),
             _to_stinky_register(self.acc2) if self.acc2 else None,
             _to_stinky_register(self.mxsa) if self.mxsa else None,
             _to_stinky_register(self.mxsb) if self.mxsb else None,
+            matrixAFmt=matrix_a_fmt,
+            matrixBFmt=matrix_b_fmt,
             comment=self.comment)
 
     def getParams(self):
@@ -4450,6 +4475,7 @@ class MXMFMAInstruction(Instruction):
         clone.mxsb = _deepcopy(self.mxsb, memo) if self.mxsb is not None else None
         clone.vop3 = self.vop3
         clone.mxCBSZ = self.mxCBSZ
+        clone.block = self.block
         return clone
 
 

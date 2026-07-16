@@ -309,6 +309,30 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             if (data) {
                 mod.reuseA = data->reuseA;
                 mod.reuseB = data->reuseB;
+                // gfx1250 f8f6f4-family scaled WMMA carries per-matrix input
+                // formats (matrix_a_fmt:MATRIX_FMT_FP4 ...) and per-matrix scale
+                // numeric formats (matrix_a_scale_fmt:N). Without the input format
+                // the assembler assumes FP8 and rejects the FP4 register tuple
+                // size; without the scale format the hardware misinterprets the
+                // MX scale operands and produces numerically wrong results.
+                // rocisa MXMFMAInstruction maps the scale datatype: f8 -> E4M3(2),
+                // e5m3 -> E5M3(1), e8/other -> no modifier.
+                auto scaleFmtFromStr = [](const std::string& s) {
+                    if (s == "fp8" || s == "f8") return MatrixScaleFmt::E4M3;
+                    if (s == "e5m3") return MatrixScaleFmt::E5M3;
+                    return MatrixScaleFmt::NONE;
+                };
+                MatrixScaleFmt scaleFmtA = scaleFmtFromStr(data->mxScaleATypeStr);
+                MatrixScaleFmt scaleFmtB = scaleFmtFromStr(data->mxScaleBTypeStr);
+                if (!data->matrixAFmt.empty() || !data->matrixBFmt.empty() ||
+                    scaleFmtA != MatrixScaleFmt::NONE || scaleFmtB != MatrixScaleFmt::NONE) {
+                    MatrixFmtModifiers fmts;
+                    if (!data->matrixAFmt.empty()) fmts.fmtA = parseMatrixFmt(data->matrixAFmt);
+                    if (!data->matrixBFmt.empty()) fmts.fmtB = parseMatrixFmt(data->matrixBFmt);
+                    fmts.scaleFmtA = scaleFmtA;
+                    fmts.scaleFmtB = scaleFmtB;
+                    asmInst->addModifier<MatrixFmtModifiers>(fmts);
+                }
             }
         }
         asmInst->addModifier<MFMAModifiers>(mod);

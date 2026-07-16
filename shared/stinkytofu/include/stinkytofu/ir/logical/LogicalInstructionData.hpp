@@ -93,10 +93,13 @@ struct MXMFMAData {
     int block;                    ///< Block size
     bool reuseA;                  ///< Matrix A reuse flag
     bool reuseB;                  ///< Matrix B reuse flag
+    std::string matrixAFmt;       ///< Per-matrix input format for A (e.g. MATRIX_FMT_FP4)
+    std::string matrixBFmt;       ///< Per-matrix input format for B (e.g. MATRIX_FMT_FP4)
 
     MXMFMAData(const std::string& instType_, const std::string& accType_,
                const std::string& mxScaleATypeStr_, const std::string& mxScaleBTypeStr_, int m_,
-               int n_, int k_, int block_, bool reuseA_, bool reuseB_)
+               int n_, int k_, int block_, bool reuseA_, bool reuseB_,
+               const std::string& matrixAFmt_ = "", const std::string& matrixBFmt_ = "")
         : instType(instType_),
           accType(accType_),
           mxScaleATypeStr(mxScaleATypeStr_),
@@ -106,7 +109,9 @@ struct MXMFMAData {
           k(k_),
           block(block_),
           reuseA(reuseA_),
-          reuseB(reuseB_) {}
+          reuseB(reuseB_),
+          matrixAFmt(matrixAFmt_),
+          matrixBFmt(matrixBFmt_) {}
 };
 
 /**
