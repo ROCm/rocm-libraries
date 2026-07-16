@@ -157,23 +157,22 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle             handle,
-                                           rocsparse_operation          trans_A,
-                                           rocsparse_csrmm_alg          alg,
-                                           int64_t                      m,
-                                           int64_t                      n,
-                                           int64_t                      k,
-                                           int64_t                      nnz,
-                                           const rocsparse_mat_descr    descr,
-                                           rocsparse_datatype           csc_val_datatype,
-                                           const void*                  csc_val,
-                                           rocsparse_indextype          csc_col_ptr_indextype,
-                                           const void*                  csc_col_ptr,
-                                           rocsparse_indextype          csc_row_ind_indextype,
-                                           const void*                  csc_row_ind,
-                                           bool                         is_batched,
-                                           rocsparse::line_nnz_profile* profile,
-                                           void*                        temp_buffer)
+rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle          handle,
+                                           rocsparse_operation       trans_A,
+                                           rocsparse_csrmm_alg       alg,
+                                           int64_t                   m,
+                                           int64_t                   n,
+                                           int64_t                   k,
+                                           int64_t                   nnz,
+                                           const rocsparse_mat_descr descr,
+                                           rocsparse_datatype        csc_val_datatype,
+                                           const void*               csc_val,
+                                           rocsparse_indextype       csc_col_ptr_indextype,
+                                           const void*               csc_col_ptr,
+                                           rocsparse_indextype       csc_row_ind_indextype,
+                                           const void*               csc_row_ind,
+                                           const rocsparse::spmm_default_alg_info* alg_info,
+                                           void*                                   temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -182,15 +181,19 @@ rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle             handle,
     // non-transposed csrmm path. Build the profile from the column-pointer array
     // (length k+1, acting as the effective CSR row pointer) and select with the
     // flipped operation, mirroring the CSR analysis stage.
-    if(alg == rocsparse_csrmm_alg_default && profile != nullptr)
+    if(alg == rocsparse_csrmm_alg_default && alg_info != nullptr && alg_info->profile != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::compute_line_nnz_profile(
-            handle, csc_col_ptr_indextype, k, nnz, csc_col_ptr, *profile));
+            handle, csc_col_ptr_indextype, k, nnz, csc_col_ptr, *alg_info->profile));
         const rocsparse_operation effective_trans_A = (trans_A == rocsparse_operation_none)
                                                           ? rocsparse_operation_transpose
                                                           : rocsparse_operation_none;
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_select_default_alg(
-            effective_trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmm_select_default_alg(effective_trans_A,
+                                                alg_info->is_batched,
+                                                handle->properties.multiProcessorCount,
+                                                *alg_info->profile,
+                                                alg));
     }
 
     rocsparse::cscmm_analysis_t f;

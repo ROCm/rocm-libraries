@@ -50,6 +50,18 @@ namespace rocsparse
         int64_t max{}; // longest line length
     };
 
+    // Inputs the default-algorithm SpMM auto-selection needs, bundled into one
+    // object so they can be threaded through the csrmm/cscmm analysis and compute
+    // entry points without spelling them out in every signature. Passing a null
+    // pointer (or a null \ref profile) opts out of auto-selection, leaving the
+    // explicit or historical default algorithm in place. Future selection inputs
+    // can be added here without touching those signatures.
+    struct spmm_default_alg_info
+    {
+        line_nnz_profile* profile{}; // structural line-length profile (filled at analysis)
+        bool              is_batched{}; // whether the multiply is batched
+    };
+
     // Computes \p profile from an \p offsets array of length (nlines + 1) using a
     // two-pass, atomic-free reduction followed by one device->host copy. The copy
     // is a synchronizing operation that is illegal while the stream is captured

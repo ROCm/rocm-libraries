@@ -491,16 +491,16 @@ void testing_spmm_csc_extra(const Arguments& arg)
     // every matrix and B entry equal to one (alpha = 1, beta = 0), C[i, j] is
     // exactly the number of non-zeros in column i, an integer represented
     // exactly in double.
-    auto run_spmm = [&](const std::vector<int32_t>& hcol_ptr,
-                        const std::vector<int32_t>& hrow_ind,
+    auto run_spmm = [&](const host_vector<int32_t>& hcol_ptr,
+                        const host_vector<int32_t>& hrow_ind,
                         int32_t                     rows,
                         rocsparse_spmm_alg          alg,
-                        std::vector<double>&        hC) {
+                        host_vector<double>&        hC) {
         const int32_t cols = static_cast<int32_t>(hcol_ptr.size()) - 1;
         const int64_t nnz  = static_cast<int64_t>(hrow_ind.size());
 
-        const std::vector<double> hval(nnz, 1.0);
-        const std::vector<double> hB(int64_t(rows) * n, 1.0);
+        const host_vector<double> hval(nnz, 1.0);
+        const host_vector<double> hB(int64_t(rows) * n, 1.0);
 
         device_vector<int32_t> dcol_ptr(cols + 1);
         device_vector<int32_t> drow_ind(nnz);
@@ -587,13 +587,13 @@ void testing_spmm_csc_extra(const Arguments& arg)
 
     // For one structure, check that the default reproduces the analytic product
     // and matches both explicit load-balanced kernels.
-    auto check_structure = [&](const std::vector<int32_t>& hcol_ptr,
-                               const std::vector<int32_t>& hrow_ind,
+    auto check_structure = [&](const host_vector<int32_t>& hcol_ptr,
+                               const host_vector<int32_t>& hrow_ind,
                                int32_t                     rows) {
         const int32_t cols = static_cast<int32_t>(hcol_ptr.size()) - 1;
 
         // Analytic reference C[i, j] = non-zeros in column i (column-major, ld = cols).
-        std::vector<double> hC_ref(int64_t(cols) * n);
+        host_vector<double> hC_ref(int64_t(cols) * n);
         for(int32_t j = 0; j < n; ++j)
         {
             for(int32_t i = 0; i < cols; ++i)
@@ -602,7 +602,7 @@ void testing_spmm_csc_extra(const Arguments& arg)
             }
         }
 
-        std::vector<double> hC_default, hC_row, hC_nnz;
+        host_vector<double> hC_default, hC_row, hC_nnz;
         run_spmm(hcol_ptr, hrow_ind, rows, rocsparse_spmm_alg_default, hC_default);
         run_spmm(hcol_ptr, hrow_ind, rows, rocsparse_spmm_alg_csr_row_split, hC_row);
         run_spmm(hcol_ptr, hrow_ind, rows, rocsparse_spmm_alg_csr_nnz_split, hC_nnz);
@@ -621,8 +621,8 @@ void testing_spmm_csc_extra(const Arguments& arg)
         const int32_t cols    = 8;
         const int32_t rows    = hub_nnz;
 
-        std::vector<int32_t> hcol_ptr(cols + 1, 0);
-        std::vector<int32_t> hrow_ind;
+        host_vector<int32_t> hcol_ptr(cols + 1, 0);
+        host_vector<int32_t> hrow_ind;
         hrow_ind.reserve(hub_nnz + (cols - 1));
 
         for(int32_t r = 0; r < hub_nnz; ++r)
@@ -648,8 +648,8 @@ void testing_spmm_csc_extra(const Arguments& arg)
         const int32_t cols    = 100000;
         const int32_t rows    = col_nnz;
 
-        std::vector<int32_t> hcol_ptr(cols + 1, 0);
-        std::vector<int32_t> hrow_ind;
+        host_vector<int32_t> hcol_ptr(cols + 1, 0);
+        host_vector<int32_t> hrow_ind;
         hrow_ind.reserve(int64_t(cols) * col_nnz);
 
         for(int32_t c = 0; c < cols; ++c)

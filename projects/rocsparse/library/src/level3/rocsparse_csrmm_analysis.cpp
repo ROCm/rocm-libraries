@@ -157,23 +157,22 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle             handle,
-                                           rocsparse_operation          trans_A,
-                                           rocsparse_csrmm_alg          alg,
-                                           int64_t                      m,
-                                           int64_t                      n,
-                                           int64_t                      k,
-                                           int64_t                      nnz,
-                                           const rocsparse_mat_descr    descr,
-                                           rocsparse_datatype           csr_val_datatype,
-                                           const void*                  csr_val,
-                                           rocsparse_indextype          csr_row_ptr_indextype,
-                                           const void*                  csr_row_ptr,
-                                           rocsparse_indextype          csr_col_ind_indextype,
-                                           const void*                  csr_col_ind,
-                                           bool                         is_batched,
-                                           rocsparse::line_nnz_profile* profile,
-                                           void*                        temp_buffer)
+rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle          handle,
+                                           rocsparse_operation       trans_A,
+                                           rocsparse_csrmm_alg       alg,
+                                           int64_t                   m,
+                                           int64_t                   n,
+                                           int64_t                   k,
+                                           int64_t                   nnz,
+                                           const rocsparse_mat_descr descr,
+                                           rocsparse_datatype        csr_val_datatype,
+                                           const void*               csr_val,
+                                           rocsparse_indextype       csr_row_ptr_indextype,
+                                           const void*               csr_row_ptr,
+                                           rocsparse_indextype       csr_col_ind_indextype,
+                                           const void*               csr_col_ind,
+                                           const rocsparse::spmm_default_alg_info* alg_info,
+                                           void*                                   temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -181,12 +180,16 @@ rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle             handle,
     // structural profile is the only expensive input; it is computed here, on the
     // non-capturing analysis stage (a device reduction + a synchronizing copy),
     // and cached so the compute stage can re-run the pure selector launch-free.
-    if(alg == rocsparse_csrmm_alg_default && profile != nullptr)
+    if(alg == rocsparse_csrmm_alg_default && alg_info != nullptr && alg_info->profile != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::compute_line_nnz_profile(
-            handle, csr_row_ptr_indextype, m, nnz, csr_row_ptr, *profile));
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_select_default_alg(
-            trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg));
+            handle, csr_row_ptr_indextype, m, nnz, csr_row_ptr, *alg_info->profile));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmm_select_default_alg(trans_A,
+                                                alg_info->is_batched,
+                                                handle->properties.multiProcessorCount,
+                                                *alg_info->profile,
+                                                alg));
     }
 
     rocsparse::csrmm_analysis_t f;

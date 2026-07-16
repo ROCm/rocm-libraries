@@ -296,8 +296,8 @@ namespace rocsparse
             // cached profile without launching a kernel. The profile is owned by
             // the spmat descriptor and passed in by pointer so the reduction runs
             // once, on the non-capturing analysis stage.
-            const bool is_batched
-                = (mat_A->batch_count > 1) || (mat_B->batch_count > 1) || (mat_C->batch_count > 1);
+            const rocsparse::spmm_default_alg_info alg_info{
+                &mat_A->line_profile, rocsparse::spmm_is_batched(mat_C->batch_count)};
 
             switch(stage)
             {
@@ -337,8 +337,7 @@ namespace rocsparse
                                                                     mat_A->const_row_data,
                                                                     mat_A->col_type,
                                                                     mat_A->const_col_data,
-                                                                    is_batched,
-                                                                    &mat_A->line_profile,
+                                                                    &alg_info,
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
@@ -370,8 +369,7 @@ namespace rocsparse
                                                                         mat_A->const_row_data,
                                                                         mat_A->col_type,
                                                                         mat_A->const_col_data,
-                                                                        is_batched,
-                                                                        &mat_A->line_profile,
+                                                                        &alg_info,
                                                                         temp_buffer));
                 }
 
@@ -409,7 +407,7 @@ namespace rocsparse
                                                            mat_C->batch_count,
                                                            mat_C->batch_stride,
                                                            mat_C->order,
-                                                           &mat_A->line_profile,
+                                                           &alg_info,
                                                            temp_buffer,
                                                            false));
                 return rocsparse_status_success;
@@ -432,8 +430,8 @@ namespace rocsparse
             // column-pointer array, and gates the upgrade on the effective csrmm
             // operation. The profile is owned by the spmat descriptor and passed
             // in by pointer.
-            const bool is_batched
-                = (mat_A->batch_count > 1) || (mat_B->batch_count > 1) || (mat_C->batch_count > 1);
+            const rocsparse::spmm_default_alg_info alg_info{
+                &mat_A->line_profile, rocsparse::spmm_is_batched(mat_C->batch_count)};
 
             switch(stage)
             {
@@ -473,8 +471,7 @@ namespace rocsparse
                                                                     mat_A->const_col_data,
                                                                     mat_A->row_type,
                                                                     mat_A->const_row_data,
-                                                                    is_batched,
-                                                                    &mat_A->line_profile,
+                                                                    &alg_info,
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
@@ -500,8 +497,7 @@ namespace rocsparse
                                                                         mat_A->const_col_data,
                                                                         mat_A->row_type,
                                                                         mat_A->const_row_data,
-                                                                        is_batched,
-                                                                        &mat_A->line_profile,
+                                                                        &alg_info,
                                                                         temp_buffer));
                 }
 
@@ -539,7 +535,7 @@ namespace rocsparse
                                                            mat_C->batch_count,
                                                            mat_C->batch_stride,
                                                            mat_C->order,
-                                                           &mat_A->line_profile,
+                                                           &alg_info,
                                                            temp_buffer));
                 return rocsparse_status_success;
             }
