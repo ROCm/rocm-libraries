@@ -48,12 +48,6 @@ std::string deviceArch(hipStream_t stream)
     return arch;
 }
 
-int deviceFromStream(hipStream_t stream)
-{
-    int device = 0;
-    return (hipStreamGetDevice(stream, &device) == hipSuccess) ? device : 0;
-}
-
 // Emit a selection-failure warning without letting the log path throw.
 void logSelectionFailure(const char* reason) noexcept
 {
@@ -78,24 +72,23 @@ RockeClientDispatcher::RockeClientDispatcher(AotCatalog catalog)
 {
 }
 
-// ---- Private: per-device catalog -------------------------------------------
+// ---- Private: per-arch catalog ---------------------------------------------
 
-const AotCatalog& RockeClientDispatcher::catalogForDevice(int deviceId,
-                                                          const std::string& arch) const
+const AotCatalog& RockeClientDispatcher::catalogForArch(const std::string& arch) const
 {
     const std::lock_guard<std::mutex> lock(_catalogMutex);
 
-    // Fast path: already loaded (or found absent) for this device.
-    auto it = _catalogsByDevice.find(deviceId);
-    if(it != _catalogsByDevice.end())
+    // Fast path: already loaded (or found absent) for this arch.
+    auto it = _catalogsByArch.find(arch);
+    if(it != _catalogsByArch.end())
     {
         return it->second;
     }
 
-    // First access for this device: load (or use injected catalog).
+    // First access for this arch: load (or use injected catalog).
     // try_emplace inserts a default AotCatalog{} first so the map entry is
     // stable before we populate it; subsequent calls return immediately above.
-    const auto emplaceResult = _catalogsByDevice.try_emplace(deviceId);
+    const auto emplaceResult = _catalogsByArch.try_emplace(arch);
     auto& newIt = emplaceResult.first;
     if(_injectedCatalog.has_value())
     {
@@ -137,17 +130,17 @@ std::optional<AotInstance> RockeClientDispatcher::selectFromCatalog(const AotCat
 
 std::optional<AotInstance> RockeClientDispatcher::select(const SdpaProblem& problem) const
 {
-    // Uses device 0's catalog keyed on problem.arch.
+    // Uses the catalog keyed on problem.arch.
     // This is the test seam: unit tests inject a catalog via the ctor; the
-    // injected catalog is returned for any (0, arch) query without HIP calls.
-    return selectFromCatalog(catalogForDevice(0, problem.arch), problem);
+    // injected catalog is returned for any arch query without HIP calls.
+    return selectFromCatalog(catalogForArch(problem.arch), problem);
 }
 
 std::optional<AotInstance>
     RockeClientDispatcher::selectForArch(const std::string& arch,
                                          const fb::IGraph& graph) const noexcept
 {
-    // Test seam: bypasses HIP stream device detection. Uses device 0's catalog.
+    // Test seam: bypasses HIP stream device detection.
     try
     {
         std::optional<SdpaProblem> problem = translate(graph);
@@ -156,7 +149,7 @@ std::optional<AotInstance>
             return std::nullopt;
         }
         problem->arch = arch;
-        return selectFromCatalog(catalogForDevice(0, arch), *problem);
+        return selectFromCatalog(catalogForArch(arch), *problem);
     }
     catch(const std::exception& e)
     {
@@ -174,14 +167,13 @@ std::optional<AotInstance>
     RockeClientDispatcher::selectInstance(const RockeClientHandle& handle,
                                           const fb::IGraph& graph) const noexcept
 {
-    // deviceArch and deviceFromStream build strings/call HIP; guard both so
-    // nothing escapes this noexcept function (selectForArch is itself noexcept,
-    // but the device resolution preceding it is not).
+    // deviceArch builds a string / calls HIP; guard it so nothing escapes this
+    // noexcept function (selectForArch is itself noexcept, but the device arch
+    // resolution preceding it is not).
     try
     {
         hipStream_t stream = handle.getStream();
         const std::string arch = deviceArch(stream);
-        const int deviceId = deviceFromStream(stream);
 
         std::optional<SdpaProblem> problem = translate(graph);
         if(!problem.has_value())
@@ -190,7 +182,7 @@ std::optional<AotInstance>
         }
         problem->arch = arch;
 
-        return selectFromCatalog(catalogForDevice(deviceId, arch), *problem);
+        return selectFromCatalog(catalogForArch(arch), *problem);
     }
     catch(...)
     {

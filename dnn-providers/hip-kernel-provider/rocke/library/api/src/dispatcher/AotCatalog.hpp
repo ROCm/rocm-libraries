@@ -17,9 +17,9 @@ namespace rocke_client::dispatcher
 // AotCatalog: the set of AOT-built kernel instances the dispatcher selects from.
 //
 // Constructed empty (default) or from explicit instances (test injection).
-// Production catalogs are populated lazily per device by loadForDevice(), called
-// from RockeClientDispatcher::catalogForDevice() on the first selection for that
-// device: it resolves the per-arch bundle installed beside the plugin, parses
+// Production catalogs are populated lazily per arch by loadForDevice(), called
+// from RockeClientDispatcher::catalogForArch() on the first selection for that
+// arch: it resolves the per-arch bundle installed beside the plugin, parses
 // its manifest into AotInstances, and returns them for selection. The kpack
 // HSACO is NOT loaded here -- the winning instance's module load is deferred to
 // plan construction (RockeClientPlan), so an unselected bundle costs nothing but
@@ -36,7 +36,7 @@ public:
 
     // Resolve and parse the AOT catalog for the given HIP device arch.
     //
-    // Reachable from the noexcept selectInstance path (via catalogForDevice), so
+    // Reachable from the noexcept selectInstance path (via catalogForArch), so
     // it MUST NOT THROW: every failure is a WARN/ERROR log and yields an empty
     // catalog. It resolves the plugin directory, locates the per-arch bundle
     // manifest (aotManifestPath), and parses its entries into AotInstances.
