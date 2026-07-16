@@ -32,8 +32,8 @@ Tests:
   function: dense_to_sparse_bell_no_set_pointers
   indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [325]
-  N: [217]
+  M: [384]
+  N: [192]
   block_dim: [2, 3, 4, 8]
   orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
@@ -44,8 +44,8 @@ Tests:
   function: dense_to_sparse_bell_no_set_pointers
   indextype: *i64
   precision: *single_double_precisions_complex_real
-  M: [512]
-  N: [428]
+  M: [560]
+  N: [560]
   block_dim: [5, 7, 16]
   orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
@@ -57,8 +57,8 @@ Tests:
   function: dense_to_sparse_bell_no_set_pointers
   indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [1287]
-  N: [943]
+  M: [1664]
+  N: [1664]
   block_dim: [4, 13, 32]
   orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
