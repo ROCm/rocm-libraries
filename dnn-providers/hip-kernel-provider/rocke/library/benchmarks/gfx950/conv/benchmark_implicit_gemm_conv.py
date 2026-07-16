@@ -176,12 +176,6 @@ def parse_miopen_cmd(cmd: str):
 
     miopen_args, _ = sub.parse_known_args(tokens[driver_idx + 1 :])
 
-    if miopen_args.groups != 1:
-        raise ValueError(
-            f"groups={miopen_args.groups} > 1 is not supported by this benchmark "
-            f"(only G=1 implicit-GEMM conv is implemented)"
-        )
-
     layout = miopen_args.in_layout.upper()
     if layout not in ("NHWC", "NWC"):
         raise ValueError(
@@ -204,6 +198,7 @@ def parse_miopen_cmd(cmd: str):
         pW=miopen_args.pW,
         dH=miopen_args.dH,
         dW=miopen_args.dW,
+        groups=miopen_args.groups,
     )
     return problem, dtype
 
@@ -287,6 +282,13 @@ def main() -> int:
     conv.add_argument("--dD", type=int, default=None, help="depth dilation (3-D only)")
     conv.add_argument("--dH", type=int, default=1, help="vertical dilation")
     conv.add_argument("--dW", type=int, default=1, help="horizontal dilation")
+    conv.add_argument(
+        "--groups",
+        "-g",
+        type=int,
+        default=1,
+        help="number of conv groups; C and K must each be divisible by groups (default: 1)",
+    )
 
     args = parser.parse_args()
 
@@ -314,8 +316,8 @@ def main() -> int:
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    def _u8(arr):
-        return (ctypes.c_uint8 * arr.nbytes).from_buffer(arr)
+    def _u8(t):
+        return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
     arch = args.arch
     target = ArchTarget.from_gfx(arch)
@@ -358,6 +360,7 @@ def main() -> int:
             dD=args.dD,
             dH=args.dH,
             dW=args.dW,
+            groups=args.groups,
         )
         cases = [(problem, args.dtype)]
 
@@ -411,33 +414,31 @@ def _run_sweep(
     LaunchConfig,
     u8,
 ) -> int:
-    import numpy as np
+    import torch
     from rocke.helpers.manifest import conv_args_signature
 
     _u8 = u8
 
     p = problem
 
-    from rocke.helpers.manifest import conv_args_signature
-    import numpy as np
-
-    np.random.seed(42)
-    _np_dtype = (
-        np.uint16
-        if dtype == "bf16"
-        else (np.float32 if dtype == "fp32" else np.float16)
-    )
-    _A_f32 = np.random.uniform(-1.0, 1.0, (p.N, p.Hi, p.Wi, p.C)).astype(np.float32)
-    _B_f32 = np.random.uniform(-1.0, 1.0, (p.K, p.Y, p.X, p.C)).astype(np.float32)
-    if dtype == "bf16":
-        A_np = (_A_f32.view(np.uint32) >> 16).astype(np.uint16)
-        B_np = (_B_f32.view(np.uint32) >> 16).astype(np.uint16)
+    _torch_dtype = {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[dtype]
+    torch.manual_seed(42)
+    if p.is_3d:
+        _A_f32 = torch.empty(p.N, p.Di, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
+        _B_f32 = torch.empty(p.K, p.Z, p.Y, p.X, p.C).uniform_(-1.0, 1.0)
+        D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
-        A_np = _A_f32.astype(_np_dtype)
-        B_np = _B_f32.astype(_np_dtype)
-    D_np = np.empty((p.N, p.Ho, p.Wo, p.K), dtype=_np_dtype)
+        _A_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
+        _B_f32 = torch.empty(p.K, p.Y, p.X, p.C).uniform_(-1.0, 1.0)
+        D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
+    A_t = _A_f32.to(_torch_dtype)
+    B_t = _B_f32.to(_torch_dtype)
 
-    bytes_xfer = float(A_np.nbytes + B_np.nbytes + D_np.nbytes)
+    bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
     vec_a, vec_b, vec_c = _get_vector_sizes(args.C, args.K, dtype)
@@ -467,14 +468,22 @@ def _run_sweep(
     n_skipped = 0
 
     # Upload inputs once; reuse across all kernels.
-    A_dev = rt.alloc(A_np.nbytes)
-    B_dev = rt.alloc(B_np.nbytes)
-    D_dev = rt.alloc(D_np.nbytes)
-    rt.memcpy_h2d(A_dev, _u8(A_np), A_np.nbytes)
-    rt.memcpy_h2d(B_dev, _u8(B_np), B_np.nbytes)
-    rt.memset(D_dev, 0, D_np.nbytes)
+    A_dev = rt.alloc(A_t.nbytes)
+    B_dev = rt.alloc(B_t.nbytes)
+    D_dev = rt.alloc(D_t.nbytes)
+    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
+    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+    rt.memset(D_dev, 0, D_t.nbytes)
 
-    verified_once = False
+    # Compute reference output once before the sweep (only when --verify).
+    ref_out: torch.Tensor | None = None
+    if args.verify:
+        from conv_reference import conv_reference
+
+        ref_out = conv_reference(_A_f32, _B_f32, p)
+        print(
+            f"Reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).", flush=True
+        )
 
     for (
         tile_m,
@@ -513,6 +522,7 @@ def _run_sweep(
             warp_tile_k=warp_tile_k,
             pipeline=pipeline,
             epilogue=epilogue,
+            groups=p.groups,
             vector_size_a=vec_a,
             vector_size_b=vec_b,
             vector_size_c=vec_c,
@@ -545,38 +555,21 @@ def _run_sweep(
             "A": A_dev,
             "B": B_dev,
             "D": D_dev,
-            "A_bytes": A_np.nbytes,
-            "B_bytes": B_np.nbytes,
-            "D_bytes": D_np.nbytes,
+            "A_bytes": A_t.nbytes,
+            "B_bytes": B_t.nbytes,
+            "D_bytes": D_t.nbytes,
         }
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
-        # Optional single-kernel verify before sweep timing.
-        if args.verify and not verified_once:
+        # Verify every kernel against the pre-computed reference (when --verify).
+        if args.verify:
             launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
-            D_out = np.empty_like(D_np)
-            rt.memcpy_d2h(_u8(D_out), D_dev, D_np.nbytes)
-            # Simple numpy reference (2D only for verify path).
-            if not p.is_3d:
-                A_f32 = A_np.astype(np.float32)
-                B_f32 = B_np.astype(np.float32)
-                Ap = np.pad(A_f32, ((0, 0), (p.pH, p.pH), (p.pW, p.pW), (0, 0)))
-                ref = np.zeros_like(D_np, dtype=np.float32)
-                for y in range(p.Y):
-                    for x in range(p.X):
-                        inp = Ap[
-                            :,
-                            y * p.dH : y * p.dH + p.Ho * p.sH : p.sH,
-                            x * p.dW : x * p.dW + p.Wo * p.sW : p.sW,
-                            :,
-                        ]
-                        ref += np.einsum(
-                            "nhwc,kc->nhwk", inp, B_f32[:, y, x, :], optimize=True
-                        )
-                err = float(np.abs(D_out.astype(np.float32) - ref).max())
-                status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
-                print(f"  verify {artifact.kernel_name}: {status}", flush=True)
-            verified_once = True
+            D_out = torch.empty_like(D_t)
+            rt.memcpy_d2h(_u8(D_out), D_dev, D_t.nbytes)
+            err = float(D_out.float().cuda().sub(ref_out).abs().max())
+            status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
+            print(f"  verify {artifact.kernel_name}: {status}", flush=True)
+            rt.memset(D_dev, 0, D_t.nbytes)
 
         ms = time_launches(
             lambda: launcher(values, config=cfg),
