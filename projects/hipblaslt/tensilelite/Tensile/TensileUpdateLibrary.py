@@ -40,12 +40,13 @@ import sys
 
 def UpdateLogic(filename, logicPath, outputPath):
     libYaml = LibraryIO.readYAML(filename)
+    isDictFormat = isinstance(libYaml, dict)
     # parseLibraryLogicData mutates the original data, so make a copy
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), filename)
     (_, _, problemType, solutions, _, _, _) = fields
 
     # problem type object to state
-    problemTypeState = problemType.state
+    problemTypeState = copy.deepcopy(problemType.state)
     problemTypeState["DataType"] = problemTypeState["DataType"].value
     problemTypeState["MacDataTypeA"] = problemTypeState["MacDataTypeA"].value
     problemTypeState["MacDataTypeB"] = problemTypeState["MacDataTypeB"].value
@@ -66,37 +67,41 @@ def UpdateLogic(filename, logicPath, outputPath):
     solutionList = []
     for solution in solutions:
         solutionState = solution.getAttributes()
-        if "ProblemType" in solutionState:
-            solutionState["ProblemType"] = solutionState["ProblemType"].state
-            solutionState["ProblemType"]["DataType"] = \
-                    solutionState["ProblemType"]["DataType"].value
-            solutionState["ProblemType"]["MacDataTypeA"] = \
-                    solutionState["ProblemType"]["MacDataTypeA"].value
-            solutionState["ProblemType"]["MacDataTypeB"] = \
-                    solutionState["ProblemType"]["MacDataTypeB"].value
-            solutionState["ProblemType"]["DataTypeA"] = \
-                    solutionState["ProblemType"]["DataTypeA"].value
-            solutionState["ProblemType"]["DataTypeB"] = \
-                    solutionState["ProblemType"]["DataTypeB"].value
-            solutionState["ProblemType"]["DataTypeE"] = \
-                    solutionState["ProblemType"]["DataTypeE"].value
-            solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                    solutionState["ProblemType"]["DataTypeAmaxD"].value
-            solutionState["ProblemType"]["DestDataType"] = \
-                    solutionState["ProblemType"]["DestDataType"].value
-            solutionState["ProblemType"]["ComputeDataType"] = \
-                    solutionState["ProblemType"]["ComputeDataType"].value
-            solutionState["ProblemType"]["BiasDataTypeList"] = \
-                    [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-            solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                    solutionState["ProblemType"]["ActivationComputeDataType"].value
-            solutionState["ProblemType"]["ActivationType"] = \
-                    solutionState["ProblemType"]["ActivationType"].value
-            solutionState["ProblemType"]["F32XdlMathOp"] = \
-                solutionState["ProblemType"]["F32XdlMathOp"].value
-            if "DataTypeMetadata" in solutionState["ProblemType"]:
-                solutionState["ProblemType"]["DataTypeMetadata"] = \
-                    solutionState["ProblemType"]["DataTypeMetadata"].value
+        if "ProblemType" not in solutionState:
+            solutionState["ProblemType"] = problemType
+        solutionState["ProblemType"] = solutionState["ProblemType"].state
+        solutionState["ProblemType"]["DataType"] = \
+                solutionState["ProblemType"]["DataType"].value
+        solutionState["ProblemType"]["MacDataTypeA"] = \
+                solutionState["ProblemType"]["MacDataTypeA"].value
+        solutionState["ProblemType"]["MacDataTypeB"] = \
+                solutionState["ProblemType"]["MacDataTypeB"].value
+        solutionState["ProblemType"]["DataTypeA"] = \
+                solutionState["ProblemType"]["DataTypeA"].value
+        solutionState["ProblemType"]["DataTypeB"] = \
+                solutionState["ProblemType"]["DataTypeB"].value
+        solutionState["ProblemType"]["DataTypeE"] = \
+                solutionState["ProblemType"]["DataTypeE"].value
+        solutionState["ProblemType"]["DataTypeAmaxD"] = \
+                solutionState["ProblemType"]["DataTypeAmaxD"].value
+        solutionState["ProblemType"]["DestDataType"] = \
+                solutionState["ProblemType"]["DestDataType"].value
+        solutionState["ProblemType"]["ComputeDataType"] = \
+                solutionState["ProblemType"]["ComputeDataType"].value
+        solutionState["ProblemType"]["BiasDataTypeList"] = \
+                [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
+        solutionState["ProblemType"]["ActivationComputeDataType"] = \
+                solutionState["ProblemType"]["ActivationComputeDataType"].value
+        solutionState["ProblemType"]["ActivationType"] = \
+                solutionState["ProblemType"]["ActivationType"].value
+        solutionState["ProblemType"]["F32XdlMathOp"] = \
+            solutionState["ProblemType"]["F32XdlMathOp"].value
+        if "DataTypeMetadata" in solutionState["ProblemType"]:
+            solutionState["ProblemType"]["DataTypeMetadata"] = \
+                solutionState["ProblemType"]["DataTypeMetadata"].value
+
+        if isDictFormat:
+            del solutionState["ProblemType"]
 
         solutionState["ISA"] = list(solutionState["ISA"])
         solutionList.append(solutionState)
