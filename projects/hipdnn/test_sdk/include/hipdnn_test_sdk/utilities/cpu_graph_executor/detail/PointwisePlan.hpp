@@ -139,16 +139,11 @@ private:
                 _params.mode,
                 *shallowOut0Tensor,
                 *shallowIn0Tensor,
-                static_cast<OutputType>(
-                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
-                static_cast<OutputType>(_params.reluUpperClip.has_value()
-                                            ? _params.reluUpperClip.value()
-                                            : std::numeric_limits<float>::max()),
-                static_cast<OutputType>(_params.reluLowerClipSlope.has_value()
-                                            ? _params.reluLowerClipSlope.value()
-                                            : 0.0f),
-                static_cast<OutputType>(_params.swishBeta.has_value() ? _params.swishBeta.value()
-                                                                      : 1.0f));
+                _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f,
+                _params.reluUpperClip.has_value() ? _params.reluUpperClip.value()
+                                                  : std::numeric_limits<float>::max(),
+                _params.reluLowerClipSlope.has_value() ? _params.reluLowerClipSlope.value() : 0.0f,
+                _params.swishBeta.has_value() ? _params.swishBeta.value() : 1.0f);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
         {
@@ -161,19 +156,16 @@ private:
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                pointwiseCompute(_params.mode,
-                                 *shallowOut0Tensor,
-                                 *shallowIn0Tensor,
-                                 *shallowIn1Tensor,
-                                 static_cast<OutputType>(_params.reluLowerClip.has_value()
-                                                             ? _params.reluLowerClip.value()
-                                                             : 0.0f),
-                                 static_cast<OutputType>(_params.reluUpperClip.has_value()
-                                                             ? _params.reluUpperClip.value()
-                                                             : std::numeric_limits<float>::max()),
-                                 static_cast<OutputType>(_params.reluLowerClipSlope.has_value()
-                                                             ? _params.reluLowerClipSlope.value()
-                                                             : 0.0f));
+                pointwiseCompute(
+                    _params.mode,
+                    *shallowOut0Tensor,
+                    *shallowIn0Tensor,
+                    *shallowIn1Tensor,
+                    _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f,
+                    _params.reluUpperClip.has_value() ? _params.reluUpperClip.value()
+                                                      : std::numeric_limits<float>::max(),
+                    _params.reluLowerClipSlope.has_value() ? _params.reluLowerClipSlope.value()
+                                                           : 0.0f);
         }
         else
         {
