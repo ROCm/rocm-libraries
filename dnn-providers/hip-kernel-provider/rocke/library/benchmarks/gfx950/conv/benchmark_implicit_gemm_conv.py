@@ -238,7 +238,7 @@ def main() -> int:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="verify first valid kernel against numpy reference before sweep",
+        help="verify first valid kernel against torch reference before sweep",
     )
 
     miopen_grp = parser.add_argument_group(
