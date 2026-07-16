@@ -85,10 +85,10 @@ class TestTDMStoreInstParameter:
 
 class TestTDMStoreInstCodegenWiring:
     def test_store_functions_renamed(self):
-        # The whole-MT TDM store helpers must carry TDMStore* names with no
+        # The TDM store helpers must carry TDMStore* names with no
         # subtile / hybrid / ping-pong residue.
         src = _read("KernelWriterAssembly.py")
-        for new in ("def _emitTDMStoreWholeMT",
+        for new in ("def _emitTDMStore(",
                     "def _emitTDMStoreScratch",
                     "def _emitTDMStoreBaseSetup"):
             assert new in src, new

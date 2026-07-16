@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # TDMStoreInst whole-MT TDM store is gfx1250-only
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # TDMStoreInst TDM store is gfx1250-only
 
 GlobalParameters:
   NumElementsToValidate: -1
@@ -18,11 +18,12 @@ GlobalParameters:
   CpuThreads: 1
   RotatingBufferSize: 0
 
-# TDMStoreInst whole-MT TDM store, bf16 TN, MT256x256x64, GSU=1, StreamK=0.
-# Covers SS0 (UseSubtileImpl) and SS1 (SourceSwap, non-subtile), each x {UseBeta True/False}
-# x M in {256 (non-edge), 255, 248 (edge)} to exercise the tensor_dim edge clamp.
+# TDMStoreInst TDM store, bf16 TN, MT256x256x64, GSU=1, StreamK=0.
+# A single group forks SourceSwap x UseSubtileImpl x TDMStoreInst so one problem set
+# covers TDM on/off, SS0/SS1 and subtile on/off (invalid subtile+SourceSwap combos are
+# pruned by solution generation).  ProblemSizes exercise the tensor_dim edge clamp on
+# both M (edgeM) and N (edgeN).
 BenchmarkProblems:
-  # ---- Group 1: SS0-TDM, UseBeta=True ----
   -
     - # ProblemType
       OperationType: GEMM
@@ -32,7 +33,7 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       TransposeA: true
       TransposeB: false
-      UseBeta: True
+      UseBeta: False
       Batched: True
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -44,11 +45,11 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [true]
-        - StreamK: [0]
         - TDMInst: [3]
-        - TDMStoreInst: [true]
-        - SourceSwap: [false]
+        - SourceSwap: [False, True]
+        - UseSubtileImpl: [False, True]
+        - TDMStoreInst: [False, True]
+        - StreamK: [0]
         - StaggerU: [0]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -63,138 +64,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 128]
-          - Exact: [255, 256, 1, 128]
-          - Exact: [248, 256, 1, 128]
-  # ---- Group 2: SS0-TDM, UseBeta=False ----
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: b
-      DestDataType: b
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: true
-      TransposeB: false
-      UseBeta: False
-      Batched: True
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 8, 8,  2, 2]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [true]
-        - StreamK: [0]
-        - TDMInst: [3]
-        - TDMStoreInst: [true]
-        - SourceSwap: [false]
-        - StaggerU: [0]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - 1LDSBuffer: [0]
-        - StoreVectorWidth: [-1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
-        - GlobalSplitU: [1]
-        - PreloadKernArgs: [False]
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 128]
-          - Exact: [255, 256, 1, 128]
-          - Exact: [248, 256, 1, 128]
-  # ---- Group 3: SS1-TDM (SourceSwap, non-subtile), UseBeta=True ----
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: b
-      DestDataType: b
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: true
-      TransposeB: false
-      UseBeta: True
-      Batched: True
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 8, 8,  2, 2]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [false]
-        - StreamK: [0]
-        - TDMInst: [3]
-        - TDMStoreInst: [true]
-        - SourceSwap: [true]
-        - StaggerU: [0]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - 1LDSBuffer: [0]
-        - StoreVectorWidth: [-1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
-        - GlobalSplitU: [1]
-        - PreloadKernArgs: [False]
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 128]
-          - Exact: [255, 256, 1, 128]
-          - Exact: [248, 256, 1, 128]
-  # ---- Group 4: SS1-TDM (SourceSwap, non-subtile), UseBeta=False ----
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: b
-      DestDataType: b
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: true
-      TransposeB: false
-      UseBeta: False
-      Batched: True
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1,  1, 8, 8,  2, 2]
-        - DepthU: [64]
-        - WavefrontSize: [32]
-        - PrefetchGlobalRead: [2]
-        - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [false]
-        - StreamK: [0]
-        - TDMInst: [3]
-        - TDMStoreInst: [true]
-        - SourceSwap: [true]
-        - StaggerU: [0]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - 1LDSBuffer: [0]
-        - StoreVectorWidth: [-1]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
-        - GlobalSplitU: [1]
-        - PreloadKernArgs: [False]
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 128]
-          - Exact: [255, 256, 1, 128]
-          - Exact: [248, 256, 1, 128]
+          - Exact: [256, 256, 1, 128]  # non-edge
+          - Exact: [255, 256, 1, 128]  # edgeM
+          - Exact: [248, 256, 1, 128]  # edgeM
+          - Exact: [256, 255, 1, 128]  # edgeN
+          - Exact: [256, 248, 1, 128]  # edgeN
+          - Exact: [255, 255, 1, 128]  # edgeM + edgeN

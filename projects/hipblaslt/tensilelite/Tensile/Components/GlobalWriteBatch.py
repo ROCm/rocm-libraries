@@ -352,9 +352,6 @@ class GlobalWriteBatchWriter:
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
     if not isMultiDU:
-      if drainBiasSav:
-        module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads (non-multiDU pre-store race fix)"))
-        module.add(SBarrier(comment="sync waves before subtile paired stores (non-multiDU race fix)"))
       self._emitAdd(module)
     if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
@@ -1798,6 +1795,32 @@ class GlobalWriteBatchWriter:
         module.add(packModule)
 
       if not self.kernel["StoreRemapVectorWidth"]:
+        storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
+        # Gate the TDM store on destination == the final, directly-written D (bf16) output.
+        #   * 'MultipleBuffer'            : writes fp32 partials to the GSU workspace; a
+        #                                   separate reduction kernel converts them to D, so
+        #                                   this store's destination is NOT D -> stay buffer.
+        #   * 'MultipleBufferSingleKernel': does the GSU reduction in-kernel; its final D
+        #                                   store is entangled with that reduction path and
+        #                                   the TDM flush is not compatible with it
+        #                                   (FFM: ~all elements wrong) -> excluded pending a
+        #                                   dedicated MBSK D-store-via-TDM change.
+        #   * StreamK                     : uses the MultipleBuffer workspace accumulation
+        #                                   (GSUAMB) for its partial tiles -> excluded by the
+        #                                   'MultipleBuffer' case above.
+        # GSU=1 (SingleBuffer) and subtile (which itself requires GSU=1) write D directly and
+        # therefore use the TDM store.
+        if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):
+          if self.batchIdx == 0 and elementIdx == 0:
+            _setupMod, self.parentWriter._tdmStoreBaseVgpr = self.parentWriter._emitTDMStoreBaseSetup(self.kernel, self.tmpS01)
+            storeCodeModule.add(_setupMod)
+          storeCodeModule.add(self.parentWriter._emitTDMStoreScratch(
+              self.kernel, self.ss, self.cvtVgprStruct, addrCalc, self.ss.elementSumIdx[elementIdx],
+              self.parentWriter.states.c.startVgprValu, self.gwvw, self.parentWriter._tdmStoreBaseVgpr))
+          self.storesIssued += 1
+          if self.batchIdx == self.numBatches - 1 and elementIdx == len(self.batchElements) - 1:
+            storeCodeModule.add(self.parentWriter._emitTDMStore(self.kernel))
+            self.parentWriter.vgprPool.checkIn(self.parentWriter._tdmStoreBaseVgpr)
         # 16bit UseSubtileImpl non-edge: emit paired dwordx4 stores combining sba=0
         # with sba=1 subtile data into one buffer_store_dwordx4.  Works for both
         # bf16 and fp16 HPA output types.
@@ -1811,32 +1834,6 @@ class GlobalWriteBatchWriter:
         #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
-        storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
-        # Gate the TDM store on destination == the final, directly-written D (bf16) output.
-        #   * 'MultipleBuffer'            : writes fp32 partials to the GSU workspace; a
-        #                                   separate reduction kernel converts them to D, so
-        #                                   this store's destination is NOT D -> stay buffer.
-        #   * 'MultipleBufferSingleKernel': does the GSU reduction in-kernel; its final D
-        #                                   store is entangled with that reduction path and
-        #                                   the whole-MT TDM flush is not compatible with it
-        #                                   (FFM: ~all elements wrong) -> excluded pending a
-        #                                   dedicated MBSK D-store-via-TDM change.
-        #   * StreamK                     : uses the MultipleBuffer workspace accumulation
-        #                                   (GSUAMB) for its partial tiles -> excluded by the
-        #                                   'MultipleBuffer' case above.
-        # GSU=1 (SingleBuffer) and subtile (which itself requires GSU=1) write D directly and
-        # therefore use the whole-MT TDM store.
-        if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):
-          if self.batchIdx == 0 and elementIdx == 0:
-            _setupMod, self.parentWriter._tdmStoreBaseVgpr = self.parentWriter._emitTDMStoreBaseSetup(self.kernel, self.tmpS01)
-            storeCodeModule.add(_setupMod)
-          storeCodeModule.add(self.parentWriter._emitTDMStoreScratch(
-              self.kernel, self.ss, self.cvtVgprStruct, addrCalc, self.ss.elementSumIdx[elementIdx],
-              self.parentWriter.states.c.startVgprValu, self.gwvw, self.parentWriter._tdmStoreBaseVgpr))
-          self.storesIssued += 1
-          if self.batchIdx == self.numBatches - 1 and elementIdx == len(self.batchElements) - 1:
-            storeCodeModule.add(self.parentWriter._emitTDMStoreWholeMT(self.kernel))
-            self.parentWriter.vgprPool.checkIn(self.parentWriter._tdmStoreBaseVgpr)
         elif is16bitSubtile:
           tt0 = element[1]  # d0: thread-tile index along M
           # Epilogue (bias/activation) is applied per-element in iteration order.

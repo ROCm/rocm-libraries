@@ -9737,8 +9737,9 @@ class KernelWriterAssembly(KernelWriter):
             module.addSpaceLine()
 
           placeHolder = "skipOptNLL_scc1_placeholder" if self.states.FactorDim == 3 else None
-          module.add(self.checkIsEdge(kernel, tmpSgprInfo, skipOptNLL, kernel["MacroTile0"], isLongBranch=isLongBranch, placeHolder=placeHolder))
-          module.add(self.checkIsEdge(kernel, tmpSgprInfo, skipOptNLL, kernel["MacroTile1"], isSize1=True, isLongBranch=isLongBranch, placeHolder=placeHolder))
+          if not self._tdmStoreSkipsEdge(kernel):
+            module.add(self.checkIsEdge(kernel, tmpSgprInfo, skipOptNLL, kernel["MacroTile0"], isLongBranch=isLongBranch, placeHolder=placeHolder))
+            module.add(self.checkIsEdge(kernel, tmpSgprInfo, skipOptNLL, kernel["MacroTile1"], isSize1=True, isLongBranch=isLongBranch, placeHolder=placeHolder))
           module.addSpaceLine()
 
           # Check tail loop required:
@@ -13941,8 +13942,8 @@ class KernelWriterAssembly(KernelWriter):
                        memToken=MemTokenData([self.states.memTokenLdsBuffer0])))
     return module
 
-  def _emitTDMStoreWholeMT(self, kernel):
-    module = Module("TDMStoreWholeMT")
+  def _emitTDMStore(self, kernel):
+    module = Module("TDMStore")
     module.add(SWaitCnt(dscnt=0, comment="TDM store: wait scratch ds_store"))
     module.add(SBarrier(comment="TDM store: all waves staged scratch before TDM store"))
     bpe = self.states.bpeCexternalGSU1
@@ -14577,27 +14578,33 @@ class KernelWriterAssembly(KernelWriter):
               # Force long branch when Edge code is deferred
               isLongBranch = True if currentInstLength >= 16384 else False
               with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo4") as tmpSgprInfo:
+                checkIsEdge = None
                 if useSubtileEdgeCheck:
                   checkIsEdge = edgeModule.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, \
                     isEdgeTarget["Then"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
                     isSize1=True, isLongBranch=isLongBranch), pos=0)
-                else:
+                elif not self._tdmStoreSkipsEdge(kernel):
                   checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
                     isEdgeTarget["Then"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
                     kernel["MacroTile1"], isSize1=True, isLongBranch=isLongBranch), pos=0)
-                currentInstLength += countInstruction(checkIsEdge)
+                if checkIsEdge is not None:
+                  currentInstLength += countInstruction(checkIsEdge)
               # If module, checking Size0 % MT0 > 0  (or subtile alignment for M)
               isLongBranch = True if currentInstLength >= 16384 else False
               with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo5") as tmpSgprInfo:
+                checkIsEdge = None
                 if useSubtileEdgeCheck:
+                  # TDMStoreInst forces subtile M alignSize=1; decision kept out of checkIsEdgeSubtile.
+                  mAlignSize = 1 if kernel.get("TDMStoreInst") else None
                   checkIsEdge = edgeModule.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, \
                     isEdgeTarget["Else"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
-                    isSize1=False, isLongBranch=isLongBranch), pos=0)
-                else:
+                    isSize1=False, isLongBranch=isLongBranch, alignSizeM=mAlignSize), pos=0)
+                elif not self._tdmStoreSkipsEdge(kernel):
                   checkIsEdge = edgeModule.add(self.checkIsEdge(kernel, tmpSgprInfo, \
                     isEdgeTarget["Else"] if kernel["AdaptiveGemm"] == 0 else isEdgeTarget["NonEdgeEnd"], \
                     kernel["MacroTile0"], isLongBranch=isLongBranch), pos=0)
-                currentInstLength += countInstruction(checkIsEdge)
+                if checkIsEdge is not None:
+                  currentInstLength += countInstruction(checkIsEdge)
           betaModule.add(edgeModule, pos=0)
 
         # FactorDim label
@@ -14686,7 +14693,7 @@ class KernelWriterAssembly(KernelWriter):
   # tmpSgpr must have at least 4 free SGPRs (same as checkIsEdge).
   # isEdgeTarget is the label to branch to when the tile IS an edge.
   ##############################################################################
-  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False):
+  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False, alignSizeM=None):
     assert(isinstance(isEdgeTarget, Label))
     isEdgeTargetLabel = isEdgeTarget.getLabelName()
     module = Module("checkIsEdgeSubtile")
@@ -14707,9 +14714,9 @@ class KernelWriterAssembly(KernelWriter):
     if not isSize1:
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
-      alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
-      if kernel.get("TDMStoreInst"):
-        alignSize = 1
+      # M alignment; caller may override (e.g. TDMStoreInst uses 1 so no unrelated
+      # store-inst logic lives inside this generic edge check).
+      alignSize = alignSizeM if alignSizeM is not None else 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
@@ -14899,6 +14906,18 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileMBlockSize = mBlockSize
 
   ##############################################################################
+  # _tdmStoreSkipsEdge
+  # Non-subtile TDMStoreInst store stages the full MacroTile and clamps the real
+  # M/N extent via the tensor_store descriptor, so the inline edge store path is
+  # unnecessary and incompatible with the M-contiguous scratch layout.  Callers use
+  # this to skip the edge branch entirely; edge correctness comes from the flush clamp.
+  ##############################################################################
+  def _tdmStoreSkipsEdge(self, kernel):
+    return (kernel.get("TDMStoreInst")
+            and not kernel.get("UseSubtileImpl")
+            and kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"))
+
+  ##############################################################################
   # checkIsEdge
   # tmpSgpr must have at least 4 free SGPR
   # isEdgeTarget is the branch target if Size % divisor > 0
@@ -14907,16 +14926,6 @@ class KernelWriterAssembly(KernelWriter):
     assert(isinstance(isEdgeTarget, Label))
     isEdgeTargetLabel = isEdgeTarget.getLabelName()
     module = Module("checkIsEdge")
-    # SS1-TDM (non-subtile TDMStoreInst whole-MT store): the tensor_store descriptor
-    # clamps the real M/N extent via tensor_dim0/tensor_dim1 and the scratch stages the
-    # FULL MacroTile, so the kernel's inline non-subtile edge store path is both
-    # unnecessary and incompatible with the M-contiguous scratch layout (it produces a
-    # positionally-scrambled tile).  Skip the edge branch entirely: always take the
-    # non-edge full-MT staging; correctness at the M/N edge comes from the flush clamp.
-    if kernel.get("TDMStoreInst") and not kernel.get("UseSubtileImpl") \
-        and kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):
-      module.addComment1("TDMStoreInst (non-subtile): skip edge branch; tensor_dim clamp handles M/N edge")
-      return module
     dim = "N (isSize1)" if isSize1 else "M"
     module.addComment1("Edge/NonEdge store path check (%s): Size %% %d > 0 -> Edge store; else -> NonEdge store" % (dim, divisor))
     tmpS0  = tmpSgprInfo.idx
