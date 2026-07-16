@@ -342,7 +342,7 @@ def test_r7_pgr0_all_passes():
 
 
 def test_r7_pgr0_preloop_nll():
-    """pgr=0 preloop is the single initC op (zeroed once); NLL stays empty."""
+    """pgr=0 preloop and NLL return empty (no prefetch)."""
     cfg = _cfg_pgr0()
     sched = LogicalScheduler(cfg)
     sched.place_LRs()
@@ -357,11 +357,9 @@ def test_r7_pgr0_preloop_nll():
     sched.remove_unnecessary_wait_lr_sync()
     sched.emit()
 
-    # pgr=0: no prefetch, but the preloop still holds the one canonical initC op
+    # pgr=0: preloop is empty [[[]]]
     preloop = sched.build_preloop()
-    labels = [getattr(em.source, 'label', None) for em in preloop[0][0]]
-    assert labels == ['initC_overlap'], \
-        f"pgr=0 preloop should be one initC op, got {labels}"
+    assert preloop == [[[]]], f"pgr=0 preloop should be [[[]]], got {preloop}"
 
     # pgr=0: NLL is empty [[[]]]
     nll = sched.build_nll()
