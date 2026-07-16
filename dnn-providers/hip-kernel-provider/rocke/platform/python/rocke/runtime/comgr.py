@@ -12,7 +12,7 @@ The chain we drive:
       -> AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE -> HSA code object
 
 The resulting HSACO bytes are returned to Python and can be handed
-straight to `hipModuleLoadData` (see `_hip_module.py`). No subprocesses,
+straight to `hipModuleLoadData` (see `hip_module.py`). No subprocesses,
 no `<hip/hip_runtime.h>` parsing, no clang spawn.
 
 The library is loaded from the default ROCm library locations or the dynamic
@@ -28,7 +28,8 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from .hip_module import _IS_WINDOWS, _LazyFn, _add_dll_dir, _candidate_lib_paths
+from ._ctypes_bind import _LazyFn
+from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
 
 # Status codes.
@@ -58,9 +59,9 @@ class ComgrError(RuntimeError):
 def _load_lib() -> ctypes.CDLL:
     # Pair the loader with ``hip_module._load_lib`` so the two halves of
     # the process always share a single HIP/comgr runtime instance. See
-    # ``_torch_bundled_lib`` in ``hip_module`` for why a torch-shipped
-    # libamd_comgr is preferred over /opt/rocm when torch is in the
-    # process.
+    # ``_torch_bundled_lib`` in ``runtime_coexistence`` for why a
+    # torch-shipped libamd_comgr is preferred over /opt/rocm when torch is
+    # in the process.
     err = None
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
         try:
@@ -73,7 +74,7 @@ def _load_lib() -> ctypes.CDLL:
 
 
 # Lazy: resolved on first call so that rocke and torch can be imported
-# in any order. See ``hip_module._torch_bundled_lib`` for context.
+# in any order. See ``runtime_coexistence._torch_bundled_lib`` for context.
 _lib: Optional[ctypes.CDLL] = None
 
 
@@ -86,7 +87,7 @@ def _resolve_lib() -> ctypes.CDLL:
 
 def resolved_lib_path() -> Optional[str]:
     """Path of the ``libamd_comgr`` this module will load (torch-bundled
-    preferred over ``/opt/rocm``; see :func:`hip_module._torch_bundled_lib`).
+    preferred over ``/opt/rocm``; see :func:`runtime_coexistence._torch_bundled_lib`).
 
     Returns the already-loaded lib's path once :func:`_resolve_lib` has run,
     else the first existing candidate. Pure lookup -- does NOT ``dlopen``, so it
@@ -196,7 +197,7 @@ def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
 
     The resolver never imports torch as a side effect (a library must not), so it
     only prefers torch's bundled (newest) ``libamd_comgr`` when torch is ALREADY
-    in the process -- see :func:`hip_module._torch_bundled_lib`. A CLI / runner
+    in the process -- see :func:`runtime_coexistence._torch_bundled_lib`. A CLI / runner
     that lowers IR should call this ONCE at startup, BEFORE the first lowering, so
     the bundled comgr (e.g. ROCm 7.2 / llvm22) is in the process and the LLVM
     flavor cannot be locked to a stale ``/opt/rocm`` by import order.
