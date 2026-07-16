@@ -180,6 +180,12 @@ install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BI
 
 # Register dynamic backend-loading sample
 add_hipdnn_sample_test(hipdnn_sample_dynamic_backend_loading)
+# Under ASAN the dlopen interceptor ignores the executable RUNPATH, so
+# the bare-name backend .so is only found via LD_LIBRARY_PATH.
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+    set_property(TEST hipdnn_sample_dynamic_backend_loading APPEND PROPERTY
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:hipdnn_backend>")
+endif()
 
 # Register autotune sample
 add_hipdnn_sample_test(hipdnn_sample_autotune)
