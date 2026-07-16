@@ -145,6 +145,7 @@ include: test_spvv.yaml
 include: test_sparse_to_dense_coo.yaml
 include: test_sparse_to_dense_csr.yaml
 include: test_sparse_to_dense_csc.yaml
+include: test_dense_to_sparse_bell.yaml
 include: test_dense_to_sparse_coo.yaml
 include: test_dense_to_sparse_csr.yaml
 include: test_dense_to_sparse_csc.yaml
