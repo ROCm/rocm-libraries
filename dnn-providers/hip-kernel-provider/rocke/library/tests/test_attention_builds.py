@@ -648,13 +648,13 @@ class TestAttentionHelpers(unittest.TestCase):
             head_size=64,
             block_size=16,
             num_query_heads=64,
-            num_kv_heads=8,          # gpt-oss 64/8 GQA
+            num_kv_heads=8,  # gpt-oss 64/8 GQA
             dtype="bf16",
             use_sinks=True,
             sliding_window=128,
             has_softcap=False,
-            num_warps=4,             
-            tile_size=16,   
+            num_warps=4,
+            tile_size=16,
             block_m_per_warp=16,
         )
         k = build_unified_attention_2d_tiled(spec, arch="gfx942")

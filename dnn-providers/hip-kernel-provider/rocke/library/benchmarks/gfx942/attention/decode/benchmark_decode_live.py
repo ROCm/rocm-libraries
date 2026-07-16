@@ -63,11 +63,16 @@ class DecodeShape:
 
     @property
     def signature(self) -> str:
-        return (
+        sig = (
             f"b{self.batch}_sq{self.seqlen_q}_sk{self.seqlen_k}"
             f"_nhq{self.num_query_heads}_nhk{self.num_kv_heads}"
             f"_hd{self.head_size}_bs{self.block_size}_{self.dtype}"
         )
+        if self.use_sinks:
+            sig += "_sinks"
+        if self.sliding_window:
+            sig += f"_sw{self.sliding_window}"
+        return sig
 
 
 def load_decode_shapes(paths: List[Path]) -> List[DecodeShape]:

@@ -3242,9 +3242,9 @@ def build_unified_attention_2d_tiled(
     fp8_total_chunks = (T * HD) // fp8_elems_per_chunk
     if KV_FP8:
         assert fp8_total_chunks % THREADS == 0, (
-                f"fp8 loader: total chunks {fp8_total_chunks} must be divisible by "
-                f"THREADS={THREADS} (T={T}, HD={HD})"
-                )
+            f"fp8 loader: total chunks {fp8_total_chunks} must be divisible by "
+            f"THREADS={THREADS} (T={T}, HD={HD})"
+        )
     fp8_chunks_per_thread = fp8_total_chunks // THREADS if KV_FP8 else 0
 
     def _issue_fp8_dequant_loads(
