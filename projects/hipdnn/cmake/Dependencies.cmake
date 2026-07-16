@@ -13,8 +13,41 @@ if(HIPDNN_NO_DOWNLOAD)
     )
 endif()
 
+# _hipdnn_suppress_rocm_toolchain_checks()
+#
+# Replace ROCMChecks's watched-variable callback with a no-op while a
+# third-party CMake project configures. Some dependencies mutate compiler flag
+# variables internally, and ROCMChecks reports those writes from variable_watch()
+# regardless of ROCM_WARN_TOOLCHAIN_VAR.
+macro(_hipdnn_suppress_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+	# Dummy function
+	function(rocm_check_toolchain_var)
+        endfunction()
+    endif()
+endmacro()
+
+# _hipdnn_restore_rocm_toolchain_checks()
+#
+# Reinstall ROCMChecks's watched-variable callback after a suppression window.
+# The warning and error toggles are disabled only for the include that restores
+# the callback, so restoring does not emit the messages being suppressed.
+macro(_hipdnn_restore_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+        _save_var(ROCM_WARN_TOOLCHAIN_VAR)
+        _save_var(ROCM_ERROR_TOOLCHAIN_VAR)
+
+        set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+        set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
+        include(ROCMChecks)
+
+        _restore_var(ROCM_ERROR_TOOLCHAIN_VAR)
+        _restore_var(ROCM_WARN_TOOLCHAIN_VAR)
+    endif()
+endmacro()
+
 # Dependencies where the local version should be used, if available
-set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json nanobind tsl-robin-map)
+set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json)
 # Dependencies where we never look for a local version
 set(_hipdnn_all_remote_deps)
 
@@ -139,23 +172,9 @@ function(_fetch_gtest VERSION HASH)
     _save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ${HIPDNN_GTEST_SHARED} CACHE INTERNAL "")
     set(INSTALL_GTEST OFF)
-    # Suppress ROCMChecks warnings from GTest's internal cmake modifying
-    # CMAKE_C_FLAGS/CMAKE_CXX_FLAGS. ROCMChecks uses variable_watch() and always
-    # prints regardless of ROCM_WARN_TOOLCHAIN_VAR. Override the callback with a
-    # flag-gated macro wrapper (same pattern as composablekernel/cmake/gtest.cmake).
-    # Must be a macro (not function) so the flag is read in the caller's scope.
-    if(ROCM_LIBS_SUPERBUILD AND COMMAND rocm_check_toolchain_var
-            AND NOT COMMAND _rocm_check_toolchain_var)
-        # Overrides ROCMChecks callback to suppress warnings from third-party code
-        macro(rocm_check_toolchain_var var access value list_file)
-            if(NOT _HIPDNN_DISABLE_ROCM_CHECKS)
-                _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
-            endif()
-        endmacro()
-    endif()
-    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(googletest)
-    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
+    _hipdnn_restore_rocm_toolchain_checks()
     _restore_var(BUILD_SHARED_LIBS)
 
     _exclude_from_all(${googletest_SOURCE_DIR})
@@ -186,6 +205,7 @@ function(_fetch_flatbuffers VERSION HASH)
         flatbuffers
         GIT_REPOSITORY https://github.com/google/flatbuffers.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -210,13 +230,14 @@ function(_fetch_spdlog VERSION HASH)
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
 
-    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(spdlog)
-    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
+    _hipdnn_restore_rocm_toolchain_checks()
 
     set(HIP_DNN_SPDLOG_INCLUDE_DIR ${spdlog_SOURCE_DIR}/include CACHE PATH "Path to spdlog include")
 
@@ -245,37 +266,6 @@ function(_fetch_nlohmann_json VERSION HASH)
 
 endfunction()
 
-# Fetches tsl-robin-map
-function(_fetch_tsl-robin-map VERSION HASH)
-    fetchcontent_declare(
-        tsl-robin-map
-        GIT_REPOSITORY https://github.com/Tessil/robin-map.git
-        GIT_TAG v${VERSION}
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-
-    fetchcontent_makeavailable(tsl-robin-map)
-
-    _exclude_from_all(${tsl-robin-map_SOURCE_DIR})
-    _mark_targets_as_system(${tsl-robin-map_SOURCE_DIR})
-endfunction()
-
-# Fetches nanobind
-function(_fetch_nanobind VERSION HASH)
-    set(NB_USE_SUBMODULE_DEPS OFF)
-
-    fetchcontent_declare(
-        nanobind
-        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-        GIT_TAG v${VERSION}
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-
-    fetchcontent_makeavailable(nanobind)
-
-    _exclude_from_all(${nanobind_SOURCE_DIR})
-    _mark_targets_as_system(${nanobind_SOURCE_DIR})
-endfunction()
 
 # Utility functions, pulled from rocroller repo
 #

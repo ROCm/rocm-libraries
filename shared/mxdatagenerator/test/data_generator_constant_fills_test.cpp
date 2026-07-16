@@ -7,6 +7,7 @@
 // per-DTYPE matrix rather than TYPED_TEST_SUITE.
 
 #include <cmath>
+#include <set>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -556,4 +557,42 @@ TEST(DataGeneratorConstantFills, RandIntFp16_Range_m10_10)
 TEST(DataGeneratorConstantFills, RandIntF32_Range_m100_100)
 {
     expectRandIntInRange<f32>(-100, 100);
+}
+
+TEST(DataGeneratorDecoupledScale, BoundedDataWithOnesScale)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling  = kBlockScaling;
+    opts.initMode      = Bounded{};
+    opts.scaleInitMode = Ones{};
+    opts.min           = -1.0;
+    opts.max           = 1.0;
+    opts.forceDenorm   = false;
+
+    // Use a larger matrix so bounded generation yields representable magnitudes
+    // after re-quantization to unity scales (tiny 32x4 blocks collapse to zero).
+    constexpr index_t rows = 256;
+    constexpr index_t cols = 256;
+    std::vector<index_t> sizes{rows, cols};
+    std::vector<index_t> strides{1, rows};
+    DataGenerator<ocp_e2m1_mxfp4> dgen;
+    dgen.generate(sizes, strides, opts);
+
+    auto const scaleBytes = dgen.getScaleBytes();
+    ASSERT_FALSE(scaleBytes.empty());
+    constexpr uint8_t kUnityScale = 0x7F;
+    for(uint8_t s : scaleBytes)
+        EXPECT_EQ(s, kUnityScale);
+
+    auto const dataBytes = dgen.getDataBytes();
+    std::set<uint8_t> uniqueData(dataBytes.begin(), dataBytes.end());
+    EXPECT_GT(uniqueData.size(), 1u);
+
+    auto ref = dgen.getReferenceFloat();
+    ASSERT_EQ(ref.size(), static_cast<size_t>(rows * cols));
+    int meaningful = 0;
+    for(float v : ref)
+        if(std::abs(v) > 1e-4f)
+            ++meaningful;
+    EXPECT_GT(meaningful, 0);
 }
