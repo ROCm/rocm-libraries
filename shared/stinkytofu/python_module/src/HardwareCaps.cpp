@@ -168,6 +168,13 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasScaleSRPk8Cvt"] =
         tryAsm(isaName, ws, "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0");
 
+    // Non-SR pk8 f32->fp8/bf8 conversion with scale: PackData uses these for
+    // gwvw%8==0 stores (mirrors rocisa hardware_caps.hpp HasCvtScalePk8*F32).
+    rv["HasCvtScalePk8Fp8F32"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_pk8_fp8_f32 v[0:1], v[2:9], s0");
+    rv["HasCvtScalePk8Bf8F32"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0");
+
     // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore
     // (mirrors rocisa hardware_caps.hpp HasMovRelsD2B32).
     rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");

@@ -2781,9 +2781,64 @@ VAddF64 = _make_scalar_alu_class("VAddF64", "v_add_f64", InstType.INST_F64)
 VAddI32 = _make_scalar_alu_class("VAddI32", "v_add_nc_i32", InstType.INST_I32)
 # VAddU32 — real class (see Vector ALU section above)
 # logicalIR: VAddCOU32
-VAddCOU32 = _make_scalar_alu_class("VAddCOU32", "v_add_co_u32", InstType.INST_U32)
+class VAddCOU32(CommonInstruction):
+    """``v_add_co_u32`` -- integer add with explicit carry-out.
+
+    Native rocisa signature is ``(dst, dst1, src0, src1)`` where ``dst1``
+    (e.g. ``VCC()``) is the carry-out *destination*, NOT a source. The
+    generic ALU factory has no positional ``dst1`` slot, so a positional
+    call like ``VAddCOU32(dst, VCC(), src0, src1)`` would misread VCC as
+    src0 and drop src1. stinkytofu re-derives the implicit ``vcc_lo``
+    carry-out itself, so ``dst1`` is dropped when lowering.
+    """
+
+    def __init__(self, dst: Any, dst1: Any = None, src0: Any = None,
+                 src1: Any = None, *extra: Any, comment: str = "", **kw):
+        _ = kw
+        for a in extra:
+            if isinstance(a, str):
+                comment = a
+        super().__init__(InstType.INST_U32, dst, [src0, src1], comment=comment)
+        self.dst1 = dst1
+        self.setInst("v_add_co_u32")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        return _st.VAddCOU32(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            comment=self.comment)
+
+
 # logicalIR: VAddCCOU32
-VAddCCOU32 = _make_scalar_alu_class("VAddCCOU32", "v_add_co_ci_u32", InstType.INST_U32)
+class VAddCCOU32(CommonInstruction):
+    """``v_add_co_ci_u32`` -- integer add with carry-in and carry-out.
+
+    Native rocisa signature is ``(dst, dst1, src0, src1, src2)``: ``dst1``
+    is the carry-out destination and ``src2`` the carry-in (both ``VCC()``
+    in practice). stinkytofu handles both implicit VCC operands, so they
+    are dropped when lowering (only ``dst, src0, src1`` are forwarded).
+    """
+
+    def __init__(self, dst: Any, dst1: Any = None, src0: Any = None,
+                 src1: Any = None, src2: Any = None, *extra: Any,
+                 comment: str = "", **kw):
+        _ = kw
+        for a in extra:
+            if isinstance(a, str):
+                comment = a
+        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], comment=comment)
+        self.dst1 = dst1
+        self.setInst("v_add_co_ci_u32")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        return _st.VAddCCOU32(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            comment=self.comment)
 _VAddNCU64 = _make_scalar_alu_class("VAddNCU64", "v_add_nc_u64", InstType.INST_U64)
 # logicalIR: VAddNCU64 (composite)
 VAddNCU64 = _make_scalar_alu_class("VAddNCU64", "v_add_nc_u64", InstType.INST_U64)

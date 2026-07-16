@@ -408,6 +408,16 @@ class ToStinkyAsmPassImpl : public Pass {
                         legalizeDSStoreB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
                     } else if (asmInst->getUnifiedOpcode() == GFX::ds_load_b192) {
                         legalizeDSLoadB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::s_barrier) {
+                        // gfx1250 has no plain s_barrier; it must split into
+                        // s_barrier_signal -1 / s_barrier_wait -1. The rocisa->stinky
+                        // conversion path does this in ToStinkyTofuUtils::legalizeInstruction
+                        // (GFX::s_barrier -> legalizeBarrier); the logical->asm path
+                        // (adaptor / PyLogicalModule) must do the same here. Doing it now
+                        // (before the asm pipeline) is also required so the workgroup
+                        // s_barrier_wait -1 exists as a distinct instruction for
+                        // InsertClusterBarrierPass to anchor its Rule 4/5 handshakes on.
+                        legalizeBarrier(asmInst, irBuilder, arch);
                     }
                     continue;
                 }

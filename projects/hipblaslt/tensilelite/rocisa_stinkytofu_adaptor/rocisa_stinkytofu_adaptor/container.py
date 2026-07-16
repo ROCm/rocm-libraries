@@ -1079,13 +1079,14 @@ def vgpr(
     return _create_gpr("v", arg, regNum, isMacro=isMacro, isAbs=isAbs, isOff=isOff)
 
 
-def sgpr(arg, regNum: float = 1.0, isMacro: bool = False) -> RegisterContainer:
+def sgpr(arg, regNum: float = 1.0, isMacro: bool = False,
+         isOff: bool = False) -> RegisterContainer:
     """Build an SGPR ``RegisterContainer`` (or ``HolderContainer``).
 
-    String form accepts ``isMacro`` only (rocisa signature parity:
-    ``sgpr(name, regNum, isMacro)`` -- no ``isAbs`` / ``isOff``).
+    String form matches rocisa ``sgpr(name, regNum, isMacro, isOff)``
+    (container.hpp: ``isMacro`` + ``isOff``, no ``isAbs``).
     """
-    return _create_gpr("s", arg, regNum, isMacro=isMacro)
+    return _create_gpr("s", arg, regNum, isMacro=isMacro, isOff=isOff)
 
 
 def accvgpr(arg, regNum: float = 1.0) -> RegisterContainer:
