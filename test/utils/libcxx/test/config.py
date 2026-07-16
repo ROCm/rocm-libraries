@@ -22,7 +22,12 @@ def _appendToSubstitution(substitutions, key, value):
 
 def configure(parameters, features, config, lit_config):
     note = lambda s: lit_config.note("({}) {}".format(config.name, s))
-    debug = lambda s: lit_config.note("({}) {}".format(config.name, s)) if not hasattr(lit_config, 'dbg') else lit_config.dbg("({}) {}".format(config.name, s))
+    # The per-action trace below is verbose (one line per applied feature/param);
+    # only emit it when lit is run with --debug. `lit_config.debug` is the real
+    # bool set by lit's --debug flag; the old `hasattr(lit_config, 'dbg')` probe
+    # was dead code — vendored lit has no `dbg` channel, so `debug` always
+    # silently aliased `note`.
+    debug = note if getattr(lit_config, "debug", False) else (lambda s: None)
     config.environment = dict(os.environ)
 
     # Apply the actions supplied by parameters to the configuration first, since
