@@ -29,6 +29,8 @@ NUM_FMHA_FEATURES = 69
 _CXX = shutil.which("g++") or shutil.which("c++") or shutil.which("clang++")
 requires_cxx = pytest.mark.skipif(_CXX is None, reason="no C++ compiler")
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
 # hw values used on both sides (device-derived at runtime; fixed here for parity).
 _HW = dict(
     num_cus=256,
@@ -315,7 +317,7 @@ def test_generator_struct_matches_names(tmp_path):
 
 
 def test_committed_headers_match_generated():
-    """Committed FmhaFeaturizer.hpp must match gen_fmha_featurizer.py output.
+    """Committed FmhaFeatures.hpp and FmhaFeaturizer.hpp must match generator output.
 
     Guards against drift: if someone updates the generator but forgets to
     regenerate + commit the headers, this test fails. The review comment noted
@@ -323,8 +325,12 @@ def test_committed_headers_match_generated():
     """
     struct_src, featurize_src = gen.emit_fmha_featurizer()
 
-    # Find the committed header (relative to this test file).
-    committed_path = os.path.normpath(
+    # Normalize whitespace differences (trailing spaces, final newline).
+    def normalize(text):
+        return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+
+    # Find the committed headers (relative to this test file).
+    sdpa_fwd_dir = os.path.normpath(
         os.path.join(
             _HERE,
             "..",
@@ -335,23 +341,27 @@ def test_committed_headers_match_generated():
             "src",
             "dispatcher",
             "sdpa_fwd",
-            "FmhaFeaturizer.hpp",
         )
     )
-    if not os.path.exists(committed_path):
-        pytest.skip(f"committed FmhaFeaturizer.hpp not found at {committed_path}")
 
-    with open(committed_path) as f:
-        committed_content = f.read()
+    # Check FmhaFeatures.hpp
+    features_path = os.path.join(sdpa_fwd_dir, "FmhaFeatures.hpp")
+    if not os.path.exists(features_path):
+        pytest.skip(f"committed FmhaFeatures.hpp not found at {features_path}")
+    with open(features_path) as f:
+        features_content = f.read()
+    assert normalize(features_content) == normalize(struct_src), (
+        "Committed FmhaFeatures.hpp does NOT match gen_fmha_featurizer.py output. "
+        "Re-run the generator and commit the updated header."
+    )
 
-    # The committed file has both struct + featurize concatenated.
-    generated_content = struct_src + "\n" + featurize_src
-
-    # Normalize whitespace differences (trailing spaces, final newline).
-    def normalize(text):
-        return "\n".join(line.rstrip() for line in text.splitlines()).strip()
-
-    assert normalize(committed_content) == normalize(generated_content), (
+    # Check FmhaFeaturizer.hpp
+    featurizer_path = os.path.join(sdpa_fwd_dir, "FmhaFeaturizer.hpp")
+    if not os.path.exists(featurizer_path):
+        pytest.skip(f"committed FmhaFeaturizer.hpp not found at {featurizer_path}")
+    with open(featurizer_path) as f:
+        featurizer_content = f.read()
+    assert normalize(featurizer_content) == normalize(featurize_src), (
         "Committed FmhaFeaturizer.hpp does NOT match gen_fmha_featurizer.py output. "
         "Re-run the generator and commit the updated header."
     )

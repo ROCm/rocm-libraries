@@ -114,7 +114,7 @@ def test_duplicate_op_arch_dtype_raises(tmp_path):
             "num_features": 69,
         },
     )
-    with pytest.raises(ValueError, match=r"duplicate.*\('fmha', 'gfx950', 'fp16'\)"):
+    with pytest.raises(ValueError, match=r"duplicate.*\('sdpa_fwd', 'gfx950', 'fp16'\)"):
         gmr.generate(models, tmp_path / "out")
 
 

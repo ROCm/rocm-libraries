@@ -209,32 +209,32 @@ def emit_featurizer() -> str:
 
 #include "dispatcher/sdpa_fwd/FmhaFeatures.hpp"
 
-namespace rocke_client::dispatcher {{{{
+namespace rocke_client::dispatcher {{
 
-{{dtype_bytes_fn}}
-{{dtype_enc_fn}}
+{dtype_bytes_fn}
+{dtype_enc_fn}
 
 // Raw problem-shape inputs (from SdpaProblem).
-struct FmhaProblemInputs {
+struct FmhaProblemInputs {{
     double batch = 0, sq = 0, sk = 0, hq = 0, hk = 0, dq = 0, dv = 0;
     std::string dtype = "fp16";
-};
+}};
 // Raw config/knob inputs (from AotInstance + arch defaults).
-struct FmhaConfigInputs {
+struct FmhaConfigInputs {{
     double pip = 1, tm0 = 16, tn0 = 0, tk0 = 0, tn1 = 0, tk1 = 0, tk0max = 0;
     double num_warps = 1;
     double ps = 0, psk = 0, pd = 0, pdv = 0, mask = 0, bias = 0, lse = 0;
     double dropout = 0, logits = 0, sink = 0, skip = 0, qscale = 0, paged = 1;
-};
+}};
 // hw fields (name-matched to FmhaFeatureEngine._hw).
-struct FmhaHwInputs {
+struct FmhaHwInputs {{
     double num_cus = 0, simds_per_cu = 4, total_simds = 0, shader_engines = 0;
     double max_clock_mhz = 0, wavefront_size = 64, lds_capacity = 0, num_xcd = 0;
-};
+}};
 
 inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
                                    const FmhaConfigInputs& c,
-                                   const FmhaHwInputs& hw) {
+                                   const FmhaHwInputs& hw) {{
     const double batch = p.batch, sq = p.sq, sk = p.sk, hq = p.hq;
     const double hk = std::max(p.hk, 1.0);
     const double dq = p.dq;
@@ -242,7 +242,7 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double bpe = fmha_dtype_bytes(p.dtype);
     const double dt_enc = fmha_dtype_enc(p.dtype);
 
-    auto l2 = [](double x) { return std::log2(std::max(x, 1.0)); };
+    auto l2 = [](double x) {{ return std::log2(std::max(x, 1.0)); }};
 
     const double gqa = hq / hk;
     const double asp = sq / std::max(sk, 1.0);
@@ -270,11 +270,11 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double ntk = std::ceil(sk / std::max(tn0, 1.0));
     const double tot = batch * hq * ntm * ntk;
 
-    auto eff = [](double d, double t) -> double {
+    auto eff = [](double d, double t) -> double {{
         if (t <= 0.0) return 1.0;
         double r = std::fmod(d, t);
         return (r > 0.0) ? r / t : 1.0;
-    };
+    }};
     const double esq = eff(sq, tm0);
     const double esk = eff(sk, tn0);
     const double oeff = esq * esk;
@@ -304,6 +304,12 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
 """.format(
         dtype_bytes_fn=dtype_bytes_fn, dtype_enc_fn=dtype_enc_fn, setters=setters
     )
+
+
+def emit_fmha_featurizer() -> tuple[str, str]:
+    """Return (FmhaFeatures.hpp content, FmhaFeaturizer.hpp content)."""
+    names = FmhaFeatureEngine().get_feature_names()
+    return emit_features_struct(names), emit_featurizer()
 
 
 def generate(out_dir: Path) -> list[str]:
