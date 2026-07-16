@@ -203,12 +203,12 @@ void testing_spsv_csc(const Arguments& arg)
     // Perform analysis on host
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
     CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
-        handle, trans_A, &halpha, A, x, y1, ttype, alg, preprocess, nullptr, dbuffer));
+        handle, trans_A, &halpha, A, x, y1, ttype, alg, preprocess, &buffer_size, dbuffer));
 
     // Perform analysis on device
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
     CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
-        handle, trans_A, dalpha, A, x, y2, ttype, alg, preprocess, nullptr, dbuffer));
+        handle, trans_A, dalpha, A, x, y2, ttype, alg, preprocess, &buffer_size, dbuffer));
 
     //
     // The buffer must be be non persistent, let's put garbage in it.

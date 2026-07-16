@@ -137,9 +137,14 @@ namespace rocsparse
 
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                // Mirror the CSR path (see PR #9295): run the analysis only for
+                // (operation, fill_mode) combinations that have not been analysed
+                // yet, instead of relying on the descriptor-wide mat->analysed flag.
+                // For CSC the analysis is cached under the CSR-mapped operation and
+                // fill mode, which cscsv_is_analyzed accounts for.
+                rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                if(!rocsparse::cscsv_is_analyzed(csrsv_info, trans, mat))
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::cscsv_analysis(handle,
                                                    trans,
@@ -148,7 +153,6 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
                 }
 
                 return rocsparse_status_success;
