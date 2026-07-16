@@ -550,8 +550,7 @@ struct {struct_name} {{
     static constexpr bool Preshuffle = {str(config.preshuffle).lower()};
     // PermuteN selects the B-preshuffle permutation used by the host-side
     // shuffle_b_permuteN (true) vs shuffle_b (false). The preshuffle ctypes lib
-    // reads this off SelectedKernel to shuffle B byte-for-byte like Old-TE
-    // (tile_engine gemm_preshuffle default_config.json sets permute_n=true).
+    // reads this value to apply the same permutation the device kernel expects.
     static constexpr bool PermuteN = {str(config.permute_n).lower()};
     static constexpr index_t NumWaveGroups = {config.num_wave_groups};
     
