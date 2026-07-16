@@ -33,28 +33,17 @@ class GL2PrefetchLoad(GL2Prefetch):
         numCooperativeWGs: int = kernel["ClusterDim"][0] * kernel["ClusterDim"][1]
         numCooperativeThreads: int = numCooperativeWGs * kernel["NumThreads"]
 
-        if isM:
-            # Metadata follows the sparse data tensor's tile axis (A for Sparse==1,
-            # B for Sparse==2). tp["idx"] already selects the correct cluster axis.
-            bpe: float = 1      # metadata is already in bytes, no need to scale
-            mt: int = kernel["MacroTileMetadata"]
-            du: int = kernel["_DepthUMetadata"]
-            numTileWGs: int = kernel["ClusterDim"][tp["idx"]]
-            coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
+        subTc: str = tc if isM else tc[-1]
+        mt: int = kernel["MacroTile%s" % subTc]
+        numTileWGs: int = kernel["ClusterDim"][tp["idx"]] if isM else (kernel["ClusterDim"][0] if subTc == "A" else kernel["ClusterDim"][1])
+        bpe: float = tp["bpeGR"]
+
+        if isMX:
+            coalescedDim = mt * numTileWGs * kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
+            perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
         else:
-            bpe: float = tp["bpeGR"]
-            subTc: str = tc[-1]
-            mt: int = kernel["MacroTile%s" % subTc]
-            numTileWGs: int = kernel["ClusterDim"][0] if subTc == "A" else kernel["ClusterDim"][1]
-            if isMX:
-                coalescedDim = mt * numTileWGs * kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-                perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
-            else:
-                # _DepthU{A,B} is the per-tensor unroll extent: == DepthU for dense,
-                # halved for the sparse data tensor (A for Sparse==1, B for Sparse==2)
-                # since 2:4 sparsity compresses the K dimension by 2x.
-                du: int = kernel["_DepthU%s" % subTc]
-                coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
+            du: int = kernel["_DepthU%s" % subTc]
+            coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
 
         tp["gl2ncp"] = perpendicularDim
         tp["gl2ncc"] = max(1, round(coalescedDim * bpe) // globalPrefetchSize)
@@ -66,19 +55,8 @@ class GL2PrefetchLoad(GL2Prefetch):
         tc: str = tp["tensorChar"]
         tIdx: int = tp['idx']
         isM: bool = tp.get("isM", False)
-        if isM:
-            # metadata is already in bytes (bpe == 1) and uses its own compressed unroll extent
-            du: int = kernel["_DepthUMetadata"]
-            if tp["tlu"]:
-                perpStride: str | RegisterContainer = writer.strideRef(tc, 3)
-                mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), perpStride, round(du), comment="metadata addr increment"))
-            else:
-                mod.add(SMovB32(dst=sgpr(f"GL2PrefetchInc{tc}"), src=round(du), comment="metadata addr increment"))
-            return mod
-        subTc: str = tc[-1]
+        subTc: str = tc if isM else tc[-1]
         bpe: float = tp["bpeGR"]
-        # _DepthU{A,B} is halved for the sparse data tensor, so the per-iteration
-        # K advance matches the physically compressed layout.
         du: int = kernel["_DepthU%s" % subTc]
         if tc.startswith("MX"):
             mod.add(SMulI32(sgpr(f"GL2PrefetchInc{tc}"), sgpr("Size%s"%INDEX_CHARS[tIdx]), \
@@ -98,14 +76,9 @@ class GL2PrefetchLoad(GL2Prefetch):
         tlu: bool = tp["tlu"]
         isMX: bool = tc.startswith("MX")
         isM: bool = tp.get("isM", False)
-        if isM:
-            subTc: str = tc                     # "Metadata"
-            mt: int = kernel["MacroTileMetadata"]
-            bpe: float = 1                      # metadata is already in bytes, no need to scale
-        else:
-            subTc: str = tc[-1]
-            mt: int = kernel["MacroTile%s" % subTc]
-            bpe: float = tp["bpeGR"]
+        subTc: str = tc if isM else tc[-1]
+        mt: int = kernel["MacroTile%s" % subTc]
+        bpe: float = tp["bpeGR"]
         tileStride: str | RegisterContainer = writer.strideRef(subTc, tIdx)
         unrollStride: str | RegisterContainer = writer.strideRef(subTc, 3)
         perpStride: str | RegisterContainer = unrollStride if tlu else tileStride
