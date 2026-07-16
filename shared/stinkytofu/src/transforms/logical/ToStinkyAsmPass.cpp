@@ -237,11 +237,45 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         merged.insert(merged.end(), irInst->srcs.begin(), irInst->srcs.end());
         asmInst->setSrcRegs(merged);
     } else {
-        if (!irInst->dests.empty()) {
-            asmInst->setDestRegs(irInst->dests);
+        std::vector<StinkyRegister> destRegs = irInst->dests;
+        std::vector<StinkyRegister> srcRegs = irInst->srcs;
+
+        // Read-write operands encoded as extra dest-position fields.
+        // v_swap_b32 / v_permlane16_swap_b32 model BOTH exchanged vgprs as RW
+        // dest fields (D0, D1), yet the logical form carries the second vgpr as
+        // a *source*. The generic mapping (logical dests->destRegs,
+        // logical srcs->srcRegs) then leaves destRegs one register short, and
+        // the emitter — which prints one operand per dest field and never emits
+        // RW fields as sources (emitSrcCount counts only non-dest fields) —
+        // silently drops it, producing e.g. "v_swap_b32 v0" (missing operand).
+        // Mirror rocisa's VSwapB32::getDstParams/getSrcParams: every RW operand
+        // must appear in BOTH destRegs (for emission) and srcRegs (so use-def
+        // tracking still sees the read).
+        size_t numDestFields = 0;
+        bool hasRWDest = false;
+        for (const auto& f : desc->operandFields) {
+            if (f.isDest) {
+                numDestFields++;
+                if (f.isReadWrite) hasRWDest = true;
+            }
         }
-        if (!irInst->srcs.empty()) {
-            asmInst->setSrcRegs(irInst->srcs);
+        if (hasRWDest && numDestFields > destRegs.size()) {
+            size_t need = numDestFields - destRegs.size();
+            for (size_t k = 0; k < need && k < srcRegs.size(); ++k) {
+                destRegs.push_back(srcRegs[k]);
+            }
+            // RW dest operands are also reads; keep them in srcRegs for
+            // dependency/use-def tracking (not re-emitted: emitSrcCount == 0).
+            for (const auto& d : irInst->dests) {
+                srcRegs.push_back(d);
+            }
+        }
+
+        if (!destRegs.empty()) {
+            asmInst->setDestRegs(destRegs);
+        }
+        if (!srcRegs.empty()) {
+            asmInst->setSrcRegs(srcRegs);
         }
     }
 
