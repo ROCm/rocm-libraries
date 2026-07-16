@@ -778,7 +778,11 @@ def default_fp8_config(
     quant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> BQuantKernelConfig:
-    """Return the default fp8 BQuant config (tile = 16x64x256, warp = 1x4x1)."""
+    """Return the default fp8 BQuant config (tile = 16x64x256, warp = 1x4x1).
+
+    WarpTileK=128: on gfx950 get_k_warp_tile<fp8_t, M_Warp_Tile=16>() returns 128
+    (is_8bit_float=true, M_Warp_Tile!=32 → K_warp=128). Using 16 causes zero output.
+    """
     return BQuantKernelConfig(
         variant_key="fp8",
         layout="rcr",
@@ -787,7 +791,7 @@ def default_fp8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
@@ -800,7 +804,10 @@ def default_bf8_config(
     quant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> BQuantKernelConfig:
-    """Return the default bf8 BQuant config (tile = 16x64x256, warp = 1x4x1)."""
+    """Return the default bf8 BQuant config (tile = 16x64x256, warp = 1x4x1).
+
+    WarpTileK=128: on gfx950 get_k_warp_tile<bf8_t, M_Warp_Tile=16>() returns 128.
+    """
     return BQuantKernelConfig(
         variant_key="bf8",
         layout="rcr",
@@ -809,7 +816,7 @@ def default_bf8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
