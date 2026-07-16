@@ -27,9 +27,18 @@ import copy
 
 import pytest
 
+from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
+
+
+# Snapshot the pristine process-global defaultSolution at import time (collection
+# runs before any test executes). Sibling unit tests mutate it in place (e.g.
+# test_MatrixInstructionConversion injects a raw "ProblemType" key), which makes
+# Solution.__init__'s `for key in defaultSolution` loop overwrite the derived
+# ProblemType object and break Solution construction in an order-dependent way.
+_PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 
 
 # ---------------------------------------------------------------------------
@@ -67,12 +76,17 @@ def _gp_gfx1250(gfx1250_iim):
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
+    saved_ds = copy.deepcopy(dict(defaultSolution))
+    defaultSolution.clear()
+    defaultSolution.update(copy.deepcopy(_PRISTINE_DEFAULT_SOLUTION))
     assignGlobalParameters({}, gfx1250_iim)
     yield
     globalParameters.clear()
     globalParameters.update(saved_gp)
     validParameters.clear()
     validParameters.update(saved_vp)
+    defaultSolution.clear()
+    defaultSolution.update(saved_ds)
 
 
 # ---------------------------------------------------------------------------
