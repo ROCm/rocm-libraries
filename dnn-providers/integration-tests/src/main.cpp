@@ -21,8 +21,8 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/BundleRegistration.hpp"
-#include "harness/golden/UnverifiableBundleReport.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
 {
@@ -108,6 +108,9 @@ int main(int argc, char** argv) noexcept
             .help("How bundle engine output is verified: 'auto' (default; golden -> "
                   "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. "
                   "Can also be set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+        parser.add_argument("--capture-bundles")
+            .help("Capture C++ graph tests as JSON bundles into the given directory. "
+                  "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -205,6 +208,13 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --capture-bundles argument
+        std::optional<std::filesystem::path> captureDir;
+        if(parser.is_used("--capture-bundles"))
+        {
+            captureDir = parser.get<std::string>("--capture-bundles");
+        }
+
         // Parse --test-article argument and load explicit plugin if provided
         std::optional<std::filesystem::path> articlePath;
         if(parser.is_used("--test-article"))
@@ -250,6 +260,7 @@ int main(int argc, char** argv) noexcept
         opts.allowBundles = allowBundles;
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
+        opts.captureDir = std::move(captureDir);
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -306,13 +317,13 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        hipdnn_integration_tests::golden::registerBundleTests();
+        hipdnn_integration_tests::bundle::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
-        hipdnn_integration_tests::golden::UnverifiableBundleReport::get().print();
+        hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
 
         // Generate support matrix if requested
         if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
