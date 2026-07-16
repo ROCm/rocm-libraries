@@ -205,3 +205,16 @@ TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticDoesNotSkipEqualityAndRan
     EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
               (std::vector<std::string>{"equality", "range", "prediction"}));
 }
+
+TEST(ExactLogicLibraryTest, FindTopSolutionsForceStaticOverridesStreamKScheduling)
+{
+    ScopedStreamK5ForceMode forceStatic("0");
+
+    auto lib     = buildMatchingRowsLibrary();
+    auto problem = dummyProblem();
+    problem.setParams().setStreamKTileSchedulingMode(1);
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    EXPECT_EQ(solutionNames(lib->findTopSolutions(problem, device, 3)),
+              (std::vector<std::string>{"equality", "range", "prediction"}));
+}

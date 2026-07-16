@@ -267,9 +267,10 @@ namespace TensileLite
             const bool                 debug   = Debug::Instance().printPropertyEvaluation();
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
 
+            const auto forceDynamic = Debug::Instance().streamK5ForceMode();
             const bool effectiveDynamic = 
-                (Debug::Instance().streamK5ForceMode() == 1) ||
-                (problem.getParams().streamKTileSchedulingMode() != 0);
+                (forceDynamic == 1) ||
+                (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
 
             // false in case of early return;
