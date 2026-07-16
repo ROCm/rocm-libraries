@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(hipthreads LANGUAGES CXX HIP)
+set(VERSION_STRING "0.1.1")
+
+project(hipthreads VERSION ${VERSION_STRING} LANGUAGES CXX HIP)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
