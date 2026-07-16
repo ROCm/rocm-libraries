@@ -15,6 +15,7 @@
   - [Python](#build-and-install-origami-python)
   - [C++](#build-and-install-origami-c)
   - [CMake Options](#cmake-options)
+  - [Origami Tests](#origami-tests)
   - [Neural Network (NN) Backend](#neural-network-nn-backend)
     - [Supported Backends](#supported-backends)
     - [Building with NN On or Off](#building-with-nn-on-or-off)
@@ -22,7 +23,6 @@
     - [Runtime Configuration](#runtime-configuration)
     - [hipBLASLt Integration](#hipblaslt-integration)
     - [NN Tests](#nn-tests)
-  - [Origami Tests](#origami-tests)
 - [Debug Logging](#debug-logging)
   - [Text Log](#text-log)
   - [CSV Log](#csv-log)
@@ -263,6 +263,63 @@ cmake --install build/
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
 | `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, TWREC loader, tilewright ranking in `rank_configs`). | `OFF` |
 
+## Origami Tests
+
+### Build and Run All Tests
+
+Build with both C++ and Python tests enabled:
+
+```bash
+cd shared/origami
+
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_BUILD_TESTING=ON \
+  -DORIGAMI_ENABLE_PYTHON=ON
+
+cmake --build build/ --parallel
+
+cd build/
+ctest --output-on-failure
+```
+
+> [!NOTE]
+> Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
+
+### Running Specific Tests
+
+Run only C++ tests:
+
+```bash
+./build/tests/origami-tests
+```
+
+Run a specific C++ test by name:
+
+```bash
+./build/tests/origami-tests "Origami: select_config_mnk unit test"
+```
+
+Run only Python tests (from `shared/origami/python`):
+
+```bash
+pip install -e .
+python -m pytest tests/ -v
+```
+
+Run Python tests excluding slow tests:
+
+```bash
+python -m pytest tests/ -m "not slow"
+```
+
+Run selector tests (requires torch):
+
+```bash
+python -m pytest tests/test_selector.py -v
+```
+
 ## Neural Network (NN) Backend
 
 Origami can rank GEMM kernel candidates with an optional **neural-network backend** in addition to the default analytical roofline model. NN inference is wired through `origami::rank_configs` via `rank_options_t`: callers choose **analytical**, **NN-only**, or **NN with analytical fallback**.
@@ -360,8 +417,6 @@ auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
 
 For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` when tilewright integration tests are added.
 
-A proposed **sharded** layout (per-cell files under `{dtype}/{layout}/` directories) is
-described in [docs/sharded-weights-design.md](docs/sharded-weights-design.md).
 
 ### Runtime Configuration
 
@@ -432,63 +487,6 @@ cmake --build build/ --parallel
 ```
 
 When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out.
-
-## Origami Tests
-
-### Build and Run All Tests
-
-Build with both C++ and Python tests enabled:
-
-```bash
-cd shared/origami
-
-cmake -S . -B build/ \
-  -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DORIGAMI_BUILD_TESTING=ON \
-  -DORIGAMI_ENABLE_PYTHON=ON
-
-cmake --build build/ --parallel
-
-cd build/
-ctest --output-on-failure
-```
-
-> [!NOTE]
-> Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
-
-### Running Specific Tests
-
-Run only C++ tests:
-
-```bash
-./build/tests/origami-tests
-```
-
-Run a specific C++ test by name:
-
-```bash
-./build/tests/origami-tests "Origami: select_config_mnk unit test"
-```
-
-Run only Python tests (from `shared/origami/python`):
-
-```bash
-pip install -e .
-python -m pytest tests/ -v
-```
-
-Run Python tests excluding slow tests:
-
-```bash
-python -m pytest tests/ -m "not slow"
-```
-
-Run selector tests (requires torch):
-
-```bash
-python -m pytest tests/test_selector.py -v
-```
 
 ## Debug Logging
 
