@@ -28,7 +28,8 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     , _bias(&(findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
     , _activationOut(nullptr)
 {
-    _epsilon = makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
+    _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
@@ -48,8 +49,8 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
        && attributes.next_running_mean_tensor_uid().has_value()
        && attributes.next_running_variance_tensor_uid().has_value())
     {
-        _momentum
-            = makeScalarOperand(tensorMap, attributes.momentum_tensor_uid().value(), "Momentum");
+        _momentum = hipdnn_plugin_sdk::makeScalarOperand(
+            tensorMap, attributes.momentum_tensor_uid().value(), "Momentum");
 
         _prevRunningMean
             = &(findTensorAttributes(tensorMap, attributes.prev_running_mean_tensor_uid().value()));
@@ -110,7 +111,7 @@ double BatchnormFwdTrainingParams::epsilonValue(const hipdnnPluginDeviceBuffer_t
                                                 uint32_t numDeviceBuffers) const
 {
     return hipdnn_plugin_sdk::toDouble(
-        resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
+        hipdnn_plugin_sdk::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
@@ -156,7 +157,7 @@ double BatchnormFwdTrainingParams::momentumValue(const hipdnnPluginDeviceBuffer_
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "momentumValue() called but momentum was not set");
     }
     return hipdnn_plugin_sdk::toDouble(
-        resolveScalarOperand(*_momentum, deviceBuffers, numDeviceBuffers));
+        hipdnn_plugin_sdk::resolveScalarOperand(*_momentum, deviceBuffers, numDeviceBuffers));
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
@@ -488,11 +489,12 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_trainingParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer
-        = findDeviceBuffer(_trainingParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer
-        = findDeviceBuffer(_trainingParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _trainingParams.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _trainingParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _trainingParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
 
     // Handle save mean/variance if provided (optional)
     void* resultSaveMeanPtr = nullptr;
@@ -500,12 +502,13 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
 
     if(_trainingParams.hasSaveMeanVariance())
     {
-        resultSaveMeanPtr
-            = findDeviceBuffer(_trainingParams.mean()->uid(), deviceBuffers, numDeviceBuffers).ptr;
-        resultSaveInvVariancePtr = findDeviceBuffer(_trainingParams.invVariance()->uid(),
-                                                    deviceBuffers,
-                                                    numDeviceBuffers)
-                                       .ptr;
+        resultSaveMeanPtr = hipdnn_plugin_sdk::findDeviceBuffer(
+                                _trainingParams.mean()->uid(), deviceBuffers, numDeviceBuffers)
+                                .ptr;
+        resultSaveInvVariancePtr
+            = hipdnn_plugin_sdk::findDeviceBuffer(
+                  _trainingParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
     }
 
     // Handle running stats if provided (optional)
@@ -516,22 +519,22 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
 
     if(_trainingParams.hasRunningStats())
     {
-        prevRunningMeanPtr = findDeviceBuffer(_trainingParams.prevRunningMean()->uid(),
-                                              deviceBuffers,
-                                              numDeviceBuffers)
-                                 .ptr;
-        prevRunningVariancePtr = findDeviceBuffer(_trainingParams.prevRunningVariance()->uid(),
-                                                  deviceBuffers,
-                                                  numDeviceBuffers)
-                                     .ptr;
-        nextRunningMeanPtr = findDeviceBuffer(_trainingParams.nextRunningMean()->uid(),
-                                              deviceBuffers,
-                                              numDeviceBuffers)
-                                 .ptr;
-        nextRunningVariancePtr = findDeviceBuffer(_trainingParams.nextRunningVariance()->uid(),
-                                                  deviceBuffers,
-                                                  numDeviceBuffers)
-                                     .ptr;
+        prevRunningMeanPtr
+            = hipdnn_plugin_sdk::findDeviceBuffer(
+                  _trainingParams.prevRunningMean()->uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
+        prevRunningVariancePtr
+            = hipdnn_plugin_sdk::findDeviceBuffer(
+                  _trainingParams.prevRunningVariance()->uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
+        nextRunningMeanPtr
+            = hipdnn_plugin_sdk::findDeviceBuffer(
+                  _trainingParams.nextRunningMean()->uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
+        nextRunningVariancePtr
+            = hipdnn_plugin_sdk::findDeviceBuffer(
+                  _trainingParams.nextRunningVariance()->uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
     }
 
     // Get epsilon value from training parameters
@@ -553,7 +556,7 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
     hipdnnPluginDeviceBuffer_t yBuffer = {-1, nullptr};
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
     {
-        yBuffer = findDeviceBuffer(
+        yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _trainingParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         const auto& activation = *_trainingParams.optActivation();
@@ -562,7 +565,8 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
     }
     else
     {
-        yBuffer = findDeviceBuffer(_trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+        yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+            _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
     }
 
     if(_kernelVariant != 2)

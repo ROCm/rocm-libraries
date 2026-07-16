@@ -612,3 +612,152 @@ TEST_F(IntegrationGraphDescriptorApi, StampsBaselineVersionForOrdinaryGraph)
               hipdnn_data_sdk::utilities::Version{
                   hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE});
 }
+
+// End-to-end: a runtime pass-by-value tensor's classification (the
+// HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT flag) must survive a full
+// build -> serialize -> deserialize round trip through the public C API, not
+// just the version stamp on the graph as a whole. Builds a graph with a
+// runtime-pbv input tensor, serializes it, deserializes it via
+// hipdnnBackendCreateAndDeserializeGraph_ext, pulls the reduction op's XDESC
+// back out of the *deserialized* graph, and re-reads the flag off it.
+TEST_F(IntegrationGraphDescriptorApi, DeserializedGraphRestoresTensorRuntimePassByValueFlag)
+{
+    const std::vector<int64_t> inDims = {4, 8};
+    const std::vector<int64_t> inStrides = {8, 1};
+    const std::vector<int64_t> outDims = {1, 8};
+    const std::vector<int64_t> outStrides = {8, 1};
+
+    std::vector<hipdnnBackendDescriptor_t> owned;
+    const auto cleanup = [&owned]() {
+        for(auto* d : owned)
+        {
+            hipdnnBackendDestroyDescriptor(d);
+        }
+    };
+
+    hipdnnBackendDescriptor_t xDesc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &xDesc),
+              HIPDNN_STATUS_SUCCESS);
+    owned.push_back(xDesc);
+    setAllTensorAttributes(xDesc, 1, "input", inDims, inStrides);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+
+    bool flag = true;
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            xDesc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &flag),
+        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(xDesc), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t yDesc = createAndFinalizeTensorDesc(2, "output", outDims, outStrides);
+    owned.push_back(yDesc);
+
+    hipdnnBackendDescriptor_t opDesc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR, &opDesc),
+              HIPDNN_STATUS_SUCCESS);
+    owned.push_back(opDesc);
+    ASSERT_EQ(hipdnnBackendSetAttribute(opDesc,
+                                        HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(&xDesc)),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(opDesc,
+                                        HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(&yDesc)),
+              HIPDNN_STATUS_SUCCESS);
+    const hipdnnReduceTensorOp_t reduceOp = HIPDNN_REDUCE_TENSOR_ADD;
+    ASSERT_EQ(hipdnnBackendSetAttribute(opDesc,
+                                        HIPDNN_ATTR_REDUCTION_OPERATOR,
+                                        HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE,
+                                        1,
+                                        &reduceOp),
+              HIPDNN_STATUS_SUCCESS);
+    const hipdnnDataType_t compType = HIPDNN_DATA_FLOAT;
+    ASSERT_EQ(hipdnnBackendSetAttribute(
+                  opDesc, HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendFinalize(opDesc), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t graphDesc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &graphDesc),
+              HIPDNN_STATUS_SUCCESS);
+    owned.push_back(graphDesc);
+    const std::array<hipdnnBackendDescriptor_t, 1> ops = {opDesc};
+    ASSERT_EQ(hipdnnBackendSetAttribute(graphDesc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(ops.data())),
+              HIPDNN_STATUS_SUCCESS);
+
+    size_t size = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(graphDesc, 0, &size, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(size, 0u);
+    std::vector<uint8_t> buffer(size);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(graphDesc, size, &size, buffer.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    // Deserialize into a brand-new descriptor -- this is the restored graph
+    // under test, distinct from the one that built the buffer above.
+    hipdnnBackendDescriptor_t restoredGraphDesc = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(&restoredGraphDesc, buffer.data(), size),
+              HIPDNN_STATUS_SUCCESS);
+    owned.push_back(restoredGraphDesc);
+
+    // Pull the single operation back out of the restored graph.
+    int64_t opCount = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(restoredGraphDesc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        0,
+                                        &opCount,
+                                        nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(opCount, 1);
+    hipdnnBackendDescriptor_t restoredOpDesc = nullptr;
+    int64_t gotOpCount = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(restoredGraphDesc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &gotOpCount,
+                                        static_cast<void*>(&restoredOpDesc)),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(gotOpCount, 1);
+    owned.push_back(restoredOpDesc);
+
+    // Pull the reduction op's X tensor descriptor back out.
+    hipdnnBackendDescriptor_t restoredXDesc = nullptr;
+    int64_t gotXCount = 0;
+    ASSERT_EQ(hipdnnBackendGetAttribute(restoredOpDesc,
+                                        HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        &gotXCount,
+                                        static_cast<void*>(&restoredXDesc)),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(gotXCount, 1);
+    owned.push_back(restoredXDesc);
+
+    // The flag set on the ORIGINAL tensor before serialization must be
+    // readable, unchanged, off the tensor descriptor extracted from the
+    // DESERIALIZED graph -- proving the full round trip, not just the
+    // graph-level version stamp checked by StampsPassByValueVersionFor*.
+    bool restoredFlag = false;
+    int64_t elementCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(restoredXDesc,
+                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &restoredFlag),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_TRUE(restoredFlag);
+
+    cleanup();
+}

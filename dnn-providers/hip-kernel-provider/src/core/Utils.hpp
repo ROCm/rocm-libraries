@@ -61,8 +61,6 @@ struct ActivationParams
 ActivationParams
     parseActivation(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
 
-using hipdnn_plugin_sdk::findDeviceBuffer;
-
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
@@ -70,9 +68,5 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttribut
     int64_t uid);
 
 bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor);
-
-using hipdnn_plugin_sdk::makeScalarOperand;
-using hipdnn_plugin_sdk::resolveScalarOperand;
-using hipdnn_plugin_sdk::ScalarOperand;
 
 } // namespace hip_kernel_provider::core::utils

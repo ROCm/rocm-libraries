@@ -62,7 +62,7 @@ private:
     MiopenTensor _bias;
     MiopenTensor _estMean;
     MiopenTensor _variance;
-    miopen_utils::ScalarOperand _epsilon;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     std::optional<MiopenActivationDescriptor> _optActivation;
     std::optional<MiopenTensor> _activationOut;

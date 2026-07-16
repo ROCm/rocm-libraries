@@ -54,7 +54,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invVariance;
-    core::utils::ScalarOperand _epsilon;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 };
 
 class LayernormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>

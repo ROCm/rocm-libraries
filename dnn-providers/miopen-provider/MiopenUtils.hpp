@@ -149,8 +149,6 @@ struct ActivationParams
 ActivationParams mapPointwiseModeToMiopenActivation(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
 
-using hipdnn_plugin_sdk::findDeviceBuffer;
-
 miopenDataType_t
     tensorDataTypeToMiopenDataType(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
@@ -187,10 +185,6 @@ size_t getSpatialDimCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttr
 /// as ":xnack+".
 /// @throws hipdnn_plugin_sdk::HipdnnPluginException on HIP failure.
 std::string getDeviceArch(hipStream_t stream);
-
-using hipdnn_plugin_sdk::makeScalarOperand;
-using hipdnn_plugin_sdk::resolveScalarOperand;
-using hipdnn_plugin_sdk::ScalarOperand;
 
 using hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;

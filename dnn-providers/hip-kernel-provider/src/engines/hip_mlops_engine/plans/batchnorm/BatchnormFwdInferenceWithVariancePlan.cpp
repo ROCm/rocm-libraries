@@ -29,7 +29,8 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _estVariance(tensorMap.at(attributes.variance_tensor_uid()))
     , _activationOut(nullptr)
 {
-    _epsilon = makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
+    _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
@@ -48,7 +49,8 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _optActivation(parseActivation(pointwiseAttributes))
     , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
 {
-    _epsilon = makeScalarOperand(tensorMap, inferenceAttributes.epsilon_tensor_uid(), "Epsilon");
+    _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, inferenceAttributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
@@ -91,7 +93,7 @@ double BatchnormFwdInferenceWithVarianceParams::epsilonValue(
     const hipdnnPluginDeviceBuffer_t* deviceBuffers, uint32_t numDeviceBuffers) const
 {
     return hipdnn_plugin_sdk::toDouble(
-        resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
+        hipdnn_plugin_sdk::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers));
 }
 
 const std::optional<ActivationParams>&
@@ -284,15 +286,16 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer
-        = findDeviceBuffer(_inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer
-        = findDeviceBuffer(_inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
-    auto estMeanBuffer
-        = findDeviceBuffer(_inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
-    auto estVarianceBuffer
-        = findDeviceBuffer(_inferenceParams.estVariance()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
+    auto estVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.estVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
     // Get epsilon
     double epsilon = _inferenceParams.epsilonValue(deviceBuffers, numDeviceBuffers);
@@ -303,7 +306,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
     // Launch kernel with appropriate output buffer
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
-        auto activationOutBuffer = findDeviceBuffer(
+        auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         // Get activation parameters
@@ -330,8 +333,8 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
     }
     else
     {
-        auto yBuffer
-            = findDeviceBuffer(_inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+            _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
         _runnableKernel->launch(handle.getStream(),
                                 xBuffer.ptr,

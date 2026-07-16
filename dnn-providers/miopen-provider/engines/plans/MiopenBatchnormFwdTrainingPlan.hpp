@@ -64,7 +64,7 @@ private:
     MiopenTensor _y;
     MiopenTensor _scale;
     MiopenTensor _bias;
-    miopen_utils::ScalarOperand _epsilon;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     // Optional save mean/variance
     std::optional<MiopenTensor> _mean;
@@ -73,7 +73,7 @@ private:
     // Optional running statistics
     std::optional<MiopenTensor> _prevRunningMean;
     std::optional<MiopenTensor> _prevRunningVariance;
-    std::optional<miopen_utils::ScalarOperand> _momentum;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _momentum;
     std::optional<MiopenTensor> _nextRunningMean;
     std::optional<MiopenTensor> _nextRunningVariance;
     bool _hasRunningStats{false};

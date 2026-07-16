@@ -71,7 +71,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _estMean;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _estVariance;
-    ScalarOperand _epsilon;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     std::optional<ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;

@@ -73,7 +73,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
-    ScalarOperand _epsilon;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     // Save mean/variance
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean = nullptr;
@@ -84,7 +84,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _prevRunningVariance = nullptr;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningMean = nullptr;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _nextRunningVariance = nullptr;
-    std::optional<ScalarOperand> _momentum;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _momentum;
     bool _hasRunningStats{false};
 
     std::optional<ActivationParams> _optActivation;
