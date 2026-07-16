@@ -3,5 +3,7 @@
 
 add_cpp_graph_test_sources(
     IntegrationGpuRMSNorm.cpp
+    IntegrationGpuRMSNormActivation.cpp
     IntegrationGpuRMSNormBackward.cpp
+    IntegrationGpuRMSNormBackwardActivation.cpp
 )

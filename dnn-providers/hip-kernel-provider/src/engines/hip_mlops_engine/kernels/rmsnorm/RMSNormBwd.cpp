@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "HipKernelActivation.hpp"
 #include "VectorTypes.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
@@ -13,15 +14,19 @@ using DyType = HIP_PLUGIN_RMSNORM_DY_TYPE;
 using DxType = HIP_PLUGIN_RMSNORM_DX_TYPE;
 using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
 using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
+using YType = HIP_PLUGIN_RMSNORM_Y_TYPE;
 
-extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
-                                                const XType* __restrict__ x,
-                                                const ComputeType* __restrict__ rstd,
-                                                ScaleType* __restrict__ dweight,
-                                                ScaleType* __restrict__ dbias)
+extern "C" __global__ void RMSnormBwdScaleBias(const DyType* __restrict__ dy,
+                                               const XType* __restrict__ x,
+                                               const ComputeType* __restrict__ rstd,
+                                               ScaleType* __restrict__ dscale,
+                                               ScaleType* __restrict__ dbias,
+                                               const YType* __restrict__ y,
+                                               ComputeType alpha,
+                                               ComputeType beta)
 {
     static_assert(std::is_same<ComputeType, float>::value,
-                  "ComputeType must be float for the RMSnormBwdWeightBias kernel");
+                  "ComputeType must be float for the RMSnormBwdScaleBias kernel");
 
     const unsigned int tidx = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
@@ -30,37 +35,49 @@ extern "C" __global__ void RMSnormBwdWeightBias(const DyType* __restrict__ dy,
         return;
     }
 
-    float sum_dw = 0.0f;
-    float sum_db = 0.0f;
+    float sum_dscale = 0.0f;
+    float sum_dbias = 0.0f;
 
-    // backward weight calculation
+    // backward scale calculation
     for(unsigned int o = 0; o < OUTER_SIZE; ++o)
     {
         for(unsigned int s = 0; s < STRIDE; ++s)
         {
             size_t idx = o * INNER_SIZE * STRIDE + tidx * STRIDE + s;
 
-            float prstd = rstd[o * STRIDE + s];
+            float prstd = hip_kernel_provider::cast<float>(rstd[o * STRIDE + s]);
             float pdy = hip_kernel_provider::cast<float>(dy[idx]);
             float px = hip_kernel_provider::cast<float>(x[idx]);
+            if constexpr(hip_kernel_provider::ActivationMode{HIP_PLUGIN_RMSNORM_NRN_OP_ID}
+                         != hip_kernel_provider::ActivationMode::PASTHRU)
+            {
+                float py = hip_kernel_provider::cast<float>(y[idx]);
+                pdy = hip_kernel_provider::applyActivationGradient<
+                    float,
+                    hip_kernel_provider::ActivationMode{HIP_PLUGIN_RMSNORM_NRN_OP_ID}>(
+                    pdy, py, alpha, beta);
+            }
 
-            sum_dw += pdy * px * prstd;
-            sum_db += pdy;
+            sum_dscale += pdy * px * prstd;
+            sum_dbias += pdy;
         }
     }
 
-    dweight[tidx] = hip_kernel_provider::cast<ScaleType>(sum_dw);
+    dscale[tidx] = hip_kernel_provider::cast<ScaleType>(sum_dscale);
     if(dbias)
     {
-        dbias[tidx] = hip_kernel_provider::cast<ScaleType>(sum_db);
+        dbias[tidx] = hip_kernel_provider::cast<ScaleType>(sum_dbias);
     }
 }
 
 extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
                                           const XType* __restrict__ x,
-                                          const ScaleType* __restrict__ weight,
+                                          const ScaleType* __restrict__ scale,
                                           const ComputeType* __restrict__ rstd,
-                                          DxType* __restrict__ dx)
+                                          DxType* __restrict__ dx,
+                                          const YType* __restrict__ y,
+                                          ComputeType alpha,
+                                          ComputeType beta)
 {
     static_assert(std::is_same<ComputeType, float>::value,
                   "ComputeType must be float for the RMSnormBwdData kernel");
@@ -80,9 +97,18 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
 
         float pdy = hip_kernel_provider::cast<float>(dy[idx]);
         float px = hip_kernel_provider::cast<float>(x[idx]);
-        float pw = hip_kernel_provider::cast<float>(weight[i]);
+        float pscale = hip_kernel_provider::cast<float>(scale[i]);
+        if constexpr(hip_kernel_provider::ActivationMode{HIP_PLUGIN_RMSNORM_NRN_OP_ID}
+                     != hip_kernel_provider::ActivationMode::PASTHRU)
+        {
+            float py = hip_kernel_provider::cast<float>(y[idx]);
+            pdy = hip_kernel_provider::applyActivationGradient<float,
+                                                               hip_kernel_provider::ActivationMode{
+                                                                   HIP_PLUGIN_RMSNORM_NRN_OP_ID}>(
+                pdy, py, alpha, beta);
+        }
 
-        mean += pdy * pw * px;
+        mean += pdy * pscale * px;
     }
 
     ltmp[lid] = mean;
@@ -107,9 +133,18 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
 
         float pdy = hip_kernel_provider::cast<float>(dy[idx]);
         float px = hip_kernel_provider::cast<float>(x[idx]);
-        float pw = hip_kernel_provider::cast<float>(weight[i]);
+        float pscale = hip_kernel_provider::cast<float>(scale[i]);
+        if constexpr(hip_kernel_provider::ActivationMode{HIP_PLUGIN_RMSNORM_NRN_OP_ID}
+                     != hip_kernel_provider::ActivationMode::PASTHRU)
+        {
+            float py = hip_kernel_provider::cast<float>(y[idx]);
+            pdy = hip_kernel_provider::applyActivationGradient<float,
+                                                               hip_kernel_provider::ActivationMode{
+                                                                   HIP_PLUGIN_RMSNORM_NRN_OP_ID}>(
+                pdy, py, alpha, beta);
+        }
 
-        float dx_val = (pdy * pw * prstd) - (mean * px * prstd * prstd * prstd);
+        float dx_val = (pdy * pscale * prstd) - (mean * px * prstd * prstd * prstd);
         dx[idx] = hip_kernel_provider::cast<DxType>(dx_val);
     }
 }
