@@ -16,6 +16,7 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Addressed internal issues causing multi-device plans to fall back to the least-performant code path for certain 3D real transforms (e.g., multi-device single-precision real out-of-place 3D of size 320x320x320 using slab decomposition).
+* Fixed a thread-safety issue that could cause `rocfft_plan_create` to crash when called concurrently from many threads.
 
 ## rocFFT 1.0.38 for ROCm 7.14
 
@@ -36,7 +37,6 @@ Documentation for rocFFT is available at
 ### Resolved issues
 
 * Fixed possible incorrect results for multi-dimensional real transforms with small lengths (e.g., smaller than 128) along the two fastest-varying dimensions.
-* Fixed a thread-safety issue that could cause `rocfft_plan_create` to crash when called concurrently from many threads.
 
 ## rocFFT 1.0.37 for ROCm 7.13
 
