@@ -1,6 +1,6 @@
 # Changelog for Tensile
 
-## Tensile 4.47.0 for ROCm 7.15
+## Tensile 4.47.0 for ROCm 10.0
 
 ### Changed
 
