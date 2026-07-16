@@ -173,7 +173,7 @@ void testing_dense_to_sparse_bell_no_set_pointers_bad_arg(const Arguments& argus
 template <typename I, typename T>
 void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
 {
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     I                           m        = argus.M;
     I                           n        = argus.N;
     I                           blockDim = argus.block_dim;
