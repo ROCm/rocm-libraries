@@ -35,13 +35,17 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <test_plugins/TestPassByValueRecorder.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
+using hipdnn_tests::IntegrationTestFixture;
 
 namespace
 {
@@ -253,4 +257,116 @@ TEST_F(IntegrationPassByValueDelivery, MissingRuntimeScalarFailsExecute)
 
     EXPECT_EQ(_recorder->count(), 0u)
         << "No scalar should have been recorded once resolution failed";
+}
+
+// ============================================================================
+// Frontend lift round-trip: proves a runtime pass-by-value tensor's
+// classification survives the REAL serialize/deserialize path through the
+// frontend's own reconstruction API, not just the backend C-API descriptor
+// accessors (see IntegrationGraphDescriptorApi.
+// DeserializedGraphRestoresTensorRuntimePassByValueFlag for that layer) and
+// not just the stub-backend unit tests in TestDescriptorHelpers.cpp. Uses
+// liftGraphWithoutFinalization(), which serializes the graph to binary via
+// Graph::to_binary(), builds a real backend descriptor from those bytes, and
+// reconstructs a new frontend Graph via fromBackendDescriptor() -- the same
+// path a caller exercises with from_compiled_plan_binary(). No handle,
+// plugin, or device is needed since this never executes.
+// ============================================================================
+
+namespace
+{
+
+// Builds an RMSNorm graph whose epsilon is a pure runtime-user-supplied
+// pass-by-value tensor (set_as_runtime_parameter(): no baked value).
+std::shared_ptr<hipdnn_tests::TestableGraphLifting> buildRuntimeEpsilonGraph()
+{
+    const std::vector<int64_t> dims = {2, 3, 8, 8};
+    std::vector<int64_t> scaleDims = dims;
+    scaleDims[0] = 1;
+
+    auto graph = std::make_shared<hipdnn_tests::TestableGraphLifting>();
+    graph->set_name("PassByValueLiftRoundTrip")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(dims)
+        .set_stride({192, 64, 8, 1});
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(scaleDims)
+        .set_stride({64, 64, 8, 1});
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(3)
+        .set_name("epsilon")
+        .set_dim({1})
+        .set_stride({1})
+        .set_data_type(DataType::FLOAT)
+        .set_as_runtime_parameter();
+
+    RMSNormAttributes attrs;
+    attrs.set_name("rmsnorm");
+    attrs.set_epsilon(epsilon);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
+
+    auto outputs = graph->rmsnorm(x, scale, std::move(attrs));
+    outputs[0]->set_uid(4).set_name("Y").set_output(true).set_data_type(DataType::FLOAT);
+
+    return graph;
+}
+
+} // namespace
+
+// The runtime pass-by-value classification set on the ORIGINAL graph's
+// epsilon tensor (set_as_runtime_parameter(): runtime flag true, no baked
+// value) must be readable, unchanged, off the epsilon tensor in the LIFTED
+// (reconstructed-from-serialized-bytes) graph. This is the frontend-facing
+// counterpart to the backend descriptor test: it proves a real caller
+// reconstructing a Graph via from_compiled_plan_binary() sees the correct
+// getters, not just that the backend's internal flatbuffer round-trips.
+TEST_F(IntegrationTestFixture, PassByValueLiftRoundTripPreservesRuntimeClassification)
+{
+    auto originalGraph = buildRuntimeEpsilonGraph();
+
+    auto liftedGraph = hipdnn_tests::liftGraphWithoutFinalization(*originalGraph);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_NE(tensorMap.count(3), 0u);
+    const auto& liftedEpsilon = tensorMap[3];
+
+    EXPECT_TRUE(liftedEpsilon->get_is_runtime_pass_by_value());
+    EXPECT_FALSE(liftedEpsilon->get_pass_by_value().has_value());
+    EXPECT_FALSE(liftedEpsilon->get_compile_time_constant<float>().has_value());
+}
+
+// Complementary case: a COMPILE-TIME CONSTANT epsilon (the default state,
+// baked value, runtime flag clear) must also survive the lift round-trip
+// with the opposite classification, proving the lift path distinguishes the
+// two states rather than always reporting one.
+TEST_F(IntegrationTestFixture, PassByValueLiftRoundTripPreservesCompileTimeConstant)
+{
+    auto graph = buildRuntimeEpsilonGraph();
+    // Overwrite epsilon with a baked compile-time constant instead.
+    auto tensorMap = graph->getTensorsByUid();
+    ASSERT_NE(tensorMap.count(3), 0u);
+    tensorMap[3]->set_value(1e-5f);
+
+    auto liftedGraph = hipdnn_tests::liftGraphWithoutFinalization(*graph);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    auto liftedTensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_NE(liftedTensorMap.count(3), 0u);
+    const auto& liftedEpsilon = liftedTensorMap[3];
+
+    EXPECT_FALSE(liftedEpsilon->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(liftedEpsilon->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(*liftedEpsilon->get_compile_time_constant<float>(), 1e-5f);
 }
