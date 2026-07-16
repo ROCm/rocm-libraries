@@ -1551,9 +1551,7 @@ inline void gpu_reference_report(hipStream_t                   stream,
             }
             else
             {
-                // unit_check: per-element 4-ULP compare, matching ASSERT_FLOAT_EQ
-                // (the naive f32 reference is not bit-identical to the kernel, so a
-                // strict max==0 would be stricter than the CPU path it replaces).
+                // unit_check: per-element 4-ULP compare, matching ASSERT_FLOAT_EQ.
                 ASSERT_EQ(res.num_unit_fail, 0ull);
             }
         }
