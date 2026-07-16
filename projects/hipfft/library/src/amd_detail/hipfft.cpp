@@ -44,13 +44,6 @@
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "../../../shared/rocfft_hip.h"
 
-#ifndef NDEBUG
-#include <iostream>
-#define HIPFFT_DEBUG_LOG(DEBUG_MSG) std::cerr << "[hipFFT DEBUG LOG]: " << DEBUG_MSG << std::endl;
-#else
-#define HIPFFT_DEBUG_LOG(DEBUG_MSG)
-#endif
-
 // Helper macro to check for errors: the status is thrown if not successful.
 // handle_exception catches it and
 // - returns it unchanged to the caller if it is a hipfftResult error code;
@@ -1005,22 +998,18 @@ try
 }
 catch(hipfftResult e)
 {
-    HIPFFT_DEBUG_LOG("Bare error code caught: " + std::to_string(e));
     return e;
 }
 catch(const DEVICEBUF_MEM_USAGE& e)
 {
-    HIPFFT_DEBUG_LOG(e.what());
     return HIPFFT_ALLOC_FAILED;
 }
 catch(const std::exception& e)
 {
-    HIPFFT_DEBUG_LOG(e.what());
     return HIPFFT_INTERNAL_ERROR;
 }
 catch(...)
 {
-    HIPFFT_DEBUG_LOG("Unknown exception");
     return HIPFFT_INTERNAL_ERROR;
 }
 
