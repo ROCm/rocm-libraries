@@ -15,10 +15,10 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
-#include "harness/golden/BundleDiscovery.hpp"
-#include "harness/golden/IntegrationTestBundle.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests::bundle;
 
 // NOLINTBEGIN(readability-identifier-naming)
 

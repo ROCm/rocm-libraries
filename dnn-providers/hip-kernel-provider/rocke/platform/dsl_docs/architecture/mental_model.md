@@ -39,7 +39,7 @@ core/lower_llvm.py
 runtime/comgr.py
   ctypes over libamd_comgr; LLVM IR -> bitcode -> relocatable -> HSACO.
 
-runtime/hip_module.py, runtime/launcher.py, runtime/torch_module.py
+runtime/hip_module.py, runtime/launcher.py, runtime/torch_interop.py
   Load HSACO, pack args, resolve streams, launch, time, manage workspace
   and per-stream pending-args lifetime.
 ```
