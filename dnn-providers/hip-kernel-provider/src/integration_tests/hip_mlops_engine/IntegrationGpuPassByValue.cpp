@@ -30,7 +30,7 @@ namespace hip_kernel_provider::pass_by_value::test
 namespace
 {
 
-// Generic regression suite for RFC 0016 runtime pass-by-value scalars in the hip-kernel
+// Generic regression suite for runtime pass-by-value scalars in the hip-kernel
 // provider. It exercises EVERY op the hip_mlops engine serves that consumes a pass-by-value
 // scalar tensor -- batchnorm-inference-with-variance epsilon, batchnorm-training epsilon,
 // batchnorm-training momentum (running stats), layernorm epsilon, and rmsnorm epsilon.

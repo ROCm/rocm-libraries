@@ -27,7 +27,7 @@ using namespace hipdnn_test_sdk::utilities;
 namespace
 {
 
-// Generic regression suite for RFC 0016 runtime pass-by-value scalars in the MIOpen provider.
+// Generic regression suite for runtime pass-by-value scalars in the MIOpen provider.
 // It exercises every op the MIOpen provider serves that consumes a pass-by-value scalar
 // tensor: batchnorm-inference-with-variance epsilon and batchnorm-forward-training epsilon.
 //
@@ -39,7 +39,7 @@ namespace
 // two materially different runtime values, which must produce DIFFERENT output -- proving the
 // delivered value actually flows through.
 //
-// Momentum (the other RFC 0016 scalar) is intentionally NOT covered: MIOpen's batchnorm plan
+// Momentum (the other pass-by-value scalar) is intentionally NOT covered: MIOpen's batchnorm plan
 // builder declines forward-training graphs that carry running statistics
 // (MiopenBatchnormPlanBuilder::isApplicable returns false when prev/next running mean+variance
 // and momentum are all set), so MIOpen never executes the momentum path and such a test would

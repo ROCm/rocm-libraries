@@ -17,8 +17,8 @@ namespace
 {
 
 // Builds a scalar TensorAttributes flatbuffer and returns the owning builder plus the
-// finalized root pointer. Mirrors compile-time-constant / runtime-with-default / pure
-// runtime-user-supplied states per RFC 0016.
+// finalized root pointer. Mirrors the compile-time-constant / runtime-with-default /
+// pure-runtime-user-supplied states.
 flatbuffers::FlatBufferBuilder buildScalarTensorAttributes(int64_t uid,
                                                            DataType dataType,
                                                            bool isRuntimePassByValue,

@@ -63,8 +63,7 @@ public:
         return "1.0.0";
     }
 
-    /// Reports the minimum plugin SDK version that advertises runtime
-    /// pass-by-value support (RFC 0016).
+    /// Reports the minimum plugin SDK version that advertises runtime pass-by-value support.
     const char* getPluginApiVersion() const override
     {
         return hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION.data();
