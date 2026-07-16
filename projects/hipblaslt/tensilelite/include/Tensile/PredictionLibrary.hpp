@@ -151,8 +151,6 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
-            if(numSolutions == 0)
-                return rv;
             size_t                     m     = 1;
             size_t                     n     = 1;
             size_t                     k     = 1;
