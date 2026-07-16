@@ -45,7 +45,6 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
-using hipdnn_tests::IntegrationTestFixture;
 
 namespace
 {
@@ -276,6 +275,13 @@ TEST_F(IntegrationPassByValueDelivery, MissingRuntimeScalarFailsExecute)
 namespace
 {
 
+// Feature-named fixture (not the bare base IntegrationTestFixture) per
+// hipDNN's GTest naming convention -- suite names embedding "Test" in the
+// middle of the name are rejected.
+class IntegrationPassByValueLiftRoundTrip : public hipdnn_tests::IntegrationTestFixture
+{
+};
+
 // Builds an RMSNorm graph whose epsilon is a pure runtime-user-supplied
 // pass-by-value tensor (set_as_runtime_parameter(): no baked value).
 std::shared_ptr<hipdnn_tests::TestableGraphLifting> buildRuntimeEpsilonGraph()
@@ -331,7 +337,7 @@ std::shared_ptr<hipdnn_tests::TestableGraphLifting> buildRuntimeEpsilonGraph()
 // counterpart to the backend descriptor test: it proves a real caller
 // reconstructing a Graph via from_compiled_plan_binary() sees the correct
 // getters, not just that the backend's internal flatbuffer round-trips.
-TEST_F(IntegrationTestFixture, PassByValueLiftRoundTripPreservesRuntimeClassification)
+TEST_F(IntegrationPassByValueLiftRoundTrip, PreservesRuntimeClassification)
 {
     auto originalGraph = buildRuntimeEpsilonGraph();
 
@@ -351,7 +357,7 @@ TEST_F(IntegrationTestFixture, PassByValueLiftRoundTripPreservesRuntimeClassific
 // baked value, runtime flag clear) must also survive the lift round-trip
 // with the opposite classification, proving the lift path distinguishes the
 // two states rather than always reporting one.
-TEST_F(IntegrationTestFixture, PassByValueLiftRoundTripPreservesCompileTimeConstant)
+TEST_F(IntegrationPassByValueLiftRoundTrip, PreservesCompileTimeConstant)
 {
     auto graph = buildRuntimeEpsilonGraph();
     // Overwrite epsilon with a baked compile-time constant instead.
