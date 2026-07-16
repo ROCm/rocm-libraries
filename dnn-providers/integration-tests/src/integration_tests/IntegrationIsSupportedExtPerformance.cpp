@@ -5,8 +5,10 @@
 
 #include <chrono>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <iostream>
 
+#include "harness/IntegrationGraphVerificationHarness.hpp"
 #include "harness/SharedHandle.hpp"
 
 using namespace hipdnn_frontend;
@@ -79,6 +81,23 @@ protected:
 
 TEST_F(IntegrationIsSupportedExtPerformance, ColdCallCompletesWithinThreshold)
 {
+    // Probe support once before timing: is_supported_ext() itself does not
+    // require build_operation_graph() first, but checkEngineSupportOrSkip()
+    // does (get_ranked_engine_ids() needs it), so validate/build a throwaway
+    // graph purely to gate the test. This is not part of what's being timed.
+    {
+        Graph probeGraph = createSimpleBatchnormGraph();
+        auto validateResult = probeGraph.validate();
+        ASSERT_TRUE(validateResult.is_good()) << validateResult.get_message();
+        auto buildResult = probeGraph.build_operation_graph(_handle);
+        ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+        ASSERT_NO_FATAL_FAILURE(hipdnn_integration_tests::checkEngineSupportOrSkip(probeGraph));
+        if(::testing::Test::IsSkipped())
+        {
+            return;
+        }
+    }
+
     const auto start = std::chrono::steady_clock::now();
 
     for(int i = 0; i < K_ITERATIONS; ++i)
@@ -109,6 +128,12 @@ TEST_F(IntegrationIsSupportedExtPerformance, HotCallCompletesWithinThreshold)
 
     result = graph.build_operation_graph(_handle);
     ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    ASSERT_NO_FATAL_FAILURE(hipdnn_integration_tests::checkEngineSupportOrSkip(graph));
+    if(::testing::Test::IsSkipped())
+    {
+        return;
+    }
 
     const auto start = std::chrono::steady_clock::now();
 
