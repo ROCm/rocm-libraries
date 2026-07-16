@@ -29,6 +29,7 @@ see artifact_helpers.py.
 """
 
 import os
+import re
 
 import pytest
 import yaml
@@ -91,6 +92,8 @@ def configMarks(filepath, rootDir, availableArchs):
      - Root directory name.  This separates tests into pre_checkin, nightly, etc.
      - Expected failures. Include 'xfail' in the name of the YAML file.
      - Anything in yaml["TestParameters"]["marks"]
+     - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
+     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
@@ -127,6 +130,14 @@ def configMarks(filepath, rootDir, availableArchs):
     if "TestParameters" in doc:
         if "marks" in doc["TestParameters"]:
             marks += [markNamed(m) for m in doc["TestParameters"]["marks"]]
+
+    arch_val = doc.get("GlobalParameters", {}).get("Architecture")
+    if arch_val and markNamed(arch_val) not in marks:
+        marks.append(markNamed(arch_val))
+
+    arch_in_name = re.search(r'(gfx\d+)', components[-1])
+    if arch_in_name and markNamed(arch_in_name.group(1)) not in marks:
+        marks.append(markNamed(arch_in_name.group(1)))
 
     # Architecture specific xfail marks
     for arch in availableArchs:

@@ -14,7 +14,6 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   BoundsCheck: 2
-  #MaxFileName: 256
   #KeepBuildTmp: True
 
 BenchmarkProblems:
@@ -78,7 +77,6 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - LocalReadVectorWidth: [4]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
@@ -166,7 +164,6 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
@@ -254,7 +251,6 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
@@ -341,7 +337,6 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
@@ -423,7 +418,6 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
         - Groups:
@@ -503,7 +497,6 @@ BenchmarkProblems:
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
         - LocalReadVectorWidth: [1]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
@@ -584,7 +577,6 @@ BenchmarkProblems:
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
         - LocalReadVectorWidth: [1]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
@@ -664,7 +656,6 @@ BenchmarkProblems:
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
         - LocalReadVectorWidth: [1]
         - DirectToVgprA: [false, true]
         - DirectToVgprB: [false, true]
