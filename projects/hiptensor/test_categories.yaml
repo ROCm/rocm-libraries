@@ -102,6 +102,6 @@ execution_settings:
     quick: 900            # 15 min
     standard: 1800        # 30 min
     comprehensive: 2700   # 45 min
-    full: 28800           # 2 hours
+    full: 7200            # 2 hours
     ffm-quick: 7200       # 2 hours
     ffm-full: 7200        # 2 hours
