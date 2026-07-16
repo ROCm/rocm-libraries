@@ -83,12 +83,10 @@ public:
         int64_t        batch_count     = has_batch_count ? arg.batch_count : 1;
 
         // both gpu_us and cpu_us are per-call time
-        // per/us to per/sec *10^6; gpu_us can be <= 0 due to the flush-overhead correction,
-        // so guard the division.
-        const bool valid_gpu_us = gpu_us > 0.0;
-        double     hipblaslt_gflops
-            = valid_gpu_us ? gflops * batch_count / gpu_us * 1e6 : ArgumentLogging::NA_value;
-        double hipblaslt_GBps = valid_gpu_us ? gbytes / gpu_us * 1e6 : ArgumentLogging::NA_value;
+        double hipblaslt_gflops = hipblaslt_bench::rate_per_second(
+            gflops * batch_count, gpu_us, ArgumentLogging::NA_value);
+        double hipblaslt_GBps
+            = hipblaslt_bench::rate_per_second(gbytes, gpu_us, ArgumentLogging::NA_value);
 
         // append performance fields
         if(gflops != ArgumentLogging::NA_value)

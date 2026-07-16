@@ -204,4 +204,13 @@ namespace hipblaslt_bench
         oss << ".";
         return oss.str();
     }
+
+    // Converts a per-call amount to a per-second rate (amount / time_us * 1e6). A
+    // flush-overhead-corrected time_us can land at or below zero (e.g. a near-instant
+    // kernel), which would otherwise divide into inf/-inf/nan; returns invalid_value
+    // instead.
+    inline double rate_per_second(double amount, double time_us, double invalid_value)
+    {
+        return time_us > 0.0 ? amount / time_us * 1e6 : invalid_value;
+    }
 } // namespace hipblaslt_bench

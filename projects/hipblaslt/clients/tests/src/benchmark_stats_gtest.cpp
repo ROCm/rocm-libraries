@@ -14,6 +14,7 @@
 #include <limits>
 
 using hipblaslt_bench::compute_rotating_buffer_plan;
+using hipblaslt_bench::rate_per_second;
 using hipblaslt_bench::TimingConfig;
 using hipblaslt_bench::validate_adaptive_config;
 
@@ -261,4 +262,26 @@ TEST(RotatingBufferPlan, OverflowingMemoryBudgetUnboundedFallsBackToOneBlock)
         /*total_size_needed_bytes=*/1);
     EXPECT_EQ(plan.block_count, 1);
     EXPECT_FALSE(plan.capped);
+}
+
+// ---------------------------------------------------------------------------
+// rate_per_second
+// ---------------------------------------------------------------------------
+
+TEST(RatePerSecond, ComputesRateForPositiveTime)
+{
+    // 2 units over 500 us == 4000 units/sec.
+    EXPECT_DOUBLE_EQ(rate_per_second(2.0, 500.0, -1.0), 4000.0);
+}
+
+TEST(RatePerSecond, ReturnsInvalidValueForZeroTime)
+{
+    EXPECT_EQ(rate_per_second(2.0, 0.0, -1.0), -1.0);
+}
+
+TEST(RatePerSecond, ReturnsInvalidValueForNegativeTime)
+{
+    // A flush-overhead-corrected time_us can land below zero for a near-instant kernel;
+    // this must not divide into -inf.
+    EXPECT_EQ(rate_per_second(2.0, -0.5, -1.0), -1.0);
 }
