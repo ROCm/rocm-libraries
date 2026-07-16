@@ -489,21 +489,13 @@ def _compile_bquant_kernel(
 
     Two-step build:
       1. Compile to a .o object file.
-      2. Link the .o + libck_tile_dispatcher.a into a shared .so.
-
-    Linking the dispatcher static library resolves Registry::instance() and
-    Dispatcher symbols that are defined in its .cpp sources (registry.cpp,
-    dispatcher.cpp) and referenced by grouped_gemm_bquant_ctypes_lib.cpp.
-    Without this, dlopen() fails with undefined symbol errors.
+      2. Link the .o into a shared .so (no dispatcher static lib needed;
+         the BQuant ctypes lib does not use the registry or dispatcher).
 
     Returns True on success.
     """
     ck_include = _get_ck_include_dir()
     static_lib = _get_dispatcher_static_lib()
-
-    # Dispatcher include: _CTYPES_LIB_SRC is dispatcher/bindings/ctypes/...cpp,
-    # so .parent.parent.parent == dispatcher/, and include/ lives directly there.
-    dispatcher_include = _CTYPES_LIB_SRC.parent.parent.parent / "include"
 
     # -- Step 1: compile to object file --------------------------------------
     obj_path = so_path.with_suffix(".o")
@@ -519,8 +511,11 @@ def _compile_bquant_kernel(
     if ck_include:
         compile_cmd += [f"-I{ck_include}"]
 
-    if dispatcher_include.is_dir():
-        compile_cmd += [f"-I{dispatcher_include}"]
+    # NOTE: dispatcher/include is intentionally excluded here.
+    # It pulls in generated_tile_backend.hpp which instantiates
+    # SelectedKernel::launch(GemmHostArgs&), conflicting with the BQuant
+    # kernel's launch(QuantGemmHostArgs&). The BQuant ctypes lib only needs
+    # the main CK include path (ck_tile/host/tensor_shuffle_utils.hpp lives there).
 
     if extra_include_dirs:
         for d in extra_include_dirs:
@@ -547,13 +542,6 @@ def _compile_bquant_kernel(
 
     if static_lib:
         link_cmd += [str(static_lib)]
-    else:
-        log.warning(
-            "libck_tile_dispatcher.a not found at %s; linking without it. "
-            "Registry::instance() may be an undefined symbol at dlopen time. "
-            "Build the dispatcher first: cd dispatcher/build && cmake .. && make ck_tile_dispatcher",
-            _CTYPES_LIB_SRC.parent.parent.parent / "build" / "libck_tile_dispatcher.a",
-        )
 
     link_cmd += ["-o", str(so_path)]
 
