@@ -185,8 +185,8 @@ rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle             handle,
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::compute_line_nnz_profile(
             handle, csr_row_ptr_indextype, m, nnz, csr_row_ptr, *profile));
-        rocsparse::csrmm_select_default_alg(
-            trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_select_default_alg(
+            trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg));
     }
 
     rocsparse::csrmm_analysis_t f;

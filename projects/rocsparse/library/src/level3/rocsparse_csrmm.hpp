@@ -195,11 +195,11 @@ namespace rocsparse
     // launches and copies. Because buffer_size runs before the profile exists, it
     // sizes for the largest auto-selectable kernel (nnz-split) as a safe upper
     // bound.
-    void csrmm_select_default_alg(rocsparse_operation                trans_A,
-                                  bool                               is_batched,
-                                  int                                cu_count,
-                                  const rocsparse::line_nnz_profile& profile,
-                                  rocsparse_csrmm_alg&               alg);
+    rocsparse_status csrmm_select_default_alg(rocsparse_operation                trans_A,
+                                              bool                               is_batched,
+                                              int32_t                            cu_count,
+                                              const rocsparse::line_nnz_profile& profile,
+                                              rocsparse_csrmm_alg&               alg);
 
     // When \p alg is the format default and \p profile is non-null and known,
     // csrmm resolves it to the same load-balanced algorithm chosen at analysis by

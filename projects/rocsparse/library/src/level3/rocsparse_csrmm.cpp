@@ -387,8 +387,8 @@ rocsparse_status rocsparse::csrmm(rocsparse_handle                   handle,
     if(alg == rocsparse_csrmm_alg_default && profile != nullptr)
     {
         const bool is_batched = (batch_count_A > 1) || (batch_count_B > 1) || (batch_count_C > 1);
-        rocsparse::csrmm_select_default_alg(
-            trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_select_default_alg(
+            trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg));
     }
 
     rocsparse::csrmm_t f;

@@ -48,9 +48,9 @@ namespace rocsparse
                                 const I* __restrict__ offsets,
                                 uint64_t* __restrict__ workspace)
     {
-        const int     tid    = hipThreadIdx_x;
-        const int64_t gid    = int64_t(hipBlockIdx_x) * BLOCKSIZE + tid;
-        const int64_t stride = int64_t(hipGridDim_x) * BLOCKSIZE;
+        const uint32_t tid    = hipThreadIdx_x;
+        const int64_t  gid    = int64_t(hipBlockIdx_x) * BLOCKSIZE + tid;
+        const int64_t  stride = int64_t(hipGridDim_x) * BLOCKSIZE;
 
         uint64_t local_max = 0;
         for(int64_t line = gid; line < nlines; line += stride)
@@ -75,7 +75,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void line_nnz_profile_part2(uint64_t* __restrict__ workspace)
     {
-        const int tid = hipThreadIdx_x;
+        const uint32_t tid = hipThreadIdx_x;
 
         __shared__ uint64_t shared[BLOCKSIZE];
         shared[tid] = workspace[tid];
@@ -97,14 +97,17 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        constexpr uint32_t BLOCKSIZE = 256;
+        static constexpr uint32_t BLOCKSIZE = 256;
 
         // Pass 1 writes exactly BLOCKSIZE partial maxima (one per block), so the
         // workspace holds BLOCKSIZE entries; every entry is written by pass 1
         // (idle blocks write the max identity 0), so no pre-seeding is needed.
-        // Reuse the handle's preallocated device buffer (at least 1 MB, so it
-        // comfortably holds BLOCKSIZE uint64_t entries) instead of a separate
-        // allocation, as done in rocsparse_doti.
+        // Reuse the handle's preallocated device buffer instead of a separate
+        // allocation, as done in rocsparse_doti. The handle buffer is allocated
+        // at a minimum of 1 MB, so assert at compile time that the partials fit
+        // rather than relying on an unchecked assumption.
+        static_assert(sizeof(uint64_t) * BLOCKSIZE <= 1024 * 1024,
+                      "line-nnz profile workspace must fit within the handle device buffer");
         uint64_t* workspace = reinterpret_cast<uint64_t*>(handle->buffer);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::line_nnz_profile_part1<BLOCKSIZE, I>),
@@ -184,8 +187,8 @@ rocsparse_status rocsparse::compute_line_nnz_profile(rocsparse_handle           
     }
     case deprecated_rocsparse_indextype_u16:
     {
-        // Not a valid offsets type; leave the profile uncomputed.
-        return rocsparse_status_success;
+        // u16 is not a valid offsets (row/column pointer) type.
+        return rocsparse_status_not_implemented;
     }
     }
 

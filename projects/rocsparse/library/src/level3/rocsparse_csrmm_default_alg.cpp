@@ -26,17 +26,17 @@
 
 #include "rocsparse_control.hpp"
 
-void rocsparse::csrmm_select_default_alg(rocsparse_operation                trans_A,
-                                         bool                               is_batched,
-                                         int                                cu_count,
-                                         const rocsparse::line_nnz_profile& profile,
-                                         rocsparse_csrmm_alg&               alg)
+rocsparse_status rocsparse::csrmm_select_default_alg(rocsparse_operation                trans_A,
+                                                     bool                               is_batched,
+                                                     int32_t                            cu_count,
+                                                     const rocsparse::line_nnz_profile& profile,
+                                                     rocsparse_csrmm_alg&               alg)
 {
     // Only the format-default algorithm is auto-tuned. Any explicit user choice
     // (row_split / nnz_split / merge_path) is honored unchanged.
     if(alg != rocsparse_csrmm_alg_default)
     {
-        return;
+        return rocsparse_status_success;
     }
 
     // The load-balanced kernels only apply to non-transposed, single-batch
@@ -46,7 +46,7 @@ void rocsparse::csrmm_select_default_alg(rocsparse_operation                tran
     if(trans_A != rocsparse_operation_none || is_batched || !profile.known || profile.nnz <= 0
        || cu_count <= 0)
     {
-        return;
+        return rocsparse_status_success;
     }
 
     // Architecture-portable load-imbalance test. Row-split assigns a fixed slice
@@ -68,11 +68,14 @@ void rocsparse::csrmm_select_default_alg(rocsparse_operation                tran
     // C ~ profile.max/nnz * cu_count ~ 0.05 * 56 ~ 3. The dense width n cancels
     // to first order because both kernels scale with it. Re-validate C if it
     // ever needs to hold on a very different regime.
-    static constexpr double s_imbalance_C = 3.0;
+    //
+    // The test is evaluated in exact 64-bit integer arithmetic (rearranged to
+    // avoid a division): profile.max, profile.nnz and cu_count are all bounded
+    // well below 2^63 for any real problem, so no floating point is needed.
+    static constexpr int64_t s_imbalance_C = 3;
 
-    const double longest_line_work
-        = static_cast<double>(profile.max) * static_cast<double>(cu_count);
-    const double balanced_work = s_imbalance_C * static_cast<double>(profile.nnz);
+    const int64_t longest_line_work = profile.max * static_cast<int64_t>(cu_count);
+    const int64_t balanced_work     = s_imbalance_C * profile.nnz;
     if(longest_line_work >= balanced_work)
     {
         // One line is long enough, relative to the device's parallelism, that
@@ -80,4 +83,6 @@ void rocsparse::csrmm_select_default_alg(rocsparse_operation                tran
         // split kernel, which balances work by non-zeros across wavefronts.
         alg = rocsparse_csrmm_alg_nnz_split;
     }
+
+    return rocsparse_status_success;
 }

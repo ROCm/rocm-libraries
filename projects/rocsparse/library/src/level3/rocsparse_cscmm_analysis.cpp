@@ -189,8 +189,8 @@ rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle             handle,
         const rocsparse_operation effective_trans_A = (trans_A == rocsparse_operation_none)
                                                           ? rocsparse_operation_transpose
                                                           : rocsparse_operation_none;
-        rocsparse::csrmm_select_default_alg(
-            effective_trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_select_default_alg(
+            effective_trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg));
     }
 
     rocsparse::cscmm_analysis_t f;
