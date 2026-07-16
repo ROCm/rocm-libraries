@@ -2933,6 +2933,80 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
+    def test_initD_emitted_on_tail_only_and_preloop_paths(self):
+        """initC is one canonical preloop op reached by every path.
+
+        Normal path (K>=DepthU): GR issue -> initC -> rest of preloop.
+        Tail-only path (K<DepthU): skip the prefetch GR to the same initC,
+        then jump to the tail loop. No separate/duplicated init block.
+        """
+        kernel = create_kernel(256, 256, fp4=True)
+        assert not kernel["NoTailLoop"]
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+
+            # initC emitted exactly once across all paths (no duplicate init).
+            assert asm.count("vgprTiles to zero") == 1, \
+                "initC must be zeroed exactly once"
+            assert "InitDForTailOnly" not in asm, "no separate tail-only init block"
+
+            # Unified control flow: skip prefetch GR to initC, then jump to tail.
+            skip_idx = asm.index("SkipPreloopGR:")
+            zero_idx = asm.index("vgprTiles to zero")
+            tail_idx = asm.index("K < DepthU: jump to tail loop")
+            assert skip_idx < zero_idx < tail_idx, \
+                "expected: SkipPreloopGR: -> initC -> jump to tail loop"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_initD_uf1_tail_only_control_flow_invariants(self):
+        """uf==1 (make_cfg_bf16): unified initC control-flow invariants."""
+        import re
+        kernel = create_kernel(256, 256, fp4=False)
+        assert not kernel["NoTailLoop"]
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel)
+
+        cfg = make_cfg_bf16()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel, tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dTileInfo)
+
+            assert sched.unroll_factor == 1, "fixture must yield uf==1"
+
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+
+            assert "InitDForTailOnly" not in asm, "no separate tail-only init block"
+
+            # initC emitted exactly once (single canonical location).
+            assert asm.count("vgprTiles to zero") == 1, "initC zeroed exactly once"
+
+            assert asm.count("label_SkipPreloopGR:") == 1, "SkipPreloopGR label present"
+            skip_gr = re.findall(r"s_cbranch_scc1\s+label_SkipPreloopGR", asm)
+            assert len(skip_gr) == 1, "K<DepthU guard must skip prefetch GR to initC"
+
+            assert asm.count("label_SkipToEnd:") == 1, "SkipToEnd label must be present"
+            tail_jump = re.findall(r"s_cbranch_scc1\s+label_SkipToEnd", asm)
+            assert len(tail_jump) == 1, "K<DepthU must jump to tail loop after initC"
+        finally:
+            sched.deallocVgprTiles(writer)
+
     def test_emitMainAndExitLoops_pap_mx_inserts_preloop_skip_and_nll_hooks(self):
         """Subtile PAP is scheduler-owned and applies to MX PRELOOP/NLL paths."""
         kernel = create_kernel(256, 256, fp4=True)
@@ -3859,12 +3933,18 @@ class TestEmit_PGR0:
 
 class TestBuildLoopVariants_PGR0:
 
-    def test_preloop_empty(self):
+    def test_preloop_has_initD_only(self):
+        # PGR=0 has no GR/LR preloop, but it must still zero the D
+        # accumulators before the mainloop's first MFMA. The preloop is
+        # therefore a single initD op (not empty).
         cfg = make_cfg_bf16_pgr0()
         sched = LogicalScheduler(cfg)
         sched.build(stop_after=Pass.EMIT)
         preloop = sched.build_preloop()
-        assert preloop == [[[]]]
+        ops = preloop[0][0]
+        labels = [getattr(em.source, 'label', None) for em in ops]
+        assert labels == ['initC_overlap'], \
+            f"PGR=0 preloop should be exactly one initD op, got {labels}"
 
     def test_ngll_empty(self):
         cfg = make_cfg_bf16_pgr0()
@@ -3879,6 +3959,26 @@ class TestBuildLoopVariants_PGR0:
         sched.build(stop_after=Pass.EMIT)
         nll = sched.build_nll()
         assert nll == [[[]]]
+
+
+class TestPreloopInitD:
+    """initD (accumulator zeroing) placement across pgr values."""
+
+    @pytest.mark.parametrize("make_cfg,pgr", [
+        (make_cfg_bf16_pgr0, 0),
+        (make_cfg_bf16_pgr1, 1),
+        (make_cfg_bf16, 2),
+    ], ids=["pgr0", "pgr1", "pgr2"])
+    def test_preloop_zeros_d_exactly_once(self, make_cfg, pgr):
+        cfg = make_cfg()
+        assert cfg.pgr == pgr
+        sched = LogicalScheduler(cfg)
+        sched.emit()
+        preloop = sched.build_preloop()
+        initd = [em for em in preloop[0][0]
+                 if getattr(em.source, 'label', None) == 'initC_overlap']
+        assert len(initd) == 1, \
+            f"pgr={pgr} preloop should zero D exactly once, got {len(initd)}"
 
 
 class TestBuildTailloopPGR0:
@@ -3948,3 +4048,193 @@ class TestBuildTailloopPGR0:
 
         finally:
             sched.deallocVgprTiles(writer)
+
+
+# ══════════════════════════════════════════════════════════════
+# InitC D-register self-reuse zeroing
+# ══════════════════════════════════════════════════════════════
+#
+# The initC zeroing uses the last MFMA-sized chunk of the D register range
+# itself as the zero source: scalar-zero that chunk, then use its first 2
+# registers as the A/B operand to MFMA-zero all preceding chunks. The A/B
+# source is addressed in the accumulator's own register file (VGPRs for
+# WMMA/VGPR accumulation, AGPRs for AGPR accumulation), so no external scratch
+# allocation is needed and 1 MFMA is saved vs zeroing with a separate pair.
+
+class _InitCPool:
+    """Minimal vgpr pool mock for initC tests (no checkouts needed)."""
+
+    def __init__(self, size=100):
+        self._size = size
+
+    def size(self):
+        return self._size
+
+
+def _initc_writer(has_wmma=False, has_wmma_arb_stall=False):
+    from types import SimpleNamespace
+    w = SimpleNamespace()
+    w.states = SimpleNamespace(
+        asmCaps={"HasWMMA_AccImmZero": has_wmma},
+        archCaps={"HasWmmaArbStallBit": has_wmma_arb_stall},
+        regCaps={"MaxVgpr": 256},
+    )
+    w.vgprPool = _InitCPool()
+    w.agprPool = object()
+    return w
+
+
+class _InitCRegList:
+    def __init__(self, base, n, pool=None):
+        self.indices = [base + k for k in range(n)]
+        self.pool = pool
+
+
+class _InitCTile:
+    def __init__(self, base, n, pool=None):
+        self.regList = _InitCRegList(base, n, pool)
+
+
+class _InitCTileInfo:
+    tc = "D"
+    def __init__(self, tiles):
+        self.vgprTiles = tiles
+
+
+def _zero_range(writer, firstReg, totalRegs, isAgpr):
+    from Tensile.Components.Subtile.Kernel import _zeroRegRange
+    module = Module()
+    _zeroRegRange(module, writer, _InitCTileInfo([]), firstReg, totalRegs, isAgpr)
+    return str(module)
+
+
+class TestInitCZeroRegRange:
+    """_zeroRegRange: D-register self-reuse zeroing."""
+
+    def test_multi_chunk_uses_last_as_source_saves_one_mfma(self):
+        """96 regs = 6 MFMA chunks; last chunk scalar-zeroed, 5 MFMAs issued."""
+        w = _initc_writer()
+        src = _zero_range(w, 0, 96, isAgpr=True)
+
+        assert src.count("initD: [") == 5, f"expected 5 matrix initD ops (last chunk scalar):\n{src[:600]}"
+        assert "zero-src" in src, "last chunk should be scalar-zeroed as source"
+
+    def test_single_chunk_all_scalar(self):
+        """16 regs = 1 chunk; no MFMA advantage, all scalar."""
+        w = _initc_writer()
+        src = _zero_range(w, 0, 16, isAgpr=True)
+
+        assert "initD: [" not in src, "single chunk should be all scalar"
+        assert src.count("zero-src") == 16, "expected 16 scalar writes"
+
+    def test_remainder_regs_scalar(self):
+        """96 + 4 remainder = 100 total; 5 MFMAs + 16 src-zero + 4 remainder scalar."""
+        w = _initc_writer()
+        src = _zero_range(w, 0, 100, isAgpr=True)
+
+        assert src.count("initD: [") == 5, "expected 5 MFMAs for 6 chunks minus last"
+        assert src.count("zero-src") == 16, "expected 16 scalar writes for last chunk (zero source)"
+        # 4 remainder regs after all full chunks
+        remainder_count = src.count("// initD\n")
+        assert remainder_count == 4, f"expected 4 scalar remainder writes, got {remainder_count}"
+
+    def test_no_pool_checkout_needed(self):
+        """D-reuse means no pool interaction at all, even at max occupancy."""
+        w = _initc_writer()
+        _zero_range(w, 0, 96, isAgpr=True)
+        assert w.vgprPool.size() == 100, "pool size must not change"
+
+    def test_source_uses_last_chunk_base_agpr(self):
+        """AGPR accumulation: MFMA A/B source is the zeroed last chunk in the
+        AGPR file (acc[80:81]), NOT the same-index VGPR (v[80:81]).
+
+        Regression guard for the -nan bug: naming vgpr(lastChunkBase) reads an
+        unzeroed VGPR of a coincidentally-matching index. gfx90a+/CDNA MFMA can
+        read A/B from AGPRs, so the source must live in the accumulator's file.
+        """
+        w = _initc_writer()
+        # 96 regs starting at reg0: last chunk base = 0 + 5*16 = 80
+        src = _zero_range(w, 0, 96, isAgpr=True)
+        assert "acc[80:81]" in src, f"expected AGPR source acc[80:81]:\n{src[:600]}"
+        assert "v[80:81]" not in src, f"AGPR source must not be the same-index VGPR:\n{src[:600]}"
+
+    def test_source_uses_last_chunk_base_vgpr(self):
+        """VGPR accumulation: MFMA A/B source is the zeroed last chunk in VGPRs."""
+        w = _initc_writer()
+        src = _zero_range(w, 0, 96, isAgpr=False)
+        assert "v[80:81]" in src, f"expected VGPR source v[80:81] (last chunk base):\n{src[:600]}"
+
+
+class TestInitCInitVgprTilesToZero:
+    """initVgprTilesToZero: no scratch needed, uses D self-reuse."""
+
+    def test_single_range_uses_mfma(self):
+        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        w = _initc_writer()
+        dtile = _InitCTileInfo([_InitCTile(0, 96, pool=w.agprPool)])
+
+        src = str(initVgprTilesToZero(w, {}, dtile))
+        assert src.count("initD: [") == 5, f"expected 5 matrix ops:\n{src[:600]}"
+
+    def test_split_pool_groups(self):
+        """A range split across agpr + vgpr pools emits MFMAs for both groups."""
+        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        w = _initc_writer()
+        vgpr_pool = object()
+        dtile = _InitCTileInfo([
+            _InitCTile(0, 48, pool=w.agprPool),
+            _InitCTile(48, 48, pool=vgpr_pool),
+        ])
+
+        src = str(initVgprTilesToZero(w, {}, dtile))
+        # Each 48-reg group = 3 chunks -> 2 MFMAs + 1 scalar chunk = 4 MFMAs total
+        assert src.count("initD: [") == 4, f"expected 4 matrix ops across 2 groups:\n{src[:600]}"
+
+    def test_empty_tiles_is_noop(self):
+        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        w = _initc_writer()
+        src = str(initVgprTilesToZero(w, {}, _InitCTileInfo([])))
+        assert "initD: [" not in src
+
+
+class TestInitCMakeOpWiring:
+    """_make_initC_op end-to-end wiring (scheduler -> zeroing)."""
+
+    class _Emitter:
+        def __init__(self, writer, kernel, dtileInfo):
+            self.writer = writer
+            self.kernel = kernel
+            self.dtileInfo = dtileInfo
+
+    def test_emits_mfma_zeroing_with_d_reuse(self):
+        s = LogicalScheduler.__new__(LogicalScheduler)
+        op = s._make_initC_op()
+        assert op.label == "initC_overlap"
+
+        w = _initc_writer()
+        dtile = _InitCTileInfo([_InitCTile(0, 96, pool=w.agprPool)])
+        src = str(op.build(self._Emitter(w, {"DirectToLds": True}, dtile)))
+
+        assert src.count("initD: [") == 5, f"expected 5 MFMAs (D self-reuse):\n{src[:600]}"
+        assert w.vgprPool.size() == 100, "no pool growth expected"
+
+    def test_wmma_reuse_flags_on_gfx1250(self):
+        """gfx1250 initC WMMA instructions get reuseA/reuseB on all but the last."""
+        from rocisa.instruction import MFMAInstruction
+        s = LogicalScheduler.__new__(LogicalScheduler)
+        op = s._make_initC_op()
+
+        w = _initc_writer(has_wmma=True, has_wmma_arb_stall=True)
+        dtile = _InitCTileInfo([_InitCTile(0, 32, pool=w.vgprPool)])
+        module = op.build(self._Emitter(w, {"DirectToLds": True}, dtile))
+
+        mfmas = [inst for inst in module.flatitems() if isinstance(inst, MFMAInstruction)]
+        # 32 regs / 8 per inst = 4 chunks; last chunk scalar-zeroed, first 3 are MFMAs
+        assert len(mfmas) == 3, f"expected 3 WMMAs, got {len(mfmas)}"
+        # All but the last MFMA should have reuseA=True, reuseB=True
+        for mfma in mfmas[:-1]:
+            assert mfma.reuseA, f"expected reuseA on {mfma}"
+            assert mfma.reuseB, f"expected reuseB on {mfma}"
+        # Last MFMA should NOT have reuse (no successor)
+        assert not mfmas[-1].reuseA
+        assert not mfmas[-1].reuseB
