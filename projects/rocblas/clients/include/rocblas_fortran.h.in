@@ -4794,8 +4794,7 @@ rocblas_status ROCBLAS_FAPI(rocblas_gemm_grouped_batched_ex)(rocblas_handle     
                                                              const rocblas_int*       group_size,
                                                              rocblas_datatype         compute_type,
                                                              rocblas_gemm_algo        algo,
-                                                             int32_t  solution_index,
-                                                             uint32_t flags);
+                                                             uint32_t                 flags);
 
 // gemm_strided_batched
 rocblas_status ROCBLAS_FAPI(rocblas_sgemm_strided_batched)(rocblas_handle    handle,

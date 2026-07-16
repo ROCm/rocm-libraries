@@ -22452,6 +22452,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_strided_batched_ex_64(rocblas_handle 
 
         D_j = alpha_i*op( A_j )*op( B_j ) + beta_i*C_j,
 
+    Supported types are as follows:
+        - rocblas_datatype_f64_r = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f32_r = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f16_r = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f16_r = a_type = b_type = c_type = d_type; rocblas_datatype_f32_r =
+   compute_type
+        - rocblas_datatype_f16_r = a_type = b_type; rocblas_datatype_f32_r = c_type = d_type =
+   compute_type
+        - rocblas_datatype_bf16_r = a_type = b_type = c_type = d_type; rocblas_datatype_f32_r =
+   compute_type
+        - rocblas_datatype_bf16_r = a_type = b_type; rocblas_datatype_f32_r = c_type = d_type =
+   compute_type
+        - rocblas_datatype_i8_r = a_type = b_type; rocblas_datatype_i32_r = c_type = d_type =
+   compute_type
+        - rocblas_datatype_f32_c  = a_type = b_type = c_type = d_type = compute_type
+        - rocblas_datatype_f64_c  = a_type = b_type = c_type = d_type = compute_type
+
     @param[in]
     handle    [rocblas_handle]
               handle to the rocBLAS library context queue.
@@ -22519,9 +22536,6 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_strided_batched_ex_64(rocblas_handle 
     algo      [rocblas_gemm_algo]
               enumerant specifying the algorithm type.
     @param[in]
-    solution_index [int32_t]
-              solution index when algo is rocblas_gemm_algo_solution_index.
-    @param[in]
     flags     [uint32_t]
               optional gemm flags.
      ********************************************************************/
@@ -22549,8 +22563,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_grouped_batched_ex(rocblas_handle    
                                                               const rocblas_int*       group_size,
                                                               rocblas_datatype         compute_type,
                                                               rocblas_gemm_algo        algo,
-                                                              int32_t  solution_index,
-                                                              uint32_t flags);
+                                                              uint32_t                 flags);
 
 ROCBLAS_EXPORT rocblas_status
     rocblas_gemm_grouped_batched_ex_64(rocblas_handle           handle,
@@ -22577,7 +22590,6 @@ ROCBLAS_EXPORT rocblas_status
                                        const int64_t*           group_size,
                                        rocblas_datatype         compute_type,
                                        rocblas_gemm_algo        algo,
-                                       int32_t                  solution_index,
                                        uint32_t                 flags);
 //! @}
 

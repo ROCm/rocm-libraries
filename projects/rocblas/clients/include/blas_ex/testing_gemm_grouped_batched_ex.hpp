@@ -129,6 +129,7 @@ namespace
 
         for(rocblas_int g = 0; g < cfg.group_count; ++g)
         {
+            // add in g to sizes and batch_count to test different group sizes and batch counts
             cfg.m_array[g] = rocblas_int(arg.M + g);
             cfg.n_array[g] = rocblas_int(arg.N + g);
             cfg.k_array[g] = rocblas_int(arg.K + g);
@@ -150,7 +151,7 @@ namespace
             cfg.ldc_array[g] = grouped_gemm_ex_ldc(cfg.m_array[g], ldc_g);
             cfg.ldd_array[g] = grouped_gemm_ex_ldc(cfg.m_array[g], ldd_g);
 
-            cfg.group_size[g]  = std::max(arg.batch_count, int64_t(0));
+            cfg.group_size[g]  = std::max(arg.batch_count+g, int64_t(0));
             cfg.alpha_array[g] = base_alpha;
             cfg.beta_array[g]  = base_beta;
         }
@@ -219,9 +220,8 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
     const size_t padded_safe_size = std::max(safe_size, size_t(cfg.max_m) * size_t(cfg.max_n));
 
     rocblas_local_handle handle{arg};
-    rocblas_gemm_algo    algo           = rocblas_gemm_algo_standard;
-    int32_t              solution_index = 0;
-    uint32_t             flags          = 0;
+    rocblas_gemm_algo    algo  = rocblas_gemm_algo_standard;
+    uint32_t             flags = 0;
 
     DEVICE_MEMCHECK(device_batch_vector<Ti>, dA, (padded_safe_size, 1, std::max(problem_count, 1)));
     DEVICE_MEMCHECK(device_batch_vector<Ti>, dB, (padded_safe_size, 1, std::max(problem_count, 1)));
@@ -276,7 +276,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                     group_size_64.data(),
                                                                     arg.compute_type,
                                                                     algo,
-                                                                    solution_index,
                                                                     flags),
                               rocblas_status_invalid_handle);
 
@@ -304,7 +303,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                     group_size_64.data(),
                                                                     arg.compute_type,
                                                                     algo,
-                                                                    solution_index,
                                                                     flags),
                               rocblas_status_invalid_pointer);
 
@@ -332,7 +330,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                     group_size_64.data(),
                                                                     arg.compute_type,
                                                                     algo,
-                                                                    solution_index,
                                                                     flags),
                               rocblas_status_invalid_size);
 
@@ -360,7 +357,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                     bad_group_size_64.data(),
                                                                     arg.compute_type,
                                                                     algo,
-                                                                    solution_index,
                                                                     flags),
                               rocblas_status_invalid_size);
     }
@@ -390,7 +386,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  cfg.group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
-                                                                 solution_index,
                                                                  flags),
                               rocblas_status_invalid_handle);
 
@@ -418,7 +413,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  cfg.group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
-                                                                 solution_index,
                                                                  flags),
                               rocblas_status_invalid_pointer);
 
@@ -446,7 +440,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  cfg.group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
-                                                                 solution_index,
                                                                  flags),
                               rocblas_status_invalid_size);
 
@@ -474,7 +467,6 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  bad_group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
-                                                                 solution_index,
                                                                  flags),
                               rocblas_status_invalid_size);
     }
@@ -499,7 +491,6 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
 
     rocblas_local_handle handle{arg};
     rocblas_gemm_algo    algo = rocblas_gemm_algo(arg.algo);
-    int32_t              solution_index(arg.solution_index);
     uint32_t             flags(arg.flags);
     rocblas_datatype     d_type = arg.d_type;
 
@@ -614,7 +605,6 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                                                       group_size_64.data(),
                                                                       arg.compute_type,
                                                                       algo,
-                                                                      solution_index,
                                                                       flags));
         }
         else
@@ -643,64 +633,184 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                                                    cfg.group_size.data(),
                                                                    arg.compute_type,
                                                                    algo,
-                                                                   solution_index,
                                                                    flags));
         }
     };
 
     HOST_MEMCHECK(host_batch_matrix<To>, hD, (cfg.max_m, cfg.max_n, cfg.max_ldd, problem_count));
 
-    if(arg.pointer_mode_host)
+    if(arg.unit_check || arg.norm_check)
     {
+        if(arg.pointer_mode_host)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+            run_grouped_gemm_ex(cfg.alpha_array.data(), cfg.beta_array.data());
+            CHECK_HIP_ERROR(hD.transfer_from(dDref));
+        }
+
+        if(arg.pointer_mode_device)
+        {
+            DEVICE_MEMCHECK(device_vector<Tc>, d_alpha, (group_count));
+            DEVICE_MEMCHECK(device_vector<Tc>, d_beta, (group_count));
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(dC.transfer_from(hC_init));
+            CHECK_HIP_ERROR(hipMemcpy(
+                d_alpha, cfg.alpha_array.data(), group_count * sizeof(Tc), hipMemcpyHostToDevice));
+            CHECK_HIP_ERROR(hipMemcpy(
+                d_beta, cfg.beta_array.data(), group_count * sizeof(Tc), hipMemcpyHostToDevice));
+            run_grouped_gemm_ex(d_alpha, d_beta);
+            CHECK_HIP_ERROR(hD.transfer_from(dDref));
+        }
+
+        if(arg.unit_check)
+        {
+            rocblas_int idx = 0;
+            for(rocblas_int g = 0; g < group_count; ++g)
+            {
+                for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
+                {
+                    unit_check_general<To, To_hpa>(
+                        cfg.m_array[g], cfg.n_array[g], cfg.ldd_array[g], hD_gold[idx], hD[idx]);
+                }
+            }
+        }
+
+        if(arg.norm_check)
+        {
+            double      error = 0;
+            rocblas_int idx   = 0;
+            for(rocblas_int g = 0; g < group_count; ++g)
+            {
+                for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
+                {
+                    error = std::max(error,
+                                     std::abs(norm_check_general<To>('F',
+                                                                     cfg.m_array[g],
+                                                                     cfg.n_array[g],
+                                                                     cfg.ldd_array[g],
+                                                                     (To_hpa*)hD_gold[idx],
+                                                                     hD[idx])));
+                }
+            }
+            ASSERT_NEAR(error, 0.0, 1e-10);
+        }
+    }
+
+    if(arg.timing && arg.api != INTERNAL)
+    {
+        double gpu_time_used     = 0.0;
+        int    number_cold_calls = arg.cold_iters;
+        int    total_calls       = number_cold_calls + arg.iters;
+
         CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
-        run_grouped_gemm_ex(cfg.alpha_array.data(), cfg.beta_array.data());
-        CHECK_HIP_ERROR(hD.transfer_from(dDref));
-    }
 
-    if(arg.pointer_mode_device)
-    {
-        DEVICE_MEMCHECK(device_vector<Tc>, d_alpha, (group_count));
-        DEVICE_MEMCHECK(device_vector<Tc>, d_beta, (group_count));
-        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
-        CHECK_HIP_ERROR(dC.transfer_from(hC_init));
-        CHECK_HIP_ERROR(hipMemcpy(
-            d_alpha, cfg.alpha_array.data(), group_count * sizeof(Tc), hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(hipMemcpy(
-            d_beta, cfg.beta_array.data(), group_count * sizeof(Tc), hipMemcpyHostToDevice));
-        run_grouped_gemm_ex(d_alpha, d_beta);
-        CHECK_HIP_ERROR(hD.transfer_from(dDref));
-    }
+        hipStream_t stream;
+        CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
-    if(arg.unit_check)
-    {
-        rocblas_int idx = 0;
-        for(rocblas_int g = 0; g < group_count; ++g)
+        FrequencyMonitor& freq_monitor = getFrequencyMonitor();
+        freq_monitor.start();
+
+        const std::vector<int64_t> m_array_64     = grouped_gemm_ex_to_int64(cfg.m_array);
+        const std::vector<int64_t> n_array_64     = grouped_gemm_ex_to_int64(cfg.n_array);
+        const std::vector<int64_t> k_array_64     = grouped_gemm_ex_to_int64(cfg.k_array);
+        const std::vector<int64_t> lda_array_64   = grouped_gemm_ex_to_int64(cfg.lda_array);
+        const std::vector<int64_t> ldb_array_64   = grouped_gemm_ex_to_int64(cfg.ldb_array);
+        const std::vector<int64_t> ldc_array_64   = grouped_gemm_ex_to_int64(cfg.ldc_array);
+        const std::vector<int64_t> ldd_array_64   = grouped_gemm_ex_to_int64(cfg.ldd_array);
+        const std::vector<int64_t> group_size_64  = grouped_gemm_ex_to_int64(cfg.group_size);
+        const int64_t              group_count_64 = group_count;
+
+        for(int i = 0; i < total_calls; i++)
         {
-            for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
+            if(i == number_cold_calls)
+                gpu_time_used = get_time_us_sync(stream); // in microseconds
+
+            if(arg.api & c_API_64)
             {
-                unit_check_general<To, To_hpa>(
-                    cfg.m_array[g], cfg.n_array[g], cfg.ldd_array[g], hD_gold[idx], hD[idx]);
+                CHECK_ROCBLAS_ERROR(rocblas_gemm_grouped_batched_ex_fn_64(handle,
+                                                                          cfg.transa_array.data(),
+                                                                          cfg.transb_array.data(),
+                                                                          m_array_64.data(),
+                                                                          n_array_64.data(),
+                                                                          k_array_64.data(),
+                                                                          cfg.alpha_array.data(),
+                                                                          dA_ptr,
+                                                                          arg.a_type,
+                                                                          lda_array_64.data(),
+                                                                          dB_ptr,
+                                                                          arg.b_type,
+                                                                          ldb_array_64.data(),
+                                                                          cfg.beta_array.data(),
+                                                                          dC_ptr,
+                                                                          arg.c_type,
+                                                                          ldc_array_64.data(),
+                                                                          dDref_ptr,
+                                                                          d_type,
+                                                                          ldd_array_64.data(),
+                                                                          group_count_64,
+                                                                          group_size_64.data(),
+                                                                          arg.compute_type,
+                                                                          algo,
+                                                                          flags));
+            }
+            else
+            {
+                CHECK_ROCBLAS_ERROR(rocblas_gemm_grouped_batched_ex_fn(handle,
+                                                                       cfg.transa_array.data(),
+                                                                       cfg.transb_array.data(),
+                                                                       cfg.m_array.data(),
+                                                                       cfg.n_array.data(),
+                                                                       cfg.k_array.data(),
+                                                                       cfg.alpha_array.data(),
+                                                                       dA_ptr,
+                                                                       arg.a_type,
+                                                                       cfg.lda_array.data(),
+                                                                       dB_ptr,
+                                                                       arg.b_type,
+                                                                       cfg.ldb_array.data(),
+                                                                       cfg.beta_array.data(),
+                                                                       dC_ptr,
+                                                                       arg.c_type,
+                                                                       cfg.ldc_array.data(),
+                                                                       dDref_ptr,
+                                                                       d_type,
+                                                                       cfg.ldd_array.data(),
+                                                                       group_count,
+                                                                       cfg.group_size.data(),
+                                                                       arg.compute_type,
+                                                                       algo,
+                                                                       flags));
             }
         }
-    }
 
-    if(arg.norm_check)
-    {
-        double      error = 0;
-        rocblas_int idx   = 0;
+        gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        freq_monitor.stop();
+
+        double gflop_count = 0.0;
         for(rocblas_int g = 0; g < group_count; ++g)
-        {
-            for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
-            {
-                error = std::max(error,
-                                 std::abs(norm_check_general<To>('F',
-                                                                 cfg.m_array[g],
-                                                                 cfg.n_array[g],
-                                                                 cfg.ldd_array[g],
-                                                                 (To_hpa*)hD_gold[idx],
-                                                                 hD[idx])));
-            }
-        }
-        ASSERT_NEAR(error, 0.0, 1e-10);
+            gflop_count += cfg.group_size[g]
+                           * gemm_gflop_count<Tc>(cfg.m_array[g], cfg.n_array[g], cfg.k_array[g]);
+
+        ArgumentModel<e_transA,
+                      e_transB,
+                      e_M,
+                      e_N,
+                      e_K,
+                      e_alpha,
+                      e_lda,
+                      e_beta,
+                      e_ldb,
+                      e_ldc,
+                      e_ldd,
+                      e_stride_x,
+                      e_batch_count>{}
+            .log_args<To>(rocblas_cout,
+                          arg,
+                          gpu_time_used,
+                          gflop_count,
+                          ArgumentLogging::NA_value,
+                          ArgumentLogging::NA_value,
+                          ArgumentLogging::NA_value);
     }
 }

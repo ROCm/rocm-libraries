@@ -17,6 +17,8 @@ Definitions:
     - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64 }
 
 Tests:
+  # to simplify test values if more than one group, each group increases batch_count and sizes by 1
+
 - name: gemm_grouped_batched_ex_bad_arg
   category: quick
   function:
@@ -69,7 +71,7 @@ Tests:
   matrix_size: *small_grouped_ex_matrix_size
   alpha_beta: *alpha_beta_range_small
   batch_count: [ 1, 3 ]
-  api: FORTRAN
+  api: FORTRAN_64
 
 - name: gemm_grouped_batched_ex
   category: pre_checkin

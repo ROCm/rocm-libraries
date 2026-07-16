@@ -22532,7 +22532,7 @@ module rocblas
                                                  Aarray, a_type, lda_array, Barray, b_type, &
                                                  ldb_array, beta_array, Carray, c_type, ldc_array, &
                                                  Darray, d_type, ldd_array, group_count, group_size, &
-                                                 compute_type, algo, solution_index, flags) &
+                                                 compute_type, algo, flags) &
             bind(c, name='rocblas_gemm_grouped_batched_ex')
             use iso_c_binding
             use rocblas_enums
@@ -22562,7 +22562,6 @@ module rocblas
             type(c_ptr), value :: group_size
             integer(kind(rocblas_datatype_f16_r)), value :: compute_type
             integer(kind(rocblas_gemm_algo_standard)), value :: algo
-            integer(c_int32_t), value :: solution_index
             integer(c_int32_t), value :: flags
         end function rocblas_gemm_grouped_batched_ex
     end interface
@@ -22573,7 +22572,7 @@ module rocblas
                                                     Aarray, a_type, lda_array, Barray, b_type, &
                                                     ldb_array, beta_array, Carray, c_type, ldc_array, &
                                                     Darray, d_type, ldd_array, group_count, group_size, &
-                                                    compute_type, algo, solution_index, flags) &
+                                                    compute_type, algo, flags) &
             bind(c, name='rocblas_gemm_grouped_batched_ex_64')
             use iso_c_binding
             use rocblas_enums
@@ -22603,7 +22602,6 @@ module rocblas
             type(c_ptr), value :: group_size
             integer(kind(rocblas_datatype_f16_r)), value :: compute_type
             integer(kind(rocblas_gemm_algo_standard)), value :: algo
-            integer(c_int32_t), value :: solution_index
             integer(c_int32_t), value :: flags
         end function rocblas_gemm_grouped_batched_ex_64
     end interface
