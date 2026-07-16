@@ -120,4 +120,4 @@ execution_settings:
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
-    ffm-quick: 300        # 5 minutes
+    ffm-quick: 2700       # 45 minutes
