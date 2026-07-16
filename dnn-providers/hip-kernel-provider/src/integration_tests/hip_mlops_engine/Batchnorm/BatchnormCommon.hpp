@@ -132,10 +132,7 @@ inline std::vector<BatchnormTestCase> getBnBwdSmoke3dTestCases()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
-    return {
-        {{2, 3, 3, 1, 1}, seed},
-        {{2, 3, 2, 4, 4}, seed},
-    };
+    return {{{2, 3, 3, 1, 1}, seed}, {{2, 3, 2, 4, 4}, seed}, {{1, 16, 8, 112, 112}, seed}};
 }
 
 } // namespace hip_kernel_provider::batchnorm::test::common
