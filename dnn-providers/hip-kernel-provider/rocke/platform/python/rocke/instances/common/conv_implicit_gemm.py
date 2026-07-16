@@ -216,7 +216,7 @@ class ConvProblem:
 
     @property
     def flops(self) -> int:
-        return 2 * self.M * self.N_gemm * self.K_gemm
+        return 2 * self.M * self.N_gemm * self.K_gemm * self.groups
 
     def short(self) -> str:
         g = f"G{self.groups}" if self.groups > 1 else ""
