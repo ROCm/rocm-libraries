@@ -615,6 +615,13 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    import os
+
+    if args.flydsl and not os.environ.get("FLYDSL_PATH"):
+        ap.error(
+            "--flydsl requires the FLYDSL_PATH env var to be set to the ROCm/FlyDSL repo root"
+        )
+
     import torch
 
     if not torch.cuda.is_available():
