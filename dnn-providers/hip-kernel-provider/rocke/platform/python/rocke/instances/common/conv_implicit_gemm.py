@@ -525,7 +525,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
 
     # Check global store vector size and disable default epilogue for
     # vec_size_c > 1
-    if spec.vector_size_c > 1 and spec.epilogue == "default":
+    if spec.vector_size_c is not None and spec.vector_size_c > 1 and spec.epilogue == "default":
         return False, (
             f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
         )
