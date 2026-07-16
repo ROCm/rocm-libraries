@@ -1,0 +1,24 @@
+# generic templates for all instances using bf16_i4_bf16_bf16 data types
+
+#CACHE_BEST_RESULTS
+
+PARAMS:
+ADataType_; CDataType_; CShuffleDataType_ GEN 
+bhalf_t 
+CONDITION 
+is_same_v<ADataType, bhalf_t> &&
+is_same_v<CDataType, bhalf_t>
+PREPROCESSOR CK_ENABLE_BF16
+
+BDataType_ GEN 
+pk_i4_t 
+CONDITION 
+is_same_v<BDataType, pk_i4_t>
+# kabraham: int4 dosen't seem to have a preprocessor define?
+
+ComputeTypeA GEN bhalf_t
+ComputeTypeB GEN bhalf_t
+
+
+PROFILER_DATATYPE_ID: 9
+

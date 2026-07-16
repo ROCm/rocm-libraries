@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+
+#include "../example/01_gemm/common.hpp"
+
+#include "ck/tensor_operation/gpu/device/impl/device_gemm_wmma_cshuffle_v3.hpp"
+using ADataType        = ck::ADataType_;
+using BDataType        = ck::BDataType_;
+using AccDataType      = float;
+using CShuffleDataType = ck::CShuffleDataType_;
+using CDataType        = ck::CDataType_;
+
+using ALayout = ALayout_;
+using BLayout = BLayout_;
+using CLayout = CLayout_;
+
+using AElementOp = PassThrough;
+using BElementOp = PassThrough;
+using CElementOp = PassThrough;
+
+
+// clang-format off
+using DeviceGemmV2Instance = ck::tensor_operation::device::DeviceGemm_Wmma_CShuffleV3< ALayout_, BLayout_, CLayout_, ADataType,  BDataType,  CDataType,     float,     CShuffleDataType, PassThrough, PassThrough, PassThrough, ck::tensor_operation::device::GemmSpec_,   BlockSize,   MPerBlock,   NPerBlock,    KPerBlock,   8,   8,   16,   16,       MRepeat,       NRepeat,       S<ATransferLengths_3, ATransferLengths_2, 1>,     S<1, 0, 2>,     S<1, 0, 2>,  ABlockTransferScrVecDim,  ABlockTransferScrScalarPerVector, PerfVector_AK1,         ExtraM,       S<BTransferLengths_3, BTransferLengths_2, 1>,     S<1, 0, 2>,     S<1, 0, 2>, BBlockTransferScrVecDim,  BBlockTransferScrScalarPerVector,  PerfVector_BK1,         ExtraN,          1,          1,        S<1, CShuffleBlockTransferClusterLengths_2, 1, CShuffleBlockTransferClusterLengths_4>,                     8,  ck::BlockGemmPipelineScheduler::InterIntra, ck::PipelineVersion_, ck::ComputeTypeA, ck::ComputeTypeB, PermuteA, PermuteB>;
+;
+// clang-format on
+
+using ReferenceGemmInstance = ck::tensor_operation::host::
+    ReferenceGemm<ADataType, BDataType, CDataType, AccDataType, AElementOp, BElementOp, CElementOp>;
+
+#include "../example/01_gemm/run_gemm_example_v2.inc"
+
+int main(int argc, char* argv[]) { return !run_gemm_splitk_example(argc, argv); }

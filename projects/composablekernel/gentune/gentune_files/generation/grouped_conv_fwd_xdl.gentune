@@ -1,0 +1,79 @@
+TEST_INSTANCE_TEMPLATE_PATH: grouped_conv_fwd_xdl.txt
+
+PARAMS:
+ABlockTransferSrcVectorDim TUNE 2
+
+BBlockTransferSrcVectorDim TUNE 2
+
+ABlockTransferSrcScalarPerVector TUNE 1; 8
+
+BBlockTransferSrcScalarPerVector TUNE 1; 2
+
+ABlockTransferDstScalarPerVector_AK1 TUNE 8
+
+BBlockTransferDstScalarPerVector_BK1 TUNE 8
+
+ABlockLdsExtraM TUNE 1
+
+BBlockLdsExtraN TUNE 1
+
+CDEBlockTransferScalarPerVector_NPerBlock TUNE 1; 8
+
+BlockSize TUNE 128; 256
+
+MPerBlock TUNE 64; 128
+
+NPerBlock_ TUNE 64; 128
+
+KPerBlock TUNE 32
+CONSTRAINT (MPerBlock + NPerBlock_) * KPerBlock <= 32768 and ((MPerBlock + NPerBlock_) * KPerBlock * 2 + 512) <= 65536
+
+AK1_ TUNE 8
+
+BK1_ TUNE 8
+
+MPerXDL_ TUNE 16; 32
+
+NPerXDL_ TUNE 16; 32
+CONSTRAINT (MPerXDL_ == NPerXDL_)
+
+MXdlPerWave_ TUNE 1; 2; 4
+
+NXdlPerWave_ TUNE 1; 2
+
+CShuffleMXdlPerWavePerShuffle TUNE 1
+CONSTRAINT (CShuffleMXdlPerWavePerShuffle <= MXdlPerWave_)
+
+CShuffleNXdlPerWavePerShuffle TUNE 1
+CONSTRAINT (CShuffleNXdlPerWavePerShuffle <= NXdlPerWave_)
+
+C1 TUNE 4; 8
+CONSTRAINT (C1 == (NPerBlock_ / NPerXDL_) / CDEBlockTransferScalarPerVector_NPerBlock)
+
+C0 TUNE 16; 32
+CONSTRAINT (C0 == BlockSize / C1)
+
+A0_0 TUNE 4
+CONSTRAINT (A0_0 == KPerBlock / AK1_)
+
+A0_1 TUNE 16; 32; 64
+CONSTRAINT (A0_1 == BlockSize / A0_0 and A0_1 >= 1)
+
+B0_0 TUNE 4
+CONSTRAINT (B0_0 == KPerBlock / BK1_)
+
+B0_1 TUNE 16; 32; 64
+CONSTRAINT (B0_1 == BlockSize / B0_0 and B0_1 >= 1)
+
+ConvSpec TUNE ck::tensor_operation::device::ConvolutionForwardSpecialization::Default; ck::tensor_operation::device::ConvolutionForwardSpecialization::OddC
+
+BENCH_ARGS:
+0 2 1 3 3 16 96 96 1 3 3 2 48 32 1 1 1 1 1 1 0 1 1 0 1 1
+
+VERIFY_ARGS:
+1 2 1 3 3 16 96 96 1 3 3 2 48 32 1 1 1 1 1 1 0 1 1 0 1 1
+
+TEST_INSTANCE_DIR: test_instances/
+
+# findme
+COMPILE_CMD: /opt/rocm/llvm/bin/clang++ -DCK_ENABLE_BF16 -DCK_ENABLE_BF8 -DCK_ENABLE_FP16 -DCK_ENABLE_FP32 -DCK_ENABLE_FP64 -DCK_ENABLE_FP8 -DCK_ENABLE_INT8 -DCK_TIME_KERNEL=1 -DCK_USE_OCP_FP8 -DDL_KERNELS -DDPP_KERNELS -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -D__HIP_PLATFORM_HCC__=1 -I/workspaces/dev-container/composable_kernel/library/include -I/workspaces/dev-container/composable_kernel/include -I/workspaces/dev-container/composable_kernel/build/include -I/workspaces/dev-container/composable_kernel/example/09_convnd_fwd -isystem /opt/rocm/include -O3 -DNDEBUG -std=c++20 -fPIC -Wall -Wextra -Wcomment -Wendif-labels -Wformat -Winit-self -Wreturn-type -Wsequence-point -Wswitch -Wtrigraphs -Wundef -Wuninitialized -Wunreachable-code -Wunused -Wno-reserved-identifier -Wno-option-ignored -Wsign-compare -Wno-extra-semi-stmt -Wno-unused-template -Wno-missing-field-initializers -Wno-error=deprecated-declarations -Weverything -Wno-c++98-compat -Wno-c++98-compat-pedantic -Wno-conversion -Wno-double-promotion -Wno-exit-time-destructors -Wno-extra-semi -Wno-float-conversion -Wno-gnu-anonymous-struct -Wno-gnu-zero-variadic-macro-arguments -Wno-missing-prototypes -Wno-nested-anon-types -Wno-padded -Wno-return-std-move-in-c++11 -Wno-shorten-64-to-32 -Wno-sign-conversion -Wno-unknown-warning-option -Wno-unused-command-line-argument -Wno-weak-vtables -Wno-covered-switch-default -Wno-unsafe-buffer-usage -Wno-unused-lambda-capture -Wno-nvcc-compat -Wno-bit-int-extension -Wno-pass-failed -Wno-switch-default -Wno-unique-object-duplication -Wno-nrvo -fno-offload-uniform-block -mllvm --lsr-drop-solution=1 -mllvm -enable-post-misched=0 -mllvm -amdgpu-coerce-illegal-types=1 -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false -Werror -fcolor-diagnostics --offload-compress -x hip --offload-arch=gfx90a -o OUTPUT_NAME INPUT_FILENAME -L/workspaces/dev-container/composable_kernel/build/lib -lutility

@@ -1,0 +1,7 @@
+#INCLUDE data_formats/bf16_bf16_bf16_bf16.gentune
+#INCLUDE data_formats/f16_f16_f16_f16.gentune
+#INCLUDE data_formats/f8_f8_bf16_bf16.gentune
+#INCLUDE data_formats/f8_f16_f16_f16.gentune
+#INCLUDE data_formats/f16_f8_f16_f16.gentune
+#INCLUDE data_formats/f16_i4_f16_f16.gentune
+

@@ -1,0 +1,21 @@
+# generic templates for all instances using f8_f8_f16_f16 data types
+#CACHE_BEST_RESULTS
+
+PARAMS:
+ADataType_; BDataType_ GEN 
+f8_t 
+CONDITION 
+is_same_v<ADataType, f8_t> &&
+is_same_v<BDataType, f8_t>
+PREPROCESSOR CK_ENABLE_FP8
+
+CDataType_; CShuffleDataType_ GEN 
+bhalf_t
+CONDITION 
+is_same_v<CDataType, bhalf_t> 
+PREPROCESSOR CK_ENABLE_BF16
+
+ComputeTypeA GEN f8_t
+ComputeTypeB GEN f8_t
+
+PROFILER_DATATYPE_ID: 7

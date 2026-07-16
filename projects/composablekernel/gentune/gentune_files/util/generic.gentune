@@ -1,0 +1,37 @@
+# contains all generic gentune params spanning most implementations 
+
+#CACHE_BEST_RESULTS
+
+PARAMS:
+BlockSize TUNE 
+64; 96; 128; 160; 192; 256; 382; 512
+
+MPerBlock TUNE 
+32; 64; 96; 128; 160; 192; 256
+
+NPerBlock TUNE 
+32; 64; 96; 128; 160; 192; 256
+
+KPerBlock TUNE 
+16; 32; 64; 96; 128; 160; 192; 256
+CONSTRAINT (MPerBlock + NPerBlock) * KPerBlock <= 32768
+
+MRepeat TUNE 
+1; 2; 3; 4; 5; 6; 8
+CONSTRAINT (MPerBlock % (16*MRepeat) == 0)
+
+NRepeat TUNE  
+1; 2; 3; 4; 5; 6; 8
+CONSTRAINT (NPerBlock % (16*NRepeat) == 0) and (MRepeat * NRepeat * BlockSize * 8) == (MPerBlock * NPerBlock)
+
+InterIntra TUNE 
+Intrawave; Interwave
+
+PipelineVersion_ TUNE 
+BlockGemmPipelineVersion::v1; BlockGemmPipelineVersion::v3
+
+ExtraN TUNE 0; 1
+ExtraM TUNE 0; 1
+
+PermuteA TUNE false
+PermuteB TUNE true; false

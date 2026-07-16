@@ -1,0 +1,8 @@
+        return op_ptrs;
+    }
+};
+
+} // namespace instance
+} // namespace device
+} // namespace tensor_operation
+} // namespace ck
