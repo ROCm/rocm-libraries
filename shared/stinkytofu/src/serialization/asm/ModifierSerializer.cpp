@@ -489,12 +489,12 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 }  // namespace
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
-    return serializeVisit<
-        DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers, CacheScopeModifiers,
-        SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers, True16Modifiers,
-        EXEC, VCC, SWaitCntData, SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData,
-        SDelayAluData, SWaitAluData,
-        MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData, CallTargetData>(mod, os);
+    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
+                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
+                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
+                          SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
+                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
+                          CallTargetData>(mod, os);
 }
 
 /*

@@ -997,9 +997,7 @@ def collect_async_war_deps(
     # any in-flight async LDS op it conflicts with (overlapping token, and at
     # least one side writes; two pure reads never conflict).
     anchor_touches_lds = (
-        _writes_lds(inst)
-        or is_ds_read(inst)
-        or _is_async_producer(inst.opcode)
+        _writes_lds(inst) or is_ds_read(inst) or _is_async_producer(inst.opcode)
     )
     if not anchor_touches_lds:
         return []

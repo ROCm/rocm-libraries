@@ -177,8 +177,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             w->addModifier<SWaitTensorCntData>(d);
         }
         if (spec.asyncCount != WaitCountSpec::kUnused) {
-            StinkyInstruction* w =
-                builder.create(getMCIDByUOp(GFX::s_wait_asynccnt, arch), anchor);
+            StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_asynccnt, arch), anchor);
             w->addSrcReg(StinkyRegister(spec.asyncCount));
             SWaitAsyncCntData d;
             d.asynccnt = spec.asyncCount;
