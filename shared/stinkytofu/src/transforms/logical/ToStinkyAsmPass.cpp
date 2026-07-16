@@ -80,15 +80,23 @@ std::string generateMFMAMnemonic(const std::string& accType, int m, int n, int k
 /**
  * @brief Generate mnemonic for SMFMA (Sparse MFMA) instructions
  *
- * All architectures use v_smfmac_{accType}_{m}x{n}x{k}_{instType} format
+ * CDNA (gfx942, gfx950): v_smfmac_{accType}_{m}x{n}x{k}_{instType}
+ * RDNA (gfx1250): v_swmmac_{accType}_{m}x{n}x{k}_{instType}
+ * gfx1250 has no MFMA/SMFMA; the sparse matrix op is SWMMAC (v_swmmac_*),
+ * mirroring how generateMFMAMnemonic maps MFMA->WMMA for RDNA.
  * Note: blocks parameter is NOT part of the mnemonic, it's an instruction modifier/operand
  */
 std::string generateSMFMAMnemonic(const std::string& accType, int m, int n, int k, int blocks,
                                   const std::string& instType, GfxArchID arch) {
     std::string variantStr = std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k);
 
-    // All architectures use v_smfmac format (blocks is not part of mnemonic)
-    return "v_smfmac_" + accType + "_" + variantStr + "_" + instType;
+    // RDNA architectures (gfx12+) use v_swmmac instead of v_smfmac (blocks is
+    // not part of the mnemonic for either family).
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(arch);
+    bool isRDNA = (archInfo && archInfo->major >= 12);
+
+    const char* prefix = isRDNA ? "v_swmmac_" : "v_smfmac_";
+    return prefix + accType + "_" + variantStr + "_" + instType;
 }
 
 /**
