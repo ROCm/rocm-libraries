@@ -41,10 +41,11 @@ silently half-built):
   build-lib  Run ``Tensile.TensileCreateLibrary --experimental`` to turn the
              staged logic into a loadable device library.
   patch-logic
-             Override ``--set`` params on the ``--where``-matching solutions of
-             shipped ``3_LibraryLogic`` and build a matched baseline/patched
-             library pair for an A/B experiment -- no re-benchmark (works for
-             Origami/learned-rule logic that ``gen-logic`` cannot reproduce).
+             Override ``--set`` params on shipped ``3_LibraryLogic`` solutions
+             (optionally narrowed by ``--where``) and build a matched
+             baseline/patched library pair for an A/B experiment -- no
+             re-benchmark (works for Origami/learned-rule logic that
+             ``gen-logic`` cannot reproduce).
   find-index Run ``hipblaslt-bench --algo_method all`` to discover the solution
              indices reachable in the experimental library.
   bench      Run ``hipblaslt-bench --algo_method index --solution_index N``.
@@ -66,7 +67,7 @@ subcommand:
       --logic <shipped>/gfx950/.../<liblogic>.yaml --indices 0 --out base.yaml
   python -m Tensile.ExperimentalLibrary pipeline \\
       --config base.yaml --set StreamKFixupTreeReduction=1 \\
-      --set StreamK=1 --feature-name streamk_treereduce \\
+      --set StreamK=3 --feature-name streamk_treereduce \\
       --arch gfx950 --cu 256 --out work/
 
 A/B family example -- rebuild every StreamK==5 solution from a shipped logic
@@ -101,6 +102,11 @@ two libraries that differ only in that parameter, with no re-benchmark:
       --arch gfx950 --out work/pap --feature-name sk5_pap1
       # prints both HIPBLASLT_TENSILE_LIBPATH exports and writes
       # work/pap/patch_manifest.csv (per-solution applied/skipped + reason)
+
+``--where`` is optional: dropping it from the command above selects every
+solution under ``--logic-src`` instead of just the ``StreamK=5`` family, so
+the same ``--set`` is applied library-wide. ``--set`` itself is always
+required.
 """
 
 from __future__ import annotations
@@ -1744,8 +1750,9 @@ def build_parser() -> argparse.ArgumentParser:
     # patch-logic
     ppl = sub.add_parser(
         "patch-logic",
-        help="Override --set params on --where-matching shipped-logic solutions "
-        "and build a matched baseline/patched library pair (no re-benchmark).",
+        help="Override --set params on shipped-logic solutions (optionally "
+        "narrowed by --where) and build a matched baseline/patched library "
+        "pair (no re-benchmark).",
     )
     ppl.add_argument(
         "--logic-src", nargs="+", required=True,
