@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "harness/input_init/SynthesisConfig.hpp"
+#include "harness/input-init/SynthesisConfig.hpp"
 
 using namespace hipdnn_integration_tests;
 

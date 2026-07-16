@@ -1048,3 +1048,73 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     }
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
+
+// Create M identical Bluestein plans concurrently to stress the
+// hipModule refcount cache.  Plans destroyed before returning.
+static void run_plan_capacity_test(size_t M)
+{
+    constexpr size_t length = 9973;
+
+    std::vector<rocfft_plan> plans(M, nullptr);
+    std::atomic<bool>        any_failure{false};
+    std::atomic<size_t>      first_failure_idx{SIZE_MAX};
+    std::atomic<int>         last_status{(int)rocfft_status_success};
+
+    try
+    {
+#pragma omp parallel for num_threads(rocfft_concurrency()) schedule(dynamic, 64)
+        for(size_t i = 0; i < M; ++i)
+        {
+            if(any_failure.load(std::memory_order_relaxed))
+                continue;
+
+            rocfft_plan p      = nullptr;
+            auto        status = rocfft_plan_create(&p,
+                                             rocfft_placement_inplace,
+                                             rocfft_transform_type_complex_forward,
+                                             rocfft_precision_single,
+                                             /*dim*/ 1,
+                                             &length,
+                                             /*batch*/ 1,
+                                             /*description*/ nullptr);
+            if(status != rocfft_status_success)
+            {
+                size_t expected = SIZE_MAX;
+                first_failure_idx.compare_exchange_strong(expected, i);
+                last_status.store((int)status, std::memory_order_relaxed);
+                any_failure.store(true, std::memory_order_release);
+                continue;
+            }
+            plans[i] = p;
+        }
+
+        for(auto p : plans)
+            if(p)
+                EXPECT_EQ(rocfft_plan_destroy(p), rocfft_status_success);
+
+        ASSERT_FALSE(any_failure.load())
+            << "rocfft_plan_create failed at i=" << first_failure_idx.load() << " (M=" << M
+            << ", status=" << last_status.load() << ")";
+    }
+    catch(const std::bad_alloc&)
+    {
+        for(auto p : plans)
+            if(p)
+                rocfft_plan_destroy(p);
+        GTEST_SKIP() << "host memory allocation failure (M=" << M << ")";
+    }
+}
+
+// Regression test for the active_modules refcount cache: pre-fix
+// rocFFT fails around 65k plans due to vm.max_map_count exhaustion.
+TEST(rocfft_UnitTest, plan_capacity_100k)
+{
+    run_plan_capacity_test(100'000);
+}
+
+// 1M-plan capacity test.  DISABLED_ because of runtime cost;
+// run manually with --gtest_also_run_disabled_tests.
+TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
+{
+    run_plan_capacity_test(1'000'000);
+}
