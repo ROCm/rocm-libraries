@@ -103,7 +103,7 @@ const AotCatalog& RockeClientDispatcher::catalogForDevice(int deviceId,
     }
     else
     {
-        newIt->second = AotCatalog::loadForDevice(deviceId, arch);
+        newIt->second = AotCatalog::loadForDevice(arch);
     }
     return newIt->second;
 }

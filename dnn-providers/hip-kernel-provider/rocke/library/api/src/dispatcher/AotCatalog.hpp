@@ -41,11 +41,10 @@ public:
     // catalog. It resolves the plugin directory, locates the per-arch bundle
     // manifest (aotManifestPath), and parses its entries into AotInstances.
     //
-    // deviceId is unused: the catalog is a function of ARCH ONLY, since the
-    // kpack module load moves to plan construction (which runs on the stream's
-    // device). The parameter is retained so the dispatcher's per-device cache
-    // key (deviceId, arch) needs no change.
-    static AotCatalog loadForDevice(int deviceId, const std::string& arch);
+    // The catalog is a function of ARCH ONLY: the kpack module load moves to
+    // plan construction (which runs on the stream's device), so no device id is
+    // needed here.
+    static AotCatalog loadForDevice(const std::string& arch);
 
     // Instances whose op and arch match, in stable (insertion) order.
     std::vector<std::reference_wrapper<const AotInstance>>

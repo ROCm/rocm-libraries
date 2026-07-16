@@ -22,7 +22,7 @@ TEST(TestAotCatalog, LoadForDeviceIsEmptyWhenNoBundlePresent)
     // path from ROCKE_CLIENT_AOT_BUNDLE_DIR does not exist), loadForDevice
     // returns an empty catalog without throwing. The engine then declines all
     // graphs when the kpack producer has not yet installed a bundle.
-    const AotCatalog catalog = AotCatalog::loadForDevice(0, "gfx942");
+    const AotCatalog catalog = AotCatalog::loadForDevice("gfx942");
     EXPECT_TRUE(catalog.empty());
     EXPECT_EQ(catalog.size(), 0u);
     EXPECT_TRUE(catalog.candidatesFor("sdpa_fwd", "gfx942").empty());

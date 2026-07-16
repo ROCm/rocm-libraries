@@ -36,7 +36,7 @@ Json loadJson(const std::filesystem::path& path)
     return value;
 }
 
-std::string requiredString(const Json& value, const char* context)
+std::string getRequiredString(const Json& value, const char* context)
 {
     if(!value.is_string() || value.get_ref<const std::string&>().empty())
     {
@@ -45,7 +45,7 @@ std::string requiredString(const Json& value, const char* context)
     return value.get<std::string>();
 }
 
-std::int64_t requiredInt(const Json& value, const char* context)
+std::int64_t getRequiredInt(const Json& value, const char* context)
 {
     if(!value.is_number_integer())
     {
@@ -193,7 +193,7 @@ std::array<unsigned int, 3> parseBlock(const Json& value)
 
 ArgKind parseArgKind(const Json& value)
 {
-    const std::string kind = requiredString(value, "argument kind");
+    const std::string kind = getRequiredString(value, "argument kind");
     if(kind == "pointer")
     {
         return ArgKind::POINTER;
@@ -208,7 +208,7 @@ ArgKind parseArgKind(const Json& value)
 
 ScalarType parseScalarType(const Json& value)
 {
-    const std::string type = requiredString(value, "argument type");
+    const std::string type = getRequiredString(value, "argument type");
     if(type == "f32")
     {
         return ScalarType::F32;
@@ -259,7 +259,7 @@ std::vector<KernelArgument> parseArgsSignature(const Json& value)
     for(const auto& item : value)
     {
         KernelArgument arg;
-        arg.name = requiredString(item.at("name"), "argument name");
+        arg.name = getRequiredString(item.at("name"), "argument name");
         arg.kind = parseArgKind(item.at("kind"));
         if(arg.kind == ArgKind::SCALAR)
         {
@@ -271,7 +271,7 @@ std::vector<KernelArgument> parseArgsSignature(const Json& value)
     return args;
 }
 
-LaunchMetadata parseLaunch(const Json& entry)
+LaunchMetadata parseLaunchMetadata(const Json& entry)
 {
     const auto& launch = entry.at("launch");
     LaunchMetadata meta;
@@ -285,17 +285,18 @@ LaunchMetadata parseLaunch(const Json& entry)
 CompileSpec parseCompileSpec(const Json& value)
 {
     CompileSpec spec;
-    spec.dtype = requiredString(value.at("dtype"), "compile_spec.dtype");
+    spec.dtype = getRequiredString(value.at("dtype"), "compile_spec.dtype");
     spec.canonicalLayout
-        = requiredString(value.at("canonical_layout"), "compile_spec.canonical_layout");
-    spec.seqlenQ = requiredInt(value.at("seqlen_q"), "compile_spec.seqlen_q");
-    spec.seqlenK = requiredInt(value.at("seqlen_k"), "compile_spec.seqlen_k");
-    spec.numQueryHeads = requiredInt(value.at("num_query_heads"), "compile_spec.num_query_heads");
-    spec.numKvHeads = requiredInt(value.at("num_kv_heads"), "compile_spec.num_kv_heads");
-    spec.headSize = requiredInt(value.at("head_size"), "compile_spec.head_size");
-    spec.blockSizeQ = requiredInt(value.at("block_size_q"), "compile_spec.block_size_q");
-    spec.blockSizeK = requiredInt(value.at("block_size_k"), "compile_spec.block_size_k");
-    spec.maskMode = requiredString(value.at("mask_mode"), "compile_spec.mask_mode");
+        = getRequiredString(value.at("canonical_layout"), "compile_spec.canonical_layout");
+    spec.seqlenQ = getRequiredInt(value.at("seqlen_q"), "compile_spec.seqlen_q");
+    spec.seqlenK = getRequiredInt(value.at("seqlen_k"), "compile_spec.seqlen_k");
+    spec.numQueryHeads
+        = getRequiredInt(value.at("num_query_heads"), "compile_spec.num_query_heads");
+    spec.numKvHeads = getRequiredInt(value.at("num_kv_heads"), "compile_spec.num_kv_heads");
+    spec.headSize = getRequiredInt(value.at("head_size"), "compile_spec.head_size");
+    spec.blockSizeQ = getRequiredInt(value.at("block_size_q"), "compile_spec.block_size_q");
+    spec.blockSizeK = getRequiredInt(value.at("block_size_k"), "compile_spec.block_size_k");
+    spec.maskMode = getRequiredString(value.at("mask_mode"), "compile_spec.mask_mode");
     return spec;
 }
 
@@ -310,34 +311,34 @@ BatchRange parseBatchRange(const Json& selection)
     {
         batch = &selection.at("shape_constraints").at("batch");
     }
-    return {.min = requiredInt(batch->at("min"), "selection.batch.min"),
-            .max = requiredInt(batch->at("max"), "selection.batch.max")};
+    return {.min = getRequiredInt(batch->at("min"), "selection.batch.min"),
+            .max = getRequiredInt(batch->at("max"), "selection.batch.max")};
 }
 
-AotInstance parseEntry(const Json& entry,
-                       const std::string& manifestArch,
-                       const std::filesystem::path& kpackPath)
+AotInstance parseManifestEntry(const Json& entry,
+                               const std::string& manifestArch,
+                               const std::filesystem::path& kpackPath)
 {
     const auto& selection = entry.at("selection");
 
     AotInstance instance;
-    instance.name = requiredString(entry.at("name"), "entry.name");
-    instance.op = requiredString(entry.at("op"), "entry.op");
-    instance.family = requiredString(entry.at("family"), "entry.family");
+    instance.name = getRequiredString(entry.at("name"), "entry.name");
+    instance.op = getRequiredString(entry.at("op"), "entry.op");
+    instance.family = getRequiredString(entry.at("family"), "entry.family");
     instance.arch = manifestArch;
     instance.compileSpec = parseCompileSpec(entry.at("compile_spec"));
     instance.batch = parseBatchRange(selection);
     instance.attributeConstraints
         = parseAttributeConstraints(selection.at("attribute_constraints"));
-    instance.runtime.cacheKey = requiredString(entry.at("cache_key"), "entry.cache_key");
-    instance.runtime.tocKey = requiredString(entry.at("toc_key"), "entry.toc_key");
-    instance.runtime.symbol = requiredString(entry.at("symbol"), "entry.symbol");
+    instance.runtime.cacheKey = getRequiredString(entry.at("cache_key"), "entry.cache_key");
+    instance.runtime.tocKey = getRequiredString(entry.at("toc_key"), "entry.toc_key");
+    instance.runtime.symbol = getRequiredString(entry.at("symbol"), "entry.symbol");
     instance.runtime.kpackPath = kpackPath.string();
-    instance.runtime.launch = parseLaunch(entry);
+    instance.runtime.launch = parseLaunchMetadata(entry);
     return instance;
 }
 
-std::vector<std::filesystem::path> manifestFiles(const std::filesystem::path& root)
+std::vector<std::filesystem::path> getManifestFilePaths(const std::filesystem::path& root)
 {
     std::vector<std::filesystem::path> files;
     if(!std::filesystem::is_directory(root))
@@ -365,12 +366,12 @@ std::vector<std::filesystem::path> manifestFiles(const std::filesystem::path& ro
     return files;
 }
 
-std::vector<AotInstance> parseManifest(const std::filesystem::path& manifestPath)
+std::vector<AotInstance> parseManifestEntries(const std::filesystem::path& manifestPath)
 {
     const Json manifest = loadJson(manifestPath);
-    const auto arch = requiredString(manifest.at("arch"), "manifest.arch");
+    const auto arch = getRequiredString(manifest.at("arch"), "manifest.arch");
     const auto kpackPath
-        = manifestPath.parent_path() / requiredString(manifest.at("kpack"), "manifest.kpack");
+        = manifestPath.parent_path() / getRequiredString(manifest.at("kpack"), "manifest.kpack");
     if(!std::filesystem::is_regular_file(kpackPath))
     {
         throw std::runtime_error("bundle kpack file is missing: " + kpackPath.string());
@@ -386,7 +387,7 @@ std::vector<AotInstance> parseManifest(const std::filesystem::path& manifestPath
     instances.reserve(entries.size());
     for(const auto& entry : entries)
     {
-        instances.emplace_back(parseEntry(entry, arch, kpackPath));
+        instances.emplace_back(parseManifestEntry(entry, arch, kpackPath));
     }
     return instances;
 }
@@ -398,7 +399,7 @@ AotCatalog::AotCatalog(std::vector<AotInstance> instances)
 {
 }
 
-AotCatalog AotCatalog::loadForDevice(int /*deviceId*/, const std::string& arch)
+AotCatalog AotCatalog::loadForDevice(const std::string& arch)
 {
     // No-throw contract: all errors produce a log and return an empty catalog.
     // Do NOT throw -- this may be called from the noexcept selectInstance path.
@@ -415,7 +416,7 @@ AotCatalog AotCatalog::loadForDevice(int /*deviceId*/, const std::string& arch)
             return AotCatalog{};
         }
 
-        auto instances = parseManifest(manifestPath);
+        auto instances = parseManifestEntries(manifestPath);
         HIPDNN_PLUGIN_LOG_INFO("rocke-client dispatcher: loaded "
                                << instances.size() << " AOT kpack instances for '" << arch
                                << "' from " << manifestPath.string());
@@ -424,7 +425,8 @@ AotCatalog AotCatalog::loadForDevice(int /*deviceId*/, const std::string& arch)
     catch(const std::exception& ex)
     {
         HIPDNN_PLUGIN_LOG_ERROR("rocke-client: failed to load AOT bundle for '"
-                                << arch << "': " << ex.what() << "; engine will decline all graphs");
+                                << arch << "': " << ex.what()
+                                << "; engine will decline all graphs");
         return AotCatalog{};
     }
     catch(...)
@@ -438,11 +440,11 @@ AotCatalog AotCatalog::loadForDevice(int /*deviceId*/, const std::string& arch)
 std::vector<AotInstance> loadManifestsFromDirectory(const std::filesystem::path& root)
 {
     std::vector<AotInstance> instances;
-    for(const auto& manifest : manifestFiles(root))
+    for(const auto& manifest : getManifestFilePaths(root))
     {
         try
         {
-            auto parsed = parseManifest(manifest);
+            auto parsed = parseManifestEntries(manifest);
             instances.insert(instances.end(),
                              std::make_move_iterator(parsed.begin()),
                              std::make_move_iterator(parsed.end()));
