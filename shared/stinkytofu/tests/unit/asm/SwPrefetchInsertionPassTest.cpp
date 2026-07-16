@@ -50,6 +50,18 @@ int countPrefetchInstPcRel(const BasicBlock& bb) {
     }
     return c;
 }
+
+int countByMnemonic(const BasicBlock& bb, const char* mnemonic) {
+    int c = 0;
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+        const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+        if (m && std::strcmp(m, mnemonic) == 0) ++c;
+    }
+    return c;
+}
 }  // namespace
 
 class SwPrefetchInsertionPassTest : public ::testing::Test {
@@ -95,6 +107,28 @@ TEST_F(SwPrefetchInsertionPassTest, SmallBlock_BelowFirstThreshold_NoPrefetchIns
 
     EXPECT_EQ(countStinkyInstructions(*bb), before);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
+}
+
+TEST_F(SwPrefetchInsertionPassTest, LargeBlock_CrossesFirstThreshold_PrefetchInserted) {
+    constexpr int kLargeBlockInstCount = 9000;
+    for (int i = 0; i < kLargeBlockInstCount; ++i) createVAddInBlock(bb, arch, 0, 1, 2);
+
+    const int before = countStinkyInstructions(*bb);
+    EXPECT_EQ(before, kLargeBlockInstCount);
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
+    EXPECT_EQ(countByMnemonic(*bb, "s_mov_b32"), 0);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createSwPrefetchInsertionPass(std::string{}));
+    pm.run(*func);
+
+    const int prefetchCount = countPrefetchInstPcRel(*bb);
+    const int movCount = countByMnemonic(*bb, "s_mov_b32");
+    EXPECT_GE(prefetchCount, 1);
+    EXPECT_EQ(movCount, prefetchCount);
+    EXPECT_EQ(countStinkyInstructions(*bb), before + 2 * prefetchCount);
 }
 
 // ---------------------------------------------------------------------------
