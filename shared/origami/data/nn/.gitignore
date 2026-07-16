@@ -1,2 +1,0 @@
-# MLREC binaries are not stored under origami/data/nn (YAML manifests + sidecars only).
-*.tilewright.bin
