@@ -36,7 +36,7 @@ from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
-                    roundUpToNearestMultiple
+                    roundUpToNearestMultiple, effectiveMatrixInstMN
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -704,29 +704,22 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "EnableMatrixInstruction undetermined")
 
     if EnableMatrixInstruction == True:
-      state["MatrixInstM"]         = state["MIBlock"][0]
-      state["MatrixInstN"]         = state["MIBlock"][1]
+      # MatrixInstM/N hold the *effective* per-instruction extents: SourceSwap on a
+      # non-square MI transposes the accumulator, so M/N swap. The *physical* opcode
+      # dims stay in MIBlock[0]/[1] (used for the WMMA opcode + hardware lane layout).
+      state["MatrixInstM"], state["MatrixInstN"] = \
+          effectiveMatrixInstMN(state["MIBlock"][0], state["MIBlock"][1], state.get("SourceSwap", False))
       state["MatrixInstK"]         = state["MIBlock"][2]
       state["MatrixInstB"]         = state["MIBlock"][3]
       state["MatrixInstBM"]        = state["MIBlock"][4]
       state["MatrixInstBN"]        = state["MIBlock"][5]
-
-      # Effective per-instruction M/N extents. SourceSwap on a non-square MI transposes
-      # the accumulator, so the M/N tiling extents swap; physical MatrixInstM/N stay the
-      # opcode/accumulator-layout source of truth. Tiling/layout code reads the *Eff values.
-      if state["SourceSwap"] and state["MatrixInstM"] != state["MatrixInstN"]:
-        state["MatrixInstMEff"] = state["MatrixInstN"]
-        state["MatrixInstNEff"] = state["MatrixInstM"]
-      else:
-        state["MatrixInstMEff"] = state["MatrixInstM"]
-        state["MatrixInstNEff"] = state["MatrixInstN"]
 
       state["LocalSplitU"] = state["WorkGroup"][2]
       state["NumWaveSplitK"] = 1
 
       state["MIOutputVectorWidth"], state["MIRegPerOut"] = Solution.getMIOutputInfo(state, isaInfoMap)
 
-      if state["MatrixInstM"] == 4:
+      if state["MIBlock"][0] == 4:
         state["ThreadTile0"] = state["MIWaveTile"][0] * state["MIOutputVectorWidth"]
         state["ThreadTile1"] = state["MIWaveTile"][1]
         state["SubGroup0"]   = state["MIWaveGroup"][0] * state["MatrixInstM"] * state["MatrixInstBM"] // state["MIOutputVectorWidth"]
@@ -734,8 +727,8 @@ class Solution(collections.abc.Mapping):
       else:
         state["ThreadTile0"] = state["MatrixInstBM"] * state["MIWaveTile"][0] * (state["MatrixInstM"] * state["MatrixInstN"] // state["WavefrontSize"])
         state["ThreadTile1"] = state["MatrixInstBN"] * state["MIWaveTile"][1]
-        state["SubGroup0"]   = state["MIWaveGroup"][0] * (state["WavefrontSize"] // state["MatrixInstNEff"])
-        state["SubGroup1"]   = state["MIWaveGroup"][1] * state["MatrixInstNEff"]
+        state["SubGroup0"]   = state["MIWaveGroup"][0] * (state["WavefrontSize"] // state["MatrixInstN"])
+        state["SubGroup1"]   = state["MIWaveGroup"][1] * state["MatrixInstN"]
 
       #for the old Logic yaml file which does not contain keys: MIInputPerThreadA/B
       if not "MIInputPerThreadA" in state:
@@ -745,7 +738,7 @@ class Solution(collections.abc.Mapping):
       # SS1 non-square: SourceSwap feeds B into wide src0 / A into narrow src1, so swap
       # per-thread input counts (A sized for N-side, B for M-side) to match mfmaIter;
       # else B has too few VGPRs for src0 -> "invalid operand for instruction".
-      if state["SourceSwap"] and state["MatrixInstM"] != state["MatrixInstN"]:
+      if state.get("SourceSwap", False) and state["MatrixInstM"] != state["MatrixInstN"]:
         state["MIInputPerThreadA"], state["MIInputPerThreadB"] = \
             state["MIInputPerThreadB"], state["MIInputPerThreadA"]
 

@@ -299,10 +299,6 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             # constant
             MIBShape0 = kernel["MatrixInstM"] * kernel["MatrixInstBM"]
             MIBShape1 = kernel["MatrixInstN"] * kernel["MatrixInstBN"]
-            # SS1 on non-square MI: the accumulator is transposed (dim0=32 holds N,
-            # dim1=16 holds M), so the coord0(M)/coord1(N) block shapes swap.
-            if kernel["SourceSwap"] and kernel["MatrixInstM"] != kernel["MatrixInstN"]:
-                MIBShape0, MIBShape1 = MIBShape1, MIBShape0
 
             matrixInstT = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
             matrixInstM = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else matrixInstT

@@ -422,13 +422,6 @@ class StoreState:
             matrixInstBM = 1                                                if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"] * matrixInstBM
             matrixInstBN = 1                                                if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"] * matrixInstBN
 
-            # SS1 non-square: accumulator is transposed, so the block multiplicity that
-            # normally sits on M (matrixInstBM) belongs on N. Swap them so coordOffset1
-            # places the 2nd register-group at +matrixInstN instead of collapsing both
-            # groups onto the same N.
-            if kernel["SourceSwap"] and kernel["MatrixInstM"] != kernel["MatrixInstN"]:
-                matrixInstBM, matrixInstBN = matrixInstBN, matrixInstBM
-
         for elementIdx in range(0, len(batchElements)):
 
             element = batchElements[elementIdx]

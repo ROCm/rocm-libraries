@@ -569,8 +569,8 @@ class LocalReadMFMA(LocalRead):
         mxUnit: int      = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{mxTc}"]
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
-        MIWaveGroupShape = [ kernel["MatrixInstMEff"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
-                            kernel["MatrixInstNEff"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
+        MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
+                            kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
 
         numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
         numReadsPerVector = int(vectorWidth // tilePerRead)
@@ -653,8 +653,8 @@ class LocalReadMFMA(LocalRead):
         vectorWidth  = kernel["VectorWidth%s"%tc]
 
         numSubTiles = kernel["numSubTiles"]
-        MIWaveGroupShape = [ kernel["MatrixInstMEff"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
-                            kernel["MatrixInstNEff"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
+        MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
+                            kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
 
         LdsPad           = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
         tileStride       = 1
@@ -691,7 +691,7 @@ class LocalReadMFMA(LocalRead):
                 UnrollStride = kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad
 
         enableLDSTr = tP["enableLDSTr"]
-        matrixInstT = kernel["MatrixInstMEff"] if (tile01 == 0) else kernel["MatrixInstNEff"]
+        matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
         matrixInstTO = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
         matrixInstTO = matrixInstT if ("MXS" in tc) else matrixInstTO
         numTilePerInst = matrixInstT // matrixInstTO
