@@ -14716,7 +14716,7 @@ class KernelWriterAssembly(KernelWriter):
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
       # M alignment; caller may override (e.g. TDMStoreInst uses 1 so no unrelated
       # store-inst logic lives inside this generic edge check).
-      alignSize = alignSizeM if alignSizeM is not None else 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
+      alignSize = alignSizeM if alignSizeM is not None else max(16 // destBpe, kernel["MatrixInstM"])  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
