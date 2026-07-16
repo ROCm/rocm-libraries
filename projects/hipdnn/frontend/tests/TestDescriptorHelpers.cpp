@@ -593,6 +593,31 @@ TYPED_TEST(DescriptorHelpersPassByValueTyped, EnsureTensorDescSetsPassByValue)
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
 
+// Explicit guard for the pre-1.2.0 backend-compatibility contract (RFC 0016
+// §1): a tensor that is not runtime pass-by-value must never send
+// HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT during lowering, so an
+// ordinary graph imposes no new backend version floor. Times(0) makes the
+// omission an assertion rather than relying on strict-mock matching.
+TEST_F(TestDescriptorHelpers, EnsureTensorDescOmitsPassByValueAttributeForNonPbvTensor)
+{
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES),
+                              /*isRuntime=*/false);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT, _, _, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
+    EXPECT_TRUE(err.is_good()) << err.err_msg;
+}
+
 // ============================================================================
 // createKnobSettingDescriptor tests
 // ============================================================================
@@ -1123,6 +1148,30 @@ TEST_F(TestDescriptorHelpersRoundTrip, LegacyDescriptorWithoutRuntimeFlagIsCompi
     ASSERT_TRUE(out->get_compile_time_constant<float>().has_value());
     EXPECT_FLOAT_EQ(out->get_compile_time_constant<float>().value(), K_VALUE);
     EXPECT_FALSE(out->get_pass_by_value<float>().has_value());
+}
+
+// A pre-1.2.0 (pre-1308) backend does not recognize
+// HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT and returns NOT_SUPPORTED on
+// the read. Unpack must treat that as "flag absent -> false" rather than
+// surfacing an error, so a frontend built from this PR can still deserialize a
+// descriptor produced by an older backend (RFC 0016 §1 binary-compat guarantee).
+TEST_F(TestDescriptorHelpersRoundTrip, UnpackToleratesNotSupportedRuntimeFlagFromLegacyBackend)
+{
+    // Force the runtime-pbv extension read to report NOT_SUPPORTED, overriding
+    // the StoringBackend default for this attribute only (later ON_CALL wins).
+    ON_CALL(*_backend,
+            backendGetAttribute(_, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT, _, _, _, _))
+        .WillByDefault(Return(HIPDNN_STATUS_NOT_SUPPORTED));
+
+    constexpr float K_VALUE = 4.25f;
+    auto in = makeScalar(1, DataType::FLOAT);
+    in->set_compile_time_constant(K_VALUE);
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_FALSE(out->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(out->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(out->get_compile_time_constant<float>().value(), K_VALUE);
 }
 
 // --- Mixed set: several scalar tensors of different types + states together ---

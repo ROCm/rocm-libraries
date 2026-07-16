@@ -100,6 +100,22 @@ flatbuffers::FlatBufferBuilder buildScalarTensorAttributesNoValue(int64_t uid, D
     return builder;
 }
 
+// Asserts that invoking fn throws HipdnnPluginException carrying the expected
+// status code -- not merely that some HipdnnPluginException was thrown.
+template <typename Fn>
+void expectPluginThrowWithStatus(Fn&& fn, hipdnnPluginStatus_t expectedStatus)
+{
+    try
+    {
+        std::forward<Fn>(fn)();
+        ADD_FAILURE() << "Expected HipdnnPluginException, but no exception was thrown";
+    }
+    catch(const HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), expectedStatus);
+    }
+}
+
 } // namespace
 
 // --- makeScalarOperand ---
@@ -233,7 +249,8 @@ TEST(TestRuntimePassByValue, MakeScalarOperandThrowsOnUnsetDataType)
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{27, attr}};
-    EXPECT_THROW(makeScalarOperand(tensorMap, 27, "Epsilon"), HipdnnPluginException);
+    expectPluginThrowWithStatus([&] { makeScalarOperand(tensorMap, 27, "Epsilon"); },
+                                HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 TEST(TestRuntimePassByValue, MakeScalarOperandThrowsOnUnsupportedDataType)
@@ -244,13 +261,15 @@ TEST(TestRuntimePassByValue, MakeScalarOperandThrowsOnUnsupportedDataType)
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
 
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap{{28, attr}};
-    EXPECT_THROW(makeScalarOperand(tensorMap, 28, "Epsilon"), HipdnnPluginException);
+    expectPluginThrowWithStatus([&] { makeScalarOperand(tensorMap, 28, "Epsilon"); },
+                                HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 TEST(TestRuntimePassByValue, MakeScalarOperandThrowsWhenUidNotInTensorMap)
 {
     const std::unordered_map<int64_t, const TensorAttributes*> tensorMap;
-    EXPECT_THROW(makeScalarOperand(tensorMap, 999, "Epsilon"), HipdnnPluginException);
+    expectPluginThrowWithStatus([&] { makeScalarOperand(tensorMap, 999, "Epsilon"); },
+                                HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 // --- resolveScalarOperand ---
@@ -305,8 +324,21 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsIfPureRuntimeUserSupplied
     const ScalarOperand op{10, DataType::FLOAT, true, 0.0};
     std::vector<hipdnnPluginDeviceBuffer_t> buffers; // empty: uid 10 absent
 
-    EXPECT_THROW(resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())),
-                 HipdnnPluginException);
+    expectPluginThrowWithStatus(
+        [&] { resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())); },
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+}
+
+TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsIfPureRuntimeUserSuppliedBufferPtrIsNull)
+{
+    const ScalarOperand op{10, DataType::FLOAT, true, 0.0};
+    // Slot for uid 10 is present but carries a null pointer: findDeviceBuffer
+    // succeeds, so the null must be caught before the host-scalar memcpy.
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{10, nullptr}};
+
+    expectPluginThrowWithStatus(
+        [&] { resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())); },
+        HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsOnUnsetDataType)
@@ -316,8 +348,9 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsOnUnsetDataType)
     float hostValue = 1.0f;
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{11, &hostValue}};
 
-    EXPECT_THROW(resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())),
-                 HipdnnPluginException);
+    expectPluginThrowWithStatus(
+        [&] { resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())); },
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostHalfForPureRuntimeUserSupplied)
@@ -389,8 +422,9 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsOnUnsupportedDataType)
     uint8_t hostValue = 0;
     std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{16, &hostValue}};
 
-    EXPECT_THROW(resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())),
-                 HipdnnPluginException);
+    expectPluginThrowWithStatus(
+        [&] { resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())); },
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
 // --- toDouble ---
@@ -408,7 +442,8 @@ TEST(TestRuntimePassByValue, ToDoubleThrowsOnUnrepresentableInt64)
 {
     // 2^53 + 1: rounds to 2^53 in double, so the round-trip check must catch it
     // rather than silently returning the wrong value.
-    EXPECT_THROW(toDouble(ScalarValue{int64_t{9007199254740993LL}}), HipdnnPluginException);
+    expectPluginThrowWithStatus([] { toDouble(ScalarValue{int64_t{9007199254740993LL}}); },
+                                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
 }
 
 TEST(TestRuntimePassByValue, ToDoubleThrowsOnUnrepresentableInt32IsUnreachableButInt64Guarded)

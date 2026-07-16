@@ -196,6 +196,12 @@ inline ScalarValue resolveScalarOperand(const ScalarOperand& op,
     const hipdnnPluginDeviceBuffer_t buffer
         = findDeviceBuffer(op.uid, deviceBuffers, numDeviceBuffers);
     const void* ptr = buffer.ptr;
+    if(ptr == nullptr)
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                    "Device buffer for uid " + std::to_string(op.uid)
+                                        + " has a null pointer");
+    }
 
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     switch(op.dataType)

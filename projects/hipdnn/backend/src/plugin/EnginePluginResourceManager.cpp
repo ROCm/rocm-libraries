@@ -680,14 +680,22 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
                        "carries override-tensor selectors.");
 
+        // Defense-in-depth recheck of the override-execute floor. Override-shape
+        // support is hipDNN-owned routing metadata carried in the execution plan
+        // envelope, so it is cheap and correct to re-verify here that the selected
+        // plugin still meets the override API floor. Pass-by-value is intentionally
+        // false: per RFC 0009, once a serialized plan resolves to an engine id the
+        // plugin owns its own payload versioning/compatibility, so hipDNN does not
+        // re-gate feature floors (like pbv) that live in the plugin payload rather
+        // than the envelope.
         const auto pluginApiVersion = plugin->parsedApiVersion();
-        THROW_IF_FALSE(
-            pluginApiVersion.has_value()
-                && *pluginApiVersion
-                       >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(true, false),
-            HIPDNN_STATUS_NOT_SUPPORTED,
-            "Selected plugin API version does not support "
-            "hipdnnEnginePluginExecuteOpGraphWithOverrides.");
+        THROW_IF_FALSE(pluginApiVersion.has_value()
+                           && *pluginApiVersion
+                                  >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+                                      true, /*isRuntimePassByValue=*/false),
+                       HIPDNN_STATUS_NOT_SUPPORTED,
+                       "Selected plugin API version does not support "
+                       "hipdnnEnginePluginExecuteOpGraphWithOverrides.");
 
         // Validate before narrowing variant-pack int64 lengths to the SDK uint32 surface.
         const auto numOverridesSize = overrideUniqueIds.size();
