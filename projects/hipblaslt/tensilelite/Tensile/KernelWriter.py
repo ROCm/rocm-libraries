@@ -5118,8 +5118,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if dtileInfo.vgprTiles:
       self._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
 
-    module.add(initVgprTilesToZero(self, kernel, dtileInfo))
-
     for vtiles in dtileInfo.vgprTiles:
       regStr = "Vgpr" if vtiles.regList.pool == self.vgprPool else "Agpr"
       module.addComment("%ss used for %s mma tile %u: %s"%(regStr, dtileInfo.tc, dtileInfo.vgprTiles.index(vtiles), str(vtiles)))

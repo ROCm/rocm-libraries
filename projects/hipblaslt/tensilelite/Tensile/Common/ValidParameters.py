@@ -294,7 +294,13 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
+    # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, including:
+    #   NumThreads must be power of 2
+    #   ClusterDim must be power of 2 and not [1,1]
+    #   DepthU must be power of 2
+    #   MacroTile must be power of 2
+    #   DataTypeA and DataTypeB must not be 6-bit float
+    # Also does not support GSU, StreamK and general batch yet. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -508,7 +514,7 @@ validParameters = { # we need to make sure this matches develop
     #  - Tail loop can be unrolled up to InnerUnroll amount if AssertSummationElementMultiple%InnerUnroll==0
     #
     # 1 indicates no assertion (since all sizes are multiples of 1)
-    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128],
+    "AssertSummationElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
     # Kernel generator will assume that the FreeIndex[0] size is some multiple of the element size
     # and uses this to optimize the kernel.
     # FreeIndex[0] is usually letter "I"
