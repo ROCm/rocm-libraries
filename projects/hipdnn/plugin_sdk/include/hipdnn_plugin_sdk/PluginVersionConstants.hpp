@@ -10,42 +10,33 @@
 namespace hipdnn_plugin_sdk
 {
 
-// Baseline engine plugin C ABI version for plugins that do not export
-// `hipdnnPluginGetApiVersion`. This preserves compatibility with existing
-// plugins across the first explicit engine-plugin API versioning rollout.
+// Baseline engine plugin C ABI version for plugins that don't export
+// `hipdnnPluginGetApiVersion`; preserves compatibility predating explicit
+// engine-plugin API versioning.
 inline constexpr std::string_view K_ENGINE_PLUGIN_API_VERSION_BASELINE = "1.0.0";
 
-// Minimum engine plugin C ABI version that advertises support for the
-// override-execute entry point (RFC 0008 §4.5). Override-execute is the
-// additive minor feature introduced in engine plugin API 1.1.0; see
-// `engine_api_version.h` for the canonical MAJOR.MINOR.PATCH macros. The
-// host's applicability filter rejects any plugin reporting an API version
-// strictly less than this when the graph opts into overridable shapes.
+// Minimum engine plugin API version for the override-execute entry point
+// (RFC 0008 §4.5), an additive minor feature. The applicability filter
+// rejects plugins below this when the graph opts into overridable shapes.
 inline constexpr std::string_view K_OVERRIDE_EXECUTE_MIN_API_VERSION = "1.1.0";
 
-// Minimum engine plugin C ABI version that advertises support for runtime
-// pass-by-value scalar tensors (RFC 0016). This is the additive minor feature
-// introduced in engine plugin API 1.2.0; see `engine_api_version.h` for the
-// canonical MAJOR.MINOR.PATCH macros. The host's applicability filter rejects
-// any plugin reporting an API version strictly less than this when the graph
-// contains any runtime pass-by-value tensor.
+// Minimum engine plugin API version for runtime pass-by-value scalar
+// tensors (RFC 0016), an additive minor feature. The applicability filter
+// rejects plugins below this when the graph contains any such tensor.
 inline constexpr std::string_view K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0";
 
 /// @brief Computes the minimum engine plugin API version a graph requires,
-/// given the graph-level feature flags that gate additive plugin ABI surface.
+/// from the graph-level feature flags gating additive plugin ABI surface.
 ///
-/// This is the single source of truth for the graph -> required-API-version
-/// mapping: GraphDescriptor stamps the result into the serialized graph's
-/// `min_required_engine_api_version` field (as an EngineApiVersion struct, see
-/// graph.fbs) at build/deserialize time, and EnginePluginResourceManager's
-/// applicability filter calls it directly to decide which loaded plugins can
-/// serve a graph. Keeping both call sites on this one function means the
-/// deserialize-time reader-version guard and the plugin-version floor can
-/// never drift apart.
+/// Single source of truth for graph -> required-API-version: GraphDescriptor
+/// stamps the result into `min_required_engine_api_version` (graph.fbs) at
+/// build/deserialize time, and EnginePluginResourceManager's applicability
+/// filter calls it to pick loaded plugins. One function keeps the
+/// deserialize-time reader-version guard and the plugin-version floor from
+/// drifting apart.
 ///
-/// Runtime pass-by-value (1.2.0) dominates the override-execute floor (1.1.0)
-/// and the baseline (1.0.0); each is an additive minor feature layered on the
-/// last, so the highest applicable floor wins.
+/// Runtime pass-by-value (1.2.0) dominates override-execute (1.1.0) and the
+/// baseline (1.0.0): the highest applicable floor wins.
 inline const hipdnn_data_sdk::utilities::Version&
     computeMinimumEnginePluginApiVersion(bool isOverrideShapeEnabled, bool isRuntimePassByValue)
 {

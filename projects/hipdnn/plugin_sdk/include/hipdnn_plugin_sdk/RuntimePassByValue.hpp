@@ -7,21 +7,21 @@
  * @file RuntimePassByValue.hpp
  * @brief Shared plugin-side helpers for RFC 0016 runtime pass-by-value scalar tensors.
  *
- * A pass-by-value scalar tensor (epsilon, momentum, ...) can be in one of three states:
- *  - Compile-time constant (`is_runtime_pass_by_value()==false`, value present): the plugin
- *    API version floor stays at the baseline; the value is baked at plan-build time.
- *  - Runtime-with-default (`is_runtime_pass_by_value()==true`, value present): the graph
- *    floors the host at `K_PASS_BY_VALUE_MIN_API_VERSION`, but the plugin still reads the
- *    baked default at plan-build time. Any `device_buffers` slot for that uid must be
- *    ignored -- the frontend never delivers an override for a tensor that already has a
- *    default, and `Graph::execute()` forwards the caller's entire variant pack unfiltered.
- *  - Pure runtime user-supplied (`is_runtime_pass_by_value()==true`, no value): the plugin
- *    cannot resolve a value until execute, where it must read a host-supplied scalar from
- *    the `device_buffers` slot matching the tensor's uid.
+ * A pass-by-value scalar (epsilon, momentum, ...) is one of three states:
+ *  - Compile-time constant (`is_runtime_pass_by_value()==false`, value present): baked
+ *    at plan-build time; no API version floor.
+ *  - Runtime-with-default (`is_runtime_pass_by_value()==true`, value present): floors
+ *    the host at `K_PASS_BY_VALUE_MIN_API_VERSION`, but the plugin still bakes the
+ *    default at plan-build time. Any `device_buffers` slot for that uid is ignored --
+ *    the frontend never overrides a tensor that already has a default, even though
+ *    `Graph::execute()` forwards the caller's whole variant pack unfiltered.
+ *  - Pure runtime user-supplied (`is_runtime_pass_by_value()==true`, no value): resolved
+ *    only at execute, by reading the host scalar from the `device_buffers` slot matching
+ *    the tensor's uid.
  *
- * `ScalarOperand` captures this classification once at plan-build time (`makeScalarOperand`)
- * and defers the actual value lookup to execute (`resolveScalarOperand`), which is the only
- * point at which `device_buffers` may safely be consulted.
+ * `ScalarOperand` captures this classification at plan-build time (`makeScalarOperand`)
+ * and defers value lookup to execute (`resolveScalarOperand`), the only point where
+ * `device_buffers` may safely be consulted.
  */
 
 #include <cstdint>
@@ -40,12 +40,10 @@
 namespace hipdnn_plugin_sdk
 {
 
-/// A pass-by-value scalar carried without widening: one arm per DataType the SDK
-/// resolves. `double` is first so a default-constructed ScalarValue holds 0.0.
-/// Supported dtypes are DOUBLE, FLOAT, HALF, BFLOAT16, INT32, INT64, and BOOLEAN --
-/// a narrower set than the frontend/flatbuffer TensorValue union (which also allows
-/// UINT8, INT8, and the FP8/FP6/FP4 families). makeScalarOperand() throws
-/// HIPDNN_PLUGIN_STATUS_BAD_PARAM at plan-build time for any dtype outside this set.
+/// A pass-by-value scalar carried without widening: one arm per supported DataType.
+/// `double` is first so a default-constructed ScalarValue holds 0.0. Narrower than the
+/// frontend/flatbuffer TensorValue union (no UINT8/INT8/FP8/FP6/FP4); makeScalarOperand()
+/// throws HIPDNN_PLUGIN_STATUS_BAD_PARAM at plan-build time for any dtype outside this set.
 using ScalarValue = std::variant<double, // DataType::DOUBLE
                                  float, // DataType::FLOAT
                                  hipdnn_data_sdk::types::half, // DataType::HALF
@@ -55,11 +53,9 @@ using ScalarValue = std::variant<double, // DataType::DOUBLE
                                  bool>; // DataType::BOOLEAN
 
 /// Collapses a ScalarValue to double for floating-point consumers (epsilon/momentum).
-/// The widening is explicit and greppable here rather than hidden in the SDK. Integer
-/// arms are checked for exact round-trip through double (the mantissa loses precision
-/// above 2^53); a value that cannot round-trip throws rather than silently rounding --
-/// this is a defensive backstop, not a used path today, since every shipped consumer
-/// (epsilon/momentum) is floating-point.
+/// Widening is explicit here rather than hidden in the SDK. Integer arms are checked
+/// for exact round-trip (double loses precision above 2^53) and throw rather than
+/// silently rounding, though no shipped consumer is integer today.
 inline double toDouble(const ScalarValue& value)
 {
     return std::visit(
@@ -84,9 +80,9 @@ inline double toDouble(const ScalarValue& value)
         value);
 }
 
-/// @brief A scalar tensor operand (epsilon/momentum) resolved either at plan-build
-/// (compile-time constant or runtime-with-default) or at execute (pure runtime
-/// user-supplied, i.e. is_runtime_pass_by_value() && value_type() == NONE).
+/// @brief A scalar tensor operand (epsilon/momentum): resolved at plan-build for
+/// compile-time-constant/runtime-with-default, or deferred to execute for pure
+/// runtime user-supplied (is_runtime_pass_by_value() && value_type()==NONE).
 
 struct ScalarOperand
 {
@@ -97,10 +93,9 @@ struct ScalarOperand
     ScalarValue bakedDefault;
 };
 
-/// @brief Builds a ScalarOperand from the op-graph tensor at plan-build time.
-/// Pure user-supplied tensors (is_runtime_pass_by_value() && value_type()==NONE)
-/// record uid+dtype only, deferring the read to execute. Every other state
-/// (compile-time constant, or runtime-with-default) extracts the baked value now.
+/// @brief Builds a ScalarOperand from the op-graph tensor at plan-build time. Pure
+/// user-supplied tensors record uid+dtype only, deferring the read to execute; every
+/// other state extracts the baked value now.
 inline ScalarOperand makeScalarOperand(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
@@ -185,10 +180,10 @@ T readHostScalar(const void* ptr)
 
 } // namespace detail
 
-/// @brief Resolves a ScalarOperand at execute time. Pure user-supplied operands
-/// read the host scalar from the matching device_buffers slot (throws
-/// HIPDNN_PLUGIN_STATUS_INVALID_VALUE if absent); all other operands return the
-/// baked default and ignore any device_buffers slot for that uid.
+/// @brief Resolves a ScalarOperand at execute time: pure user-supplied operands read
+/// the host scalar from the matching device_buffers slot (throws
+/// HIPDNN_PLUGIN_STATUS_INVALID_VALUE if absent); all other operands return the baked
+/// default, ignoring any device_buffers slot for that uid.
 inline ScalarValue resolveScalarOperand(const ScalarOperand& op,
                                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                         uint32_t numDeviceBuffers)
