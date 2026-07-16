@@ -20,7 +20,7 @@ TEST(TestRMSnormValidator, Valid)
     const auto& attr = *node.attributes_as_RMSNormAttributes();
 
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    EXPECT_NO_THROW(validator.checkFwdTensorConfigSupported(attr));
 }
 
 TEST(TestRMSnormValidator, ValidBwd)
@@ -47,7 +47,7 @@ TEST(TestRMSnormValidator, UnsupportedDim)
 
     // 3D tensor is not supported
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -153,7 +153,7 @@ TEST(TestRMSnormValidator, MismatchIOTypes)
 
     // Data type of x and y tensors don't need to match
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    EXPECT_NO_THROW(validator.checkFwdTensorConfigSupported(attr));
 }
 
 TEST(TestRMSnormValidator, UnsupportedScaleType)
@@ -173,7 +173,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleType)
 
     // Data type of scale should be the same as bias, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -194,7 +194,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMSType)
 
     // only FLOAT inv_rms type is supported at the moment, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -328,7 +328,7 @@ TEST(TestRMSnormValidator, MismatchIOShapes)
 
     // Shape of x and y tensors should match, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -370,7 +370,7 @@ TEST(TestRMSnormValidator, MismatchAffineDims)
 
     // Shape of scale and bias tensors should match, expect exception when this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -407,7 +407,7 @@ TEST(TestRMSnormValidator, UnsupportedScaleShape)
 
     // Scale not normalized correctly, throw if this isn't the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -442,7 +442,7 @@ TEST(TestRMSnormValidator, UnsupportedInvRMShape)
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -477,7 +477,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis1)
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    EXPECT_NO_THROW(validator.checkFwdTensorConfigSupported(attr));
 }
 
 TEST(TestRMSnormValidator, ScaleNormalizeAxis2)
@@ -511,7 +511,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis2)
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    EXPECT_NO_THROW(validator.checkFwdTensorConfigSupported(attr));
 }
 
 TEST(TestRMSnormValidator, ScaleNormalizeAxis3)
@@ -545,7 +545,7 @@ TEST(TestRMSnormValidator, ScaleNormalizeAxis3)
 
     // inv_rms should be infered from IO and derived dims, throw if not the case
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    EXPECT_NO_THROW(validator.checkFwdTensorConfigSupported(attr));
 }
 
 TEST(TestRMSnormValidator, Valid4DChannelLast)
@@ -579,7 +579,7 @@ TEST(TestRMSnormValidator, Valid4DChannelLast)
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    EXPECT_NO_THROW(validator.checkFwdTensorConfigSupported(attr));
 }
 
 TEST(TestRMSnormValidator, MismatchInputOutputLayouts)
@@ -615,7 +615,7 @@ TEST(TestRMSnormValidator, MismatchInputOutputLayouts)
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
@@ -650,6 +650,6 @@ TEST(TestRMSnormValidator, MismatchAffineTensorLayout)
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+    EXPECT_THROW(validator.checkFwdTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
