@@ -31,6 +31,7 @@
 #endif
 
 #ifdef __HIP__
+    #include <hip/hip_fp16.h>
     #include <hip/hip_runtime.h>
 #elif defined(__CUDACC__)
     #include <cuda/std/chrono>
@@ -58,6 +59,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -89,6 +91,14 @@
         static inline const char* name = NAME; \
     };                                         \
     }
+
+/// Asserts equality between input and expected. Works for scalar arithmetic types,
+/// iterable containers, and brace-enclosed initializer lists. The expected value and
+/// an optional tolerance (tol, defaults to 0.0) are captured via __VA_ARGS__ to handle
+/// initializer list commas. Prints file:line, an error message to stderr, and exits
+/// on mismatch.
+#define PRIMBENCH_ASSERT(input, ...) \
+    primbench::detail::assert_equal(__FILE__, __LINE__, (input), __VA_ARGS__)
 
 #ifdef __HIP__
     /// Exits the program with an error message if the given HIP API call returns a failure status.
@@ -315,6 +325,127 @@ inline std::ostream& blue(std::ostream& os)
     return os;
 }
 
+template<typename T>
+std::string value_to_string(const T& v)
+{
+    return std::to_string(v);
+}
+
+inline std::string value_to_string(const __half& v)
+{
+    return std::to_string(__half2float(v));
+}
+
+template<typename T>
+constexpr bool is_numeric
+    = std::is_arithmetic_v<std::remove_cv_t<T>> || std::is_same_v<std::remove_cv_t<T>, __half>;
+
+template<typename T>
+constexpr bool is_fp_or_half
+    = std::is_floating_point_v<std::remove_cv_t<T>> || std::is_same_v<std::remove_cv_t<T>, __half>;
+
+/// Asserts equality between two scalar values.
+/// For floating-point types an optional tolerance can be specified.
+/// Prints an error message to stderr and exits on mismatch.
+template<typename T, typename U>
+std::enable_if_t<is_numeric<T> && is_numeric<U>>
+    assert_equal(const char* file, int line, const T& input, const U& expected, double tol = 0.0)
+{
+    clearline(std::cout);
+    const std::string prefix = std::string(file) + ":" + std::to_string(line) + ": ";
+    if constexpr(is_fp_or_half<T> || is_fp_or_half<U>)
+    {
+        const double diff = std::abs(static_cast<double>(input) - static_cast<double>(expected));
+        if(diff > tol)
+        {
+            std::cerr << prefix
+                      << "primbench::assert_equal() failed: Expected " + value_to_string(expected)
+                             + ", got " + value_to_string(input) + " (diff " + value_to_string(diff)
+                             + ", tol " + std::to_string(tol) + ")\n";
+            exit(EXIT_FAILURE);
+        }
+    }
+    else
+    {
+        if(input != expected)
+        {
+            std::cerr << prefix
+                      << "primbench::assert_equal() failed: Expected " + value_to_string(expected)
+                             + ", got " + value_to_string(input) + "\n";
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+/// Asserts element-wise equality between two containers.
+/// For floating-point types an optional tolerance can be specified.
+/// Prints an error message to stderr and exits on size mismatch or value mismatch,
+/// with a message indicating the index and the mismatching values.
+template<typename ContainerT, typename ContainerU>
+std::enable_if_t<!is_numeric<ContainerT> && !is_numeric<ContainerU>>
+    assert_equal(const char*       file,
+                 int               line,
+                 const ContainerT& input,
+                 const ContainerU& expected,
+                 double            tol = 0.0)
+{
+    clearline(std::cout);
+    const std::string prefix = std::string(file) + ":" + std::to_string(line) + ": ";
+    if(input.size() != expected.size())
+    {
+        std::cerr << prefix
+                  << "primbench::assert_equal() failed: Expected " + std::to_string(expected.size())
+                         + " values, got " + std::to_string(input.size()) + "\n";
+        exit(EXIT_FAILURE);
+    }
+    using T = typename ContainerT::value_type;
+    using U = typename ContainerU::value_type;
+    for(size_t i = 0; i < input.size(); ++i)
+    {
+        if constexpr(is_fp_or_half<T> || is_fp_or_half<U>)
+        {
+            const double diff
+                = std::abs(static_cast<double>(input[i]) - static_cast<double>(expected[i]));
+            if(diff > tol)
+            {
+                std::cerr << prefix
+                          << "primbench::assert_equal() failed at index " + std::to_string(i)
+                                 + ": Expected " + value_to_string(expected[i]) + ", got "
+                                 + value_to_string(input[i]) + " (diff " + value_to_string(diff)
+                                 + ", tol " + std::to_string(tol) + ")\n";
+                exit(EXIT_FAILURE);
+            }
+        }
+        else
+        {
+            if(input[i] != expected[i])
+            {
+                std::cerr << prefix
+                          << "primbench::assert_equal() failed at index " + std::to_string(i)
+                                 + ": Expected " + value_to_string(expected[i]) + ", got "
+                                 + value_to_string(input[i]) + "\n";
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+}
+
+/// Asserts element-wise equality against an initializer list.
+/// For floating-point types an optional tolerance can be specified.
+/// Prints an error message to stderr and exits on size mismatch or value mismatch,
+/// with a message indicating the index and the mismatching values.
+template<typename ContainerT>
+std::enable_if_t<!is_numeric<ContainerT>>
+    assert_equal(const char*                                            file,
+                 int                                                    line,
+                 const ContainerT&                                      input,
+                 std::initializer_list<typename ContainerT::value_type> expected,
+                 double                                                 tol = 0.0)
+{
+    // Forward directly to the generic container overload.
+    assert_equal(file, line, input, std::vector(expected), tol);
+}
+
 /// Backend-agnostic wrappers for HIP and CUDA.
 /// The functions in this namespace are sorted alphabetically.
 namespace gpu_backend
@@ -430,7 +561,7 @@ using namespace gpu_backend;
 
 #ifdef __HIP__
 /// Serializes information about the used GPU.
-std::string serialize_gpu_info()
+inline std::string serialize_gpu_info()
 {
     std::ostringstream ss;
     ss << "{";
@@ -459,7 +590,7 @@ std::string serialize_gpu_info()
 }
 #elif defined(__CUDACC__)
 /// Serializes information about the used GPU.
-std::string serialize_gpu_info()
+inline std::string serialize_gpu_info()
 {
     std::ostringstream ss;
     ss << "{";
@@ -1799,7 +1930,7 @@ inline void print_progress(uint64_t         iteration,
 #ifdef __HIP__
 
 /// Kernel that blocks the GPU stream until unblocked or timeout occurs.
-__global__
+static __global__
 void block_stream_kernel(volatile int32_t* is_blocked,
                          volatile int32_t* timeout_flag,
                          double            timeout_seconds,
@@ -1822,7 +1953,7 @@ void block_stream_kernel(volatile int32_t* is_blocked,
 #elif defined(__CUDACC__)
 
 /// Kernel that blocks the GPU stream until unblocked or timeout occurs.
-__global__
+static __global__
 void block_stream_kernel(volatile int32_t* is_blocked,
                          volatile int32_t* timeout_flag,
                          double            timeout_seconds)
@@ -2196,7 +2327,7 @@ private:
 
 /// Warms the GPU, using complex enough dummy kernel code
 /// that the compiler can't optimize it away.
-__global__
+static __global__
 void warmup_kernel(float* data, int n)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2409,6 +2540,7 @@ public:
             std::cerr << "Error: Can't call run() before calling set_items()\n";
             exit(EXIT_FAILURE);
         }
+        m_has_run = true;
 
         std::string name            = m_meta.serialize_name();
         std::string serialized_meta = m_meta.serialize();
@@ -2458,6 +2590,24 @@ public:
 
         for(const auto& event : events)
             PRIMBENCH_CHECK(event_destroy(event));
+    }
+
+    /// Registers \ref test_lambda, which runs once during warmup.
+    ///
+    /// Must not be called after \ref run().
+    ///
+    /// Define `PRIMBENCH_NO_TEST` to disable.
+    void test(std::function<void()> test_lambda)
+    {
+        if(m_has_run)
+        {
+            std::cerr << "Error: Can't call test() after calling run()\n";
+            exit(EXIT_FAILURE);
+        }
+
+#ifndef PRIMBENCH_NO_TEST
+        m_test_lambda = test_lambda;
+#endif
     }
 
     // Public fields accessed directly by benchmarks.
@@ -2628,6 +2778,11 @@ private:
         for(auto& event : events)
             PRIMBENCH_CHECK(event_create(&event));
         run_batch(events, kernel);
+        if(m_test_lambda)
+        {
+            primbench::log("Running tests");
+            m_test_lambda();
+        }
         for(const auto& event : events)
             PRIMBENCH_CHECK(event_destroy(event));
 
@@ -2818,12 +2973,14 @@ private:
     cache_thrasher& m_cache;
 
     std::function<void()> m_run_before_every_iteration_lambda = nullptr;
+    std::function<void()> m_test_lambda                       = nullptr;
     std::vector<double>   m_times;
     size_t                m_kernels_per_batch = 0;
     double                m_ms_per_batch      = 0.0;
 
     bool   m_has_set_items    = false;
     bool   m_has_set_writes   = false;
+    bool   m_has_run          = false;
     size_t m_items            = 0;
     size_t m_read_write_bytes = 0;
 }; // class state

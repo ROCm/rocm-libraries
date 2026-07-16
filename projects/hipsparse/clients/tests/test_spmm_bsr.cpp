@@ -24,7 +24,7 @@
 #include "test.hpp"
 #include "testing_spmm_bsr.hpp"
 
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12080)
 TEST_ROUTINE_WITH_CONFIG(spmm_bsr,
                          generic,
                          hipsparse_test_config_ijt,

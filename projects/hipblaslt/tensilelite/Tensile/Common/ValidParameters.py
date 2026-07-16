@@ -294,13 +294,7 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, including:
-    #   NumThreads must be power of 2
-    #   ClusterDim must be power of 2 and not [1,1]
-    #   DepthU must be power of 2
-    #   MacroTile must be power of 2
-    #   DataTypeA and DataTypeB must not be 6-bit float
-    # Also does not support GSU, StreamK and general batch yet. May remove these limitations in the future.
+    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -777,8 +771,6 @@ validParameters = { # we need to make sure this matches develop
     # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
     # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel
     # 0 : Standard data-parallel kernel
-    # 1 : Basic StreamK
-    # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
     # 4 : Dynamic StreamK using per-XCD work queues
     # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
@@ -807,7 +799,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3, 4, 5],
+    "StreamK": [0, 3, 4, 5],
     # Force StreamK=3 to run all output tiles through the persistent DP path.
     # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
     # to skip the SK region, and keeps the normal StreamK grid selection policy.
@@ -838,7 +830,7 @@ validParameters = { # we need to make sure this matches develop
     "DebugStreamK": [0, 1, 2, 3],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.
-    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    # Termination is via process death. Requires StreamK = 3.
     "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic

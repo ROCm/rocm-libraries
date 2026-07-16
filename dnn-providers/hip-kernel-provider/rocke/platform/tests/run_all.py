@@ -5,10 +5,10 @@
 # Cross-platform (Windows + Linux) CI/parent entrypoint for the rocKE engine.
 # One command runs: (1) the relative-path contract guard, (2) the byte-identity
 # gate, (3) the pytest suite, (4) ctest if a build dir exists. All paths are
-# derived relative to this file so the rocKE/ tree is copy-able verbatim.
+# derived relative to this file so the rocke/platform/ tree is copy-able verbatim.
 #
 # Usage:
-#   python rocKE/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
+#   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
 #       [--only SUBSTR] [--build-root DIR]
 
 from __future__ import annotations
@@ -25,12 +25,15 @@ ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocKE
 TESTS = ROCKE / "tests"
 TOOLS = ROCKE / "tools"
 
-# Files that may reference an absolute repo path or a path that escapes rocKE/
+# Files that may reference an absolute repo path or a path that escapes rocke/platform/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are
 # exempt). A clean run is required before the tree is dropped into another repo.
 _GUARD_SUFFIXES = {".py", ".cmake", ".toml", ".ini", ".sh", ".cfg"}
 _GUARD_NAMES = {"CMakeLists.txt"}
-_GUARD_SKIP_DIRS = {".git", ".venv", "__pycache__", "build", "dsl_docs", "examples"}
+_GUARD_SKIP_DIRS = {".git", "__pycache__", "build", "dsl_docs", "examples"}
+# Any ".venv*" dir is a local virtual environment (".venv", ".venv-torch", ...);
+# keeping side venvs around for CI parity and local dev must not trip the guard.
+_GUARD_SKIP_PREFIXES = (".venv",)
 _FORBIDDEN = [
     re.compile(r"/workspace\b"),
     re.compile(r"rocm-libraries(?:-[a-z-]+)?/"),
@@ -40,12 +43,15 @@ _FORBIDDEN = [
 
 
 def relative_path_guard() -> int:
-    """Fail if any code/build file under rocKE/ references an absolute repo path."""
+    """Fail if any code/build file under rocke/platform/ references an absolute repo path."""
     violations: list[str] = []
     for path in ROCKE.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in _GUARD_SKIP_DIRS for part in path.relative_to(ROCKE).parts):
+        if any(
+            part in _GUARD_SKIP_DIRS or part.startswith(_GUARD_SKIP_PREFIXES)
+            for part in path.relative_to(ROCKE).parts
+        ):
             continue
         if path.suffix not in _GUARD_SUFFIXES and path.name not in _GUARD_NAMES:
             continue
@@ -62,7 +68,9 @@ def relative_path_guard() -> int:
                         f"{path.relative_to(ROCKE)}:{i}: {line.strip()[:100]}"
                     )
     if violations:
-        print("RELATIVE-PATH GUARD: FAIL - absolute/repo paths found under rocKE/:")
+        print(
+            "RELATIVE-PATH GUARD: FAIL - absolute/repo paths found under rocke/platform/:"
+        )
         for v in violations:
             print(f"  {v}")
         return 1

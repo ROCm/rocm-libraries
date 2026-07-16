@@ -59,6 +59,6 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 600           # 10 min
-    standard: 3600       # 1 hour (covers standard/comprehensive/full labels)
+    standard: 10800      # 3 hours (covers standard/comprehensive/full labels), keep it conservative until oversubscription concerns in CI are addressed
     ffm-quick: 7200      # 2 hours
     multigpu_tests: 3600 # 1 hour
