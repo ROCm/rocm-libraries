@@ -564,10 +564,12 @@ struct hipfftxt_test_params_t
     // | UNDEFINED          |  -  |  -  |  -  |  Y0 |  Y0 |  Y0 |  Y0 |  Y0 |  Y0 |  -  |  -  |  -  |
     // ----------------------------------------------------------------------------------------------
     // Legend:
+    // Note: Y0 cases are intentionally rejected by hipfft with the rocFFT backend,
+    // so the table above only applies to the cuFFT backend for those cells.
     enum class xt_alloc_expectation_t
     {
         accepted, // "Y"
-        accepted_but_nullptrs, // "Y0"
+        accepted_but_nullptrs, // "Y0" (cuFFT only; rejected on rocFFT backend)
         accepted_but_untestable, // "Y?"
         rejected, // "-"
         unreachable // "/"
@@ -596,8 +598,10 @@ struct hipfftxt_test_params_t
                 // only C2C is reachable (and untestable) for unbatched 1D
                 return c2c ? xt_alloc_expectation_t::accepted_but_untestable // "Y?"
                            : xt_alloc_expectation_t::unreachable; // "/"
-            // rank == 2 or 3
-            return xt_alloc_expectation_t::accepted_but_nullptrs; // "Y0"
+            // rank == 2 or 3: cuFFT accepts but produces null data pointers;
+            // rocFFT backend intentionally rejects these.
+            return rocfft_backend ? xt_alloc_expectation_t::rejected
+                                  : xt_alloc_expectation_t::accepted_but_nullptrs;
 
         case HIPFFT_XT_FORMAT_INPLACE:
             if(batch > 1)
@@ -607,8 +611,9 @@ struct hipfftxt_test_params_t
                 return c2c ? xt_alloc_expectation_t::accepted_but_untestable // "Y?"
                            : xt_alloc_expectation_t::unreachable; // "/"
             if(rank == 2)
-                // C2R's data pointers are null; R2C and C2C are fully accepted
-                return c2r ? xt_alloc_expectation_t::accepted_but_nullptrs // "Y0"
+                // C2R: cuFFT produces null data pointers; rocFFT rejects instead
+                return c2r ? (rocfft_backend ? xt_alloc_expectation_t::rejected
+                                            : xt_alloc_expectation_t::accepted_but_nullptrs)
                            : xt_alloc_expectation_t::accepted; // "Y"
             // rank == 3
             return xt_alloc_expectation_t::accepted; // "Y"
@@ -621,8 +626,9 @@ struct hipfftxt_test_params_t
                 return c2c ? xt_alloc_expectation_t::accepted_but_untestable // "Y?"
                            : xt_alloc_expectation_t::unreachable; // "/"
             if(rank == 2)
-                // R2C's data pointers are null; C2R and C2C are fully accepted
-                return r2c ? xt_alloc_expectation_t::accepted_but_nullptrs // "Y0"
+                // R2C: cuFFT produces null data pointers; rocFFT rejects instead
+                return r2c ? (rocfft_backend ? xt_alloc_expectation_t::rejected
+                                            : xt_alloc_expectation_t::accepted_but_nullptrs)
                            : xt_alloc_expectation_t::accepted; // "Y"
             // rank == 3
             return xt_alloc_expectation_t::accepted; // "Y"
@@ -636,10 +642,11 @@ struct hipfftxt_test_params_t
             return xt_alloc_expectation_t::rejected; // "-"
 
         case HIPFFT_FORMAT_UNDEFINED:
-            // Accepted (with null data pointers) only for unbatched multi-dimensional
-            // transforms; rejected for unbatched 1D and for every batched transform.
+            // cuFFT accepts (with null data pointers) for unbatched multi-dimensional
+            // transforms; rocFFT intentionally rejects all UNDEFINED cases.
             if(batch == 1 && rank > 1)
-                return xt_alloc_expectation_t::accepted_but_nullptrs; // "Y0"
+                return rocfft_backend ? xt_alloc_expectation_t::rejected
+                                      : xt_alloc_expectation_t::accepted_but_nullptrs;
             return xt_alloc_expectation_t::rejected; // "-"
 
         default:

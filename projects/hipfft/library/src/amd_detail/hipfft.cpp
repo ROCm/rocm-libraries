@@ -2303,13 +2303,16 @@ try
                 return HIPFFT_NOT_SUPPORTED;
         }
     }
-    // allocated descriptors must cover all the relevant input/output fields
-    // for the requested sub-format:
-    const std::vector<fft_io> relevant_io_labels
-        = placement_from_format(format) == rocfft_placement_inplace
-              ? std::vector<fft_io>{fft_io::fft_io_in, fft_io::fft_io_out}
-              : std::vector<fft_io>{format == HIPFFT_XT_FORMAT_INPUT ? fft_io::fft_io_in
-                                                                     : fft_io::fft_io_out};
+    // When requesting a in-place descriptor's subformat, the key's input descriptor format
+    // must match the requested subformat.
+    const fft_io desc_io_label
+        = format == HIPFFT_XT_FORMAT_OUTPUT ? fft_io::fft_io_out : fft_io::fft_io_in;
+    std::vector<fft_io> field_io_labels_to_fit{desc_io_label};
+    if(placement_from_format(format) == rocfft_placement_inplace)
+    {
+        // both input and output fields must fit the same descriptor for in-place transforms
+        field_io_labels_to_fit = {fft_io::fft_io_in, fft_io::fft_io_out};
+    }
 
     std::unique_ptr<hipLibXtDesc, decltype(&hipfftXtFree)> lib_desc(new hipLibXtDesc, hipfftXtFree);
     std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
@@ -2335,11 +2338,9 @@ try
         xt_desc->size[dev_idx] = 0;
         for(const auto& [key, _] : plan->exec_plans)
         {
-            if(std::none_of(relevant_io_labels.begin(), relevant_io_labels.end(), [&](fft_io io) {
-                   return hipfftHandle_t::key_matches_format(key, format, io);
-               }))
+            if(!hipfftHandle_t::key_matches_format(key, format, desc_io_label))
                 continue; // requested format not compatible with this item
-            for(auto io : relevant_io_labels)
+            for(auto io : field_io_labels_to_fit)
             {
                 const auto& field      = io == fft_io::fft_io_in ? plan->input_fields.at(key)
                                                                  : plan->output_fields.at(key);
@@ -2348,7 +2349,6 @@ try
                     field.get_brick(dev_idx).data_byte_size(plan->io_type.get_hip_data_type(io)));
             }
         }
-
         if(xt_desc->size[dev_idx] == 0)
         {
             // TODO: how should we handle the case where some devices don't have data?
