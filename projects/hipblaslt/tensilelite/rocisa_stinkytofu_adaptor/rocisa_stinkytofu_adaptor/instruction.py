@@ -725,7 +725,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
                  *extra: Any, comment: str = "", sdwa: Any = None,
-                 dpp: Any = None, vop3: Any = None, **kw):
+                 dpp: Any = None, vop3: Any = None, sels: Any = None, **kw):
         _ = kw
         # Native rocisa binary-VALU ctors are heterogeneous in their trailing
         # positional slots: some are (dst, src0, src1, sdwa, comment), some
@@ -740,6 +740,19 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
                 comment = a
             elif a is not None:
                 sdwa = a
+        # ``sels`` is the byte-select used by SR/pk CVT ctors (e.g.
+        # VCvtSRF32toFP8(..., sels=[vi%4])). Native maps it to VOP3P byte_sel
+        # (gfx11+/gfx1250 branch); dropping it makes every partial conversion
+        # write byte 0, so packed FP8 outputs overwrite each other -> wrong
+        # results. Mirror rocisa cvt.hpp: size-1 -> byte_sel=[s0], size-2 ->
+        # byte_sel=[s1 + (s0<<1)].
+        if sels and vop3 is None:
+            from .container import VOP3PModifiers  # noqa: WPS433
+            if len(sels) == 1:
+                byte_sel = [sels[0]]
+            else:
+                byte_sel = [sels[1] + (sels[0] << 1)]
+            vop3 = VOP3PModifiers(byte_sel=byte_sel)
         CommonInstruction.__init__(
             self,
             instType=inst_type,

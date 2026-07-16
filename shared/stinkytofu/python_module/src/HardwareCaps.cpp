@@ -162,6 +162,12 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
 
     rv["v_prng_b32"] = hasMnemonic(m, "v_prng_b32");
 
+    // FP8 stochastic-rounding pk8 conversion with scale: gated by PackData for
+    // gwvw%8==0 stores (mirrors rocisa hardware_caps.hpp HasScaleSRPk8Cvt,
+    // which probes "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0").
+    rv["HasScaleSRPk8Cvt"] =
+        tryAsm(isaName, ws, "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0");
+
     // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore
     // (mirrors rocisa hardware_caps.hpp HasMovRelsD2B32).
     rv["HasMovRelsD2B32"] = hasMnemonic(m, "v_movrelsd_2_b32");
