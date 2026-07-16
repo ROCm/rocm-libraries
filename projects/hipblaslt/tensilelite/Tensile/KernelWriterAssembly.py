@@ -82,7 +82,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
@@ -2579,8 +2579,7 @@ class KernelWriterAssembly(KernelWriter):
 
       # init workgroup id from ttmp
       if self.states.archCaps["WorkGroupIdFromTTM"]:
-        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
-        if not enableCluster:
+        if not clusterEnabled(kernel["ClusterDim"]):
           moduleRegInit.addComment1("Init workgroup id from ttmp")
           moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
           moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
@@ -2806,8 +2805,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ArgType3_Routed_To_ArgType0)      
       module.add(deepcopy(moduleWg))
       if kernel["StreamK"] == 0:
-        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
-        if enableCluster:
+        if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel, earlyStop=False))
 
@@ -3017,8 +3015,7 @@ class KernelWriterAssembly(KernelWriter):
       earlyReturnModule.add(noEarlyReturnLabel)
       module.add(earlyReturnModule)
       if kernel["StreamK"] == 0:
-        enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
-        if enableCluster:
+        if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
         module.add(self.remapWgSerial(kernel))
       module.addSpaceLine()
@@ -18847,7 +18844,7 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
-    enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+    enableCluster = clusterEnabled(kernel["ClusterDim"])
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
@@ -19000,7 +18997,7 @@ class KernelWriterAssembly(KernelWriter):
     unrolledMajor = not tlu
     ti: int = tP["idx"]
     tileChar: str = tP["tileChar"]
-    enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
+    enableCluster = clusterEnabled(kernel["ClusterDim"])
     mod = Module(f"Init TDM Descriptor {tc}")
 
     def descSgprName(idx: int) -> str:
