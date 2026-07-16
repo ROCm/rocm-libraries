@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-// test comment
+// testing
 
 #include <Tensile/Activation.hpp>
 #include <Tensile/Utils.hpp>
