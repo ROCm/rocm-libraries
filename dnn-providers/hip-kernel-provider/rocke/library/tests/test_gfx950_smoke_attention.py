@@ -15,6 +15,7 @@ Run on a gfx950 ROCm runner:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -24,6 +25,7 @@ import unittest
 from pathlib import Path
 
 from rocke.assets import platform_root
+from rocke.runtime.hip_module import get_device_arch, get_device_name
 
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
 _PY_ROOT = platform_root() / "python"
@@ -32,26 +34,23 @@ _DEFAULT_BASELINE = (
 )
 
 
-def _detect_gpu_arch() -> tuple[bool, str | None, str]:
-    try:
-        import torch
+# GPU/arch via the rocke HIP runtime (no torch); get_device_name is the rocminfo
+# "Marketing Name". The attention parity subprocess imports torch for its numeric
+# reference, so also gate on torch being importable (a dependency check, not a device
+# probe) — a torch-free env then skips cleanly instead of hitting an ImportError.
+GPU_ARCH = get_device_arch(0)
+GPU_NAME = get_device_name(0)
+_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
-        if not torch.cuda.is_available():
-            return False, None, "torch reports no ROCm GPU"
-        props = torch.cuda.get_device_properties(0)
-        arch = props.gcnArchName.split(":", 1)[0]
-        return True, arch, torch.cuda.get_device_name(0)
-    except Exception as exc:  # pragma: no cover - environment dependent
-        return False, None, f"torch GPU detection failed: {exc!r}"
-
-
-GPU_AVAILABLE, GPU_ARCH, GPU_REASON = _detect_gpu_arch()
-
-
-@unittest.skipUnless(
-    GPU_AVAILABLE and GPU_ARCH == "gfx950",
-    f"needs a gfx950 ROCm GPU; detected {GPU_ARCH or GPU_REASON}",
+_DETECTED = f"{GPU_ARCH} ({GPU_NAME})" if GPU_ARCH else "no ROCm GPU detected"
+_SKIP_REASON = (
+    f"needs a gfx950 ROCm GPU; detected {_DETECTED}"
+    if _HAS_TORCH
+    else f"needs a gfx950 ROCm GPU + torch; detected {_DETECTED} (torch not importable)"
 )
+
+
+@unittest.skipUnless(GPU_ARCH == "gfx950" and _HAS_TORCH, _SKIP_REASON)
 class TestGfx950AttentionSmoke(unittest.TestCase):
     maxDiff = 4000
     baseline = json.loads(

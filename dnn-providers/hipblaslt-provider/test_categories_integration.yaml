@@ -1,0 +1,73 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipblaslt-provider external integration Test Categories Configuration.
+#
+# This file is applied to hipdnn_integration_tests when it is run against the
+# hipblaslt provider plugin. These patterns match hipdnn_integration_tests
+# GTest names, not hipblaslt_plugin_tests/hipblaslt_plugin_integration_tests
+# names.
+#
+# hipblaslt only implements matmul, but test_patterns below are not scoped to
+# it: --test-engine HIPBLASLT_ENGINE pins the graph-support check in
+# IntegrationGraphVerificationHarness::checkEngineSupportOrSkip(), which
+# already GTEST_SKIPs (or, under --fail-on-unsupported, fails) any graph
+# HIPBLASLT_ENGINE doesn't support. Filtering by test name here would just
+# duplicate that check while hiding it from `ctest -V`; letting every op run
+# and rely on the generic skip keeps this YAML identical in shape to
+# miopen-provider's, since both wrap the same hipdnn_integration_tests binary.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Fast external integration coverage: Smoke GPU cases plus quick CPU golden-reference bundles"
+    test_patterns:
+      - "Smoke/*"
+      - "TestCpu*GoldenReference*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
+    test_patterns:
+      - "Smoke/*"
+      - "TestCpu*GoldenReference*"
+      - "TestCpu*GoldenRefStd*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive external integration coverage"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete external integration coverage"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    standard: 2700
+    comprehensive: 25200
+    full: 28800
