@@ -48,6 +48,23 @@ namespace rocsparse
                                                    : rocsparse_operation_none;
     }
 
+    // Report whether the analysis for the requested CSC operation is already
+    // cached in \p info. Because the CSC solve is expressed as a transposed CSR
+    // solve, the analysis is stored under the CSR-mapped operation and the flipped
+    // fill mode (see build_csr_from_csc), so the lookup key must be mapped the same
+    // way. This lets callers gate the analysis per (operation, fill_mode) instead
+    // of using the descriptor-wide mat->analysed flag.
+    inline bool cscsv_is_analyzed(rocsparse_csrsv_info        info,
+                                  rocsparse_operation         trans,
+                                  rocsparse_const_spmat_descr A)
+    {
+        _rocsparse_mat_descr   descr_csr;
+        _rocsparse_spmat_descr mat_csr;
+        rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
+
+        return info->get(rocsparse::cscsv_operation_to_csr(trans), descr_csr.fill_mode) != nullptr;
+    }
+
     inline rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                        rocsparse_operation         trans,
                                                        rocsparse_const_spmat_descr A,
