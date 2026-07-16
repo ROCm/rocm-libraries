@@ -29,18 +29,19 @@ see artifact_helpers.py.
 """
 
 import os
+import re
 
 import pytest
 import yaml
 
 from Tensile.Common.DataType import DataType
 
+_TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
-except:
-    print('CSafeLoader is not installed.')
+except AttributeError:
     DEFAULT_YAML_LOADER = yaml.SafeLoader
-
 
 
 def get_rocm_version_or_none():
@@ -70,17 +71,19 @@ def walkDict(root, path=""):
                 keypath = path + "." + str(keypath)
             yield from walkDict(value, keypath)
     elif isinstance(root, list):
-        for i,obj in enumerate(root):
+        for i, obj in enumerate(root):
             keypath = str(i)
             if path != "":
                 keypath = path + "." + keypath
             yield from walkDict(obj, keypath)
+
 
 def markNamed(name):
     """
     Gets a mark by a name contained in a variable.
     """
     return getattr(pytest.mark, name)
+
 
 def configMarks(filepath, rootDir, availableArchs):
     """
@@ -89,6 +92,8 @@ def configMarks(filepath, rootDir, availableArchs):
      - Root directory name.  This separates tests into pre_checkin, nightly, etc.
      - Expected failures. Include 'xfail' in the name of the YAML file.
      - Anything in yaml["TestParameters"]["marks"]
+     - Architecture from GlobalParameters.Architecture (e.g. gfx1250)
+     - Architecture from filename (e.g. bf16_gfx1250.yaml -> gfx1250)
      - validate / validateAll - whether the test validates (all?) results.
      - Data type(s) used in the YAML
      - Problem type(s) used in the YAML
@@ -98,7 +103,10 @@ def configMarks(filepath, rootDir, availableArchs):
     components = relpath.split(os.path.sep)
 
     # First part of directory - nightly, pre-checkin, etc.
-    marks = list([markNamed(component) for component in components[:-1]])
+    # Skip underscore-prefixed path components (e.g. characterization's _codegen
+    # fixture dir): pytest rejects marks starting with "_", and such dirs hold
+    # library logic YAMLs that are filtered out below by the not-dict guard anyway.
+    marks = list([markNamed(c) for c in components[:-1] if not c.startswith("_")])
 
     if 'xfail' in relpath or 'wip' in relpath:
         marks.append(pytest.mark.xfail)
@@ -112,9 +120,24 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(pytest.mark.syntax_error)
         return marks
 
+    # A Tensile config is a mapping (GlobalParameters/BenchmarkProblems/...).
+    # Top-level sequences are library logic YAMLs (e.g. characterization data
+    # files), which are not standalone Tensile.py configs. Signal the caller to
+    # skip them rather than crashing on doc["BenchmarkProblems"].
+    if not isinstance(doc, dict):
+        return None
+
     if "TestParameters" in doc:
         if "marks" in doc["TestParameters"]:
             marks += [markNamed(m) for m in doc["TestParameters"]["marks"]]
+
+    arch_val = doc.get("GlobalParameters", {}).get("Architecture")
+    if arch_val and markNamed(arch_val) not in marks:
+        marks.append(markNamed(arch_val))
+
+    arch_in_name = re.search(r'(gfx\d+)', components[-1])
+    if arch_in_name and markNamed(arch_in_name.group(1)) not in marks:
+        marks.append(markNamed(arch_in_name.group(1)))
 
     # Architecture specific xfail marks
     for arch in availableArchs:
@@ -160,24 +183,43 @@ def configMarks(filepath, rootDir, availableArchs):
 
     return marks
 
-def findAvailableArchs():
+def findAvailableArchs(gpu_targets=None):
+    """Detect available GPU architectures, or use an explicit override.
+
+    Args:
+        gpu_targets: Semicolon-separated GPU targets (e.g. "gfx942").
+            When provided, skips hardware detection entirely.
+
+    Returns:
+        List of architecture strings (e.g. ["gfx942"]).
+    """
+    if gpu_targets:
+        return [t.strip() for t in gpu_targets.split(";") if t.strip()]
+
     from Tensile.Tests.gpu_detection import get_available_archs
     return get_available_archs()
 
-def findConfigs(rootDir=None):
+
+def findConfigs(rootDir=None, availableArchs=None):
     """
     Walks rootDir (defaults to trying to find Tensile/Tests) and returns a
     list of test parameters, one for each YAML file.
+
+    Args:
+        rootDir: Directory to walk for YAML configs. Defaults to Tensile/Tests.
+        availableArchs: Pre-resolved list of GPU architectures.
+            When None, calls findAvailableArchs() to auto-detect.
     """
-    if rootDir ==  None:
-        rootDir = os.path.dirname(os.path.dirname(__file__))
+    if rootDir is None:
+        rootDir = _TESTS_ROOT_DIR
         printRoot = os.path.dirname(os.path.dirname(rootDir))
     else:
         printRoot = rootDir
 
-    availableArchs = findAvailableArchs()
-    globaParamArchsStr = ';'.join(availableArchs)
-    os.environ["PyTestBuildArchNames"] = globaParamArchsStr
+    if availableArchs is None:
+        availableArchs = findAvailableArchs()
+    globalParamArchsStr = ';'.join(availableArchs)
+    os.environ["PyTestBuildArchNames"] = globalParamArchsStr
 
     rocm_version = get_rocm_version_or_none()
 
@@ -197,6 +239,9 @@ def findConfigs(rootDir=None):
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
                     marks = configMarks(filepath, rootDir, availableArchs)
+                    if marks is None:
+                        # Not a Tensile config (e.g. a library logic YAML); skip.
+                        continue
 
                     # Conditionally xfail icache_flush.yaml on rocm 7.1 due to ROCm bug.
                     if filename == "icache_flush.yaml" and rocm_version and rocm_version.startswith("7.1"):

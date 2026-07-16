@@ -3,13 +3,15 @@
 
 #pragma once
 
-#include "ck_tile/host/concat.hpp"
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/common/utils.hpp"
-#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
+#include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
+#include <algorithm>
+#include <string>
+#include <tuple>
 #include <type_traits>
 
 namespace ck_tile {
@@ -37,7 +39,9 @@ template <typename AsDataType_,
           bool DoubleSmemBuffer_       = false,
           typename AComputeDataType_   = void,
           typename BComputeDataType_   = void,
-          bool TilesPacked_            = false>
+          bool TilesPacked_            = false,
+          typename CComputeDataType_   = AccDataType_,
+          typename CShuffleDataType_   = ODataType_>
 struct CShuffleEpilogueProblem
 {
     using AsDataType                             = remove_cvref_t<AsDataType_>;
@@ -50,6 +54,8 @@ struct CShuffleEpilogueProblem
     using CDElementwise                          = remove_cvref_t<CDElementwise_>;
     using AComputeDataType                       = remove_cvref_t<AComputeDataType_>;
     using BComputeDataType                       = remove_cvref_t<BComputeDataType_>;
+    using CComputeDataType                       = remove_cvref_t<CComputeDataType_>;
+    using CShuffleDataType                       = remove_cvref_t<CShuffleDataType_>;
     static constexpr index_t kBlockSize          = MWave_ * NWave_ * get_warp_size();
     static constexpr index_t kMPerBlock          = kM_;
     static constexpr index_t kNPerBlock          = kN_;
@@ -82,6 +88,8 @@ struct CShuffleEpilogue
     using DsLayout         = remove_cvref_t<typename Problem::DsLayout>;
     using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
     using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
+    using CComputeDataType = remove_cvref_t<typename Problem::CComputeDataType>;
+    using CShuffleDataType = remove_cvref_t<typename Problem::CShuffleDataType>;
 
     static constexpr bool ADataTypeIsTuple = is_detected<is_tuple, AsDataType>::value;
     static constexpr bool BDataTypeIsTuple = is_detected<is_tuple, BsDataType>::value;
@@ -94,32 +102,20 @@ struct CShuffleEpilogue
                                                remove_cvref_t<BsDataType>,
                                                remove_cvref_t<tuple<BsDataType>>>;
 
-    // ADataTypeCompute: compute type from Problem (may be tf32_t for TF32 mode)
-    using ADataTypeCompute = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
-    using BDataTypeCompute = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
+    using ADataType = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
+    using BDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
 
-    // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeBuf = if_select_t<ADataTypeCompute, tf32_t, float, ADataTypeCompute>;
-    using BDataTypeBuf = if_select_t<BDataTypeCompute, tf32_t, float, BDataTypeCompute>;
-
-    // For warp gemm selection: use tf32_t if compute type was tf32_t
     // For pk_int4/pk_fp4: use the other data type
-    using ATypeToUse =
-        std::conditional_t<std::is_same_v<ADataTypeCompute, tf32_t>,
-                           tf32_t,
-                           std::conditional_t<std::is_same_v<ADataTypeBuf, pk_int4_t> ||
-                                                  std::is_same_v<ADataTypeBuf, pk_fp4_t>,
-                                              BDataTypeBuf,
-                                              ADataTypeBuf>>;
+    using ATypeToUse = std::conditional_t<std::is_same_v<ADataType, pk_int4_t> ||
+                                              std::is_same_v<ADataType, pk_fp4_t>,
+                                          BDataType,
+                                          ADataType>;
     // Used for weight-only quantization kernel, B would be dequantized to the same data type as A
-    using BTypeToUse =
-        std::conditional_t<std::is_same_v<BDataTypeCompute, tf32_t>,
-                           tf32_t,
-                           std::conditional_t<std::is_same_v<BDataTypeBuf, pk_int4_t> ||
-                                                  std::is_same_v<BDataTypeBuf, pk_fp4_t> ||
-                                                  sizeof(BDataTypeBuf) < sizeof(ADataTypeBuf),
-                                              ADataTypeBuf,
-                                              BDataTypeBuf>>;
+    using BTypeToUse = std::conditional_t<std::is_same_v<BDataType, pk_int4_t> ||
+                                              std::is_same_v<BDataType, pk_fp4_t> ||
+                                              sizeof(BDataType) < sizeof(ADataType),
+                                          ADataType,
+                                          BDataType>;
 
     using ELayout                          = remove_cvref_t<typename Problem::ELayout>;
     using CDElementwise                    = remove_cvref_t<typename Problem::CDElementwise>;
@@ -246,7 +242,7 @@ struct CShuffleEpilogue
         constexpr index_t n_val = NPerXdl * NWave * n_shuffle_tile;
 
         constexpr auto shuffle_tile =
-            m_val * n_val * sizeof(ODataType) > get_smem_capacity() || DoubleSmemBuffer
+            m_val * n_val * sizeof(CShuffleDataType) > get_smem_capacity() || DoubleSmemBuffer
                 ? std::make_tuple(1, 1)
                 : std::make_tuple(m_shuffle_tile, n_shuffle_tile);
 
@@ -327,7 +323,7 @@ struct CShuffleEpilogue
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
     {
-        constexpr auto DataTypeSize = sizeof(ODataType);
+        constexpr auto DataTypeSize = sizeof(CShuffleDataType);
         constexpr index_t VectorLen = GetVectorSizeC();
         constexpr index_t banks     = get_n_lds_banks();
 
@@ -344,18 +340,18 @@ struct CShuffleEpilogue
             static_assert((BaseStrideElems * DataTypeSize) % BytesPerBank == 0,
                           "LDS row stride must be 4B-aligned for bank-word padding logic");
             // calculate how many elements to pad to avoid bank conflict
+#if defined(__gfx950__) || defined(__gfx125__)
 #if defined(__gfx950__)
             constexpr index_t ElemsPer4B = BytesPerBank / ck_tile::gcd(BytesPerBank, DataTypeSize);
             constexpr auto ToWords       = [](index_t elems) constexpr {
                 return (elems * DataTypeSize) / BytesPerBank;
             };
-            constexpr index_t BaseWords  = ToWords(BaseStrideElems);
-            constexpr index_t PadWords   = ((BaseWords % 2) == 0) ? 1 : 0;
-            constexpr auto PaddingAmount = PadWords * ElemsPer4B;
-#elif defined(__gfx125__)
-            constexpr auto PaddingAmount = VectorLen;
+            constexpr index_t BaseWords = ToWords(BaseStrideElems);
+            constexpr index_t PadWords  = ((BaseWords % 2) == 0) ? 1 : 0;
+            constexpr auto PaddingAmount =
+                isCTransposed ? PadWords * VectorLen : PadWords * ElemsPer4B;
 #else
-            constexpr auto PaddingAmount = 0;
+            constexpr auto PaddingAmount = VectorLen;
 #endif
 
             constexpr auto lds_block_desc_0 = make_naive_tensor_descriptor(
@@ -385,7 +381,14 @@ struct CShuffleEpilogue
                                number<NPerIterationShuffle / VectorLen>{}, number<VectorLen>{}))),
                 make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
                 make_tuple(sequence<0>{}, sequence<1>{}));
-
+#else
+            constexpr auto PaddingAmount  = 0;
+            constexpr auto lds_block_desc = make_naive_tensor_descriptor(
+                make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
+                make_tuple(number<NPerIterationShuffle + PaddingAmount>{}, number<1>{}),
+                number<VectorLen>{},
+                number<1>{});
+#endif
             return lds_block_desc;
         }
         // M is contiguous dimension
@@ -505,8 +508,8 @@ struct CShuffleEpilogue
                     // BlockedLayout
                     // this branch is for original a16w4
                     if constexpr(UseBlockedLayout ||
-                                 is_any_of<ADataTypeBuf, pk_int4_t, pk_fp4_t>::value ||
-                                 is_any_of<BDataTypeBuf, pk_int4_t, pk_fp4_t>::value)
+                                 is_any_of<ADataType, pk_int4_t, pk_fp4_t>::value ||
+                                 is_any_of<BDataType, pk_int4_t, pk_fp4_t>::value)
                     {
                         if constexpr(EightWave)
                         {
@@ -554,27 +557,64 @@ struct CShuffleEpilogue
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         constexpr auto lds_block_desc = MakeLdsBlockDescriptor<Problem>();
-        return lds_block_desc.get_element_space_size() * sizeof(ODataType);
+        return lds_block_desc.get_element_space_size() * sizeof(CShuffleDataType);
+    }
+
+    /// Number of block_sync_lds() calls in operator().
+    /// Used by RunBarrierStub() to match barrier count for wavelet load waves.
+    /// IMPORTANT: Must be kept in sync with operator(). See RunBarrierStub().
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBarrierCount()
+    {
+        // operator() issues:
+        //   1x s_wait_tensorcnt_barrier()  (counted as 1 barrier)
+        //   num_access iterations x 2 block_sync_lds() each
+        constexpr index_t num_access = SFC::get_num_of_access();
+        return 1 + 2 * num_access;
+    }
+
+    /// Run matching barriers for wavelet load waves that don't participate
+    /// in the epilogue data path. Must issue the same number of barriers
+    /// as operator() to avoid deadlock.
+    CK_TILE_DEVICE static void RunBarrierStub()
+    {
+        constexpr index_t num_access = SFC::get_num_of_access();
+        constexpr index_t count      = GetBarrierCount();
+        // Verify the barrier count formula matches the structural pattern in operator():
+        //   1 x s_wait_tensorcnt_barrier  +  num_access x 2 block_sync_lds
+        static_assert(count == 1 + 2 * num_access,
+                      "RunBarrierStub: barrier count mismatch with operator(). "
+                      "If operator()'s barrier pattern changed, update GetBarrierCount().");
+        static_for<0, count, 1>{}([&](auto) { block_sync_lds(); });
     }
 
     template <index_t iAccess, typename LdsTile, typename ScaleM, typename ScaleN>
-    CK_TILE_DEVICE void
+    CK_TILE_DEVICE auto
     scale_tile(LdsTile& lds_tile, ScaleM& scale_m_window, ScaleN& scale_n_window)
     {
         // Check if scales are EmptyScale first (no scaling needed)
         if constexpr(std::is_same_v<ScaleM, EmptyScale> && std::is_same_v<ScaleN, EmptyScale>)
         {
-            // No scaling needed - this is a no-op
+            // No scaling needed
+            return cast_tile<CComputeDataType>(lds_tile);
         }
         // Check if scales are scalar AccDataType
-        else if constexpr(std::is_same_v<ScaleM, AccDataType> &&
-                          std::is_same_v<ScaleN, AccDataType>)
+        else if constexpr(std::is_same_v<ScaleM, CComputeDataType> &&
+                          std::is_same_v<ScaleN, CComputeDataType>)
         {
             // Handle scalar scales
-            const AccDataType scale_m = scale_m_window;
-            const AccDataType scale_n = scale_n_window;
-            tile_elementwise_inout([&](auto& element) { element = element * scale_m * scale_n; },
-                                   lds_tile);
+            const CComputeDataType scale_m = scale_m_window;
+            const CComputeDataType scale_n = scale_n_window;
+
+            auto scaled_lds_tile =
+                make_static_distributed_tensor<CComputeDataType>(lds_tile.get_tile_distribution());
+
+            tile_elementwise_inout(
+                [&](auto& scaled_element, const auto& element) {
+                    scaled_element = type_convert<CComputeDataType>(element) * scale_m * scale_n;
+                },
+                scaled_lds_tile,
+                lds_tile);
+            return scaled_lds_tile;
         }
         // Otherwise, assume they are tile windows that can be loaded
         else
@@ -583,9 +623,15 @@ struct CShuffleEpilogue
             const auto scale_m_tile = load_tile(scale_m_window);
             const auto scale_n_tile = load_tile(scale_n_window);
 
-            // Compute element-wise product in-place i.e. lds_tile = lds_tile * scale_m * scale_n
-            tile_elementwise_inout(
-                element_wise::MultiDMultiply{}, lds_tile, lds_tile, scale_m_tile, scale_n_tile);
+            auto scaled_lds_tile =
+                make_static_distributed_tensor<CComputeDataType>(lds_tile.get_tile_distribution());
+
+            // Compute element-wise product i.e. scaled_lds_tile = lds_tile * scale_m * scale_n
+            tile_elementwise_inout(element_wise::MultiDMultiply{},
+                                   scaled_lds_tile,
+                                   lds_tile,
+                                   scale_m_tile,
+                                   scale_n_tile);
 
             // Move scale windows
             constexpr index_t num_access = SFC::get_num_of_access();
@@ -596,6 +642,8 @@ struct CShuffleEpilogue
                 move_tile_window(scale_m_window, {step.at(number<0>{}), step.at(number<1>{})});
                 move_tile_window(scale_n_window, {step.at(number<0>{}), step.at(number<1>{})});
             }
+
+            return scaled_lds_tile;
         }
     }
 
@@ -616,14 +664,6 @@ struct CShuffleEpilogue
                 c_warp_y_index_zeros),
             merge_sequences(sequence<NumMXdlPerWavePerShuffle, NumNXdlPerWavePerShuffle>{},
                             c_warp_y_lengths));
-    }
-
-    template <typename LdsTile, typename InLdsWindow>
-    CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
-    {
-        const auto c_warptile_in_tensor_casted = cast_tile<ODataType>(lds_tile);
-
-        store_tile(in_lds_window, c_warptile_in_tensor_casted);
     }
 
     template <typename DramWindows, typename COutTensor>
@@ -711,7 +751,7 @@ struct CShuffleEpilogue
 
         constexpr auto lds_block_desc = MakeLdsBlockDescriptor<Problem>();
         auto o_lds_block              = make_tensor_view<address_space_enum::lds>(
-            static_cast<ODataType*>(p_smem), lds_block_desc);
+            static_cast<CShuffleDataType*>(p_smem), lds_block_desc);
 
         auto in_lds_window = make_tile_window(
             o_lds_block,
@@ -748,7 +788,7 @@ struct CShuffleEpilogue
         constexpr bool has_scales =
             !std::is_same_v<ScaleM, EmptyScale> && !std::is_same_v<ScaleN, EmptyScale>;
         constexpr bool has_scalar_scales =
-            std::is_same_v<ScaleM, AccDataType> && std::is_same_v<ScaleN, AccDataType>;
+            std::is_same_v<ScaleM, CComputeDataType> && std::is_same_v<ScaleN, CComputeDataType>;
         auto scale_m_window = [&]() {
             if constexpr(has_scalar_scales)
             {
@@ -778,24 +818,25 @@ struct CShuffleEpilogue
             }
         }();
 
+        // NOTE: This barrier pattern must match GetBarrierCount().
+        // Total barriers = 1 (s_wait_tensorcnt_barrier) + 2 * num_access (block_sync_lds pairs).
+        // If you add/remove barriers here, update GetBarrierCount() and RunBarrierStub().
         s_wait_tensorcnt_barrier();
 
         static_for<0, num_access, 1>{}([&](auto iAccess) {
             block_sync_lds();
             slice_acc_tile<iAccess>(o_acc_tile, lds_tile);
 
-            if constexpr(has_scales)
-            {
+            const auto scaled_lds_tile =
                 scale_tile<iAccess>(lds_tile, scale_m_window, scale_n_window);
-            }
 
-            cast_lds_tile(lds_tile, in_lds_window);
+            store_tile(in_lds_window, cast_tile<CShuffleDataType>(scaled_lds_tile));
             block_sync_lds();
 
             auto c_out_tensor = load_tile(make_tile_window(out_lds_window, dram_tile_distribution));
 
             apply_d_tensors(d_dram_windows, c_out_tensor);
-            store_to_dram(out_dram_window, c_out_tensor);
+            store_to_dram(out_dram_window, cast_tile<ODataType>(c_out_tensor));
             move_windows<iAccess>(out_dram_window, d_dram_windows);
         });
     }

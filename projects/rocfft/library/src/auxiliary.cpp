@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,9 @@
 #include "../../shared/environment.h"
 #include "../../shared/rocfft_hip.h"
 #include "logging.h"
+#ifdef ROCFFT_RCCL_ENABLE
+#include "rccl_wrapper.h"
+#endif
 #include "repo.h"
 #include "rocfft/rocfft-version.h"
 #include "rocfft/rocfft.h"
@@ -34,6 +37,7 @@
 #include "tuning_helper.h"
 #include <fcntl.h>
 #include <memory>
+#include <mutex>
 
 /*******************************************************************************
  * Static handle data
@@ -48,6 +52,11 @@ int log_tuning_fd   = -1;
 int log_graph_fd    = -1;
 
 extern const char* ROCFFT_VERSION_STRING;
+// Counter incremented (resp. decremented) at every call to
+// rocfft_setup (resp. rocfft_cleanup)
+static size_t rocfft_usage_count = 0;
+// Serializes setup/final-cleanup transitions that mutate global state.
+static std::mutex rocfft_setup_cleanup_mutex;
 
 /**
  *  @brief Logging function
@@ -86,6 +95,11 @@ static void open_log_stream(const char* environment_variable_name, int& log_fd)
 rocfft_status rocfft_setup()
 try
 {
+    std::lock_guard<std::mutex> lock(rocfft_setup_cleanup_mutex);
+
+    if(++rocfft_usage_count > 1)
+        return rocfft_status_success;
+
     rocfft_ostream::setup();
     RTCCache::single = std::make_unique<RTCCache>();
 
@@ -157,6 +171,19 @@ catch(...)
 rocfft_status rocfft_cleanup()
 try
 {
+    std::lock_guard<std::mutex> lock(rocfft_setup_cleanup_mutex);
+
+    // Only the last call to rocfft_cleanup does the cleanup
+    if(rocfft_usage_count == 0)
+    {
+        // Note: "rocfft_usage_count == 0" implies that logging layers (and files)
+        // were already reset (and closed) or never set (nor opened) in the first
+        // place, so logging cannot be done however desirable it may be.
+        return rocfft_status_failure;
+    }
+    if(--rocfft_usage_count > 0)
+        return rocfft_status_success;
+
     // Logging is potentially unsafe if we're in the middle of static
     // deinitialization, as log structures might have already been
     // cleaned up.
@@ -166,6 +193,10 @@ try
     // rocfft_setup() + plan creation will start from scratch
     Repo::Clear();
     RTCCache::single.reset();
+
+#ifdef ROCFFT_RCCL_ENABLE
+    rocfft_rccl_comm_t::reset_all();
+#endif
 
     TuningBenchmarker::GetSingleton().Clean();
 
@@ -214,7 +245,6 @@ try
 
     // stop all log worker threads
     rocfft_ostream::cleanup();
-
     return rocfft_status_success;
 }
 catch(...)

@@ -2,11 +2,11 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 
 GlobalParameters:
+  Architecture: gfx1250
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: -1
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   PruneSparseMode: 0
@@ -27,8 +27,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -53,8 +53,8 @@ BenchmarkProblems:
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - LdsBlockSizePerPadA: [1024]
-        - LdsBlockSizePerPadB: [1024]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
         - StaggerU: [0]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
@@ -62,7 +62,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
         - TDMInst: [3]
@@ -87,8 +87,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -119,7 +119,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0, 1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
       BenchmarkJoinParameters:
@@ -143,8 +143,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -175,7 +175,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
       BenchmarkJoinParameters:
@@ -198,8 +198,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -230,7 +230,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
         - TDMInst: [3]

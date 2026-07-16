@@ -3,6 +3,28 @@
 
 """Configuration module for dnn-benchmarking."""
 
-from .benchmark_config import ABTestConfig, BenchmarkConfig, ValidationConfig
+from .benchmark_config import (
+    BenchmarkConfig,
+    EXECUTION_BACKEND_CHOICES,
+    EngineSelection,
+    ExecutionBackendName,
+    MetricsConfig,
+    REFERENCE_PROVIDER_CHOICES,
+    ReferenceProviderName,
+    SuiteConfig,
+    TimingBackendName,
+    ValidationConfig,
+)
 
-__all__ = ["ABTestConfig", "BenchmarkConfig", "ValidationConfig"]
+__all__ = [
+    "BenchmarkConfig",
+    "EXECUTION_BACKEND_CHOICES",
+    "EngineSelection",
+    "ExecutionBackendName",
+    "MetricsConfig",
+    "REFERENCE_PROVIDER_CHOICES",
+    "ReferenceProviderName",
+    "SuiteConfig",
+    "TimingBackendName",
+    "ValidationConfig",
+]

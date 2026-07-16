@@ -27,14 +27,15 @@ import re
 import pytest
 import rocisa
 from rocisa.code import Module, SignatureBase
-from rocisa.container import MUBUFModifiers, sgpr, vgpr
-from rocisa.enum import CacheScope
+from rocisa.container import GLOBALModifiers, MUBUFModifiers, sgpr, vgpr
+from rocisa.enum import CacheScope, TemporalHint, NonVolatile
 from rocisa.instruction import (
     BufferAtomicAddF32,
     BufferLoadB32,
     BufferLoadB64,
     BufferLoadB128,
     BufferStoreB32,
+    GlobalAtomicIncU32Saddr,
 )
 
 _ISA = (12, 5, 0)
@@ -156,6 +157,116 @@ def test_mubuf_scope_modifiers_stinkytofu(_mubuf_scope_asm):
     )
 
 
+@pytest.fixture(scope="module")
+def _mubuf_th_asm() -> str:
+    mod = Module("mubuf_th_modifiers")
+    mod.add(
+        BufferLoadB32(
+            dst=vgpr(13),
+            vaddr=vgpr(33),
+            saddr=sgpr(64, 4),
+            soffset=sgpr(47),
+            mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_CU, th=TemporalHint.TH_NT),
+        )
+    )
+    mod.add(
+        BufferStoreB32(
+            src=vgpr(12),
+            vaddr=vgpr(32),
+            saddr=sgpr(60, 4),
+            soffset=sgpr(46),
+            mubuf=MUBUFModifiers(offen=True, isStore=True, scope=CacheScope.SCOPE_CU, th=TemporalHint.TH_NT),
+        )
+    )
+    mod.setParent()
+
+    sig = SignatureBase(
+        kernelName="mubuf_th_modifiers",
+        kernArgsVersion=1,
+        codeObjectVersion="4",
+        groupSegmentSize=0,
+        sgprWorkGroup=(1, 1, 0),
+        vgprWorkItem=0,
+        flatWorkGroupSize=64,
+        numSgprPreload=0,
+    )
+
+    st = rocisa.toStinkyTofuModule(
+        mod, _ISA, "mubuf_th_modifiers", signature=sig, options={"OptLevel": 0}
+    )
+    st.runOptimizationPipeline()
+    return st.emitAssembly()
+
+
+def test_mubuf_temporal_hint_modifiers_stinkytofu(_mubuf_th_asm):
+    assert re.search(
+        r"buffer_load_b32 v13, v33, s\[64:67\], s47 offen offset:0 scope:SCOPE_CU th:TH_LOAD_NT",
+        _mubuf_th_asm,
+    )
+    assert re.search(
+        r"buffer_store_b32 v12, v32, s\[60:63\], s46 offen offset:0 scope:SCOPE_CU th:TH_STORE_NT",
+        _mubuf_th_asm,
+    )
+
+
+@pytest.fixture(scope="module")
+def _mubuf_nv_asm() -> str:
+    mod = Module("mubuf_nv_modifiers")
+    mod.add(
+        BufferLoadB32(
+            dst=vgpr(13),
+            vaddr=vgpr(33),
+            saddr=sgpr(64, 4),
+            soffset=sgpr(47),
+            mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_CU, nv=NonVolatile.NV),
+        )
+    )
+    mod.add(
+        BufferStoreB32(
+            src=vgpr(12),
+            vaddr=vgpr(32),
+            saddr=sgpr(60, 4),
+            soffset=sgpr(46),
+            mubuf=MUBUFModifiers(
+                offen=True,
+                isStore=True,
+                scope=CacheScope.SCOPE_CU,
+                th=TemporalHint.TH_NT,
+                nv=NonVolatile.NV,
+            ),
+        )
+    )
+    mod.setParent()
+
+    sig = SignatureBase(
+        kernelName="mubuf_nv_modifiers",
+        kernArgsVersion=1,
+        codeObjectVersion="4",
+        groupSegmentSize=0,
+        sgprWorkGroup=(1, 1, 0),
+        vgprWorkItem=0,
+        flatWorkGroupSize=64,
+        numSgprPreload=0,
+    )
+
+    st = rocisa.toStinkyTofuModule(
+        mod, _ISA, "mubuf_nv_modifiers", signature=sig, options={"OptLevel": 0}
+    )
+    st.runOptimizationPipeline()
+    return st.emitAssembly()
+
+
+def test_mubuf_non_volatile_modifiers_stinkytofu(_mubuf_nv_asm):
+    assert re.search(
+        r"buffer_load_b32 v13, v33, s\[64:67\], s47 offen offset:0 scope:SCOPE_CU nv",
+        _mubuf_nv_asm,
+    )
+    assert re.search(
+        r"buffer_store_b32 v12, v32, s\[60:63\], s46 offen offset:0 scope:SCOPE_CU th:TH_STORE_NT nv",
+        _mubuf_nv_asm,
+    )
+
+
 def test_rocisa_load_null_soffset_adds_offen():
     inst = BufferLoadB32(
         dst=vgpr(13),
@@ -187,6 +298,61 @@ def test_rocisa_atomic_null_soffset_adds_offen():
     )
 
     assert str(inst).strip() == "buffer_atomic_add_f32 v12, v32, s[60:63], null offen offset:0"
+
+
+def test_rocisa_global_atomic_inc_u32_saddr():
+    # gfx1250 StreamK dynamic-queue fetch: returning global atomic, SADDR form
+    # (scalar 64-bit base + 32-bit VGPR offset).
+    inst = GlobalAtomicIncU32Saddr(
+        dst=vgpr(1),
+        vaddr=vgpr(0),
+        data=vgpr(4),
+        saddr=sgpr(2, 2),
+        modifier=GLOBALModifiers(scope=CacheScope.SCOPE_DEV),
+    )
+
+    # th:TH_ATOMIC_RETURN is emitted unconditionally; scope: only renders when the ISA's
+    # HasSCOPEModifier cap is set (assembler-probed), so it is optional in this bare context.
+    assert re.fullmatch(
+        r"global_atomic_inc_u32 v1, v0, v4, s\[2:3\]( scope:SCOPE_DEV)? th:TH_ATOMIC_RETURN",
+        str(inst).strip(),
+    ), str(inst).strip()
+
+
+def test_global_atomic_inc_u32_saddr_stinkytofu():
+    mod = Module("global_atomic_inc_u32")
+    mod.add(
+        GlobalAtomicIncU32Saddr(
+            dst=vgpr(1),
+            vaddr=vgpr(0),
+            data=vgpr(4),
+            saddr=sgpr(2, 2),
+            modifier=GLOBALModifiers(scope=CacheScope.SCOPE_DEV),
+        )
+    )
+    mod.setParent()
+
+    sig = SignatureBase(
+        kernelName="global_atomic_inc_u32",
+        kernArgsVersion=1,
+        codeObjectVersion="4",
+        groupSegmentSize=0,
+        sgprWorkGroup=(1, 1, 0),
+        vgprWorkItem=0,
+        flatWorkGroupSize=64,
+        numSgprPreload=0,
+    )
+
+    st = rocisa.toStinkyTofuModule(
+        mod, _ISA, "global_atomic_inc_u32", signature=sig, options={"OptLevel": 0}
+    )
+    st.runOptimizationPipeline()
+    asm = st.emitAssembly()
+
+    assert re.search(
+        r"global_atomic_inc_u32 v1, v0, v4, s\[2:3\] scope:SCOPE_DEV th:TH_ATOMIC_RETURN",
+        asm,
+    )
 
 
 def test_rocisa_off_vaddr_null_soffset():

@@ -103,7 +103,16 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
 
     // Load module and get function
     GPU_REF_HIP_CHECK(hipModuleLoadData(&_module, _binary.data()));
-    GPU_REF_HIP_CHECK(hipModuleGetFunction(&_function, _module, functionName.c_str()));
+
+    // Manual error check (instead of GPU_REF_HIP_CHECK) because module must be
+    // unloaded before throwing to avoid memory leak.
+    auto funcResult = hipModuleGetFunction(&_function, _module, functionName.c_str());
+    if(funcResult != hipSuccess)
+    {
+        static_cast<void>(hipModuleUnload(_module));
+        _module = nullptr;
+        throwOnHipError(funcResult, "hipModuleGetFunction(...)");
+    }
 }
 
 CompiledKernel::~CompiledKernel()

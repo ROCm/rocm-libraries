@@ -33,33 +33,6 @@
 
 namespace miopen {
 
-static std::vector<std::string> OclKernelWarnings()
-{
-    std::vector<std::string> rv = {
-        "-Weverything",
-        "-Wno-cast-align",
-        "-Wno-cast-qual",
-        "-Wno-conversion",
-        "-Wno-double-promotion",
-        "-Wno-float-equal",
-        "-Wno-missing-prototypes",
-        "-Wno-pass-failed",            // Disable "loop not unrolled" warnings. See #1735.
-        "-Wno-pedantic-core-features", // Cases like "#pragma OPENCL EXTENSION cl_khr_fp64 : enable"
-        "-Wno-reserved-id-macro",
-        "-Wno-shorten-64-to-32",
-        "-Wno-sign-compare",
-        "-Wno-sign-conversion",
-#if HIP_PACKAGE_VERSION_FLAT >= 6001024000ULL
-        "-Wno-unsafe-buffer-usage",
-#endif
-        "-Wno-unused-function",
-        "-Wno-unused-macros",
-        "-Wno-declaration-after-statement", // W/A for SWDEV-337356
-    };
-
-    return rv;
-}
-
 static std::vector<std::string> HipKernelWarnings()
 {
     std::vector<std::string> rv = {
@@ -99,18 +72,6 @@ static std::string MakeKernelWarningsString(const std::vector<std::string>& kern
                                             const std::string& prefix)
 {
     return prefix + JoinStrings(kernel_warnings, prefix);
-}
-
-const std::string& OclKernelWarningsString()
-{
-#if MIOPEN_BACKEND_OPENCL
-    const std::string prefix = " -Wf,";
-#else
-    const std::string prefix = " ";
-#endif
-
-    static const std::string result = MakeKernelWarningsString(OclKernelWarnings(), prefix);
-    return result;
 }
 
 const std::string& HipKernelWarningsString()

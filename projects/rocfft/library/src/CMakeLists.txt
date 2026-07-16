@@ -73,17 +73,31 @@ if( ROCFFT_MPI_ENABLE )
   endif()
 endif()
 
+# RCCL: find and link (compile definition added after target creation below).
+if( ROCFFT_RCCL_ENABLE )
+  find_package(rccl)
+  if( rccl_FOUND )
+    message(STATUS "RCCL support enabled for multi-GPU communication")
+    set( ROCFFT_HOST_LINK_LIBS "${ROCFFT_HOST_LINK_LIBS}" "roc::rccl" )
+  else()
+    message(FATAL_ERROR "ROCFFT_RCCL_ENABLE is ON but RCCL was not found. "
+      "Install RCCL or set -DROCFFT_RCCL_ENABLE=OFF.")
+  endif()
+endif()
+
 set( package_targets rocfft )
 target_include_directories( rocfft_rtc_helper
   PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
 )
 # rocfft_rtc_helper will be installed in /opt/rocm-ver/lib/rocfft/VERSION_STRING
-# To find rocm libraries need the relative RPATH
+# To find rocm libraries need the relative RPATH.  Also prevent TheRock builds
+# from overriding this RPATH.
 set(APPEND_ROCMLIB_RPATH "\$ORIGIN/../../../lib")
 target_link_libraries( rocfft_rtc_helper PRIVATE rocfft-rtc-compile )
 set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON
-                                         INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}" )
+                                         INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}"
+                                         THEROCK_NO_INSTALL_RPATH TRUE )
 target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
 # Package that helps me set visibility for function names exported
@@ -94,12 +108,16 @@ find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 add_subdirectory( device )
 
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  add_subdirectory( tests )
+endif()
+
 #
 # embed the generator itself into c++ files
 #
 
 # script that produces an include file
-set( kgen_embed_command ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator-embed-cpp.py )
+set( kgen_embed_command ${CMAKE_SOURCE_DIR}/shared/embed-to-header-rtc.py )
 
 # location of the generated source file
 set( kgen_embed_cpp ${CMAKE_BINARY_DIR}/library/src/device/kernel-generator-embed.cpp )
@@ -148,7 +166,7 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/shared/rocfft_complex.h
 
      # python code that does the embedding
-     ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator-embed-cpp.py
+     ${kgen_embed_command}
 
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
@@ -170,6 +188,7 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_2d.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_base.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rc.h
@@ -255,6 +274,7 @@ set( rocfft_source
   rtc_exports.cpp
   tuning_kernel_tuner.cpp
   tuning_plan_tuner.cpp
+  rccl_wrapper.cpp
   )
 
 set(static_depends)
@@ -412,7 +432,7 @@ endif()
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link
 # stage on Windows)
-if (NOT WIN32)
+if( NOT WIN32 AND NOT BUILD_CODE_COVERAGE )
   target_compile_options( rocfft PRIVATE -fgpu-rdc )
   target_link_options( rocfft PRIVATE -fgpu-rdc )
 endif()
@@ -420,6 +440,11 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
+endif()
+
+# RCCL: activate RCCL code paths
+if( ROCFFT_RCCL_ENABLE )
+  target_compile_definitions(rocfft PRIVATE ROCFFT_RCCL_ENABLE)
 endif()
 
 add_library( roc::rocfft ALIAS rocfft )
@@ -548,6 +573,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   set( GPU_TARGETS_AOT ${GPU_TARGETS} )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx803 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx900 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx90c )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx906 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx940 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )

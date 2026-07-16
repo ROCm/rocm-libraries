@@ -31,12 +31,7 @@
 #include <hipblaslt/hipblaslt.h>
 #endif
 
-#ifdef BUILD_WITH_TENSILE
-#else
-// see TensileHost.cpp for normal rocblas_initialize definition
-// it isn't compiled if not BUILD_WITH_TENSILE so defining here
-extern "C" void rocblas_initialize() {}
-#endif
+// rocblas_initialize is defined in tensile_host.cpp (always compiled).
 
 // forcing early cleanup
 extern "C" void rocblas_shutdown()
