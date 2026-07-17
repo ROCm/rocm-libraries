@@ -309,6 +309,54 @@ namespace DGen
         index_t     blockScaling = 1;
     };
 
+    // MX scale-block indexing along the stride-1 (contiguous) dimension.
+    struct ScaleBlockLayout
+    {
+        index_t contiguousDim = 0;
+        index_t blockSize     = 1;
+
+        index_t scaleBlocksPerRow() const
+        {
+            return (contiguousDim + blockSize - 1) / blockSize;
+        }
+
+        index_t numScaleBlocks(index_t arraySize) const
+        {
+            // Fallback when contiguousDim is unset (defensive; callers may misbehave).
+            if(contiguousDim <= 0)
+                return (arraySize + blockSize - 1) / blockSize;
+            const index_t numRows = arraySize / contiguousDim;
+            return scaleBlocksPerRow() * numRows;
+        }
+
+        index_t scaleBlockElementCount(index_t scale_i) const
+        {
+            const index_t blocksPerRow = scaleBlocksPerRow();
+            const index_t blockInRow   = scale_i % blocksPerRow;
+            const index_t tail         = contiguousDim - blockInRow * blockSize;
+            return std::min(blockSize, tail);
+        }
+
+        index_t dataIndex(index_t scale_i, index_t block_i) const
+        {
+            const index_t blocksPerRow = scaleBlocksPerRow();
+            const index_t row          = scale_i / blocksPerRow;
+            const index_t blockInRow   = scale_i % blocksPerRow;
+            return row * contiguousDim + blockInRow * blockSize + block_i;
+        }
+
+        index_t scaleIndexForData(index_t data_i) const
+        {
+            // Fallback treats the buffer as one contiguous row (ceil block count).
+            if(contiguousDim <= 0)
+                return data_i / blockSize;
+            const index_t row          = data_i / contiguousDim;
+            const index_t pos          = data_i % contiguousDim;
+            const index_t blocksPerRow = scaleBlocksPerRow();
+            return row * blocksPerRow + pos / blockSize;
+        }
+    };
+
     template <typename DTYPE>
     class DataGenerator
     {
@@ -336,7 +384,37 @@ namespace DGen
         // get reference float double vector.
         std::vector<float> getReferenceFloat() const; // Might overflow to NaN/Inf
 
+        // Layout helpers (contiguous dim set by generate()).
+        index_t scaleIndexForData(index_t data_i) const
+        {
+            return layout().scaleIndexForData(data_i);
+        }
+
+        index_t dataIndex(index_t scale_i, index_t block_i) const
+        {
+            return layout().dataIndex(scale_i, block_i);
+        }
+
+        index_t scaleBlockElementCount(index_t scale_i) const
+        {
+            return layout().scaleBlockElementCount(scale_i);
+        }
+
+        index_t numScaleBlocks() const
+        {
+            return layout().numScaleBlocks(m_dataDesc.array_size);
+        }
+
     private:
+        ScaleBlockLayout layout() const
+        {
+            return {m_contiguousDim, blockSize()};
+        }
+
+        index_t blockSize() const
+        {
+            return isScaled<DTYPE>() ? m_options.blockScaling : 1;
+        }
         DataGeneratorOptions m_options;
 
         uint32_t               m_seed = kDefaultSeed;
@@ -360,43 +438,24 @@ namespace DGen
         // Contiguous dimension (sorted_size[0], stride 1) for partial tail scale blocks.
         index_t m_contiguousDim = 0;
 
-        index_t scaleBlocksPerRow(index_t block_size) const
-        {
-            return (m_contiguousDim + block_size - 1) / block_size;
-        }
-
         index_t numScaleBlocks(index_t block_size) const
         {
-            if(m_contiguousDim <= 0)
-                return m_dataDesc.array_size / block_size;
-            const index_t numRows = m_dataDesc.array_size / m_contiguousDim;
-            return scaleBlocksPerRow(block_size) * numRows;
+            return ScaleBlockLayout{m_contiguousDim, block_size}.numScaleBlocks(m_dataDesc.array_size);
         }
 
-        index_t blockWidth(index_t scale_i, index_t block_size) const
+        index_t scaleBlockElementCount(index_t scale_i, index_t block_size) const
         {
-            const index_t blocksPerRow = scaleBlocksPerRow(block_size);
-            const index_t blockInRow   = scale_i % blocksPerRow;
-            const index_t tail         = m_contiguousDim - blockInRow * block_size;
-            return std::min(block_size, tail);
+            return ScaleBlockLayout{m_contiguousDim, block_size}.scaleBlockElementCount(scale_i);
         }
 
         index_t dataIndex(index_t scale_i, index_t block_i, index_t block_size) const
         {
-            const index_t blocksPerRow = scaleBlocksPerRow(block_size);
-            const index_t row          = scale_i / blocksPerRow;
-            const index_t blockInRow   = scale_i % blocksPerRow;
-            return row * m_contiguousDim + blockInRow * block_size + block_i;
+            return ScaleBlockLayout{m_contiguousDim, block_size}.dataIndex(scale_i, block_i);
         }
 
         index_t scaleIndexForData(index_t data_i, index_t block_size) const
         {
-            if(m_contiguousDim <= 0)
-                return data_i / block_size;
-            const index_t row          = data_i / m_contiguousDim;
-            const index_t k            = data_i % m_contiguousDim;
-            const index_t blocksPerRow = scaleBlocksPerRow(block_size);
-            return row * blocksPerRow + k / block_size;
+            return ScaleBlockLayout{m_contiguousDim, block_size}.scaleIndexForData(data_i);
         }
 
         static std::vector<uint8_t> packArray(BufferDesc in_desc, const std::vector<uint8_t>& src);
@@ -733,7 +792,7 @@ namespace DGen
                         s_template.data(),
                         m_scaleDesc.byte_size);
 
-            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {
                 const index_t data_i = dataIndex(scale_i, block_i, block_size);
                 const float   ref    = refFloats[static_cast<size_t>(data_i)];
@@ -1030,7 +1089,7 @@ namespace DGen
 
                 const auto& candidates = data_candidates[stored_scale];
                 std::uniform_int_distribution<size_t> data_dist(0, candidates.size() - 1);
-                for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
                 {
                     const auto data_i = dataIndex(scale_i, block_i, block_size);
                     const auto result = candidates[data_dist(m_gen[tid])];
@@ -1076,7 +1135,7 @@ namespace DGen
                 std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
-            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
@@ -1247,7 +1306,7 @@ namespace DGen
                             &stored_scale,
                             m_scaleDesc.byte_size);
 
-                for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
                 {
                     const auto data_i     = dataIndex(scale_i, block_i, block_size);
                     const bool negative   = static_cast<bool>(data_i % 2);
@@ -1301,7 +1360,7 @@ namespace DGen
                 std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
-            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
@@ -1398,7 +1457,7 @@ namespace DGen
                             m_scaleDesc.byte_size);
 
                 std::uniform_int_distribution<uint64_t> data_dist(0, max);
-                for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
                 {
                     const auto data_i = dataIndex(scale_i, block_i, block_size);
 
@@ -1436,7 +1495,7 @@ namespace DGen
 
             int32_t max_exp = std::numeric_limits<int32_t>::min();
             int32_t min_exp = std::numeric_limits<int32_t>::max();
-            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
@@ -1479,7 +1538,7 @@ namespace DGen
                 //
                 // Generate scale
                 //
-                if(isScaled<DTYPE>() && block_i == blockWidth(scale_i, block_size) - 1)
+                if(isScaled<DTYPE>() && block_i == scaleBlockElementCount(scale_i, block_size) - 1)
                 {
                     int32_t scaleMax = scaleBiasedEMax;
                     int32_t scaleMin = scaleBiasedEMin;
@@ -1956,7 +2015,7 @@ namespace DGen
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
         {
             const auto            tid = omp_get_thread_num();
-            const index_t         width = blockWidth(scale_i, block_size);
+            const index_t         width = scaleBlockElementCount(scale_i, block_size);
             std::vector<uint64_t> temp_data((isScaled<DTYPE>() ? block_size : 0), 0);
             std::vector<uint32_t> temp_scale((isScaled<DTYPE>() ? block_size : 0), 0);
 
@@ -2116,7 +2175,7 @@ namespace DGen
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
         {
             const auto            tid = omp_get_thread_num();
-            const index_t         width = blockWidth(scale_i, block_size);
+            const index_t         width = scaleBlockElementCount(scale_i, block_size);
             std::vector<uint64_t> temp_data((isScaled<DTYPE>() ? block_size : 0), 0);
             std::vector<uint32_t> temp_scale((isScaled<DTYPE>() ? block_size : 0), 0);
 

@@ -277,45 +277,22 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
         int M = sizes[0];
         int K = sizes[1];
 
-        // For example, assume matrix A is 128x128 and elementsPerMXBlock is 32.
-        // Before aligned,
-        //
-        //  mk     m     k       scale ID
-        //  0      0     0           0
-        //  1      1     0           1     (data at index 1 use scale 1 not 0)
-        //  2      2     0           2
-        //            ...
-        //  127   127    0          127
-        //
-        //  128    0     1           0
-        //  129    1     1           1
-        //            ...
-        //  255   127    1          127
-        //            ...
-        //
-        // To align data with scale,
-        //
-        //  mk     m     k       scale ID      data id
-        //  0      0     0           0            0
-        //  1      1     0           1           32
-        //  2      2     0           2           64
-        //            ...
-        // 127    127    0          127        4064 (127 x 32)
-        //
-        // We move data at index 32 to index 1 (because the index 1
-        // is using scale 1), data at index 64 to index 2, and so on.
+        DGen::ScaleBlockLayout genLayout{M, elementsPerMXBlock};
 
 #pragma omp parallel for
-        for(size_t mk = 0; mk < M * K; ++mk)
+        for(size_t mk = 0; mk < static_cast<size_t>(M * K); ++mk)
         {
-            auto m        = mk % M;
-            auto k        = mk / M;
-            auto scale_id = (k / elementsPerMXBlock) * M + m;
+            auto const m             = static_cast<int>(mk % static_cast<size_t>(M));
+            auto const k             = static_cast<int>(mk / static_cast<size_t>(M));
+            auto const kBlock        = k / elementsPerMXBlock;
+            auto const offsetInBlock = k - kBlock * elementsPerMXBlock;
+            auto const scale_id      = kBlock * M + m;
+            auto const data_id       = scale_id * elementsPerMXBlock + offsetInBlock;
+            auto const genScaleIdx   = genLayout.scaleIndexForData(static_cast<DGen::index_t>(mk));
 
-            auto data_id         = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
             alignedDataBytes[mk] = dataBytes[data_id];
-            refFloat[mk]
-                = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            refFloat[mk]         = DGen::toFloat<DT>(
+                scaleBytes.data(), dataBytes.data(), genScaleIdx, static_cast<DGen::index_t>(mk));
         }
         std::swap(dataBytes, alignedDataBytes);
     }
@@ -324,17 +301,22 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
         int N = sizes[0];
         int K = sizes[1];
 
-#pragma omp parallel for
-        for(size_t kn = 0; kn < K * N; ++kn)
-        {
-            auto k        = kn / N;
-            auto n        = kn % N;
-            auto scale_id = (k / elementsPerMXBlock) * N + n;
+        DGen::ScaleBlockLayout genLayout{N, elementsPerMXBlock};
 
-            auto data_id         = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
+#pragma omp parallel for
+        for(size_t kn = 0; kn < static_cast<size_t>(K * N); ++kn)
+        {
+            auto const k             = static_cast<int>(kn / static_cast<size_t>(N));
+            auto const n             = static_cast<int>(kn % static_cast<size_t>(N));
+            auto const kBlock        = k / elementsPerMXBlock;
+            auto const offsetInBlock = k - kBlock * elementsPerMXBlock;
+            auto const scale_id      = kBlock * N + n;
+            auto const data_id       = scale_id * elementsPerMXBlock + offsetInBlock;
+            auto const genScaleIdx   = genLayout.scaleIndexForData(static_cast<DGen::index_t>(kn));
+
             alignedDataBytes[kn] = dataBytes[data_id];
-            refFloat[kn]
-                = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            refFloat[kn]           = DGen::toFloat<DT>(
+                scaleBytes.data(), dataBytes.data(), genScaleIdx, static_cast<DGen::index_t>(kn));
         }
         std::swap(dataBytes, alignedDataBytes);
     }
