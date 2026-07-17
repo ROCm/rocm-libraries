@@ -1027,7 +1027,7 @@ class MultiDGemmProblem:
     M: int
     N: int
     K: int
-    num_d: int = 1
+    num_d: int = 2
 
     @property
     def flops(self) -> float:
@@ -1502,7 +1502,7 @@ def expand_sweep(
     if variant == "multi_d":
         mdc = cfg.get("multi_d_config", {})
         md_ops = _expand_values(mdc.get("elementwise_ops"), ["MultiDAdd"])
-        md_nds = _expand_values(mdc.get("num_d_tensors"), [1])
+        md_nds = _expand_values(mdc.get("num_d_tensors"), [2])
         md_combos = list(itertools.product(md_ops, md_nds))
     else:
         md_combos = [("PassThrough", 0)]

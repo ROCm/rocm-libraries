@@ -33,6 +33,7 @@
 
 #include <hip/hip_runtime.h>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -70,6 +71,23 @@ static int env_int(const char* name, int fallback)
     if(end == v)
         return fallback;
     return static_cast<int>(out);
+}
+
+// Read a boolean benchmark knob from the environment. Accepts 1/0, true/false,
+// yes/no, on/off (case-insensitive). Falls back to `fallback` when unset.
+static bool env_bool(const char* name, bool fallback)
+{
+    const char* v = std::getenv(name);
+    if(v == nullptr || *v == '\0')
+        return fallback;
+    std::string s(v);
+    for(auto& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if(s == "1" || s == "true" || s == "yes" || s == "on")
+        return true;
+    if(s == "0" || s == "false" || s == "no" || s == "off")
+        return false;
+    return fallback;
 }
 
 extern "C" {
@@ -254,14 +272,17 @@ int dispatcher_run_multi_d_gemm(const void* A,
                         stride_E);
 
     ck_tile::stream_config stream_cfg;
-    stream_cfg.stream_id_      = nullptr;
-    stream_cfg.time_kernel_    = true;
-    stream_cfg.log_level_      = 0;
-    stream_cfg.cold_niters_    = env_int("CK_TILE_BENCH_WARMUP", 50);
-    stream_cfg.nrepeat_        = env_int("CK_TILE_BENCH_REPEAT", 100);
-    stream_cfg.is_gpu_timer_   = true;
-    stream_cfg.flush_cache_    = false;
-    stream_cfg.rotating_count_ = 1;
+    stream_cfg.stream_id_    = nullptr;
+    stream_cfg.time_kernel_  = true;
+    stream_cfg.log_level_    = 0;
+    stream_cfg.cold_niters_  = env_int("CK_TILE_BENCH_WARMUP", 50);
+    stream_cfg.nrepeat_      = env_int("CK_TILE_BENCH_REPEAT", 100);
+    stream_cfg.is_gpu_timer_ = true;
+    // Fair-by-default: match Old-TE gemm_multi_d benchmark (flush_cache=true,
+    // rotating_count=1000) so the committed bridge benchmark is reproducible and
+    // apples-to-apples out of the box. Both remain env-tunable.
+    stream_cfg.flush_cache_    = env_bool("CK_TILE_BENCH_FLUSH", true);
+    stream_cfg.rotating_count_ = env_int("CK_TILE_BENCH_ROTATING", 1000);
 
     float exec_time = 0.0f;
     try
