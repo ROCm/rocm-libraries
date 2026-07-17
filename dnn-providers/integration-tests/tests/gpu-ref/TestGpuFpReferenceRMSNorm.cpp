@@ -506,34 +506,34 @@ TEST(TestGpuRMSNormFwdRefChannelLast, MatchesCpuRefWithBiasAndInvRms)
 
 // --- Test suite instantiations ---
 
-using TestGpuRMSNormFwdRefFp324D = RMSNormFwdTestSuite<float>;
-using TestGpuRMSNormFwdRefFp164D = RMSNormFwdTestSuite<half>;
-using TestGpuRMSNormFwdRefBfp164D = RMSNormFwdTestSuite<bfloat16>;
-using TestGpuRMSNormFwdRefFp325D = RMSNormFwdTestSuite<float>;
-using TestGpuRMSNormFwdRefFp165D = RMSNormFwdTestSuite<half>;
-using TestGpuRMSNormFwdRefBfp165D = RMSNormFwdTestSuite<bfloat16>;
+using TestGpuRMSNormFwdRef4DFp32 = RMSNormFwdTestSuite<float>;
+using TestGpuRMSNormFwdRef4DFp16 = RMSNormFwdTestSuite<half>;
+using TestGpuRMSNormFwdRef4DBfp16 = RMSNormFwdTestSuite<bfloat16>;
+using TestGpuRMSNormFwdRef5DFp32 = RMSNormFwdTestSuite<float>;
+using TestGpuRMSNormFwdRef5DFp16 = RMSNormFwdTestSuite<half>;
+using TestGpuRMSNormFwdRef5DBfp16 = RMSNormFwdTestSuite<bfloat16>;
 
-TEST_P(TestGpuRMSNormFwdRefFp324D, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRef4DFp32, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
-TEST_P(TestGpuRMSNormFwdRefFp164D, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRef4DFp16, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
-TEST_P(TestGpuRMSNormFwdRefBfp164D, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRef4DBfp16, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
-TEST_P(TestGpuRMSNormFwdRefFp325D, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRef5DFp32, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
-TEST_P(TestGpuRMSNormFwdRefFp165D, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRef5DFp16, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
-TEST_P(TestGpuRMSNormFwdRefBfp165D, MatchesCpuRef)
+TEST_P(TestGpuRMSNormFwdRef5DBfp16, MatchesCpuRef)
 {
     this->runRMSNormFwdTest();
 }
@@ -545,36 +545,36 @@ TEST_P(TestGpuRMSNormFwdRefBfp165D, MatchesCpuRef)
 // --- Quick tests ---
 
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuRMSNormFwdRefFp324D,
+                         TestGpuRMSNormFwdRef4DFp32,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuRMSNormFwdRefFp164D,
+                         TestGpuRMSNormFwdRef4DFp16,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuRMSNormFwdRefBfp164D,
+                         TestGpuRMSNormFwdRef4DBfp16,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRefFp324D,
+                         TestGpuRMSNormFwdRef4DFp32,
                          ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRefFp164D,
+                         TestGpuRMSNormFwdRef4DFp16,
                          ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRefBfp164D,
+                         TestGpuRMSNormFwdRef4DBfp16,
                          ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRefFp324D,
+                         TestGpuRMSNormFwdRef4DFp32,
                          ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRefFp164D,
+                         TestGpuRMSNormFwdRef4DFp16,
                          ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRefBfp164D,
+                         TestGpuRMSNormFwdRef4DBfp16,
                          ::testing::ValuesIn(getRMSnormLarge4DTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp324D, ::testing::ValuesIn([]() {
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef4DFp32, ::testing::ValuesIn([]() {
                              auto v = getRMSnormSmall4DTestCases();
                              auto m = getRMSnormMedium4DTestCases();
                              auto l = getRMSnormLarge4DTestCases();
@@ -582,7 +582,7 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp324D, ::testing::ValuesIn([
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp164D, ::testing::ValuesIn([]() {
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef4DFp16, ::testing::ValuesIn([]() {
                              auto v = getRMSnormSmall4DTestCases();
                              auto m = getRMSnormMedium4DTestCases();
                              auto l = getRMSnormLarge4DTestCases();
@@ -590,7 +590,7 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp164D, ::testing::ValuesIn([
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefBfp164D, ::testing::ValuesIn([]() {
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef4DBfp16, ::testing::ValuesIn([]() {
                              auto v = getRMSnormSmall4DTestCases();
                              auto m = getRMSnormMedium4DTestCases();
                              auto l = getRMSnormLarge4DTestCases();
@@ -604,36 +604,36 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefBfp164D, ::testing::ValuesIn(
 // ============================================================================
 
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuRMSNormFwdRefFp325D,
+                         TestGpuRMSNormFwdRef5DFp32,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuRMSNormFwdRefFp165D,
+                         TestGpuRMSNormFwdRef5DFp16,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuRMSNormFwdRefBfp165D,
+                         TestGpuRMSNormFwdRef5DBfp16,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRefFp325D,
+                         TestGpuRMSNormFwdRef5DFp32,
                          ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRefFp165D,
+                         TestGpuRMSNormFwdRef5DFp16,
                          ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuRMSNormFwdRefBfp165D,
+                         TestGpuRMSNormFwdRef5DBfp16,
                          ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRefFp325D,
+                         TestGpuRMSNormFwdRef5DFp32,
                          ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRefFp165D,
+                         TestGpuRMSNormFwdRef5DFp16,
                          ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuRMSNormFwdRefBfp165D,
+                         TestGpuRMSNormFwdRef5DBfp16,
                          ::testing::ValuesIn(getRMSnormLarge5DTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp325D, ::testing::ValuesIn([]() {
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DFp32, ::testing::ValuesIn([]() {
                              auto v = getRMSnormSmall5DTestCases();
                              auto m = getRMSnormMedium5DTestCases();
                              auto l = getRMSnormLarge5DTestCases();
@@ -641,7 +641,7 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp325D, ::testing::ValuesIn([
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp165D, ::testing::ValuesIn([]() {
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DFp16, ::testing::ValuesIn([]() {
                              auto v = getRMSnormSmall5DTestCases();
                              auto m = getRMSnormMedium5DTestCases();
                              auto l = getRMSnormLarge5DTestCases();
@@ -649,7 +649,7 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefFp165D, ::testing::ValuesIn([
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRefBfp165D, ::testing::ValuesIn([]() {
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DBfp16, ::testing::ValuesIn([]() {
                              auto v = getRMSnormSmall5DTestCases();
                              auto m = getRMSnormMedium5DTestCases();
                              auto l = getRMSnormLarge5DTestCases();

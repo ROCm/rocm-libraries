@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <hipdnn_gpu_ref/GpuFpReferenceRMSNorm.hpp>
+#include <hipdnn-gpu-ref/GpuFpReferenceRMSNorm.hpp>
 
-#include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
-#include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 
 #include <cstdint>
 #include <hip/hip_runtime.h>
@@ -24,9 +24,18 @@ namespace
 
 void launchKernel(hipFunction_t function, int64_t outerSize, void* argsPtr, size_t argsSize)
 {
-    if(outerSize > static_cast<int64_t>(std::numeric_limits<unsigned int>::max()))
+    // Check the device limits for grid size
+    int deviceId;
+    detail::throwOnHipError(hipGetDevice(&deviceId), "hipGetDevice failed");
+    hipDeviceProp_t deviceProps;
+    detail::throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
+                            "hipGetDeviceProperties failed");
+    const int64_t maxOuterSize = static_cast<int64_t>(deviceProps.maxGridSize[0])
+                                 / static_cast<int64_t>(GpuFpReferenceRMSNorm::BLOCK_SIZE);
+    if(outerSize > maxOuterSize)
     {
-        throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
+        throw std::runtime_error("Grid size exceeds device limit: " + std::to_string(outerSize)
+                                 + " > " + std::to_string(maxOuterSize));
     }
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)

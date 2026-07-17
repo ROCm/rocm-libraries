@@ -5,8 +5,8 @@
 
 #include "RMSNormShapeCatalog.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_gpu_ref/GpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
