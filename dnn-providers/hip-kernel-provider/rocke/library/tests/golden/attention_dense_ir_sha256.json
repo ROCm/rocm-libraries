@@ -3,112 +3,112 @@
     "llvm20": {
       "cases": {
         "attention_dense/bn128_sq512": {
-          "bytes": 604858,
-          "sha256": "000a9408578a9728c7e9baa80428d50b4d4cc17dc3fc1d79e3ad36c6e8642ac5"
+          "bytes": 610799,
+          "sha256": "67feb714296db5af1d332df6427ea306727f0ec72215982d6048da5c398cc6b9"
         },
         "attention_dense/default_causal_sq512": {
-          "bytes": 337008,
-          "sha256": "281d6f975a9056969fb059357faf048a7a11d56557ebba075652aa81c8a6b5cb"
-        },
-        "attention_dense/fp16_h64_sq512": {
-          "bytes": 227134,
-          "sha256": "70e5e3a9a5923a9e1209e39b800c6309a41265eaf1f45dc3df9d87f35645cb06"
-        },
-        "attention_dense/lazy_rescale_sq512": {
           "bytes": 341939,
           "sha256": "1dc714eeaa2e69c3198eeadc725956f2c5257db2f6263f524dc3930ed707651d"
         },
+        "attention_dense/fp16_h64_sq512": {
+          "bytes": 230977,
+          "sha256": "e30bb63f718f6437eaac14bc49b347174b398c2fcc225dd1ca9d46959ddf2fa1"
+        },
+        "attention_dense/lazy_off_sq512": {
+          "bytes": 337008,
+          "sha256": "281d6f975a9056969fb059357faf048a7a11d56557ebba075652aa81c8a6b5cb"
+        },
         "attention_dense/noncausal_sq512": {
-          "bytes": 214925,
-          "sha256": "c35254ad8eb1e051a5735c6314a6ccfaaeff0ea003db2b3b9be8804da8c314c2"
+          "bytes": 217781,
+          "sha256": "db33f2ff07c424d2b3e759aed66e4b0d29056e7e4780ce11fdcc8d199da99334"
         },
         "attention_dense/persist_hkvmaj_sq512": {
-          "bytes": 322579,
-          "sha256": "4ee6f48d6cbc461f71e041922f5dab82bfb5c42749087bc595973cb963cca526"
+          "bytes": 327546,
+          "sha256": "f49a0e2f5415bce83f55d251c2a5a7be00fcbd999db3b038023f50ab53113f74"
         },
         "attention_dense/persist_intl_sq512": {
-          "bytes": 322053,
-          "sha256": "4b26b91f3677719a588dde62844cf6a42a4346817800b0e6be4700240e9d4946"
+          "bytes": 327020,
+          "sha256": "b1bde5a27e66647c342d5ee4b2e010e52106d33d22d901cedf46f59e3ce9fca8"
         },
-        "attention_dense/persist_lazy_sq512": {
+        "attention_dense/persist_lazy_off_sq512": {
+          "bytes": 321142,
+          "sha256": "7f5251827f8e9e4853c16b0908950cbf1b878686007643438c9beb241254d6a3"
+        },
+        "attention_dense/persist_qbmaj_sq512": {
           "bytes": 326109,
           "sha256": "b3dd90bf381adf2dffac99288b78de56ae3137dddf8f6349418338ae4df6baed"
         },
-        "attention_dense/persist_qbmaj_sq512": {
-          "bytes": 321142,
-          "sha256": "7f5251827f8e9e4853c16b0908950cbf1b878686007643438c9beb241254d6a3"
-        },
         "attention_dense/persist_swa_w128_sq512": {
-          "bytes": 437202,
-          "sha256": "4ccce534163778d590ad2e70a0c258e30330ec9fd80dd202fb91b4b6be034ec7"
+          "bytes": 444213,
+          "sha256": "3a2039ebb82f66fbf375f8ff9b636ce5cda48702a914541b854d5997ce2de222"
         },
         "attention_dense/persistent_causal_sq512": {
-          "bytes": 321142,
-          "sha256": "7f5251827f8e9e4853c16b0908950cbf1b878686007643438c9beb241254d6a3"
+          "bytes": 326109,
+          "sha256": "b3dd90bf381adf2dffac99288b78de56ae3137dddf8f6349418338ae4df6baed"
         },
         "attention_dense/swa_w128_sq512": {
-          "bytes": 457079,
-          "sha256": "cc49b513ebedd8c9691c41311cd2a1340e6c6c1066eab680bda1d852c7d0712d"
+          "bytes": 464090,
+          "sha256": "cbde8ed9be5ac5b89b68305c8b4092630bf5ee56ccd58cd2c8e70228879b1f1d"
         },
         "attention_dense/varlen_sq512": {
-          "bytes": 339044,
-          "sha256": "f0fdae668ea39aa9a8a0d5cd425a5d22a1607c0a768e79e4fd4c35e31c358ea7"
+          "bytes": 344011,
+          "sha256": "afacdff3e337450ae8db2ec59bf87d5aea6949a23e83256bc4af8b97f63da80a"
         }
       }
     },
     "llvm22": {
       "cases": {
         "attention_dense/bn128_sq512": {
-          "bytes": 604962,
-          "sha256": "fc497f9f50d107c9634b528447a9b8af35d5c50192f940409e936f084f12ff79"
+          "bytes": 610903,
+          "sha256": "b75fea02477fec773dc639131b94c33efda4ea2217f7822622c3b69dba42c165"
         },
         "attention_dense/default_causal_sq512": {
-          "bytes": 337112,
-          "sha256": "11a2458a4ec86709fcec37da59d48c1de6a8b55ca4f23e5fbb27f13e5388222d"
-        },
-        "attention_dense/fp16_h64_sq512": {
-          "bytes": 227234,
-          "sha256": "39cd4557fdda2cce4813b22ef11787d94804f5c420a2f1924cb398a00fbeb5f0"
-        },
-        "attention_dense/lazy_rescale_sq512": {
           "bytes": 342043,
           "sha256": "0698cf388935622a76524c20f300b383a946ecbdb512e93c662db29ad574a1f0"
         },
+        "attention_dense/fp16_h64_sq512": {
+          "bytes": 231077,
+          "sha256": "aeced7d0a10933d2eb2143fd127d7fdbc08ae86ac8c7f8e40fe30dca6dbcf2f3"
+        },
+        "attention_dense/lazy_off_sq512": {
+          "bytes": 337112,
+          "sha256": "11a2458a4ec86709fcec37da59d48c1de6a8b55ca4f23e5fbb27f13e5388222d"
+        },
         "attention_dense/noncausal_sq512": {
-          "bytes": 215025,
-          "sha256": "408840a8a2cac5bf8e38759694f344ac4f454e5e397d8d2e31f14a9e124f14d2"
+          "bytes": 217881,
+          "sha256": "83333cfcfd4d2e3c26ba2cf6e61faffc8dce46ad43cc1216d7efd68ad0653e54"
         },
         "attention_dense/persist_hkvmaj_sq512": {
-          "bytes": 322683,
-          "sha256": "cf7ea81a10abc6ab2e0be03eddacb7eaa316ecf7ef817c352f57ee1054ff49f8"
+          "bytes": 327650,
+          "sha256": "8a0e7f52f54566f579cf9f0f20d074b0a57f5079c242f6a6b98d35ab9cd000a4"
         },
         "attention_dense/persist_intl_sq512": {
-          "bytes": 322157,
-          "sha256": "816f23613fa06f85f548cf0f797b389d34b616617db80ee67a5419ea4bc78bed"
+          "bytes": 327124,
+          "sha256": "6d9f80a763c0d4d992159487222d0ca30e8ff588e1a9c0347969e94e6b4a4373"
         },
-        "attention_dense/persist_lazy_sq512": {
+        "attention_dense/persist_lazy_off_sq512": {
+          "bytes": 321246,
+          "sha256": "6c805ce2f02d540afb7f4e36f6cb55edb19d3e0526d2b2880e8a0c2beb1bea4e"
+        },
+        "attention_dense/persist_qbmaj_sq512": {
           "bytes": 326213,
           "sha256": "0574a132367b90ef4a980afa9d482746c973556545032a61f1e9b66c891aa7e1"
         },
-        "attention_dense/persist_qbmaj_sq512": {
-          "bytes": 321246,
-          "sha256": "6c805ce2f02d540afb7f4e36f6cb55edb19d3e0526d2b2880e8a0c2beb1bea4e"
-        },
         "attention_dense/persist_swa_w128_sq512": {
-          "bytes": 437306,
-          "sha256": "83b993a204700a4132aadaedb9e13291f8ea6ca9810f976676f337471b45d967"
+          "bytes": 444317,
+          "sha256": "6fe644368ff3c588edfcf80eb74e6ae9264458a9032b40ca78fdfb93e6f6c403"
         },
         "attention_dense/persistent_causal_sq512": {
-          "bytes": 321246,
-          "sha256": "6c805ce2f02d540afb7f4e36f6cb55edb19d3e0526d2b2880e8a0c2beb1bea4e"
+          "bytes": 326213,
+          "sha256": "0574a132367b90ef4a980afa9d482746c973556545032a61f1e9b66c891aa7e1"
         },
         "attention_dense/swa_w128_sq512": {
-          "bytes": 457183,
-          "sha256": "13f345abeb46865f08f4575956942e85e9e6f27d34166ba524b6b13d92d190b5"
+          "bytes": 464194,
+          "sha256": "35c4abc272427bc1f92ca1cfe06256e7e1a02e8a2690d21cec105c32269fc1c0"
         },
         "attention_dense/varlen_sq512": {
-          "bytes": 339148,
-          "sha256": "0a0d6b81445a01b63b4ef793bb850afd81cbaafc521cdf74a0278c3677be0cf9"
+          "bytes": 344115,
+          "sha256": "a9bf509c16f6fde382fe7f778b3508f2b385b67011ed0f778f81035a12372998"
         }
       }
     }

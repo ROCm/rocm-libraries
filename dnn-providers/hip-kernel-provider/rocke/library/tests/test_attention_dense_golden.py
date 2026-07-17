@@ -59,7 +59,7 @@ def _cases():
         "attention_dense/default_causal_sq512": mk(),
         "attention_dense/swa_w128_sq512": mk(sliding_window=128),
         "attention_dense/varlen_sq512": mk(varlen=True),
-        "attention_dense/lazy_rescale_sq512": mk(lazy_rescale=True),
+        "attention_dense/lazy_off_sq512": mk(lazy_rescale=False),
         "attention_dense/fp16_h64_sq512": mk(dtype="fp16", head_size=64),
         "attention_dense/bn128_sq512": mk(block_n=128),
         "attention_dense/noncausal_sq512": mk(causal=False),
@@ -76,8 +76,8 @@ def _cases():
         "attention_dense/persist_intl_sq512": mk(
             persistent=True, num_persistent=256, interleave=True
         ),
-        "attention_dense/persist_lazy_sq512": mk(
-            persistent=True, num_persistent=256, lazy_rescale=True
+        "attention_dense/persist_lazy_off_sq512": mk(
+            persistent=True, num_persistent=256, lazy_rescale=False
         ),
         "attention_dense/persist_swa_w128_sq512": mk(
             persistent=True, num_persistent=256, sliding_window=128

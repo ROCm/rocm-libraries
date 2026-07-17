@@ -30,9 +30,14 @@ Measured on MI355X (bf16, D=128, causal, 0 spill, err ~1.46e-3 vs SDPA):
 (dense, compile-time-sized ABI); the KV tile, occupancy hint, and persistent knobs
 are the tunable parameters.
 
+Lazy online-softmax rescale (skip the O/l rescale when every lane's tile-max is
+within 8 log2 of the running max) is ALWAYS-ON by default (``lazy_rescale=True``):
+parity-identical (1.46e-3) and ~+2% (bf16, Sq=8192, GQA -> ~970 TFLOPS with the
+hkv-major decode + V-pad).
+
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
-staging, score truncation, s_setprio, PV V-prefetch, lazy rescale) are intentionally
-NOT carried over — see the experiment's ``plan.md`` for their measured results.
+staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
+the experiment's ``plan.md`` for their measured results.
 """
 
 from dataclasses import dataclass
@@ -150,8 +155,9 @@ class AttentionDenseSpec:
     #   cutting the per-tile VALU between the QK and PV MFMA clusters (raises
     #   MFMA utilization). P is then bounded by exp2(8)=256 (safe for fp32 accum
     #   / bf16 P) rather than <=1, so this is a numerically APPROXIMATE lever
-    #   (still within bf16/fp16 tolerance); default off.
-    lazy_rescale: bool = False
+    #   (still within bf16/fp16 tolerance). ALWAYS-ON by default (parity-identical
+    #   at 1.46e-3, ~+2% TFLOPS); set False only to disable for A/B.
+    lazy_rescale: bool = True
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
