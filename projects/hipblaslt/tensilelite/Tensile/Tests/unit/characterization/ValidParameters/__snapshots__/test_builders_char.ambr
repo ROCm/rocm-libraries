@@ -1513,6 +1513,7 @@
     'VectorStore',
     'VectorWidthA',
     'VectorWidthB',
+    'WMMABankDistinctC',
     'WaveSeparateGlobalReadA',
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
@@ -2869,6 +2870,14 @@
         2,
       ]),
       'len': 7,
+      'type': 'list',
+    }),
+    'WMMABankDistinctC': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'WaveSeparateGlobalReadA': dict({
