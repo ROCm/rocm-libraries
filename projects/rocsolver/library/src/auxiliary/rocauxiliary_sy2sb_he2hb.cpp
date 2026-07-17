@@ -40,12 +40,11 @@ ROCSOLVER_BEGIN_NAMESPACE
 //  kd          Matrix bandwidth. kd >= 1.
 //  nb          Block size. nb >= kd and nb is a multiple of kd.
 //  A           n-by-n Hermitian matrix, with both lower and upper entries set.
-//              On output, Householder vectors V overwrite lower portion of A,
-//              below diagonal kd. Rest of A is destroyed.
+//              On output, Householder vectors V overwrite the lower portion of A,
+//              sub-diagonal kd and below. The rest of A is destroyed.
 //  Aband       n-by-n band matrix, with space for kd - 1 super-diagonals and
-//              2*kd - 1 sub-diagonals. On output, main diagonal and kd - 1
-//              sub-diagonals are set.
-//              todo: verify what must be set/zero.
+//              2*kd - 1 sub-diagonals. On output, the main diagonal and kd
+//              sub-diagonals are set; other entries are destroyed.
 //  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
 //  tau         Householder tau values.
 //
