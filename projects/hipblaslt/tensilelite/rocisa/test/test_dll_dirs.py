@@ -1,4 +1,4 @@
-# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
 """Tests for the Windows dependent-DLL directory resolution (_candidate_dll_dirs).
