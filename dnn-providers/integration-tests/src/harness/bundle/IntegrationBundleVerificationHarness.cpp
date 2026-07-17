@@ -16,6 +16,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/CpuReferenceGraphExecutorAdapter.hpp"
@@ -378,6 +379,8 @@ std::unordered_map<int64_t, void*>
     std::unordered_map<int64_t, void*> variantPack;
     const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
                                        _bundle->outputTensorUids.end());
+    const auto wrapper = _bundle->graphWrapper();
+    const auto& tensorAttrMap = wrapper.getTensorMap();
 
     for(auto& [uid, tensor] : *_bundle->tensors)
     {
@@ -385,11 +388,13 @@ std::unordered_map<int64_t, void*>
         {
             continue;
         }
-        variantPack[uid] = useDevice ? tensor->rawDeviceData() : tensor->rawHostData();
+        variantPack[uid] = hipdnn_test_sdk::utilities::variantPackData(
+            *tensor, useDevice, tensorAttrMap.at(uid)->is_runtime_pass_by_value());
     }
     for(auto& [uid, tensor] : outputs)
     {
-        variantPack[uid] = useDevice ? tensor->rawDeviceData() : tensor->rawHostData();
+        variantPack[uid] = hipdnn_test_sdk::utilities::variantPackData(
+            *tensor, useDevice, /*isRuntimePassByValue=*/false);
     }
     return variantPack;
 }

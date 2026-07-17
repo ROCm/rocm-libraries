@@ -46,12 +46,14 @@ class TestableHarness : public IntegrationBundleVerificationHarness
 public:
     using StubFunc = std::function<void(std::unordered_map<int64_t, void*>&)>;
 
-    explicit TestableHarness(StubFunc stub)
-        : IntegrationBundleVerificationHarness(/*requiresDevice=*/false)
+    explicit TestableHarness(StubFunc stub, bool requiresDevice = false)
+        : IntegrationBundleVerificationHarness(requiresDevice)
         , _stub(std::move(stub))
     {
     }
 
+    using IntegrationBundleVerificationHarness::allocateSentinelOutputs;
+    using IntegrationBundleVerificationHarness::buildVariantPack;
     using IntegrationBundleVerificationHarness::SetUp;
     using IntegrationBundleVerificationHarness::TestBody;
 
@@ -195,6 +197,65 @@ protected:
     }
 };
 
+std::shared_ptr<IntegrationTestBundle> makeRuntimePassByValueBundle()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> scalarDims = {1};
+    const std::vector<int64_t> scalarStrides = {1};
+    const std::vector<int64_t> outputDims = {1};
+    const std::vector<int64_t> outputStrides = {1};
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   1,
+                                                   "epsilon",
+                                                   DataType::FLOAT,
+                                                   &scalarStrides,
+                                                   &scalarDims,
+                                                   false,
+                                                   TensorValue::NONE,
+                                                   0,
+                                                   true));
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, 2, "output", DataType::FLOAT, &outputStrides, &outputDims));
+
+    const std::vector<flatbuffers::Offset<Node>> nodes;
+    const auto graph = CreateGraphDirect(builder,
+                                         "runtime_pbv",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
+    builder.Finish(graph);
+
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->graphBuffer = builder.Release();
+    bundle->outputTensorUids = {2};
+    bundle->tensors.emplace();
+    auto epsilon
+        = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(scalarDims, scalarStrides);
+    epsilon->fillTensorWithValue(0.01f);
+    bundle->tensors->emplace(1, std::move(epsilon));
+    return bundle;
+}
+
+TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
+{
+    TestableHarness harness([](std::unordered_map<int64_t, void*>&) {}, /*requiresDevice=*/true);
+    auto bundle = makeRuntimePassByValueBundle();
+    auto* expectedHostPointer = bundle->tensors->at(1)->rawHostData();
+    harness.setBundle(std::move(bundle), "runtime-pbv-unit-test");
+    auto outputs = harness.allocateSentinelOutputs();
+
+    auto variantPack = harness.buildVariantPack(outputs, /*useDevice=*/true);
+
+    ASSERT_EQ(variantPack.at(1), expectedHostPointer);
+    EXPECT_FLOAT_EQ(*static_cast<const float*>(variantPack.at(1)), 0.01f);
+    EXPECT_NE(variantPack.at(2), outputs.at(2)->rawHostData());
+}
 } // namespace
 
 // An executor that throws ("unsupported graph") must yield a SKIP, not a FAIL —

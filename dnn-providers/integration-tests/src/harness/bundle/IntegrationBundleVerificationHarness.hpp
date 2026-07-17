@@ -145,6 +145,10 @@ protected:
         return _synthesisConfig;
     }
 
+    OutputTensors allocateSentinelOutputs() const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
+                                                        bool useDevice) const;
+
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
@@ -199,9 +203,6 @@ private:
     // runEngine* / runReference* call the executors and capture results.
     // Outputs are sentinel-filled (NaN) so an unwritten output element is
     // caught by allClose rather than masquerading as a computed zero.
-    OutputTensors allocateSentinelOutputs() const;
-    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
-                                                        bool useDevice) const;
     // Runs the engine into fresh output buffers. Returns nullopt if the
     // engine threw (its message is written to `error`) or raised a fatal
     // GTest failure (in which case `error` is left empty).

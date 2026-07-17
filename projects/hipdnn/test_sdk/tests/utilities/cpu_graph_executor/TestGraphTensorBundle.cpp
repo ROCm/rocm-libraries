@@ -202,6 +202,34 @@ TEST_F(TestGraphTensorBundle, ToDeviceVariantPackReturnsCorrectMapping)
     }
 }
 
+TEST(TestGraphTensorBundleStandalone, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1};
+    const std::vector<int64_t> strides = {1};
+    const auto attrOffset = CreateTensorAttributesDirect(builder,
+                                                         42,
+                                                         "epsilon",
+                                                         DataType::FLOAT,
+                                                         &strides,
+                                                         &dims,
+                                                         false,
+                                                         TensorValue::NONE,
+                                                         0,
+                                                         true);
+    builder.Finish(attrOffset);
+
+    const auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    const std::unordered_map<int64_t, const TensorAttributes*> tensorMap = {{42, attr}};
+    GraphTensorBundle bundle(tensorMap);
+    bundle.getTensor(42).fillTensorWithValue(0.01f);
+
+    auto variantPack = bundle.toDeviceVariantPack();
+
+    ASSERT_EQ(variantPack.at(42), bundle.getTensor(42).rawHostData());
+    EXPECT_FLOAT_EQ(*static_cast<const float*>(variantPack.at(42)), 0.01f);
+}
+
 TEST_F(TestGraphTensorBundle, GetTensorReturnsCorrectTensor)
 {
     auto graphWrapper = buildTestGraph(DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
