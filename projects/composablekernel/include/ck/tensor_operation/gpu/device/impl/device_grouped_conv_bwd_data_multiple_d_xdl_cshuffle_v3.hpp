@@ -60,7 +60,6 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const index_t num_k_per_block)
 {
 #if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
-    if constexpr(GridwiseGemm::template IsValidCompilationParameter<EGlobalMemoryDataOperation>())
     {
         // offset base pointer for each work-group
         const index_t block_args_id = __builtin_amdgcn_readfirstlane(blockIdx.x);
@@ -74,7 +73,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const long_index_t e_batch_offset =
             amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetEPtrOffset(g_idx));
 
-        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
         index_t left     = 0;
         index_t right    = gemms_count;
@@ -94,57 +93,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             group_id = index_t((left + right) / 2);
         }
 
-        if constexpr(GridwiseGemm::DirectLoadEnabled)
-        {
-#if defined(__gfx950__)
-            const auto a_grid_desc_ak0_m_ak1_transformed =
-                GridwiseGemm::template TransformGrid<AGridDesc_AK0_M_AK1,
-                                                     GridwiseGemm::AK0Number,
-                                                     GridwiseGemm::AK1Number>(
-                    gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_);
-            if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
-            {
-                GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1_transformed),
-                                           BGridDesc_BK0_N_BK1,
-                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                           true,
-                                           EGlobalMemoryDataOperation,
-                                           TailNum>(
-                    karg.p_a_grid + a_batch_offset,
-                    karg.p_b_grid + b_batch_offset,
-                    karg.p_c_grid + e_batch_offset,
-                    p_shared,
-                    karg,
-                    a_grid_desc_ak0_m_ak1_transformed,
-                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                    k_idx,
-                    gridDim.z,
-                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
-            }
-            else
-            {
-                GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1_transformed),
-                                           BGridDesc_BK0_N_BK1,
-                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                           false,
-                                           EGlobalMemoryDataOperation,
-                                           TailNum>(
-                    karg.p_a_grid + a_batch_offset,
-                    karg.p_b_grid + b_batch_offset,
-                    karg.p_c_grid + e_batch_offset,
-                    p_shared,
-                    karg,
-                    a_grid_desc_ak0_m_ak1_transformed,
-                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                    k_idx,
-                    gridDim.z,
-                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
-            }
-#endif
-        }
-        else
+        // DirectLoad (gfx950-only) is not used in this backport; always use the standard path.
         {
             if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
             {
@@ -301,34 +250,6 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
     using DeviceOp = DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3;
 
-    // Wave32 support: compute effective MXdlPerWave for wave64 and wave32 modes.
-    // The bwd_data template uses MRepeat/NRepeat as MXdlPerWave/NXdlPerWave and
-    // MPerXdl/NPerXdl (lowercase 'dl') instead of MPerXDL/NPerXDL.
-    template <bool IsWave64,
-              index_t MPerXdlAligned = MPerXdl,
-              index_t NPerXdlAligned = NPerXdl,
-              index_t NRepeatAligned = NRepeat>
-    static constexpr auto GetMXdlPerWave()
-    {
-        return GetXdlPerWave2<BlockSize,
-                              NPerBlock,
-                              MPerBlock,
-                              NPerXdlAligned,
-                              MPerXdlAligned,
-                              NRepeatAligned,
-                              IsWave64>();
-    }
-
-    static constexpr bool Wave32Force16MNPerXdl = sizeof(ADataType) == 2 && sizeof(BDataType) == 2;
-    static constexpr index_t Wave32MaxMNPerXdl =
-        Wave32Force16MNPerXdl ? 16 : math::max(MPerXdl, NPerXdl);
-
-    static constexpr auto MXdlPerWave64 = GetMXdlPerWave<true>();
-    static constexpr auto MXdlPerWave32 = GetMXdlPerWave<false,
-                                                         Wave32MaxMNPerXdl,
-                                                         Wave32MaxMNPerXdl,
-                                                         NRepeat*(NPerXdl / Wave32MaxMNPerXdl)>();
-
     static constexpr index_t NumDTensor = DsDataType::Size();
     static constexpr auto I0            = Number<0>{};
     static constexpr auto I1            = Number<1>{};
@@ -361,23 +282,6 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                                                                      1,
                                                                      IndexType>;
 
-    // Dummy function just used to create an alias to Grid Descriptors
-    static auto
-    GetDummyABDsEGridDescriptor(const ConvToGemmBwdDataTransform& conv_to_gemm_transform)
-    {
-        const auto a_grid_desc_ak0_m_ak1 = conv_to_gemm_transform.MakeADescriptor_AK0_M_AK1();
-
-        const auto b_grid_desc_bk0_n_bk1 = conv_to_gemm_transform.MakeBDescriptor_BK0_N_BK1();
-
-        const auto e_grid_desc_mblock_mperblock_nblock_nperblock =
-            GridwiseGemm::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
-                conv_to_gemm_transform.MakeCDescriptor_M_N(), IndexType{1}, IndexType{1});
-
-        return make_tuple(a_grid_desc_ak0_m_ak1,
-                          b_grid_desc_bk0_n_bk1,
-                          e_grid_desc_mblock_mperblock_nblock_nperblock);
-    }
-
     static constexpr index_t ABlockTransferSrcScalarPerVectorAligned =
         ABlockTransferSrcScalarPerVector * sizeof(ADataType) == 8
             ? 4 / sizeof(ADataType)
@@ -390,10 +294,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     static constexpr bool ALdsScalarLoadToVgpr = false;
     static constexpr bool BLdsScalarLoadToVgpr = true;
 
-    // Parameterized GridwiseGemm template to support both wave64 (MPerXdl/NPerXdl) and
-    // wave32 (Wave32MaxMNPerXdl/Wave32MaxMNPerXdl) XDL instruction sizes.
-    template <index_t MRepeat_, index_t MPerXdl_, index_t NPerXdl_>
-    using GridwiseGemmBase = GridwiseGemm_xdl_cshuffle_v3<
+    using GridwiseGemm = GridwiseGemm_xdl_cshuffle_v3<
         tensor_layout::gemm::RowMajor,
         tensor_layout::gemm::RowMajor,
         tensor_layout::gemm::RowMajor,
@@ -412,10 +313,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         KPerBlock,
         AK1,
         BK1,
-        MPerXdl_,
-        NPerXdl_,
-        MRepeat_,
-        NRepeat*(NPerXdl / NPerXdl_),
+        MPerXdl,
+        NPerXdl,
+        MRepeat,
+        NRepeat,
         ABlockTransferThreadClusterLengths_AK0_M_AK1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -433,7 +334,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         false,
         BBlockLdsExtraN,
         CShuffleMRepeatPerShuffle,
-        CShuffleNRepeatPerShuffle*(NPerXdl / NPerXdl_),
+        CShuffleNRepeatPerShuffle,
         CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         CShuffleBlockTransferScalarPerVector,
         BlkGemmPipeSched,
@@ -441,17 +342,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         AComputeType,
         BComputeType, LargeTensors>;
 
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(MXdlPerWave64, 1), MPerXdl, NPerXdl>;
-    using GridwiseGemm32 =
-        GridwiseGemmBase<math::max(MXdlPerWave32, 1), Wave32MaxMNPerXdl, Wave32MaxMNPerXdl>;
-    // Default GridwiseGemm alias for use in non-wave-size-dependent code paths
-    using GridwiseGemm = GridwiseGemm64;
+    // Dummy function just used to create an alias to Grid Descriptors
+    static auto
+    GetDummyABDsEGridDescriptor(const ConvToGemmBwdDataTransform& conv_to_gemm_transform)
+    {
+        const auto a_grid_desc_ak0_m_ak1 = conv_to_gemm_transform.MakeADescriptor_AK0_M_AK1();
 
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(MXdlPerWave64, 1), MPerXdl, NPerXdl>;
-    using GridwiseGemm32 =
-        GridwiseGemmBase<math::max(MXdlPerWave32, 1), Wave32MaxMNPerXdl, Wave32MaxMNPerXdl>;
-    // Default GridwiseGemm alias for use in non-wave-size-dependent code paths
-    using GridwiseGemm = GridwiseGemm64;
+        const auto b_grid_desc_bk0_n_bk1 = conv_to_gemm_transform.MakeBDescriptor_BK0_N_BK1();
+
+        const auto e_grid_desc_mblock_mperblock_nblock_nperblock =
+            GridwiseGemm::MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
+                conv_to_gemm_transform.MakeCDescriptor_M_N(), IndexType{1}, IndexType{1});
+
+        return make_tuple(a_grid_desc_ak0_m_ak1,
+                          b_grid_desc_bk0_n_bk1,
+                          e_grid_desc_mblock_mperblock_nblock_nperblock);
+    }
 
     template <typename Desc_K0_M_K1>
     static auto transform_k0_m_k1_to_m_k(const Desc_K0_M_K1& desc_k0_m_k1)
@@ -916,45 +822,19 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 arg.Print();
             }
 
-            if(get_warp_size() == 64)
+            if(arg.k_batch_ > 1)
             {
-                if constexpr(MXdlPerWave64 > 0)
+                if constexpr(IsSplitKSupported)
                 {
-                    if(arg.k_batch_ > 1)
-                    {
-                        if constexpr(IsSplitKSupported)
-                        {
-                            ave_time +=
-                                RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::AtomicAdd>(
-                                    arg, stream_config);
-                        }
-                    }
-                    else
-                    {
-                        ave_time += RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::Set>(
+                    ave_time +=
+                        RunMultiDGemm<GridwiseGemm, InMemoryDataOperationEnum::AtomicAdd>(
                             arg, stream_config);
-                    }
                 }
             }
             else
             {
-                if constexpr(MXdlPerWave32 > 0)
-                {
-                    if(arg.k_batch_ > 1)
-                    {
-                        if constexpr(IsSplitKSupported)
-                        {
-                            ave_time +=
-                                RunMultiDGemm<GridwiseGemm32, InMemoryDataOperationEnum::AtomicAdd>(
-                                    arg, stream_config);
-                        }
-                    }
-                    else
-                    {
-                        ave_time += RunMultiDGemm<GridwiseGemm32, InMemoryDataOperationEnum::Set>(
-                            arg, stream_config);
-                    }
-                }
+                ave_time += RunMultiDGemm<GridwiseGemm, InMemoryDataOperationEnum::Set>(
+                    arg, stream_config);
             }
 
             return ave_time;
@@ -984,26 +864,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
             }
         }
 
-        // Reject if the current warp size has no valid XDL configuration
-        if(get_warp_size() == 64)
-        {
-            if constexpr(MXdlPerWave64 == 0)
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if constexpr(MXdlPerWave32 == 0)
-            {
-                return false;
-            }
-        }
-
-        if(!ck::is_xdl_wmma_supported<AComputeType,
-                                      BComputeType,
-                                      Wave32MaxMNPerXdl,
-                                      Wave32MaxMNPerXdl>())
+        if(!ck::is_xdl_supported())
         {
             return false;
         }
@@ -1654,7 +1515,6 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
 
         // clang-format off
         str << "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3"
-            << (get_warp_size() != 64 ? "_WmmaPorted" : "")
             << (DirectLoad ? "_DirectLoad" : "")
             << (LargeTensors ? "_Large_Tensor" : "")
             << "<"

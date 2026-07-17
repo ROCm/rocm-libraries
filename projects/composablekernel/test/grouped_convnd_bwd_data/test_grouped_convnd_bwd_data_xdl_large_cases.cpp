@@ -39,7 +39,7 @@ class TestGroupedConvndBwdDataXdl : public ::testing::Test
                                                                                 DataType,
                                                                                 DataType,
                                                                                 DataType>(
-                                   true,  // do_verification
+                                   1,     // do_verification: 1=CPU reference
                                    1,     // init_method: integer value
                                    false, // do_log
                                    false, // time_kernel

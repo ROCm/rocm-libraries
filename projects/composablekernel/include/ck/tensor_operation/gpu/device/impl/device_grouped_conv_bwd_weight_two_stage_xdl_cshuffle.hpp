@@ -750,16 +750,16 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         WeiElementwiseOperation cde_element_op_;
 
         // for checking IsSupportedArgument()
-        const index_t Conv_G_;
-        const index_t Conv_N_;
-        const index_t Conv_K_;
-        const index_t Conv_C_;
-        std::array<ck::index_t, NDimSpatial> input_spatial_lengths_;
-        std::array<ck::index_t, NDimSpatial> filter_spatial_lengths_;
-        std::array<ck::index_t, NDimSpatial> output_spatial_lengths_;
-        const std::array<ck::index_t, NDimSpatial>& conv_filter_strides_;
-        const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
-        const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
+        const IndexType Conv_G_;
+        const IndexType Conv_N_;
+        const IndexType Conv_K_;
+        const IndexType Conv_C_;
+        std::array<IndexType, NDimSpatial> input_spatial_lengths_;
+        std::array<IndexType, NDimSpatial> filter_spatial_lengths_;
+        std::array<IndexType, NDimSpatial> output_spatial_lengths_;
+        const std::array<IndexType, NDimSpatial>& conv_filter_strides_;
+        const std::array<IndexType, NDimSpatial>& input_left_pads_;
+        const std::array<IndexType, NDimSpatial>& input_right_pads_;
         const index_t k_batch_;
         bool stride_overflow;
     };
@@ -1739,14 +1739,10 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
 
             if constexpr(!LargeTensors)
             {
-                const bool a_small_enough = arg.a_grid_desc_k0_m_k1_.GetElementSpaceSize() /
-                                                (arg.split_k_offset_hack_ ? arg.k_batch_ : 1) *
-                                                sizeof(ADataType) <=
-                                            TwoGB;
-                const bool b_small_enough = arg.b_grid_desc_k0_n_k1_.GetElementSpaceSize() /
-                                                (arg.split_k_offset_hack_ ? arg.k_batch_ : 1) *
-                                                sizeof(BDataType) <=
-                                            TwoGB;
+                const bool a_small_enough =
+                    arg.a_grid_desc_k0_m_k1_.GetElementSpaceSize() * sizeof(ADataType) <= TwoGB;
+                const bool b_small_enough =
+                    arg.b_grid_desc_k0_n_k1_.GetElementSpaceSize() * sizeof(BDataType) <= TwoGB;
                 const bool c_small_enough =
                     arg.ce_grid_desc_m_n_.GetElementSpaceSize() * sizeof(EDataType) <= TwoGB;
                 if(!(a_small_enough && b_small_enough && c_small_enough))

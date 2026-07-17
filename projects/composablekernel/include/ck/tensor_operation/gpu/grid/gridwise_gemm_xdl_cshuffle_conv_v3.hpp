@@ -198,7 +198,8 @@ struct GridwiseGemm_xdl_cshuffle_v3
                          IndexType StrideA_,
                          IndexType StrideB_,
                          IndexType StrideC_,
-                         IndexType KBatch_)
+                         IndexType KBatch_,
+                         IndexType CPhysicalSize_ = 0)
             : M{M_},
               N{N_},
               K{K_},
@@ -206,6 +207,7 @@ struct GridwiseGemm_xdl_cshuffle_v3
               StrideB{StrideB_},
               StrideC{StrideC_},
               KBatch{KBatch_},
+              CPhysicalSize{CPhysicalSize_},
               MPadded{CalculateMPadded(M_)},
               NPadded{CalculateNPadded(N_)},
               KRead{CalculateKRead(K_, KBatch_)},
@@ -243,6 +245,7 @@ struct GridwiseGemm_xdl_cshuffle_v3
         IndexType StrideB;
         IndexType StrideC;
         IndexType KBatch;
+        IndexType CPhysicalSize;
         IndexType MPadded;
         IndexType NPadded;
         IndexType KRead;
@@ -265,8 +268,9 @@ struct GridwiseGemm_xdl_cshuffle_v3
                           IndexType StrideA_,
                           IndexType StrideB_,
                           IndexType StrideC_,
-                          IndexType k_batch_)
-            : Problem{M_, N_, K_, StrideA_, StrideB_, StrideC_, k_batch_},
+                          IndexType k_batch_,
+                          IndexType CPhysicalSize_ = 0)
+            : Problem{M_, N_, K_, StrideA_, StrideB_, StrideC_, k_batch_, CPhysicalSize_},
               p_a_grid{p_a_grid_},
               p_b_grid{p_b_grid_},
               p_c_grid{p_c_grid_}
@@ -669,10 +673,12 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
                                const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                    c_grid_desc_mblock_mperblock_nblock_nperblock,
-                               const index_t k_id = 0)
+                               const index_t k_id        = 0,
+                               const index_t k_batch     = 1,
+                               const index_t block_idx_x = static_cast<index_t>(blockIdx.x))
     {
-        const long_index_t a_space_size_divisor = 1;
-        const long_index_t b_space_size_divisor = 1;
+        const long_index_t a_space_size_divisor = k_batch;
+        const long_index_t b_space_size_divisor = k_batch;
 
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
@@ -682,10 +688,13 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
                                                     IndexType>(
             p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / b_space_size_divisor);
+        const IndexType c_buf_size = (problem.CPhysicalSize > 0)
+                                         ? problem.CPhysicalSize
+                                         : c_grid_desc_mblock_mperblock_nblock_nperblock
+                                               .GetElementSpaceSize();
         auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
-                                                    AmdBufferCoherenceEnum::DefaultCoherence,
-                                                    IndexType>(
-            p_c_grid, c_grid_desc_mblock_mperblock_nblock_nperblock.GetElementSpaceSize());
+                                              AmdBufferCoherenceEnum::DefaultCoherence,
+                                              IndexType>(p_c_grid, c_buf_size);
 
         const AElementwiseOperation a_element_op{};
         const BElementwiseOperation b_element_op{};
@@ -695,7 +704,7 @@ struct GridwiseGemm_xdl_cshuffle_v3
         const auto block_2_ctile_map = Block2CTileMap{problem.M, problem.N, 4};
 
         const auto block_work_idx = block_2_ctile_map.CalculateBottomIndex(
-            make_multi_index(static_cast<index_t>(blockIdx.x)));
+            make_multi_index(block_idx_x));
 
         if(!block_2_ctile_map.ValidCTileIndex(
                block_work_idx,
@@ -957,8 +966,9 @@ struct GridwiseGemm_xdl_cshuffle_v3
                 Sequence<0, 1, 2, 3>,                           // typename DimAccessOrder,
                 3,                                              // index_t VectorDim,
                 CShuffleBlockTransferScalarPerVector_NPerBlock, // index_t ScalarPerVector,
-                true,  // bool ThreadTransferSrcResetCoordinateAfterRun,
-                false> // bool ThreadTransferDstResetCoordinateAfterRun>
+                true,       // bool ThreadTransferSrcResetCoordinateAfterRun,
+                false,      // bool ThreadTransferDstResetCoordinateAfterRun
+                IndexType>  // IndexType for large tensor support
                 {c_shuffle_block_desc_mblock_mperblock_nblock_nperblock,
                  make_multi_index(0, 0, 0, 0),
                  c_grid_desc_mblock_mperblock_nblock_nperblock,
@@ -1040,10 +1050,13 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                     const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
                                     const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                         c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                    const index_t k_id = 0)
+                                    const index_t k_id             = 0,
+                                    const index_t k_batch          = 1,
+                                    const index_t block_idx_x      = static_cast<index_t>(blockIdx.x),
+                                    const IndexType c_physical_size = 0)
     {
-        const long_index_t a_space_size_divisor = 1;
-        const long_index_t b_space_size_divisor = 1;
+        const long_index_t a_space_size_divisor = k_batch;
+        const long_index_t b_space_size_divisor = k_batch;
 
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
@@ -1053,6 +1066,13 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
                                                     IndexType>(
             p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / b_space_size_divisor);
+        const IndexType c_buf_size = (problem.CPhysicalSize > 0)
+                                         ? problem.CPhysicalSize
+                                         : c_grid_desc_mblock_mperblock_nblock_nperblock
+                                               .GetElementSpaceSize();
+        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                              AmdBufferCoherenceEnum::DefaultCoherence,
+                                              IndexType>(p_c_grid, c_buf_size);
 
         const AElementwiseOperation a_element_op{};
         const BElementwiseOperation b_element_op{};
@@ -1062,7 +1082,7 @@ struct GridwiseGemm_xdl_cshuffle_v3
         const auto block_2_ctile_map = Block2CTileMap{problem.M, problem.N, 4};
 
         const auto block_work_idx = block_2_ctile_map.CalculateBottomIndex(
-            make_multi_index(static_cast<index_t>(blockIdx.x)));
+            make_multi_index(block_idx_x));
 
         if(!block_2_ctile_map.ValidCTileIndex(
                block_work_idx,
@@ -1334,8 +1354,9 @@ struct GridwiseGemm_xdl_cshuffle_v3
                 Sequence<0, 1, 2, 3>,                           // typename DimAccessOrder,
                 3,                                              // index_t VectorDim,
                 CShuffleBlockTransferScalarPerVector_NPerBlock, // index_t ScalarPerVector,
-                true,  // bool ThreadTransferSrcResetCoordinateAfterRun,
-                false> // bool ThreadTransferDstResetCoordinateAfterRun>
+                true,       // bool ThreadTransferSrcResetCoordinateAfterRun,
+                false,      // bool ThreadTransferDstResetCoordinateAfterRun
+                IndexType>  // IndexType for large tensor support
                 {c_shuffle_block_desc_mblock_mperblock_nblock_nperblock,
                  make_multi_index(0, 0, 0, 0),
                  c_grid_desc_mblock_mperblock_nblock_nperblock,

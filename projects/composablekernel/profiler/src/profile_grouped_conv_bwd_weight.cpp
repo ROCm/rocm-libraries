@@ -133,7 +133,7 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
                                                                        OutDataType,
                                                                        ComputeTypeA,
                                                                        ComputeTypeB>(
-            do_verification, init_method, do_log, time_kernel, params, split_k);
+            do_verification, init_method, do_log, time_kernel, params, std::to_string(split_k));
 
         return pass ? 0 : 1;
     };

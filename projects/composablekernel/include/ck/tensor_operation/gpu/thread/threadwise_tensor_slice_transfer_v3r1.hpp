@@ -207,25 +207,11 @@ struct ThreadwiseTensorSliceTransfer_v3r1
                 [&](auto i) { return Number<src_data_idx[i]>{}; }, Number<src_data_idx.Size()>{});
 
 
-            using vector_t = typename vector_type_maker<DstData, SrcScalarPerVector>::type::type;
-
             // maintain a container record is_src_valid, waiting for RunWrite use.
-            if constexpr(std::is_same_v<IndexType, long_index_t>)
-            {
-                // Is source valid has been verified during load
-                src_thread_scratch_tuple_(thread_scratch_id)
-                    .template SetAsType<vector_t>(src_data_idx_seq, op_r);
-            }
-            else
-            {
-                const bool is_src_valid = src_oob_thread_scratch_tuple_(thread_scratch_id)
-                                              .template GetAsType<bool>(src_data_idx_seq);
-
-                auto op_r_v = is_src_valid ? op_r : vector_t(0);
-
-                src_thread_scratch_tuple_(thread_scratch_id)
-                    .template SetAsType<vector_t>(src_data_idx_seq, op_r_v);
-            }
+            const bool is_src_valid =
+                coordinate_has_valid_offset_assuming_visible_index_is_valid(src_desc, src_coord_);
+            src_oob_thread_scratch_tuple_(thread_scratch_id)
+                .template SetAsType<bool>(src_data_idx_seq, is_src_valid);
 
             using dst_vector_type = vector_type_maker_t<DstData, SrcScalarPerVector>;
             using dst_vector_t    = typename dst_vector_type::type;
@@ -302,23 +288,21 @@ struct ThreadwiseTensorSliceTransfer_v3r1
                     constexpr auto LoadOffset =
                         tuple_element_t<SrcScalarPerVector, VectorOffsetsLookupTable>::At(v_idx);
 
-                using src_vector_container   = vector_type_maker_t<SrcData, VectorLoadSize>;
-                using src_vector_container_t = typename src_vector_container::type;
                     using src_vector_container   = vector_type_maker_t<SrcData, VectorLoadSize>;
                     using src_vector_container_t = typename src_vector_container::type;
-                // Leave it as a true for buffer load
-                bool is_offset_valid = true;
-                if constexpr(std::is_same_v<IndexType, long_index_t>)
-                {
-                    is_offset_valid = is_src_valid;
-                }
-                else
-                {
-                    static_assert(std::is_same_v<IndexType, index_t>);
-                }
-                const IndexType ld_offset       = src_coord_.GetOffset() / PackedSize + LoadOffset;
-                src_vector_container src_vector = src_vector_container{
-                    src_buf.template Get<src_vector_container_t>(ld_offset, is_offset_valid)};
+                    // Leave it as a true for buffer load
+                    bool is_offset_valid = true;
+                    if constexpr(std::is_same_v<IndexType, long_index_t>)
+                    {
+                        is_offset_valid = is_src_valid;
+                    }
+                    else
+                    {
+                        static_assert(std::is_same_v<IndexType, index_t>);
+                    }
+                    const IndexType ld_offset       = src_coord_.GetOffset() / PackedSize + LoadOffset;
+                    src_vector_container src_vector = src_vector_container{
+                        src_buf.template Get<src_vector_container_t>(ld_offset, is_offset_valid)};
 
                     static_for<0, VectorLoadSize / elem_op_vec_len, 1>{}([&](auto idx) {
                         // apply the src elementwise op and convert to DstData under the hood if
@@ -450,13 +434,23 @@ struct ThreadwiseTensorSliceTransfer_v3r1
             auto op_r = src_thread_scratch_tuple_(thread_scratch_id)
                             .template GetAsType<vector_t>(src_data_idx_seq);
 
-            const bool is_src_valid = src_oob_thread_scratch_tuple_(thread_scratch_id)
-                                          .template GetAsType<bool>(src_data_idx_seq);
+            // maintain a container record is_src_valid, waiting for RunWrite use.
+            if constexpr(std::is_same_v<IndexType, long_index_t>)
+            {
+                // Is source valid has been verified during load
+                src_thread_scratch_tuple_(thread_scratch_id)
+                    .template SetAsType<vector_t>(src_data_idx_seq, op_r);
+            }
+            else
+            {
+                const bool is_src_valid = src_oob_thread_scratch_tuple_(thread_scratch_id)
+                                              .template GetAsType<bool>(src_data_idx_seq);
 
-            auto op_r_v = is_src_valid ? op_r : vector_t(0);
+                auto op_r_v = is_src_valid ? op_r : vector_t(0);
 
-            src_thread_scratch_tuple_(thread_scratch_id)
-                .template SetAsType<vector_t>(src_data_idx_seq, op_r_v);
+                src_thread_scratch_tuple_(thread_scratch_id)
+                    .template SetAsType<vector_t>(src_data_idx_seq, op_r_v);
+            }
         });
 
         // sub-dword transpose between src_thread_scratch_ and dst_thread_scratch_

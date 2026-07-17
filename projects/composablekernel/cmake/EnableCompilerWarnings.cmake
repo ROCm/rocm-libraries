@@ -66,11 +66,16 @@ else()
             -Wunreachable-code
             -Wunused
             -Wno-reserved-identifier
-            -Werror
+            # Werror set outside by BUILD_DEV
+            # -Werror
             -Wno-option-ignored
             -Wsign-compare
             -Wno-extra-semi-stmt
             -Wno-unused-template
+            -Wno-lifetime-safety-intra-tu-suggestions
+            -Wno-lifetime-safety-cross-tu-suggestions
+            -Wno-lifetime-safety-lifetimebound-violation
+            -Wno-unknown-warning-option
         )
         if (CMAKE_${COMPILER}_COMPILER_ID MATCHES "Clang")
             list(APPEND CMAKE_COMPILER_WARNINGS
@@ -97,6 +102,11 @@ else()
                 -Wno-unsafe-buffer-usage
                 -Wno-unused-lambda-capture
                 -Wno-nvcc-compat
+                -Wno-lifetime-safety-intra-tu-suggestions
+                -Wno-lifetime-safety-cross-tu-suggestions
+                -Wno-lifetime-safety-lifetimebound-violation
+                -Wno-unknown-warning-option
+                -Wno-c2y-extensions
             )
         else()
             if (CMAKE_${COMPILER}_COMPILER_ID MATCHES "GNU" AND ${COMPILER} MATCHES "CXX")
