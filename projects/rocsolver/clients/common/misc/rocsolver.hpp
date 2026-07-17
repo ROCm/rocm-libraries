@@ -374,6 +374,7 @@ rocblas_status rocsolver_zlaset(rocblas_handle handle,
                                 rocblas_stride const strideA,
                                 rocblas_int const batch_count);
 
+/******************** sb2st/hb2st ********************/
 rocblas_status rocsolver_ssb2st(rocblas_handle handle,
                                 rocblas_fill uplo,
                                 const rocblas_int n,
@@ -470,6 +471,7 @@ rocblas_status rocsolver_zhb2st_64(rocblas_handle handle,
                                    const int64_t ldv,
                                    rocblas_double_complex* tau);
 
+/******************** sy2sb/he2hb ********************/
 rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
                                 const rocblas_fill uplo,
                                 const rocblas_int n,
@@ -557,6 +559,103 @@ rocblas_status rocsolver_zhe2hb_64(rocblas_handle handle,
                                    rocblas_double_complex* Aband,
                                    const int64_t ldab,
                                    rocblas_double_complex* tau);
+
+/******************** ormtr_sb2st/unmtr_hb2st ********************/
+rocblas_status rocsolver_sormtr_sb2st(rocblas_handle handle,
+                                      const rocblas_side side,
+                                      const rocblas_operation trans,
+                                      const rocblas_int m,
+                                      const rocblas_int n,
+                                      const rocblas_int kd,
+                                      float* V,
+                                      const rocblas_int ldv,
+                                      float* tau,
+                                      float* C,
+                                      const rocblas_int ldc);
+
+rocblas_status rocsolver_dormtr_sb2st(rocblas_handle handle,
+                                      const rocblas_side side,
+                                      const rocblas_operation trans,
+                                      const rocblas_int m,
+                                      const rocblas_int n,
+                                      const rocblas_int kd,
+                                      double* V,
+                                      const rocblas_int ldv,
+                                      double* tau,
+                                      double* C,
+                                      const rocblas_int ldc);
+
+rocblas_status rocsolver_sormtr_sb2st_64(rocblas_handle handle,
+                                         const rocblas_side side,
+                                         const rocblas_operation trans,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         const int64_t kd,
+                                         float* V,
+                                         const int64_t ldv,
+                                         float* tau,
+                                         float* C,
+                                         const int64_t ldc);
+
+rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
+                                         const rocblas_side side,
+                                         const rocblas_operation trans,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         const int64_t kd,
+                                         double* V,
+                                         const int64_t ldv,
+                                         double* tau,
+                                         double* C,
+                                         const int64_t ldc);
+
+rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
+                                      const rocblas_side side,
+                                      const rocblas_operation trans,
+                                      const rocblas_int m,
+                                      const rocblas_int n,
+                                      const rocblas_int kd,
+                                      rocblas_float_complex* V,
+                                      const rocblas_int ldv,
+                                      rocblas_float_complex* tau,
+                                      rocblas_float_complex* C,
+                                      const rocblas_int ldc);
+
+rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
+                                      const rocblas_side side,
+                                      const rocblas_operation trans,
+                                      const rocblas_int m,
+                                      const rocblas_int n,
+                                      const rocblas_int kd,
+                                      rocblas_double_complex* V,
+                                      const rocblas_int ldv,
+                                      rocblas_double_complex* tau,
+                                      rocblas_double_complex* C,
+                                      const rocblas_int ldc);
+
+rocblas_status rocsolver_cunmtr_hb2st_64(rocblas_handle handle,
+                                         const rocblas_side side,
+                                         const rocblas_operation trans,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         const int64_t kd,
+                                         rocblas_float_complex* V,
+                                         const int64_t ldv,
+                                         rocblas_float_complex* tau,
+                                         rocblas_float_complex* C,
+                                         const int64_t ldc);
+
+rocblas_status rocsolver_zunmtr_hb2st_64(rocblas_handle handle,
+                                         const rocblas_side side,
+                                         const rocblas_operation trans,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         const int64_t kd,
+                                         rocblas_double_complex* V,
+                                         const int64_t ldv,
+                                         rocblas_double_complex* tau,
+                                         rocblas_double_complex* C,
+                                         const int64_t ldc);
 
 rocblas_status rocsolver_sstedcx(rocblas_handle handle,
                                  const rocblas_evect evect,

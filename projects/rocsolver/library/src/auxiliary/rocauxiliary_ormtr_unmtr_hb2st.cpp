@@ -147,6 +147,7 @@ ROCSOLVER_END_NAMESPACE
 
 extern "C" {
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_sormtr_sb2st(rocblas_handle handle,
                                       const rocblas_side side,
                                       const rocblas_operation trans,
@@ -167,6 +168,7 @@ rocblas_status rocsolver_sormtr_sb2st(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_dormtr_sb2st(rocblas_handle handle,
                                       const rocblas_side side,
                                       const rocblas_operation trans,
@@ -187,6 +189,7 @@ rocblas_status rocsolver_dormtr_sb2st(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
                                       const rocblas_side side,
                                       const rocblas_operation trans,
@@ -207,6 +210,7 @@ rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
                                       const rocblas_side side,
                                       const rocblas_operation trans,
@@ -227,6 +231,7 @@ rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_sormtr_sb2st_64(rocblas_handle handle,
                                          const rocblas_side side,
                                          const rocblas_operation trans,
@@ -247,6 +252,7 @@ rocblas_status rocsolver_sormtr_sb2st_64(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
                                          const rocblas_side side,
                                          const rocblas_operation trans,
@@ -267,6 +273,7 @@ rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_cunmtr_hb2st_64(rocblas_handle handle,
                                          const rocblas_side side,
                                          const rocblas_operation trans,
@@ -287,6 +294,7 @@ rocblas_status rocsolver_cunmtr_hb2st_64(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT
 rocblas_status rocsolver_zunmtr_hb2st_64(rocblas_handle handle,
                                          const rocblas_side side,
                                          const rocblas_operation trans,
