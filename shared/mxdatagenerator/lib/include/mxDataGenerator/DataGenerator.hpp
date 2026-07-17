@@ -545,11 +545,8 @@ namespace DGen
         if(sorted_stride[0] != 1)
             throw std::invalid_argument("Invalid dimensions: the smallest stride must be 1.");
 
-        // assume dimension of contiguous elements is a multiple of block size
-        if(sorted_size[0] % options.blockScaling != 0)
-            throw std::invalid_argument(
-                "Invalid block scaling: dimension of contiguous elements must "
-                "be a multiple of block size.");
+        // Misaligned contiguous dimensions (K not a multiple of mxBlock) are padded
+        // internally by generateMXInput callers; generation proceeds on padded sizes.
 
         // find array sizes (unpacked)
         m_dataDesc.array_size = sorted_stride[n_size - 1] * sorted_size[n_size - 1];

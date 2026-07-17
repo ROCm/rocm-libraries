@@ -596,3 +596,22 @@ TEST(DataGeneratorDecoupledScale, BoundedDataWithOnesScale)
             ++meaningful;
     EXPECT_GT(meaningful, 0);
 }
+
+// generateMXInput pads misaligned K to the next mxBlock multiple internally.
+TEST(MxDataGeneratorMisalignedK, BoundedMxfp6PaddedK160DoesNotThrow)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling = 32;
+    opts.initMode     = Bounded{};
+    opts.min          = -1.0;
+    opts.max          = 1.0;
+
+    constexpr index_t kRows = 160; // padded form of stinky_sia4 K=136
+    constexpr index_t kCols = 128;
+    std::vector<index_t> sizes{kRows, kCols};
+    std::vector<index_t> strides{1, kRows};
+
+    DataGenerator<ocp_e2m3_mxfp6> dgen;
+    EXPECT_NO_THROW(dgen.generate(sizes, strides, opts));
+    EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(kCols * (kRows / opts.blockScaling)));
+}
