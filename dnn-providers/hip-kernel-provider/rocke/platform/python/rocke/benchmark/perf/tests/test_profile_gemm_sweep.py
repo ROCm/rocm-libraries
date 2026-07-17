@@ -3,6 +3,7 @@
 """Unit tests for the GEMM-sweep example's pure wiring (no GPU, no rocKE)."""
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from rocke.benchmark.perf import schema
 from rocke.benchmark.perf.tool import store, selfcheck
@@ -19,7 +20,7 @@ def _fake_record(
     shape=None,
     warmup=0,
     warn=None,
-    _busy=[100]
+    _busy=[100],
 ):
     """Stand-in for harness.profile: identity from label, counters from a counter."""
     counters = {"busy_cycles": _busy[0], "total_clocks": 1000}
@@ -45,6 +46,76 @@ class TestLaunchCmd(unittest.TestCase):
         self.assertIn("rocke.run_manifest", cmd)
         self.assertEqual(cmd[-3:], ["--shape", "512,256,128", "--verify"])
         self.assertIn("/t/a.hsaco", cmd)
+
+
+def _planned(cache_key, shape=(8, 16, 32)):
+    return SimpleNamespace(
+        cache_key=cache_key,
+        shape=SimpleNamespace(M=shape[0], N=shape[1], K=shape[2]),
+    )
+
+
+def _build(cache_key, *, ok=True, error=""):
+    return SimpleNamespace(
+        cache_key=cache_key,
+        ok=ok,
+        error=error,
+        kernel_name=f"kernel_{cache_key}",
+        hsaco_path=f"/{cache_key}.hsaco",
+        manifest_path=f"/{cache_key}.json",
+    )
+
+
+class TestBuildValidation(unittest.TestCase):
+    def test_all_builds_succeed(self):
+        plan = SimpleNamespace(variants=[_planned("a"), _planned("b")])
+        variants = ex._validated_variants(plan, [_build("a"), _build("b")])
+        self.assertEqual([variant.cache_key for variant in variants], ["a", "b"])
+
+    def test_partial_build_failure_is_reported(self):
+        plan = SimpleNamespace(variants=[_planned("a"), _planned("b")])
+        with self.assertRaises(RuntimeError) as caught:
+            ex._validated_variants(
+                plan, [_build("a"), _build("b", ok=False, error="compiler failed")]
+            )
+        self.assertIn("1 of 2", str(caught.exception))
+        self.assertIn("b: compiler failed", str(caught.exception))
+
+    def test_all_builds_failed_is_reported(self):
+        plan = SimpleNamespace(variants=[_planned("a"), _planned("b")])
+        with self.assertRaisesRegex(RuntimeError, "2 of 2"):
+            ex._validated_variants(
+                plan,
+                [
+                    _build("a", ok=False, error="first failed"),
+                    _build("b", ok=False, error="second failed"),
+                ],
+            )
+
+    def test_missing_build_record_is_reported(self):
+        plan = SimpleNamespace(variants=[_planned("a")])
+        with self.assertRaisesRegex(RuntimeError, "a: missing build record"):
+            ex._validated_variants(plan, [])
+
+    def test_empty_plan_is_reported_separately(self):
+        plan = SimpleNamespace(variants=[])
+        with self.assertRaisesRegex(RuntimeError, "no applicable variants"):
+            ex._validated_variants(plan, [])
+
+
+class TestMain(unittest.TestCase):
+    def test_build_failure_exits_nonzero(self):
+        original = ex.profile_sweep
+
+        def fail_sweep(*args, **kwargs):
+            raise RuntimeError("1 of 1 planned variants failed to build")
+
+        ex.profile_sweep = fail_sweep
+        try:
+            with self.assertRaisesRegex(SystemExit, "profile_gemm_sweep: 1 of 1"):
+                ex.main(["--arch", "gfx950", "--shape", "8x8x8"])
+        finally:
+            ex.profile_sweep = original
 
 
 class TestProfileVariants(unittest.TestCase):

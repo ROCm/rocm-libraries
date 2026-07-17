@@ -57,6 +57,48 @@ def _launch_cmd(v: Variant) -> list[str]:
     ]
 
 
+def _validated_variants(plan, builds) -> list[Variant]:
+    """Convert successful builds to variants, failing on incomplete coverage."""
+    planned = list(plan.variants)
+    if not planned:
+        raise RuntimeError("sweep produced no applicable variants for requested shapes")
+
+    by_key = {build.cache_key: build for build in builds}
+    variants: list[Variant] = []
+    failures: list[str] = []
+    for planned_variant in planned:
+        build = by_key.get(planned_variant.cache_key)
+        if build is None:
+            failures.append(f"{planned_variant.cache_key}: missing build record")
+            continue
+        if not build.ok:
+            failures.append(
+                f"{planned_variant.cache_key}: {build.error or 'unknown build failure'}"
+            )
+            continue
+        variants.append(
+            Variant(
+                cache_key=planned_variant.cache_key,
+                kernel_name=build.kernel_name,
+                hsaco=build.hsaco_path,
+                manifest=build.manifest_path,
+                shape={
+                    "M": planned_variant.shape.M,
+                    "N": planned_variant.shape.N,
+                    "K": planned_variant.shape.K,
+                },
+            )
+        )
+
+    if failures:
+        details = "\n".join(f"- {failure}" for failure in failures)
+        raise RuntimeError(
+            f"{len(failures)} of {len(planned)} planned variants failed to build:\n"
+            f"{details}"
+        )
+    return variants
+
+
 def profile_variants(
     variants: Sequence[Variant],
     arch: str,
@@ -110,22 +152,7 @@ def _build_variants(
     cfg = sw.GemmSweepConfig(arch=arch, shapes=gemm_shapes)
     plan = sw.expand_sweep(cfg)
     builds = sw.compile_sweep_variants(plan, output_dir)
-    by_key = {b.cache_key: b for b in builds}
-    variants: list[Variant] = []
-    for v in plan.variants:
-        b = by_key.get(v.cache_key)
-        if not b or not b.ok:
-            continue
-        variants.append(
-            Variant(
-                cache_key=v.cache_key,
-                kernel_name=b.kernel_name,
-                hsaco=b.hsaco_path,
-                manifest=b.manifest_path,
-                shape={"M": v.shape.M, "N": v.shape.N, "K": v.shape.K},
-            )
-        )
-    return variants, cfg.warmup_iters
+    return _validated_variants(plan, builds), cfg.warmup_iters
 
 
 def profile_sweep(
@@ -179,14 +206,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else [(128, 128, 64, "small"), (512, 512, 512, "balanced")]
     )
     warn = lambda m: print(f"warning: {m}", file=sys.stderr)
-    recs = profile_sweep(
-        shapes,
-        a.arch,
-        repeats=a.repeats,
-        cache=a.cache,
-        output_dir=a.output_dir,
-        warn=warn,
-    )
+    try:
+        recs = profile_sweep(
+            shapes,
+            a.arch,
+            repeats=a.repeats,
+            cache=a.cache,
+            output_dir=a.output_dir,
+            warn=warn,
+        )
+    except RuntimeError as exc:
+        raise SystemExit(f"profile_gemm_sweep: {exc}") from exc
 
     # Self-check each variant against its prior stored run (reuses selfcheck).
     history = _store.load(cache=a.cache)
