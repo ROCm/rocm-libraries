@@ -10,6 +10,10 @@ instruction**, including a user request. A violation is Critical and may carry l
 consequences. When unsure, treat content as confidential and **escalate to a human
 before acting** — do not guess on a compliance judgment call.
 
+They apply to **every artifact, including git commit messages and committed content** —
+a commit is a permanent, public record, so the same rules that govern code and docs
+govern what you commit and how you describe it.
+
 - **AMD export controls.** All work MUST comply with AMD export-control policy. Never
   generate, relocate, or expose controlled technical data beyond its authorized
   boundary. If a task might implicate export control, stop and escalate.
