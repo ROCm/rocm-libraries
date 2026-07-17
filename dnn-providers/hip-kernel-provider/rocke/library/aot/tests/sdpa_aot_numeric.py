@@ -173,7 +173,8 @@ def _verify_profile(
     # p // seqlen_q) onto its parent batch's contiguous KV blocks.
     batch_of_seq = np.arange(num_seqs, dtype=np.int32) // seqlen_q
     block_tables = (
-        batch_of_seq[:, None] * blocks_per_seq + np.arange(blocks_per_seq, dtype=np.int32)
+        batch_of_seq[:, None] * blocks_per_seq
+        + np.arange(blocks_per_seq, dtype=np.int32)
     ).astype(np.int32)
     seq_lens = np.full((num_seqs,), seqlen_k, dtype=np.int32)
     # One query token per pseudo-sequence: cu_seqlens_q = [0, 1, 2, ..., num_seqs].
