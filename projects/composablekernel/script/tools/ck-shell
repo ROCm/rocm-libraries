@@ -36,7 +36,7 @@ Environment:
 Examples:
   ck-shell                           # Open interactive shell
   ck-shell my_container              # Open shell in specific container
-  ck-shell -c "rocm-smi"             # Execute single command
+  ck-shell -c "ck_smi_show_gpu_info"  # GPU info via SMI wrapper (rocm-smi or amd-smi)
   ck-shell -c "cd build && ls bin"   # Execute command in build directory
 
 EOF
