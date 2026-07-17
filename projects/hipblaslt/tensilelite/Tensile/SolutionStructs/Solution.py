@@ -1052,13 +1052,20 @@ class Solution(collections.abc.Mapping):
     # FP6 -> 4 (3 bytes = exactly 4 packed 6-bit elements).
     usesTDM = tc in ("A", "B", "MXSA", "MXSB") and state.get("TDMInst", 0) == 3
     if usesTDM:
+      # Sub-byte floor: GRVW*bpe must be a whole number of bytes for a real
+      # load instruction (FP4 -> 2, FP6 -> 4).
       tdmGrvw = 1
       if tc in ("A", "B"):
         if state["ProblemType"]["DataType%s"%tc].isFloat4():
           tdmGrvw = 2
         elif state["ProblemType"]["DataType%s"%tc].is6bitFloat():
           tdmGrvw = 4
-      state["GlobalReadVectorWidth%s"%tc] = tdmGrvw
+      # Keep the natural GRVW (only raise it to the sub-byte floor). GRVW is
+      # unused by TDM code generation itself, but it still feeds the gfx12
+      # 8-bit G2L VGPR reserve (KernelWriter: bpr/vwmx* multiplier). Forcing it
+      # to 1 inflated that reserve ~4x and overflowed the 1024 VGPR limit, so
+      # preserve the requested width here.
+      state["GlobalReadVectorWidth%s"%tc] = max(grvw, tdmGrvw)
       state["NumLoads%s"%tc] = 1
       state["NumLoadsCoalesced%s"%tc] = 1
       state["NumLoadsPerpendicular%s"%tc] = 1
