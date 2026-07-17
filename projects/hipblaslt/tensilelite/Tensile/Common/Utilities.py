@@ -361,6 +361,10 @@ def isRhel8() -> bool:
 # Math
 ########################################
 
+def clusterEnabled(clusterDim):
+    """True when a workgroup cluster is requested (ClusterDim [x, y] is not [1, 1])."""
+    return (clusterDim[0] * clusterDim[1]) != 1
+
 def log2(x):
     return int(log(x, 2) + 0.5)
 

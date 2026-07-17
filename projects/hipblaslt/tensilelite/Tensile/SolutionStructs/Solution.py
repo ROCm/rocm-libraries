@@ -180,6 +180,45 @@ def _disableUnsupportedRuntimeStaggerU(state):
     _disableRuntimeStaggerU(state)
 
 
+def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
+  # TODO: TEMPORARY FIX. Encodes the trigger for the subtile global-read
+  # cooperative-group + K-partition LDS bug (see fix_subtile_gr_missing_k_partition):
+  # when one buffer_load covers multiple consecutive M-subtiles (loadRatioGR > 1)
+  # and the per-wave M-subtile count (localSubtileGrid[0]) is not a multiple of
+  # loadRatioGR, the last partial M-group writes a "ghost" slot that overlaps the
+  # next K-partition's data, and the K>=1 representative subtile can be silently
+  # dropped. This only manifests when there is more than one K-partition
+  # (localSubtileGrid[1] > 1). Remove once the emit-side fix lands.
+  return (loadRatioGR > 1
+          and localSubtileGrid[1] > 1
+          and localSubtileGrid[0] % int(loadRatioGR) != 0)
+
+
+def _validateSubtileGRKPartition(state, printRejectionReason):
+  # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
+  # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
+  # fix_subtile_gr_missing_k_partition is merged.
+  if not state["UseSubtileImpl"]:
+    return True
+  if tuple(state["ISA"]) != (9, 5, 0):
+    return True
+  # Lazy import: Components/Subtile pulls the Components package and would
+  # deadlock at module-load time if imported from Solution.py's top level.
+  from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
+  for tc in ("A", "B"):
+    tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
+    loadRatioGR = tileInfo.loadRatioGR
+    localSubtileGrid = tileInfo.localSubtileGrid
+    if _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
+      reject(state, printRejectionReason,
+             "UseSubtileImpl=1 hits the subtile GR K-partition bug on tensor %s: "
+             "loadRatioGR=%s with localSubtileGrid=%s (M-subtile count %d is not a "
+             "multiple of loadRatioGR and there is more than one K-partition)"
+             % (tc, loadRatioGR, localSubtileGrid, localSubtileGrid[0]))
+      return False
+  return True
+
+
 def _validateStreamKForceDPOnly(state, printRejectionReason):
   if state["StreamKForceDPOnly"]:
     if state["StreamK"] != 3:
@@ -974,7 +1013,10 @@ class Solution(collections.abc.Mapping):
 
     state["Multicast"] = False
     state["ClusterBarrier"] = False
-    if state["ClusterDim"] != [1, 1]:
+    # Multicast uses a mask fixed to the physical cluster position, but Stream-K remaps
+    # each WG's tile per iteration, so the broadcast would target the wrong partner.
+    # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K.
+    if state["ClusterDim"] != [1, 1] and state["StreamK"] == 0:
       state["Multicast"] = True
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
       if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
@@ -997,6 +1039,31 @@ class Solution(collections.abc.Mapping):
     # Skip GRVW range check for subtile impl: scale uses serial*loadWidth DTL addressing, not standard GRVW chunks
     if grvw not in [1,2,4,8,16,32] and not state["UseSubtileImpl"]:
       validDepthU = False
+    # TDM uses tensor_load_to_lds (not per-thread buffer_load), so the
+    # per-thread NumLoads* tile-split params are meaningless — normalize them
+    # to 1 so the later setGlobalLoadTileDimClassic nlc/nlp checks stay
+    # consistent. GRVW is kept as small as possible so small-size solution
+    # rejection still fires, but the global-read width (GRVW*bpe/bpr) must map
+    # to a real load instruction: the smallest is b8 = 0.25 dwords (1 byte),
+    # and the matcher requires width to be a whole multiple of it. That means
+    # GRVW*bpe must be a whole number of bytes. For sub-byte types GRVW=1 is
+    # too small (FP4: 0.5B -> 0.125 dw; FP6: 0.75B -> 0.1875 dw), so bump GRVW
+    # to the minimum that yields an integer byte count: FP4 -> 2 (1 byte),
+    # FP6 -> 4 (3 bytes = exactly 4 packed 6-bit elements).
+    usesTDM = tc in ("A", "B", "MXSA", "MXSB") and state.get("TDMInst", 0) == 3
+    if usesTDM:
+      tdmGrvw = 1
+      if tc in ("A", "B"):
+        if state["ProblemType"]["DataType%s"%tc].isFloat4():
+          tdmGrvw = 2
+        elif state["ProblemType"]["DataType%s"%tc].is6bitFloat():
+          tdmGrvw = 4
+      state["GlobalReadVectorWidth%s"%tc] = tdmGrvw
+      state["NumLoads%s"%tc] = 1
+      state["NumLoadsCoalesced%s"%tc] = 1
+      state["NumLoadsPerpendicular%s"%tc] = 1
+      return validDepthU
+
     if totalVectors % state["NumThreads"] != 0:
       reject(state, printRejectionReason, "totalVectors%s %u %% NumThreads %u != 0" \
           % (tc, totalVectors, state["NumThreads"]))
@@ -1587,6 +1654,20 @@ class Solution(collections.abc.Mapping):
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
+      if state["ClusterDim"] != [1, 1]:
+        # Only SK3 (two-tile DP-first) is cluster-aware; SK4 (dynamic per-XCD
+        # work queues) and SK5 (hybrid) have no cluster WG-id decode support.
+        if state["StreamK"] in (4, 5):
+          reject(state, printRejectionReason,
+                 "Stream-K modes 4 and 5 do not support ClusterDim != [1, 1]")
+        # Stream-K launches a 1-D grid in X, so StreamKIdx = WorkGroup0 = cluster_x*nwg_x
+        # + wg_x must stay a unique linear index. A Y-extent > 1 collides WorkGroup0 across
+        # WGs that differ only in Y, so restrict clustering to the X dimension.
+        if state["ClusterDim"][1] != 1:
+          reject(state, printRejectionReason,
+                 "Stream-K + ClusterDim requires ClusterDim Y-extent == 1")
+        # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
+        state["StreamKXCCMapping"] = 0
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
       # if state["PersistentKernel"]:
@@ -2826,6 +2907,11 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["MXBlockB"]:
         state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
+
+      # Runs here (not earlier) because it needs MacroTileA/B and _DepthUA/B,
+      # which TileInfo reads and which are only set by this point.
+      if not _validateSubtileGRKPartition(state, printRejectionReason):
+        return
 
       # fp6 doesn't support LDS padding yet.
       for tc in ["A", "B"]:
