@@ -7,6 +7,8 @@
 
 #if MIOPEN_USE_HIPBLASLT
 
+#include <miopen/export_internals.h>
+
 #include <cstddef>
 #include <memory>
 
@@ -42,7 +44,8 @@ struct hipblaslt_gemm_cache_key
 
 struct hipblaslt_gemm_cache_key_hash
 {
-    std::size_t operator()(const hipblaslt_gemm_cache_key& k) const noexcept;
+    MIOPEN_INTERNALS_EXPORT std::size_t
+    operator()(const hipblaslt_gemm_cache_key& k) const noexcept;
 };
 
 // Owns the hipBLASLt objects associated with a single cached shape. Defined in
@@ -62,8 +65,8 @@ struct hipblaslt_gemm_cache_entry;
 class hipblaslt_gemm_cache
 {
 public:
-    hipblaslt_gemm_cache();
-    ~hipblaslt_gemm_cache();
+    MIOPEN_INTERNALS_EXPORT hipblaslt_gemm_cache();
+    MIOPEN_INTERNALS_EXPORT ~hipblaslt_gemm_cache();
 
     hipblaslt_gemm_cache(const hipblaslt_gemm_cache&)            = delete;
     hipblaslt_gemm_cache& operator=(const hipblaslt_gemm_cache&) = delete;
@@ -71,13 +74,14 @@ public:
     hipblaslt_gemm_cache& operator=(hipblaslt_gemm_cache&&)      = delete;
 
     // Returns the entry for `key` if present, otherwise nullptr.
-    hipblaslt_gemm_cache_entry* find(const hipblaslt_gemm_cache_key& key) const;
+    MIOPEN_INTERNALS_EXPORT hipblaslt_gemm_cache_entry*
+    find(const hipblaslt_gemm_cache_key& key) const;
 
     // Inserts `entry` under `key` if no entry exists yet, and returns the
     // resident entry (which may be the just-inserted one or one inserted
     // concurrently between the caller's find and this insert).
-    hipblaslt_gemm_cache_entry* insert(const hipblaslt_gemm_cache_key& key,
-                                       std::unique_ptr<hipblaslt_gemm_cache_entry> entry);
+    MIOPEN_INTERNALS_EXPORT hipblaslt_gemm_cache_entry*
+    insert(const hipblaslt_gemm_cache_key& key, std::unique_ptr<hipblaslt_gemm_cache_entry> entry);
 
 private:
     struct impl;
