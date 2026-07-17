@@ -21,7 +21,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_fwd_multiple_abd.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
-#include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_v3.hpp"
+#include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_v3_multi_d.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_elementwise_2d.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
 #include "ck/host_utility/device_prop.hpp"
@@ -62,10 +62,11 @@ namespace {
  *
  */
 template <typename GridwiseGemm,
+          typename ComputePtrOffset,
           typename AGridDesc_AK0_M_K1,
           typename BGridDesc_BK0_N_K1,
-          typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-          typename ComputePtrOffset,
+          typename DsGridDesc_M_N,
+          typename EGridDesc_M_N,
           bool HasMainKBlockLoop,
           InMemoryDataOperationEnum CGlobalMemoryDataOperation,
           index_t MinimumOccupancy = 1,
@@ -78,21 +79,29 @@ __global__ void
             typename GridwiseGemm::Argument karg,
             [[maybe_unused]] const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
             [[maybe_unused]] const BGridDesc_BK0_N_K1 b_grid_desc_bk0_n_bk1,
-            [[maybe_unused]] const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock
-                c_grid_desc_mblock_mperblock_nblock_nperblock,
+            [[maybe_unused]] const DsGridDesc_M_N ds_grid_desc_m_n,
+            [[maybe_unused]] const EGridDesc_M_N c_grid_desc_m_n,
             [[maybe_unused]] const ComputePtrOffset compute_ptr_offset_of_groups,
             [[maybe_unused]] const ComputePtrOffset compute_ptr_offset_of_n)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx9__))
-    // offset base pointer for each work-group
     const index_t g_idx = __builtin_amdgcn_readfirstlane(blockIdx.y);
     const index_t n_idx = __builtin_amdgcn_readfirstlane(blockIdx.z);
 
-    const long_index_t a_batch_offset =
+    static constexpr index_t NumDTensor = GridwiseGemm::NumDTensor;
+    using DsGridPointer                 = typename GridwiseGemm::DsGridPointer;
+    DsGridPointer p_ds_grid_grp{};
+    static_for<0, NumDTensor, 1>{}([&](auto i) {
+        p_ds_grid_grp(i) = karg.p_ds_grid[i] +
+                           compute_ptr_offset_of_n.GetDsPtrOffset(n_idx)[i] +
+                           compute_ptr_offset_of_groups.GetDsPtrOffset(g_idx)[i];
+    });
+
+    const long_index_t a_group_offset =
         amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetAPtrOffset(g_idx));
-    const long_index_t b_batch_offset =
+    const long_index_t b_group_offset =
         amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetBPtrOffset(g_idx));
-    const long_index_t e_batch_offset =
+    const long_index_t e_group_offset =
         amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetEPtrOffset(g_idx));
 
     const long_index_t a_n_offset =
@@ -102,29 +111,44 @@ __global__ void
 
     __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
-    GridwiseGemm::template Run<AGridDesc_AK0_M_K1,
-                               BGridDesc_BK0_N_K1,
-                               CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+    using Block2CTileMap         = typename GridwiseGemm::Block2CTileMapDefault;
+    const auto block_2_ctile_map = Block2CTileMap{karg.M, karg.N, 4};
+
+    GridwiseGemm::template Run<Block2CTileMap,
                                HasMainKBlockLoop,
                                CGlobalMemoryDataOperation,
-                               TailNum>(karg.p_a_grid + a_batch_offset + a_n_offset,
-                                        karg.p_b_grid + b_batch_offset,
-                                        karg.p_c_grid + e_batch_offset + e_n_offset,
-                                        p_shared,
-                                        karg,
-                                        a_grid_desc_ak0_m_ak1,
-                                        b_grid_desc_bk0_n_bk1,
-                                        c_grid_desc_mblock_mperblock_nblock_nperblock);
+                               TailNum>(
+        karg.p_a_grid + a_group_offset + a_n_offset,
+        karg.p_b_grid + b_group_offset,
+        p_ds_grid_grp,
+        karg.p_c_grid + e_group_offset + e_n_offset,
+        p_shared,
+        karg,
+        karg.a_element_op,
+        karg.b_element_op,
+        karg.c_element_op,
+        block_2_ctile_map,
+        a_grid_desc_ak0_m_ak1,
+        b_grid_desc_bk0_n_bk1,
+        ds_grid_desc_m_n,
+        c_grid_desc_m_n);
 #else
     ignore = karg;
-#endif // end of if (defined(__gfx9__))
+    ignore = a_grid_desc_ak0_m_ak1;
+    ignore = b_grid_desc_bk0_n_bk1;
+    ignore = ds_grid_desc_m_n;
+    ignore = c_grid_desc_m_n;
+    ignore = compute_ptr_offset_of_groups;
+    ignore = compute_ptr_offset_of_n;
+#endif
 }
 
 template <typename GridwiseGemm,
+          typename ComputePtrOffset,
           typename AGridDesc_AK0_M_K1,
           typename BGridDesc_BK0_N_K1,
-          typename CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-          typename ComputePtrOffset,
+          typename DsGridDesc_M_N,
+          typename EGridDesc_M_N,
           bool HasMainKBlockLoop,
           InMemoryDataOperationEnum CGlobalMemoryDataOperation,
           index_t MinimumOccupancy = 1,
@@ -137,21 +161,29 @@ __global__ void
             typename GridwiseGemm::Argument karg,
             [[maybe_unused]] const AGridDesc_AK0_M_K1 a_grid_desc_ak0_m_ak1,
             [[maybe_unused]] const BGridDesc_BK0_N_K1 b_grid_desc_bk0_n_bk1,
-            [[maybe_unused]] const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock
-                c_grid_desc_mblock_mperblock_nblock_nperblock,
+            [[maybe_unused]] const DsGridDesc_M_N ds_grid_desc_m_n,
+            [[maybe_unused]] const EGridDesc_M_N c_grid_desc_m_n,
             [[maybe_unused]] const ComputePtrOffset compute_ptr_offset_of_groups,
             [[maybe_unused]] const ComputePtrOffset compute_ptr_offset_of_n)
 {
 #if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx9__))
-    // offset base pointer for each work-group
     const index_t g_idx = __builtin_amdgcn_readfirstlane(blockIdx.y);
     const index_t n_idx = __builtin_amdgcn_readfirstlane(blockIdx.z);
 
-    const long_index_t a_batch_offset =
+    static constexpr index_t NumDTensor = GridwiseGemm::NumDTensor;
+    using DsGridPointer                 = typename GridwiseGemm::DsGridPointer;
+    DsGridPointer p_ds_grid_grp{};
+    static_for<0, NumDTensor, 1>{}([&](auto i) {
+        p_ds_grid_grp(i) = karg.p_ds_grid[i] +
+                           compute_ptr_offset_of_n.GetDsPtrOffset(n_idx)[i] +
+                           compute_ptr_offset_of_groups.GetDsPtrOffset(g_idx)[i];
+    });
+
+    const long_index_t a_group_offset =
         amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetAPtrOffset(g_idx));
-    const long_index_t b_batch_offset =
+    const long_index_t b_group_offset =
         amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetBPtrOffset(g_idx));
-    const long_index_t e_batch_offset =
+    const long_index_t e_group_offset =
         amd_wave_read_first_lane(compute_ptr_offset_of_groups.GetEPtrOffset(g_idx));
 
     const long_index_t a_n_offset =
@@ -159,28 +191,41 @@ __global__ void
     const long_index_t e_n_offset =
         amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
 
-    // Pass two lds pointer is the key to tell compiler that ds_read/write
-    // operate on different lds chunk at same time without order dependecy
+    // Pass two lds pointers to tell compiler ds_read/write operate on different lds chunks
     __shared__ char p_shared_0[GridwiseGemm::GetSharedMemoryNumberOfByte()];
     __shared__ char p_shared_1[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
-    GridwiseGemm::template Run_2Lds<AGridDesc_AK0_M_K1,
-                                    BGridDesc_BK0_N_K1,
-                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+    using Block2CTileMap         = typename GridwiseGemm::Block2CTileMapDefault;
+    const auto block_2_ctile_map = Block2CTileMap{karg.M, karg.N, 4};
+
+    GridwiseGemm::template Run_2Lds<Block2CTileMap,
                                     HasMainKBlockLoop,
                                     CGlobalMemoryDataOperation,
-                                    TailNum>(karg.p_a_grid + a_batch_offset + a_n_offset,
-                                             karg.p_b_grid + b_batch_offset,
-                                             karg.p_c_grid + e_batch_offset + e_n_offset,
-                                             p_shared_0,
-                                             p_shared_1,
-                                             karg,
-                                             a_grid_desc_ak0_m_ak1,
-                                             b_grid_desc_bk0_n_bk1,
-                                             c_grid_desc_mblock_mperblock_nblock_nperblock);
+                                    TailNum>(
+        karg.p_a_grid + a_group_offset + a_n_offset,
+        karg.p_b_grid + b_group_offset,
+        p_ds_grid_grp,
+        karg.p_c_grid + e_group_offset + e_n_offset,
+        p_shared_0,
+        p_shared_1,
+        karg,
+        karg.a_element_op,
+        karg.b_element_op,
+        karg.c_element_op,
+        block_2_ctile_map,
+        a_grid_desc_ak0_m_ak1,
+        b_grid_desc_bk0_n_bk1,
+        ds_grid_desc_m_n,
+        c_grid_desc_m_n);
 #else
     ignore = karg;
-#endif // end of if (defined(__gfx9__))
+    ignore = a_grid_desc_ak0_m_ak1;
+    ignore = b_grid_desc_bk0_n_bk1;
+    ignore = ds_grid_desc_m_n;
+    ignore = c_grid_desc_m_n;
+    ignore = compute_ptr_offset_of_groups;
+    ignore = compute_ptr_offset_of_n;
+#endif
 }
 
 } // namespace
@@ -294,6 +339,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
     static constexpr auto I4 = Number<4>{};
     static constexpr auto I5 = Number<5>{};
 
+    // Generate vector size for C & Ds
+    using CDEBlockTransferScalarPerVectors =
+        typename uniform_sequence_gen<NumDTensor + 1,
+                                      CDEBlockTransferScalarPerVector_NPerBlock>::type;
+
     using ConvToGemmFwdTransformer = TransformConvFwdToGemm<NDimSpatial,
                                                             ConvForwardSpecialization,
                                                             true /*SplitN*/,
@@ -406,8 +456,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 
 #define GridwiseGemmV3TemplateParams                                                           \
     tensor_layout::gemm::RowMajor, tensor_layout::gemm::ColumnMajor,                           \
-        tensor_layout::gemm::RowMajor, ADataType, BDataType, AccDataType, CShuffleDataType,    \
-        EDataType, AElementwiseOperation, BElementwiseOperation, CDEElementwiseOperation,      \
+        DsLayout, tensor_layout::gemm::RowMajor, ADataType, BDataType, AccDataType,            \
+        CShuffleDataType, DsDataType, EDataType,                                               \
+        AElementwiseOperation, BElementwiseOperation, CDEElementwiseOperation,                 \
         GemmSpec, BlockSize, MPerBlock, NPerBlock, KPerBlock, AK1, BK1, MPerXDL, NPerXDL,      \
         MXdlPerWave, NXdlPerWave, ABlockTransferThreadClusterLengths_AK0_M_AK1,                \
         ABlockTransferThreadClusterArrangeOrder, ABlockTransferSrcAccessOrder,                 \
@@ -418,11 +469,13 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         BBlockTransferSrcScalarPerVector, BBlockTransferDstScalarPerVector_BK1, false,         \
         BBlockLdsExtraN, CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle,         \
         CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                      \
-        CDEBlockTransferScalarPerVector_NPerBlock, BlkGemmPipeSched, BlkGemmPipelineVer,       \
-        AComputeDataType, BComputeDataType, LargeTensors
+        CDEBlockTransferScalarPerVectors, BlkGemmPipeSched, BlkGemmPipelineVer,       \
+        AComputeDataType, BComputeDataType, AComputeDataType, BComputeDataType, LargeTensors
 
     // Use appropriate gridwise gemm
-    using GridwiseGemm = GridwiseGemm_xdl_cshuffle_v3<GridwiseGemmV3TemplateParams>;
+    using GridwiseGemm = GridwiseGemmMultiD_xdl_cshuffle_v3<GridwiseGemmV3TemplateParams>;
+
+    using DsGridDesc_M_N = typename GridwiseGemm::DsGridDesc_M_N;
 
     using Block2TileMapElementwise =
         BlockToCTileMap_M00_N0_M01Adapt<NPerBlock, NPerBlock, void, IndexType>;
@@ -597,6 +650,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 
             e_grid_desc_mblock_mperblock_nblock_nperblock_ =
                 MakeEGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(e_grid_desc_m_n_);
+            // ds_grid_desc_m_n_ is default-initialized (empty for NumDTensor=0)
 
             if constexpr(is_NGCHW_GKCYX_NGKHW<ALayout, BLayout, ELayout>() ||
                          is_NGCDHW_GKCZYX_NGKDHW<ALayout, BLayout, ELayout>())
@@ -721,6 +775,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         BGridDesc_BK0_N_BK1 b_grid_desc_bk0_n_bk1_;
         EGridDesc_M_N e_grid_desc_m_n_;
         EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock e_grid_desc_mblock_mperblock_nblock_nperblock_;
+        DsGridDesc_M_N ds_grid_desc_m_n_;
 
         // for computing batch offset
         ComputePtrOffsetOfStridedBatch<I1, I1, I0> compute_ptr_offset_of_groups_;
@@ -793,8 +848,22 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         sizeof(EDataType);
             }
 
-                        typename GridwiseGemm::Argument gemm_arg{
-                p_a_grid, p_b_grid, p_e_grid, static_cast<index_t>(GemmM), static_cast<index_t>(GemmN), static_cast<index_t>(GemmK), I0, I0, I0, I1};
+            typename GridwiseGemm::Argument gemm_arg{
+                p_a_grid,
+                p_b_grid,
+                std::array<const void*, NumDTensor>{},
+                p_e_grid,
+                GemmM,
+                GemmN,
+                GemmK,
+                IndexType{0},
+                IndexType{0},
+                std::array<IndexType, GridwiseGemm::NumDTensor>{},
+                IndexType{0},
+                IndexType{1} /*KBatch*/,
+                arg.a_element_op_,
+                arg.b_element_op_,
+                arg.cde_element_op_};
 
             const auto Run = [&](const auto& kernel) {
                 if(stream_config.flush_cache)
@@ -824,7 +893,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         gemm_arg_,
                         arg.a_grid_desc_ak0_m_ak1_,
                         arg.b_grid_desc_bk0_n_bk1_,
-                        arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        arg.ds_grid_desc_m_n_,
+                        arg.e_grid_desc_m_n_,
                         arg.compute_ptr_offset_of_groups_,
                         arg.compute_ptr_offset_of_n_);
                 }
@@ -839,7 +909,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                                                gemm_arg,
                                                arg.a_grid_desc_ak0_m_ak1_,
                                                arg.b_grid_desc_bk0_n_bk1_,
-                                               arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                               arg.ds_grid_desc_m_n_,
+                        arg.e_grid_desc_m_n_,
                                                arg.compute_ptr_offset_of_groups_,
                                                arg.compute_ptr_offset_of_n_);
                 }
@@ -853,10 +924,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                 {
                     const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                         GridwiseGemm,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
                         DeviceOp::AGridDesc_AK0_M_AK1,
                         DeviceOp::BGridDesc_BK0_N_BK1,
-                        DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                         true,
                         InMemoryDataOperationEnum::Set,
                         minimum_occupancy>;
@@ -869,10 +941,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                     {
                         const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                             GridwiseGemm,
-                            DeviceOp::AGridDesc_AK0_M_AK1,
-                            DeviceOp::BGridDesc_BK0_N_BK1,
-                            DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                             true,
                             InMemoryDataOperationEnum::Set,
                             minimum_occupancy,
@@ -883,10 +956,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                     {
                         const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                             GridwiseGemm,
-                            DeviceOp::AGridDesc_AK0_M_AK1,
-                            DeviceOp::BGridDesc_BK0_N_BK1,
-                            DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                             true,
                             InMemoryDataOperationEnum::Set,
                             minimum_occupancy,
@@ -900,10 +974,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         {
                             const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                                 GridwiseGemm,
-                                DeviceOp::AGridDesc_AK0_M_AK1,
-                                DeviceOp::BGridDesc_BK0_N_BK1,
-                                DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                                 true,
                                 InMemoryDataOperationEnum::Set,
                                 minimum_occupancy,
@@ -918,10 +993,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         {
                             const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                                 GridwiseGemm,
-                                DeviceOp::AGridDesc_AK0_M_AK1,
-                                DeviceOp::BGridDesc_BK0_N_BK1,
-                                DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                                 true,
                                 InMemoryDataOperationEnum::Set,
                                 minimum_occupancy,
@@ -936,10 +1012,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         {
                             const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                                 GridwiseGemm,
-                                DeviceOp::AGridDesc_AK0_M_AK1,
-                                DeviceOp::BGridDesc_BK0_N_BK1,
-                                DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                                 true,
                                 InMemoryDataOperationEnum::Set,
                                 minimum_occupancy,
@@ -954,10 +1031,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         {
                             const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                                 GridwiseGemm,
-                                DeviceOp::AGridDesc_AK0_M_AK1,
-                                DeviceOp::BGridDesc_BK0_N_BK1,
-                                DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                                 true,
                                 InMemoryDataOperationEnum::Set,
                                 minimum_occupancy,
@@ -972,10 +1050,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         {
                             const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                                 GridwiseGemm,
-                                DeviceOp::AGridDesc_AK0_M_AK1,
-                                DeviceOp::BGridDesc_BK0_N_BK1,
-                                DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                                 true,
                                 InMemoryDataOperationEnum::Set,
                                 minimum_occupancy,
@@ -990,10 +1069,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         {
                             const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                                 GridwiseGemm,
-                                DeviceOp::AGridDesc_AK0_M_AK1,
-                                DeviceOp::BGridDesc_BK0_N_BK1,
-                                DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                                 true,
                                 InMemoryDataOperationEnum::Set,
                                 minimum_occupancy,
@@ -1009,10 +1089,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                     {
                         const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3_2lds<
                             GridwiseGemm,
-                            DeviceOp::AGridDesc_AK0_M_AK1,
-                            DeviceOp::BGridDesc_BK0_N_BK1,
-                            DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                             true,
                             InMemoryDataOperationEnum::Set,
                             minimum_occupancy,
@@ -1023,10 +1104,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                     {
                         const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3_2lds<
                             GridwiseGemm,
-                            DeviceOp::AGridDesc_AK0_M_AK1,
-                            DeviceOp::BGridDesc_BK0_N_BK1,
-                            DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                             true,
                             InMemoryDataOperationEnum::Set,
                             minimum_occupancy,
@@ -1040,10 +1122,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                     {
                         const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                             GridwiseGemm,
-                            DeviceOp::AGridDesc_AK0_M_AK1,
-                            DeviceOp::BGridDesc_BK0_N_BK1,
-                            DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                             true,
                             InMemoryDataOperationEnum::Set,
                             minimum_occupancy,
@@ -1054,10 +1137,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                     {
                         const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                             GridwiseGemm,
-                            DeviceOp::AGridDesc_AK0_M_AK1,
-                            DeviceOp::BGridDesc_BK0_N_BK1,
-                            DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                            ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::AGridDesc_AK0_M_AK1,
+                        DeviceOp::BGridDesc_BK0_N_BK1,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                             true,
                             InMemoryDataOperationEnum::Set,
                             minimum_occupancy,
@@ -1073,10 +1157,11 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                 {
                     const auto kernel = kernel_grouped_conv_fwd_xdl_cshuffle_v3<
                         GridwiseGemm,
+                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
                         DeviceOp::AGridDesc_AK0_M_AK1,
                         DeviceOp::BGridDesc_BK0_N_BK1,
-                        DeviceOp::EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                        ComputePtrOffsetOfStridedBatch<I1, I1, I0>,
+                        DeviceOp::DsGridDesc_M_N,
+                        DeviceOp::EGridDesc_M_N,
                         false,
                         InMemoryDataOperationEnum::Set,
                         minimum_occupancy>;
@@ -1387,8 +1472,22 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         const IndexType GemmK =
             arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) * arg.a_grid_desc_ak0_m_ak1_.GetLength(I2);
 
-                    typename GridwiseGemm::Argument gemm_arg{
-            nullptr, nullptr, nullptr, static_cast<index_t>(GemmM), static_cast<index_t>(GemmN), static_cast<index_t>(GemmK), I0, I0, I0, I1 /*KBatch*/};
+        typename GridwiseGemm::Argument gemm_arg{
+            nullptr,
+            nullptr,
+            std::array<const void*, NumDTensor>{},
+            nullptr,
+            GemmM,
+            GemmN,
+            GemmK,
+            IndexType{0},
+            IndexType{0},
+            std::array<IndexType, GridwiseGemm::NumDTensor>{},
+            IndexType{0},
+            IndexType{1} /*KBatch*/,
+            AElementwiseOperation{},
+            BElementwiseOperation{},
+            CDEElementwiseOperation{}};
 
         return GridwiseGemm::CheckValidity(gemm_arg);
     }

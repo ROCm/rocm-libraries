@@ -96,5 +96,22 @@ inline bool is_gfx12_supported()
     return ck::get_device_name() == "gfx1200" || ck::get_device_name() == "gfx1201";
 }
 
+inline int __host__ get_lds_size()
+{
+    int device  = 0;
+    int result  = 0;
+    auto status = hipGetDevice(&device);
+    if(status == hipSuccess)
+    {
+        status = hipDeviceGetAttribute(&result, hipDeviceAttributeMaxSharedMemoryPerBlock, device);
+        if(status == hipSuccess)
+        {
+            return result;
+        }
+    }
+
+    return 64 * 1024;
+}
+
 } // namespace ck
 #endif
