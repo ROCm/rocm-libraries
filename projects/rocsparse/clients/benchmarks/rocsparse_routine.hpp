@@ -100,6 +100,7 @@ ROCSPARSE_DO_ROUTINE(csr2hyb)					\
 ROCSPARSE_DO_ROUTINE(dense2coo)					\
 ROCSPARSE_DO_ROUTINE(dense2csc)					\
 ROCSPARSE_DO_ROUTINE(dense2csr)					\
+ROCSPARSE_DO_ROUTINE(dense_to_sparse_bell)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_coo)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_csc)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_csr)			\
