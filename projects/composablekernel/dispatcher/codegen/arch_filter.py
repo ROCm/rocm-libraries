@@ -50,6 +50,7 @@ class OperatorType(Enum):
     GEMM = "gemm"
     GEMM_PRESHUFFLE = "gemm_preshuffle"
     GEMM_MULTI_D = "gemm_multi_d"
+    GEMM_GROUPED = "gemm_grouped"
     GEMM_STREAMK = "gemm_streamk"
     CONV_FWD = "conv_fwd"
     CONV_BWD_DATA = "conv_bwd_data"
@@ -79,6 +80,14 @@ OPERATOR_TILE_CONSTRAINTS = {
         "tile_k_alignment": 16,
     },
     OperatorType.GEMM_MULTI_D: {
+        "min_tile_m": 16,
+        "min_tile_n": 16,
+        "min_tile_k": 8,
+        "tile_m_alignment": 16,
+        "tile_n_alignment": 16,
+        "tile_k_alignment": 8,
+    },
+    OperatorType.GEMM_GROUPED: {
         "min_tile_m": 16,
         "min_tile_n": 16,
         "min_tile_k": 8,
