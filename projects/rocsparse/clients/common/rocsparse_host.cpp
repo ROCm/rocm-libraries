@@ -7740,6 +7740,231 @@ void host_coo_to_dense(I                     m,
     }
 }
 
+template <typename I, typename T>
+void host_dense_to_bell(I                     m,
+                        I                     n,
+                        rocsparse_index_base  base,
+                        const std::vector<T>& A,
+                        int64_t               ld,
+                        rocsparse_order       order,
+                        I                     ell_block_size,
+                        I&                    ell_cols,
+                        std::vector<T>&       bell_val,
+                        std::vector<I>&       bell_col_ind)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    const I mb = (m + ell_block_size - 1) / ell_block_size;
+    const I nb = (n + ell_block_size - 1) / ell_block_size;
+
+    ell_cols = 0;
+
+    if(order == rocsparse_order_row)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I blocks_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    blocks_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
+        for(I i = 0; i < mb; i++)
+        {
+            I slot = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gr + gc] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
+                }
+            }
+
+            for(I s = slot; s < ell_block_width; s++)
+            {
+                bell_col_ind[i * ell_block_width + s] = base - 1;
+            }
+        }
+    }
+    else if(order == rocsparse_order_column)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I blocks_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    blocks_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
+        for(I i = 0; i < mb; i++)
+        {
+            I slot = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gc + gr] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
+                }
+            }
+
+            for(I s = slot; s < ell_block_width; s++)
+            {
+                bell_col_ind[i * ell_block_width + s] = base - 1;
+            }
+        }
+    }
+}
+
 template <typename I, typename J>
 void host_csr_to_coo(J                     M,
                      I                     nnz,
@@ -9572,17 +9797,27 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   std::vector<TTYPE>&       A,           \
                                                   int64_t                   ld,          \
                                                   rocsparse_order           order);
-#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                              \
-    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,           \
-                                                  ITYPE                     n,           \
-                                                  rocsparse_index_base      base,        \
-                                                  const std::vector<TTYPE>& A,           \
-                                                  int64_t                   ld,          \
-                                                  rocsparse_order           order,       \
-                                                  const std::vector<ITYPE>& nnz_per_row, \
-                                                  std::vector<TTYPE>&       coo_val,     \
-                                                  std::vector<ITYPE>&       coo_row_ind, \
-                                                  std::vector<ITYPE>&       coo_col_ind);
+#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                                  \
+    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,               \
+                                                  ITYPE                     n,               \
+                                                  rocsparse_index_base      base,            \
+                                                  const std::vector<TTYPE>& A,               \
+                                                  int64_t                   ld,              \
+                                                  rocsparse_order           order,           \
+                                                  const std::vector<ITYPE>& nnz_per_row,     \
+                                                  std::vector<TTYPE>&       coo_val,         \
+                                                  std::vector<ITYPE>&       coo_row_ind,     \
+                                                  std::vector<ITYPE>&       coo_col_ind);          \
+    template void host_dense_to_bell<ITYPE, TTYPE>(ITYPE                     m,              \
+                                                   ITYPE                     n,              \
+                                                   rocsparse_index_base      base,           \
+                                                   const std::vector<TTYPE>& A,              \
+                                                   int64_t                   ld,             \
+                                                   rocsparse_order           order,          \
+                                                   ITYPE                     ell_block_size, \
+                                                   ITYPE&                    ell_cols,       \
+                                                   std::vector<TTYPE>&       bell_val,       \
+                                                   std::vector<ITYPE>&       bell_col_ind);
 
 #define INSTANTIATE_IJ(ITYPE, JTYPE)                                                       \
     template void host_csr_to_coo<ITYPE, JTYPE>(JTYPE                     M,               \

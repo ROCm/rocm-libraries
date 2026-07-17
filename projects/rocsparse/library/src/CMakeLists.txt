@@ -577,6 +577,7 @@ set(rocsparse_source
   src/conversion/rocsparse_csxsldu_buffer_size.cpp
   src/conversion/rocsparse_csxsldu_preprocess.cpp
   src/conversion/rocsparse_csxsldu_compute.cpp
+  src/conversion/rocsparse_dense2bell.cpp
   src/conversion/rocsparse_dense2csr.cpp
   src/conversion/rocsparse_dense2coo.cpp
   src/conversion/rocsparse_prune_dense2csr.cpp
