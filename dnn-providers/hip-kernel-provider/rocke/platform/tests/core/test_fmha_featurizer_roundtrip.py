@@ -316,18 +316,34 @@ def test_generator_struct_matches_names(tmp_path):
     assert idx == sorted(idx), "struct field order diverges from get_feature_names"
 
 
+_CLANG_FORMAT = shutil.which("clang-format")
+
+
 def test_committed_headers_match_generated():
     """Committed FmhaFeatures.hpp and FmhaFeaturizer.hpp must match generator output.
 
     Guards against drift: if someone updates the generator but forgets to
     regenerate + commit the headers, this test fails. The review comment noted
     that tests compare against temp files but don't check committed files.
+
+    Comparison is done after clang-format normalization so formatting style
+    differences don't cause spurious failures.
     """
+    if _CLANG_FORMAT is None:
+        pytest.skip("clang-format not found")
+
     struct_src, featurize_src = gen.emit_fmha_featurizer()
 
-    # Normalize whitespace differences (trailing spaces, final newline).
-    def normalize(text):
-        return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+    def clang_format(text: str) -> str:
+        """Run clang-format on text to normalize formatting."""
+        result = subprocess.run(
+            [_CLANG_FORMAT, "--style=file", "--assume-filename=x.hpp"],
+            input=text,
+            capture_output=True,
+            text=True,
+            cwd=_HERE,
+        )
+        return result.stdout.strip() if result.returncode == 0 else text.strip()
 
     # Find the committed headers (relative to this test file).
     sdpa_fwd_dir = os.path.normpath(
@@ -350,7 +366,7 @@ def test_committed_headers_match_generated():
         pytest.skip(f"committed FmhaFeatures.hpp not found at {features_path}")
     with open(features_path) as f:
         features_content = f.read()
-    assert normalize(features_content) == normalize(struct_src), (
+    assert clang_format(features_content) == clang_format(struct_src), (
         "Committed FmhaFeatures.hpp does NOT match gen_fmha_featurizer.py output. "
         "Re-run the generator and commit the updated header."
     )
@@ -361,7 +377,7 @@ def test_committed_headers_match_generated():
         pytest.skip(f"committed FmhaFeaturizer.hpp not found at {featurizer_path}")
     with open(featurizer_path) as f:
         featurizer_content = f.read()
-    assert normalize(featurizer_content) == normalize(featurize_src), (
+    assert clang_format(featurizer_content) == clang_format(featurize_src), (
         "Committed FmhaFeaturizer.hpp does NOT match gen_fmha_featurizer.py output. "
         "Re-run the generator and commit the updated header."
     )
