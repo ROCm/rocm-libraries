@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_sb2st_hb2st.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -40,15 +41,14 @@ ROCSOLVER_BEGIN_NAMESPACE
 //  kd          Matrix bandwidth. kd >= 1.
 //  Aband       n-by-n band matrix, with space for kd - 1 super-diagonals and
 //              2*kd - 1 sub-diagonals. On input, diagonal and kd sub-diagonals
-//              must be set; other entries must be 0.
-//              todo: verify what must be set/zero.
+//              must be set.
 //  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
 //  D           Vector of length n. On output, diagonal of tridiagonal A_tri.
 //  E           Vector of length n-1. On output, sub-diagonal of tridiagonal A_tri.
 //  V           Array of Householder vectors, of size ldv*nv, where
 //              number of tiles nt = ceil( (n - 1) / kd ), and
 //              number of vectors nv = kd*nt*(nt + 1)/2.
-//  ldv         Leading dimension of V. ldv >= 2*kd.
+//  ldv         Leading dimension of V. ldv >= 2*kd - 1.
 //  tau         Vector of Householder tau factors, of length nv.
 //
 template <typename T, typename I, typename S, typename U>
@@ -63,6 +63,7 @@ rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
                                           U V,
                                           const I ldv,
                                           T* tau)
+try
 {
     ROCSOLVER_ENTER_TOP("sb2st_hb2st", "-n", n, "--kd", kd, "--ldab", ldab, "--ldv", ldv);
 
@@ -101,6 +102,10 @@ rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
     return rocsolver_sb2st_hb2st_template<false, false, T, I>(
         handle, uplo, n, kd, Aband, shiftA, ldab, strideA, D, strideD, E, strideE, V, ldv, strideV,
         tau, strideTau, batch_count);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

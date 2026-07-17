@@ -471,6 +471,7 @@ rocblas_status rocsolver_zhb2st_64(rocblas_handle handle,
                                    rocblas_double_complex* tau);
 
 rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
+                                const rocblas_fill uplo,
                                 const rocblas_int n,
                                 const rocblas_int kd,
                                 const rocblas_int nb,
@@ -481,6 +482,7 @@ rocblas_status rocsolver_ssy2sb(rocblas_handle handle,
                                 float* tau);
 
 rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
+                                const rocblas_fill uplo,
                                 const rocblas_int n,
                                 const rocblas_int kd,
                                 const rocblas_int nb,
@@ -491,6 +493,7 @@ rocblas_status rocsolver_dsy2sb(rocblas_handle handle,
                                 double* tau);
 
 rocblas_status rocsolver_che2hb(rocblas_handle handle,
+                                const rocblas_fill uplo,
                                 const rocblas_int n,
                                 const rocblas_int kd,
                                 const rocblas_int nb,
@@ -501,6 +504,7 @@ rocblas_status rocsolver_che2hb(rocblas_handle handle,
                                 rocblas_float_complex* tau);
 
 rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
+                                const rocblas_fill uplo,
                                 const rocblas_int n,
                                 const rocblas_int kd,
                                 const rocblas_int nb,
@@ -511,6 +515,7 @@ rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
                                 rocblas_double_complex* tau);
 
 rocblas_status rocsolver_ssy2sb_64(rocblas_handle handle,
+                                   const rocblas_fill uplo,
                                    const int64_t n,
                                    const int64_t kd,
                                    const int64_t nb,
@@ -521,6 +526,7 @@ rocblas_status rocsolver_ssy2sb_64(rocblas_handle handle,
                                    float* tau);
 
 rocblas_status rocsolver_dsy2sb_64(rocblas_handle handle,
+                                   const rocblas_fill uplo,
                                    const int64_t n,
                                    const int64_t kd,
                                    const int64_t nb,
@@ -531,6 +537,7 @@ rocblas_status rocsolver_dsy2sb_64(rocblas_handle handle,
                                    double* tau);
 
 rocblas_status rocsolver_che2hb_64(rocblas_handle handle,
+                                   const rocblas_fill uplo,
                                    const int64_t n,
                                    const int64_t kd,
                                    const int64_t nb,
@@ -541,6 +548,7 @@ rocblas_status rocsolver_che2hb_64(rocblas_handle handle,
                                    rocblas_float_complex* tau);
 
 rocblas_status rocsolver_zhe2hb_64(rocblas_handle handle,
+                                   const rocblas_fill uplo,
                                    const int64_t n,
                                    const int64_t kd,
                                    const int64_t nb,
@@ -2786,6 +2794,7 @@ inline rocblas_status rocsolver_sb2st_hb2st(rocblas_handle handle,
 
 /******************** SY2SB_HE2HB ********************/
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const rocblas_int n,
                                             const rocblas_int kd,
                                             const rocblas_int nb,
@@ -2795,10 +2804,11 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const rocblas_int ldab,
                                             float* tau)
 {
-    return rocsolver_ssy2sb(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_ssy2sb(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const rocblas_int n,
                                             const rocblas_int kd,
                                             const rocblas_int nb,
@@ -2808,10 +2818,11 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const rocblas_int ldab,
                                             double* tau)
 {
-    return rocsolver_dsy2sb(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_dsy2sb(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const rocblas_int n,
                                             const rocblas_int kd,
                                             const rocblas_int nb,
@@ -2821,10 +2832,11 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const rocblas_int ldab,
                                             rocblas_float_complex* tau)
 {
-    return rocsolver_che2hb(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_che2hb(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const rocblas_int n,
                                             const rocblas_int kd,
                                             const rocblas_int nb,
@@ -2834,10 +2846,11 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const rocblas_int ldab,
                                             rocblas_double_complex* tau)
 {
-    return rocsolver_zhe2hb(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_zhe2hb(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const int64_t n,
                                             const int64_t kd,
                                             const int64_t nb,
@@ -2847,10 +2860,11 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const int64_t ldab,
                                             float* tau)
 {
-    return rocsolver_ssy2sb_64(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_ssy2sb_64(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const int64_t n,
                                             const int64_t kd,
                                             const int64_t nb,
@@ -2860,10 +2874,11 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const int64_t ldab,
                                             double* tau)
 {
-    return rocsolver_dsy2sb_64(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_dsy2sb_64(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const int64_t n,
                                             const int64_t kd,
                                             const int64_t nb,
@@ -2873,10 +2888,11 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const int64_t ldab,
                                             rocblas_float_complex* tau)
 {
-    return rocsolver_che2hb_64(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_che2hb_64(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 
 inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
+                                            const rocblas_fill uplo,
                                             const int64_t n,
                                             const int64_t kd,
                                             const int64_t nb,
@@ -2886,7 +2902,7 @@ inline rocblas_status rocsolver_sy2sb_he2hb(rocblas_handle handle,
                                             const int64_t ldab,
                                             rocblas_double_complex* tau)
 {
-    return rocsolver_zhe2hb_64(handle, n, kd, nb, A, lda, Aband, ldab, tau);
+    return rocsolver_zhe2hb_64(handle, uplo, n, kd, nb, A, lda, Aband, ldab, tau);
 }
 /***************************************************************/
 

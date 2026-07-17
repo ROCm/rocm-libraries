@@ -36,6 +36,7 @@
 #include "rocsolver/rocsolver.h"
 
 #include "lapack_device_functions.hpp"
+#include "laset.hpp"
 #include "lib_device_helpers.hpp"
 #include "rocsolver_hybrid_storage.hpp"
 
@@ -45,6 +46,61 @@ ROCSOLVER_BEGIN_NAMESPACE
 // Reductions in larfg and larf must be updated if DIMX is changed
 #define DIMX 32
 #define DIMY 32
+
+//------------------------------------------------------------------------------
+// Hermitianize a band matrix stored in LAPACK band format (column-major).
+//
+// Layout: Aband has ldab rows and n columns.
+//   ku super-diagonals  (band rows 0 .. ku-1)
+//   main diagonal       (band row  ku)
+//   ku+1 sub-diagonals  (band rows ku+1 .. 2*ku+1)
+//
+// Element A(i,j) (0-indexed) is stored at Aband[b*strideAb + j*ldab + (ku+i-j)].
+//
+// For each d = 1..ku and valid column j, copies sub-diagonal d to
+// super-diagonal d with conjugation:
+//   A(j, j+d) := conj( A(j+d, j) )
+//
+// Sub-diagonal ku+1 is left untouched.
+template <typename T, typename I>
+ROCSOLVER_KERNEL void hermitianize_band_kernel(I n, I ku, T* Aband, I ldab, rocblas_stride strideAb)
+{
+    I j = blockIdx.x * blockDim.x + threadIdx.x; // matrix column, 0-indexed
+    I d = blockIdx.y * blockDim.y + threadIdx.y + 1; // sub-diagonal index, 1..ku
+    I b = blockIdx.z; // batch index
+
+    if(d > ku || j >= n || j + d >= n)
+        return;
+
+    T* AB = Aband + b * strideAb;
+
+    // Source: A(j+d, j)  band row = ku+d, col = j
+    // Dest:   A(j, j+d)  band row = ku-d, col = j+d
+    AB[(j + d) * ldab + (ku - d)] = conj(AB[j * ldab + (ku + d)]);
+}
+
+//------------------------------------------------------------------------------
+template <typename T, typename I>
+void hermitianize_band(rocblas_handle handle,
+                       I n,
+                       I ku,
+                       T* Aband,
+                       I ldab,
+                       rocblas_stride strideAb,
+                       I batch_count)
+{
+    if(n <= 0 || ku <= 0 || batch_count <= 0)
+        return;
+
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    dim3 block(BS2, BS2 / 4, 1);
+    dim3 grid(ceildiv(n, I(block.x)), ceildiv(ku, I(block.y)), batch_count);
+
+    ROCSOLVER_LAUNCH_KERNEL((hermitianize_band_kernel<T, I>), grid, block, 0, stream, n, ku, Aband,
+                            ldab, strideAb);
+}
 
 //------------------------------------------------------------------------------
 // Generates a Householder reflector.
@@ -396,8 +452,6 @@ __device__ void sb2st_hb2st_task(const I xid,
             // and copy subdiagonal element to E.
             if(xid == 0)
             {
-                // Bottom row of V stores tau.
-                // todo: if desired, save s_housev[0] back to Aband as well.
                 Aband[idiag + 1 + sweep * ldab] = s_housev[0];
                 assert(std::imag(s_housev[0]) == 0);
                 E[sweep] = std::real(s_housev[0]);
@@ -433,8 +487,6 @@ __device__ void sb2st_hb2st_task(const I xid,
                 sb2st_larf(xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
                            Aband + idiag + (sweep + 1) * ldab, ldab - 1, s_work);
             }
-
-            // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
         }
     }
     else
@@ -674,7 +726,7 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(rocblas_handle handle,
         return rocblas_status_not_implemented;
 
     // 2. invalid size
-    if(n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd)
+    if(n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd - 1)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
@@ -726,6 +778,12 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     const T zero = 0;
+
+    // Clear diagonals below sub-diagonal kd, where bulges will go.
+    laset(handle, 'g', kd - 1, n, zero, zero, Aband, shiftA + 2 * kd, ldab, strideA, batch_count);
+
+    // Copy lower band to upper band.
+    hermitianize_band(handle, n, kd - 1, Aband + shiftA, ldab, strideA, batch_count);
 
     // Set V = 0.
     // Ideally, set each Vk = I, but need to iterate over Vk.

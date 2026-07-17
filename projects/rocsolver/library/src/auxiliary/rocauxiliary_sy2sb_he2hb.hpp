@@ -29,6 +29,7 @@
 
 #include "lapack/roclapack_geqrf.hpp"
 #include "laset.hpp"
+#include "lib_device_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -89,6 +90,7 @@ void rocsolver_sy2sb_he2hb_getMemorySize(const I n,
 //------------------------------------------------------------------------------
 template <typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
+                                              const rocblas_fill uplo,
                                               const I n,
                                               const I kd,
                                               const I nb,
@@ -102,7 +104,8 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
     // order is important for unit tests:
 
     // 1. invalid/non-supported values
-    // N/A
+    if(uplo != rocblas_fill_upper && uplo != rocblas_fill_lower && uplo != rocblas_fill_full)
+        return rocblas_status_invalid_value;
 
     // 2. invalid size
     if(n < 0 || kd < 1 || nb < kd || nb % kd != 0 || lda < n || ldab < 3 * kd - 1 || batch_count < 0)
@@ -125,6 +128,7 @@ rocblas_status rocsolver_sy2sb_he2hb_argCheck(rocblas_handle handle,
 //
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
 rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
+                                              const rocblas_fill uplo,
                                               const I n,
                                               const I kd,
                                               const I nb,
@@ -147,8 +151,8 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
                                               T* work,
                                               T** workArr)
 {
-    ROCSOLVER_ENTER("sy2sb_he2hb", "n:", n, "kd", kd, "nb:", nb, "shiftA:", shiftA, "lda:", lda,
-                    "ldab:", ldab, "bc:", batch_count);
+    ROCSOLVER_ENTER("sy2sb_he2hb", "uplo:", uplo, "n:", n, "kd", kd, "nb:", nb, "shiftA:", shiftA,
+                    "lda:", lda, "ldab:", ldab, "bc:", batch_count);
 
     using S = decltype(std::real(T{}));
 
@@ -162,6 +166,18 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
+
+    // Symmetrize A if only one triangle is provided.
+    if(uplo != rocblas_fill_full)
+    {
+        I blocks = (n - 1) / BS2 + 1;
+        ROCSOLVER_LAUNCH_KERNEL((copy_trans_mat<T, T>), dim3(blocks, blocks, batch_count),
+                                dim3(BS2, BS2, 1), 0, stream, rocblas_operation_conjugate_transpose,
+                                n, n, // opts
+                                A, shiftA, lda, strideA, // src
+                                A, shiftA, lda, strideA, // dst
+                                no_mask{}, uplo, rocblas_diagonal_unit);
+    }
 
     // Row of Aband that stores main diagonal.
     I idiag = kd - 1;
@@ -182,9 +198,7 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
     }
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     T const one = 1;
     T const zero = 0;
@@ -441,7 +455,6 @@ rocblas_status rocsolver_sy2sb_he2hb_template(rocblas_handle handle,
                             Aband, idx2D(idiag, i, ldab), ldab - 1, strideAb, // Aband_ii
                             no_mask{}, rocblas_fill_lower);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
