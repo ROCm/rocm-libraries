@@ -1,0 +1,40 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipdnn-integration-tests Test Categories Configuration (RFC0010).
+#
+# This component registers its tests as pre-registered CTest entries (via
+# add_unit_test_target() / add_tiered_test_target()), not as a single GTest
+# binary, so categorization uses apply_ctest_category_labels() over the
+# installed CTestTestfile.cmake. `test_patterns` here are matched (as
+# regex) against CTest test NAMES, not GTest filters.
+#
+# The installed CTestTestfile.cmake (bin/hipdnn_integration_tests_ctest/)
+# contains:
+#   - hipdnn_integration_tests_unit_tests  (framework unit tests)
+#   - hipdnn_gpu_ref_tests_quick           (GPU reference smoke tier)
+#
+# The legacy test_hipdnn_integration_tests.py ran `ctest` with no label
+# filter, so every installed test executed in all TEST_TYPEs. The `.*`
+# pattern in the quick tier reproduces that: every installed test is
+# selected by quick (which inherits standard -> comprehensive -> full).
+
+test_categories:
+  quick:
+    description: "Framework unit + GPU reference smoke tests (run in all tiers)"
+    test_patterns:
+      - ".*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours
