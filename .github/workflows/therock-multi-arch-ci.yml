@@ -14,13 +14,8 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: the setup job resolves the requested ref (default main) to one
-# concrete SHA (needs.setup.outputs.ref) and every downstream build/test job
-# consumes that SHA so the whole run is locked to a single TheRock commit. See
-# ROCm/rocm-libraries#9507 (this supersedes the earlier pinned-SHA plan in
-# TheRock#3343). The `uses: ...@main` lines below are the workflow-definition
-# ref (Actions forbids an expression there) and are deliberately separate from
-# the build-source `ref:` inputs.
+# TheRock ref: using main until full migration, then switch to pinned SHA (TheRock#3343)
+# NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 on:
   workflow_dispatch:
@@ -140,8 +135,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: main
     permissions:
       contents: read
       id-token: write
@@ -166,8 +160,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: main
     permissions:
       contents: read
       id-token: write
@@ -185,8 +178,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: ${{ needs.setup.outputs.ref }}
+          ref: main
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
