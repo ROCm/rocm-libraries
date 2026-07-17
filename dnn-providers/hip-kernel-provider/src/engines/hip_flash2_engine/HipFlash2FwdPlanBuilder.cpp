@@ -90,6 +90,17 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(vTensor->dims()->size() != 4, "V must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(oTensor->dims()->size() != 4, "O must be rank-4");
 
+    // -- Tensor layout: innermost dim must be contiguous (I2) -----------------
+    // The kernel d-loop assumes stride-1 on dim 3 (head_dim). Reject non-contiguous layouts.
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->strides()->Get(3) != 1,
+                               "Q head_dim stride must be 1 (contiguous)");
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->strides()->Get(3) != 1,
+                               "K head_dim stride must be 1 (contiguous)");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor->strides()->Get(3) != 1,
+                               "V head_dim stride must be 1 (contiguous)");
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->strides()->Get(3) != 1,
+                               "O head_dim stride must be 1 (contiguous)");
+
     // ── Data type: FP16 only (BF16 not yet supported by V7 kernel) ────────────
     const auto qType = qTensor->data_type();
     const auto kType = kTensor->data_type();
