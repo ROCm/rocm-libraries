@@ -34,7 +34,7 @@ from .Problem import ProblemType
 # fields compile to identical code objects.
 _INTERNAL_ARGS = (
     "WorkGroupMapping",
-    "WorkGroupMappingXCC",
+    # "WorkGroupMappingXCC", # WGMXCC affects asm code gen
     "WorkGroupMappingXCCGroup",
     "StaggerU",
     "StaggerUStride",
@@ -69,6 +69,7 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   backups = {k: s[k] for k in _INTERNAL_ARGS}
   gsu_backup = s["GlobalSplitU"]
   gg_backup = pt["GroupedGemm"]
+  wgmxcc_backup = s["WorkGroupMappingXCC"]
 
   # Mask internal args
   pt["GroupedGemm"] = False
@@ -76,6 +77,8 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
     s["GlobalSplitU"] = "M" if (gsu_backup > 1 or gsu_backup == -1) else gsu_backup
   elif gsu_backup != 0:
     s["GlobalSplitU"] = "M"
+  if "WorkGroupMappingXCC" in s and s["WorkGroupMappingXCC"] != -1:
+    s["WorkGroupMappingXCC"] = 1
   for k in _INTERNAL_ARGS:
     s[k] = "M"
 
@@ -85,6 +88,7 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   # Restore
   pt["GroupedGemm"] = gg_backup
   s["GlobalSplitU"] = gsu_backup
+  s["WorkGroupMappingXCC"] = wgmxcc_backup
   for k in _INTERNAL_ARGS:
     s[k] = backups[k]
 
@@ -148,6 +152,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
 
   gsuBackup = state["GlobalSplitU"]
   ggBackup = state["ProblemType"]["GroupedGemm"]
+  wgmxccBackup = state["WorkGroupMappingXCC"]
+
+  # Include WGMXCC in kernel name as either n1 for auto or 1 for set value
+  # Fixed values produce different assembly code
+  # If the key is missing from name, kernels are dropped as duplicates when they should be kept
+  if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
+    state["WorkGroupMappingXCC"] = 1
 
   if ignoreInternalArgs:
     state["ProblemType"]["GroupedGemm"] = False
@@ -161,7 +172,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.discard("GlobalSplitU")
   else:
     requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
-                                                           "WorkGroupMappingXCC",
+                                                          #  "WorkGroupMappingXCC", # WGMXCC affects asm code gen
                                                            "WorkGroupMappingXCCGroup",
                                                            "StaggerU",
                                                            "StaggerUStride",
@@ -201,6 +212,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup
+  state["WorkGroupMappingXCC"] = wgmxccBackup
 
   return '_'.join(components)
 

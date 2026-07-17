@@ -32,12 +32,12 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void csric0_device_binsearch(J m,
                                                       const I* __restrict__ csr_row_ptr,
                                                       const J* __restrict__ csr_col_ind,
-                                                      T* __restrict__ csr_val,
+                                                      T* csr_val,
                                                       const I* __restrict__ csr_diag_ind,
                                                       int32_t* __restrict__ done,
                                                       const J* __restrict__ map,
-                                                      J* __restrict__ zero_pivot,
-                                                      J* __restrict__ singular_pivot,
+                                                      J*                   zero_pivot,
+                                                      J*                   singular_pivot,
                                                       double               tol,
                                                       rocsparse_index_base idx_base)
     {
@@ -211,15 +211,15 @@ namespace rocsparse
     void csric0_kernel_binsearch(J m,
                                  const I* __restrict__ csr_row_ptr,
                                  const J* __restrict__ csr_col_ind,
-                                 T* __restrict__ csr_val,
+                                 T*      csr_val,
                                  int64_t csr_val_stride,
                                  const I* __restrict__ csr_diag_ind,
                                  int32_t* __restrict__ done,
                                  int64_t done_stride,
                                  const J* __restrict__ map,
-                                 J* __restrict__ zero_pivot,
-                                 int64_t zero_pivot_stride,
-                                 J* __restrict__ singular_pivot,
+                                 J*                 zero_pivot,
+                                 int64_t            zero_pivot_stride,
+                                 J*                 singular_pivot,
                                  int64_t            singular_pivot_stride,
                                  rocsparse_datatype tolerance_datatype,
                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
@@ -320,7 +320,7 @@ namespace rocsparse
             return rocsparse::
                 csric0_kernel_binsearch_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -345,7 +345,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

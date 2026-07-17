@@ -17,6 +17,7 @@ try:
         grid_selection_t,
         reduction_t,
         prediction_modes_t,
+        model_t,
         # Data structures
         dim3_t,
         dim4_t,
@@ -68,6 +69,24 @@ try:
         compute_number_of_output_tiles,
         # Reduction functions
         int_to_reduction_t,
+        # Attention functions
+        att_compute_total_latency,
+        att_compute_number_matrix_instructions,
+        att_compute_mt_compute_latency,
+        att_check_lds_capacity,
+        att_estimate_l2_hit,
+        att_estimate_mall_hit,
+        att_compute_memory_latency,
+        att_compute_tile_latency,
+        att_compute_timestep_latency,
+        att_calculate_work_utilization,
+        att_calculate_output_utilization,
+        att_compute_cu_occupancy,
+        att_arithmetic_intensity,
+        att_emulated_tf32_arithmetic_intensity,
+        att_round_elements_to_128B,
+        att_compute_mem_bw_from_occupancy,
+        att_compute_l2_hit_rate_global,
     )
 except ImportError as e:
     raise ImportError(
@@ -87,6 +106,7 @@ __all__ = [
     "grid_selection_t",
     "reduction_t",
     "prediction_modes_t",
+    "model_t",
     # Data structures
     "dim3_t",
     "dim4_t",
@@ -136,14 +156,33 @@ __all__ = [
     "compute_number_of_output_tiles",
     # Reduction functions
     "int_to_reduction_t",
+    # Attention functions
+    "att_compute_total_latency",
+    "att_compute_number_matrix_instructions",
+    "att_compute_mt_compute_latency",
+    "att_check_lds_capacity",
+    "att_estimate_l2_hit",
+    "att_estimate_mall_hit",
+    "att_compute_memory_latency",
+    "att_compute_tile_latency",
+    "att_compute_timestep_latency",
+    "att_calculate_work_utilization",
+    "att_calculate_output_utilization",
+    "att_compute_cu_occupancy",
+    "att_arithmetic_intensity",
+    "att_emulated_tf32_arithmetic_intensity",
+    "att_round_elements_to_128B",
+    "att_compute_mem_bw_from_occupancy",
+    "att_compute_l2_hit_rate_global",
 ]
 
 try:
-    # Import the python selector if possible (requires torch)
-    from .selector import OrigamiMatmulSelector
+    # Import the python selectors if possible (requires torch)
+    from .selector import OrigamiMatmulSelector, OrigamiAttentionSelector
     __all__.append("OrigamiMatmulSelector")
+    __all__.append("OrigamiAttentionSelector")
 except ImportError:
     # Do not raise this error if import fails - compiled Origami bindings still
-    # work without the dedicated Python selector
+    # work without the dedicated Python selectors
     pass
 
