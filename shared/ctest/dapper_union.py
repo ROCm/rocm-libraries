@@ -98,10 +98,18 @@ def compute_filter(dapper_json_path, category_name, category_filter):
       - 'minimal'         -> minimal default (nothing test-relevant changed)
       - 'entire_category' -> the category filter as-is (unattributable change; safe)
       - 'union' (default) -> dapper impact filter intersected with the category
-    Never returns a superset of the category (subtractive-only).
+    Never returns a superset of the category (subtractive-only). If the dapper JSON
+    is missing or unreadable, fail open to the entire category (safe; never skips).
     """
-    with open(dapper_json_path, "r") as f:
-        data = json.load(f)
+    try:
+        with open(dapper_json_path, "r") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(
+            f"dapper_union: cannot read '{dapper_json_path}' ({e}); "
+            f"falling back to entire category for '{category_name}'."
+        )
+        return category_filter
     dapper_filter = data.get("dapper_filter", "")
     fallback_mode = data.get("fallback_mode", "union")
 

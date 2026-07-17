@@ -124,11 +124,17 @@ def get_git_origin_url(repo_path="."):
     return None
 
 
-def write_shas_file(context, shas_file):
-    origin = get_git_origin_url()
-    print(f"{context}: origin={origin}")
-    feature_sha = get_git_sha(["git", "rev-parse", "HEAD"])
-    base_sha = get_git_sha(["git", "merge-base", "HEAD", "origin/develop"])
+def write_shas_file(context, shas_file, base_ref="origin/develop", source_dir="."):
+    """Write base (merge-base with base_ref) and feature (HEAD) SHAs.
+
+    source_dir points at the project's git worktree. For an in-source build (CI)
+    this is the default '.'; for an out-of-source build (TheRock) the build dir is
+    not a git repo, so the caller passes the MIOpen source dir.
+    """
+    origin = get_git_origin_url(source_dir)
+    print(f"{context}: origin={origin} base_ref={base_ref} source_dir={source_dir}")
+    feature_sha = get_git_sha(["git", "-C", source_dir, "rev-parse", "HEAD"])
+    base_sha = get_git_sha(["git", "-C", source_dir, "merge-base", "HEAD", base_ref])
     with open(shas_file, "w") as file:
         file.write(f"{base_sha}\n")
         file.write(f"{feature_sha}\n")
@@ -158,6 +164,16 @@ def main():
         "--use-cached",
         action="store_true",
         help="Reuse the existing shas file if present (skip); error if it is missing.",
+    )
+    parser_shas.add_argument(
+        "--base-ref",
+        default="origin/develop",
+        help="Git ref to merge-base against for the impact diff (default origin/develop).",
+    )
+    parser_shas.add_argument(
+        "--source-dir",
+        default=".",
+        help="Project git worktree (for out-of-source builds, e.g. TheRock).",
     )
 
     # Dependency parsing
@@ -220,6 +236,11 @@ def main():
         help="Optional path to file containing a list of gtest shard output files",
         default="",
     )
+    parser_test.add_argument(
+        "--source-dir",
+        default=".",
+        help="Project git worktree for the impact diff (out-of-source builds, e.g. TheRock).",
+    )
 
     # Code auditing
     parser_audit = subparsers.add_parser(
@@ -247,7 +268,7 @@ def main():
                 "existing dapper inputs; reconfigure once with -DMIOPEN_DAPPER_USE_CACHED=OFF "
                 "to generate them."
             )
-        write_shas_file("MAIN SHAS: ", shas_file)
+        write_shas_file("MAIN SHAS: ", shas_file, args.base_ref, args.source_dir)
     elif args.command == "parse":
         mapping_json = os.path.join(
             os.path.dirname(args.build_ninja) or ".", "miopen_dapper_mapping.json"
@@ -282,6 +303,8 @@ def main():
         if args.shardsfile:
             print(f"main: ADDED SHARDSFILE: {args.shardsfile}")
             filter_args += ["--shardsfile", args.shardsfile]
+        if args.source_dir:
+            filter_args += ["--source-dir", args.source_dir]
         run_selective_test_filter(filter_args)
     elif args.command == "audit":
         run_selective_test_filter([args.depmap_json, "--audit"])

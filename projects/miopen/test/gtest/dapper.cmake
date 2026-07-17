@@ -229,3 +229,46 @@ macro(dapper_add_sharded_test)
         VERBATIM
     )
 endmacro()
+
+# Build-time production of the Dapper impact JSON for a single-gtest TheRock build.
+# GPU-less (git diff + ninja deps + nm + fixture extraction). The resulting
+# miopen_dapper_tests.json (dapper_filter + fallback_mode) is installed next to the
+# generated CTestTestfile so the runner wrapper can compute the union filter. The
+# native shard/ctest dapper machinery (above) stays inert in TheRock.
+#
+# Uses source-tree script paths (PROJECT_SOURCE_DIR) since TheRock builds out-of-source,
+# and passes --source-dir so git runs in the MIOpen source worktree (the build dir is not
+# a git repo). --workspace-root is intentionally omitted: TheRock build.ninja dep paths are
+# absolute, which the current normalizer maps correctly. (When the path-normalization branch
+# is integrated, pass --workspace-root ${PROJECT_SOURCE_DIR}.)
+macro(dapper_therock_generate_json)
+    set(_dapper_src "${PROJECT_SOURCE_DIR}/script/dependency-parser")
+    set(_dapper_out "${CMAKE_BINARY_DIR}")
+    set(_dapper_tests_json "${_dapper_out}/miopen_dapper_tests.json")
+    set(_dapper_mapping_json "${_dapper_out}/miopen_dapper_mapping.json")
+    set(_dapper_fixtures_json "${_dapper_out}/miopen_dapper_fixtures.json")
+    set(_dapper_build_ninja "${_dapper_out}/build.ninja")
+
+    add_custom_command(
+        OUTPUT ${_dapper_tests_json}
+        COMMENT "Dapper: generating ${_dapper_tests_json} (mode=${MIOPEN_DAPPER_MODE}, bridges=${MIOPEN_DAPPER_BRIDGES})"
+        COMMAND ${Python_EXECUTABLE} ${_dapper_src}/main.py shas
+            --base-ref ${MIOPEN_DAPPER_BASE_REF} --source-dir ${PROJECT_SOURCE_DIR}
+        COMMAND ${Python_EXECUTABLE} ${_dapper_src}/src/extract_gtest_fixtures.py
+        COMMAND ${Python_EXECUTABLE} ${_dapper_src}/main.py parse ${_dapper_build_ninja}
+            --bridges=${MIOPEN_DAPPER_BRIDGES}
+        COMMAND ${Python_EXECUTABLE} ${_dapper_src}/main.py select ${_dapper_mapping_json}
+            --fixturemap=${_dapper_fixtures_json} --source-dir ${PROJECT_SOURCE_DIR}
+            --output ${_dapper_tests_json}
+        WORKING_DIRECTORY ${_dapper_out}
+        DEPENDS miopen_gtest
+        VERBATIM
+    )
+    add_custom_target(dapper_therock_json ALL DEPENDS ${_dapper_tests_json})
+
+    if(NOT ENABLE_ASAN_PACKAGING)
+        install(FILES ${_dapper_tests_json}
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+            COMPONENT tests)
+    endif()
+endmacro()

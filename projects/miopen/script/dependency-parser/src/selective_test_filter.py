@@ -35,24 +35,36 @@ import subprocess
 import xml.etree.ElementTree as ET
 
 
-def get_changed_files(ref1, ref2, path_to_folder):
-    """Return a set of files changed between two git refs."""
-    base_commit = subprocess.run(
-        ["git", "show", "-s", '--format="%h  %ad  %s"', "--date=iso", f"{ref1}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    feat_commit = subprocess.run(
-        ["git", "show", "-s", '--format="%h  %ad  %s"', "--date=iso", f"{ref2}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+def get_changed_files(ref1, ref2, path_to_folder, source_dir="."):
+    """Return the set of files changed between two git refs, or None if the refs or
+    the diff cannot be resolved.
+
+    source_dir is the project's git worktree; for an out-of-source build (TheRock)
+    the caller passes the MIOpen source dir since the build dir is not a git repo.
+    Returning None lets the caller fail open (run the entire category) rather than
+    crash when the base ref / history is unavailable.
+    """
+    git = ["git", "-C", source_dir]
+    try:
+        base_commit = subprocess.run(
+            git + ["show", "-s", '--format="%h  %ad  %s"', "--date=iso", f"{ref1}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        feat_commit = subprocess.run(
+            git + ["show", "-s", '--format="%h  %ad  %s"', "--date=iso", f"{ref2}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"DAPPER: could not resolve refs {ref1}..{ref2} in {source_dir}: {e}")
+        return None
     print(f"DAPPER branches: MERGE-BASE: {base_commit.stdout.strip()}")
     print(f"                    FEATURE: {feat_commit.stdout.strip()}")
 
-    args = ["git", "diff", "--name-only", ref1, ref2]
+    args = git + ["diff", "--name-only", ref1, ref2]
     if path_to_folder:
         args += ["--", path_to_folder]
     try:
@@ -65,7 +77,7 @@ def get_changed_files(ref1, ref2, path_to_folder):
         return files
     except subprocess.CalledProcessError as e:
         print(f"Error running git diff: {e}")
-        sys.exit(1)
+        return None
 
 
 def load_depmap(depmap_json):
@@ -304,12 +316,17 @@ def main():
         idx = sys.argv.index("--shardsfile")
         if idx + 1 < len(sys.argv):
             shardsfile = sys.argv[idx + 1]
+    source_dir = "."
+    if "--source-dir" in sys.argv:
+        idx = sys.argv.index("--source-dir")
+        if idx + 1 < len(sys.argv):
+            source_dir = sys.argv[idx + 1]
 
     if not os.path.exists(depmap_json):
         print(f"Dependency map JSON not found: {depmap_json}")
         sys.exit(1)
 
-    changed_files = get_changed_files(ref1, ref2, path_to_folder)
+    changed_files = get_changed_files(ref1, ref2, path_to_folder, source_dir)
 
     # Load the mapping once: file->executables plus the compiled-source set used to
     # classify unattributed-but-compiled changes.
@@ -319,7 +336,14 @@ def main():
     compiled_sources = set(depmap_raw.get("compiled_sources", []))
     fixturemap = load_fixturemap(fixturemap_json) if fixturemap_json else None
 
-    if not changed_files:
+    if changed_files is None:
+        # Could not determine the diff (missing base ref / shallow history). Fail open:
+        # run the entire category so nothing is silently skipped.
+        print("DAPPER: changed files undetermined; using entire_category fallback.")
+        tests = []
+        gtest_filter = ""
+        fallback_mode = "entire_category"
+    elif not changed_files:
         print("No changed files detected.")
         tests = []
         gtest_filter = ""
@@ -347,7 +371,7 @@ def main():
                 "tests_to_run": tests,
                 "dapper_filter": gtest_filter,
                 "fallback_mode": fallback_mode,
-                "changed_files": sorted(changed_files),
+                "changed_files": sorted(changed_files) if changed_files else [],
                 "gtest_shards": gtest_shards,
             },
             f,

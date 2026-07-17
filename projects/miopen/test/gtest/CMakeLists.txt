@@ -3,17 +3,33 @@ find_package(GTest REQUIRED)
 include(GoogleTest)
 
 # Detect a TheRock build: TheRock injects THEROCK_SUBPROJECT_TARGET into every sub-project
-# configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES). Dapper must be completely inert there.
+# configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES).
 if(DEFINED THEROCK_SUBPROJECT_TARGET)
   set(MIOPEN_BUILD_IN_THEROCK ON)
 else()
   set(MIOPEN_BUILD_IN_THEROCK OFF)
 endif()
 
+# Dapper master switch (read by both the native/Jenkins flow and TheRock):
+#   off      : no Dapper (byte-for-byte pre-Dapper behavior)
+#   validate : native shard + dapper_diff coverage validation (Jenkins/MICI default)
+#   union    : ACTIVE -- the reduced subtractive union filter actually runs (TheRock default)
 if(MIOPEN_BUILD_IN_THEROCK)
-  # dapper_init() normally force-sets MIOPEN_TEST_SINGLE_GTEST / MIOPEN_TEST_DISCRETE. With
-  # Dapper skipped, restore the pre-Dapper default so the single aggregated gtest is built
-  # when discrete binaries are not (old `if(MIOPEN_TEST_DISCRETE) ... else() ... endif()`).
+  set(_MIOPEN_DAPPER_MODE_DEFAULT "union")
+else()
+  set(_MIOPEN_DAPPER_MODE_DEFAULT "validate")
+endif()
+set(MIOPEN_DAPPER_MODE "${_MIOPEN_DAPPER_MODE_DEFAULT}" CACHE STRING
+    "Dapper mode: off | validate | union")
+set_property(CACHE MIOPEN_DAPPER_MODE PROPERTY STRINGS off validate union)
+set(MIOPEN_DAPPER_BASE_REF "origin/develop" CACHE STRING
+    "Git ref to compute the Dapper impact diff against")
+message(STATUS "Dapper: MIOPEN_DAPPER_MODE=${MIOPEN_DAPPER_MODE} (TheRock=${MIOPEN_BUILD_IN_THEROCK})")
+
+if(MIOPEN_BUILD_IN_THEROCK)
+  # dapper_init() normally force-sets MIOPEN_TEST_SINGLE_GTEST / MIOPEN_TEST_DISCRETE. The
+  # native shard machinery stays inert here; restore the pre-Dapper default so the single
+  # aggregated gtest is built when discrete binaries are not.
   if(NOT DEFINED MIOPEN_TEST_SINGLE_GTEST)
     if(MIOPEN_TEST_DISCRETE)
       set(MIOPEN_TEST_SINGLE_GTEST OFF)
@@ -21,10 +37,22 @@ if(MIOPEN_BUILD_IN_THEROCK)
       set(MIOPEN_TEST_SINGLE_GTEST ON)
     endif()
   endif()
+  # Produce the Dapper impact JSON on the (GPU-less) builder so the runner can compute the
+  # union filter. Only the JSON-producing steps run; no native shard/ctest dapper tests.
+  if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
+    find_package(Python 3 REQUIRED COMPONENTS Interpreter)
+    include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
+    dapper_therock_generate_json()
+  endif()
 else()
-  find_package(Python 3 REQUIRED COMPONENTS Interpreter)
-  include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
-  dapper_init()
+  # Native/Jenkins build. 'off' disables Dapper entirely; 'validate'/'union' set up the
+  # native pipeline. (Full native check->union activation is a follow-up; today 'union'
+  # here is exercised via the existing `diff_check` target.)
+  if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
+    find_package(Python 3 REQUIRED COMPONENTS Interpreter)
+    include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
+    dapper_init()
+  endif()
 endif()
 
 if(MIOPEN_USE_HIPBLASLT)
@@ -426,8 +454,15 @@ message(STATUS "YAML-based test categorization:")
 list(APPEND CMAKE_MESSAGE_INDENT "  ")
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         message(STATUS "YAML-based test categorization")
+        # In active (union) mode, tell the generator to route dapper-enabled categories
+        # through the co-installed gtest_runner wrapper (which injects the union filter).
+        # The basename must match the installed dapper JSON (see dapper_therock_generate_json).
+        set(_MIOPEN_DAPPER_JSON_ARG "")
+        if(MIOPEN_DAPPER_MODE STREQUAL "union")
+          set(_MIOPEN_DAPPER_JSON_ARG DAPPER_JSON "miopen_dapper_tests.json")
+        endif()
         message(STATUS "apply_test_category_labels(miopen_gtest ${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR} ${INSTALL_TEST_FILE})")
-        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}")
+        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}" ${_MIOPEN_DAPPER_JSON_ARG})
 else()
         message(STATUS "No test categorization (${MIOPEN_TEST_CATEGORIES_CMAKE} missing)")
 endif()
@@ -442,4 +477,17 @@ if( NOT ENABLE_ASAN_PACKAGING )
       COMPONENT tests
       RENAME "CTestTestfile.cmake"
   )
+  # Active-union mode: co-install the dapper gtest_runner wrapper and its self-contained
+  # union helper next to the CTestTestfile so the runner can compute the filter with only
+  # the installed artifact (no source tree). The dapper JSON is installed by
+  # dapper_therock_generate_json().
+  if(MIOPEN_DAPPER_MODE STREQUAL "union")
+    install(
+        PROGRAMS
+          "${PROJECT_SOURCE_DIR}/scripts/run_miopen_gtest.py"
+          "${ROCM_LIBRARIES_ROOT}/shared/ctest/dapper_union.py"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+        COMPONENT tests
+    )
+  endif()
 endif()
