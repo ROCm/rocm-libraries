@@ -13908,16 +13908,24 @@ class KernelWriterAssembly(KernelWriter):
   def _emitTDMStoreBaseSetup(self, kernel, tmpS01):
     # Per-thread M-contiguous LDS scratch base (byte) = (mLocal + nLocal*MT0)*bpe,
     # mLocal=coord0-wg0*MT0, nLocal=coord1-wg1*MT1 (tile-local, from global coords).
+    #
+    # Computed into a SINGLE persistent VGPR: nLocal is formed first, then coord0 is
+    # added and the scalar wg0*MT0 subtracted so mLocal is folded in without a second
+    # live VGPR.  The result is bit-identical to the two-VGPR form, but the TDM store
+    # then adds only ONE live VGPR to the store phase.  This matters for StreamK, whose
+    # fixup/regular store phase is already at the 1024-VGPR ceiling: a second live TDM
+    # VGPR overflows to 1025 ("too many vgprs").  GSU=1 is unaffected (same base value,
+    # one fewer VGPR).
     module = Module("TDMStoreBaseSetup")
     bpe = self.states.bpeCexternalGSU1
     MT0 = kernel["MacroTile0"]; MT1 = kernel["MacroTile1"]
-    v = self.vgprPool.checkOut(2, "tdmStoreBase")
-    module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("WorkGroup0"), src1=MT0, comment="wg0*MT0"))
-    module.add(VSubU32(dst=vgpr(v), src0=vgpr(self.vgprs.coord0), src1=sgpr(tmpS01), comment="mLocal=coord0-wg0*MT0"))
+    v = self.vgprPool.checkOut(1, "tdmStoreBase")
     module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("WorkGroup1"), src1=MT1, comment="wg1*MT1"))
-    module.add(VSubU32(dst=vgpr(v+1), src0=vgpr(self.vgprs.coord1), src1=sgpr(tmpS01), comment="nLocal=coord1-wg1*MT1"))
-    module.add(VMulLOU32(dst=vgpr(v+1), src0=vgpr(v+1), src1=MT0, comment="nLocal*MT0"))
-    module.add(VAddU32(dst=vgpr(v), src0=vgpr(v), src1=vgpr(v+1), comment="mLocal + nLocal*MT0"))
+    module.add(VSubU32(dst=vgpr(v), src0=vgpr(self.vgprs.coord1), src1=sgpr(tmpS01), comment="nLocal=coord1-wg1*MT1"))
+    module.add(VMulLOU32(dst=vgpr(v), src0=vgpr(v), src1=MT0, comment="nLocal*MT0"))
+    module.add(VAddU32(dst=vgpr(v), src0=vgpr(v), src1=vgpr(self.vgprs.coord0), comment="+coord0"))
+    module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("WorkGroup0"), src1=MT0, comment="wg0*MT0"))
+    module.add(VSubU32(dst=vgpr(v), src0=vgpr(v), src1=sgpr(tmpS01), comment="mLocal folded in: (nLocal*MT0+coord0)-wg0*MT0"))
     module.add(VLShiftLeftB32(dst=vgpr(v), shiftHex=hex(int(log2(bpe))), src=vgpr(v), comment="*bpe"))
     return module, v
 
@@ -14931,6 +14939,10 @@ class KernelWriterAssembly(KernelWriter):
   # M/N extent via the tensor_store descriptor, so the inline edge store path is
   # unnecessary and incompatible with the M-contiguous scratch layout.  Callers use
   # this to skip the edge branch entirely; edge correctness comes from the flush clamp.
+  # This is True for the two D-writing accumulation modes: GSU=1 (SingleBuffer / no
+  # accumulation) and StreamK non-atomic (PartialsBuffer, whose fixup-owner final bf16->D
+  # store reuses this path) -- both exclude MultipleBuffer / MultipleBufferSingleKernel.
+  # The descriptor clamp is FFM-validated on StreamK partial-tile M edges (e.g. M=248/232/216).
   ##############################################################################
   def _tdmStoreSkipsEdge(self, kernel):
     return (kernel.get("TDMStoreInst")

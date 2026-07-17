@@ -1805,11 +1805,15 @@ class GlobalWriteBatchWriter:
         #                                   the TDM flush is not compatible with it
         #                                   (FFM: ~all elements wrong) -> excluded pending a
         #                                   dedicated MBSK D-store-via-TDM change.
-        #   * StreamK                     : sets _GlobalAccumulation='PartialsBuffer' (its
-        #                                   partial-tile store target is the GSU workspace, not
-        #                                   D).  'PartialsBuffer' is NOT in the exclusion set
-        #                                   below, so StreamK is rejected up-front in
-        #                                   SolutionStructs/Solution.py rather than here.
+        #   * StreamK (non-atomic)        : sets _GlobalAccumulation='PartialsBuffer'.  Its fp32
+        #                                   partial-tile store to the workspace goes through the
+        #                                   separate StreamK partialsWriteBatch path and never
+        #                                   reaches this gate.  Only the fixup-owner's final store
+        #                                   -- after fixupBatch accumulates all partials into ValuC
+        #                                   -- reaches globalWriteBatch, and its destination IS D
+        #                                   (bf16), structurally identical to the GSU=1 case.  So
+        #                                   'PartialsBuffer' is intentionally NOT excluded here and
+        #                                   the TDM store correctly fires only on that bf16->D write.
         # GSU=1 (SingleBuffer) and subtile (which itself requires GSU=1) write D directly and
         # therefore use the TDM store.
         if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):

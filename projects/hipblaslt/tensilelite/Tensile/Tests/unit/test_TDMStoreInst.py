@@ -108,3 +108,48 @@ class TestTDMStoreInstCodegenWiring:
         assert "isSubtileTDMStore" not in src
         assert '"MultipleBufferSingleKernel", "MultipleBuffer"' in src
 
+    def test_store_base_setup_single_vgpr(self):
+        # _emitTDMStoreBaseSetup must hold exactly ONE persistent VGPR for the
+        # M-contiguous LDS scratch base.  A second live VGPR overflows StreamK's
+        # store phase (already at the 1024-VGPR ceiling) to 1025 ("too many vgprs").
+        src = _read("KernelWriterAssembly.py")
+        setup = src.split("def _emitTDMStoreBaseSetup", 1)[1].split("\n  def ", 1)[0]
+        assert 'checkOut(1, "tdmStoreBase")' in setup
+        assert 'checkOut(2, "tdmStoreBase")' not in setup
+
+
+class TestTDMStoreInstStreamKGate:
+    """Solution-time gate for the StreamK narrow-scope TDM support.
+
+    StreamK non-atomic (``_GlobalAccumulation == 'PartialsBuffer'``) keeps its
+    fp32 partial-tile store on ``buffer_store`` (a separate StreamK path) and
+    routes only the fixup-owner's final bf16->D store through the regular
+    ``globalWriteBatch`` -- exactly where the TDM store fires.  These guards lock
+    the accept/reject envelope in ``SolutionStructs/Solution.py``.
+    """
+
+    def test_streamk_partialsbuffer_is_the_allowed_mode(self):
+        src = _read("SolutionStructs", "Solution.py")
+        # Only the non-atomic PartialsBuffer StreamK mode is allowed; the atomic
+        # path (not PartialsBuffer) is rejected.
+        assert "!= 'PartialsBuffer'" in src
+        assert "atomic StreamK reduction path does not route the final D store" in src
+
+    def test_streamk_requires_usebeta_true(self):
+        # StreamK aliases sgprSkPartialIdx onto sgprBeta, which is unallocated when
+        # UseBeta=False -> cleanly rejected instead of an assembler error.
+        src = _read("SolutionStructs", "Solution.py")
+        assert 'state["StreamK"] != 0 and not pt.get("UseBeta", False)' in src
+        assert "TDMStoreInst + StreamK requires UseBeta=True" in src
+
+    def test_gsu_gt1_still_rejected(self):
+        src = _read("SolutionStructs", "Solution.py")
+        assert "TDMStoreInst does not yet support GlobalSplitU>1" in src
+
+    def test_gate_comment_documents_streamk_partialsbuffer(self):
+        # The GlobalWriteBatch gate comment must explain that PartialsBuffer is
+        # intentionally NOT excluded (only the fixup-owner's D store reaches here).
+        src = _read("Components", "GlobalWriteBatch.py")
+        assert "PartialsBuffer" in src
+        assert "fixup-owner" in src
+

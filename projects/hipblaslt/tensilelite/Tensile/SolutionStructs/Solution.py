@@ -1569,14 +1569,29 @@ class Solution(collections.abc.Mapping):
 
     # TDMStoreInst: gfx1250 tensor_store_from_lds epilogue.  Supported + FFM-validated: bf16
     # DestDataType, HighPrecisionAccumulate (fp32->bf16 convert+pack), GlobalSplitU=1 direct-to-D,
-    # SourceSwap 0/1, UseSubtileImpl 0/1, and UseBeta 0/1 (verified numerically incl. beta!=0 at
-    # M/N edges).  Reject everything not yet supported at solution time so an unsupported config is
-    # cleanly rejected instead of silently mis-generating a broken kernel:
+    # SourceSwap 0/1, UseSubtileImpl 0/1, UseBeta 0/1 (verified numerically incl. beta!=0 at
+    # M/N edges), and StreamK in the non-atomic workspace (PartialsBuffer) mode.  Reject everything
+    # not yet supported at solution time so an unsupported config is cleanly rejected instead of
+    # silently mis-generating a broken kernel:
     #   - non-gfx1250 / non-bf16 / non-HPA: the tensor_store_from_lds convert+pack path assumptions
     #     do not hold.
-    #   - StreamK / GlobalSplitU>1: the partial-tile workspace store (fp32 partials -> PartialsBuffer)
-    #     + fixup reduction path is not implemented; the TDM store would write to the wrong
-    #     destination.  Tracked separately.
+    #   - StreamK non-atomic (_GlobalAccumulation == 'PartialsBuffer') with UseBeta=True: SUPPORTED.
+    #     The fp32 partial-tile store to the GSU workspace stays on buffer_store (StreamK
+    #     partialsWriteBatch, a separate store path the TDM gate never touches), while the
+    #     fixup-owner accumulates the partials into ValuC (fixupBatch) and then writes the final
+    #     bf16 result to D through the regular globalWriteBatch path.  That final D store is
+    #     structurally identical to the validated GSU=1 bf16->D store and is exactly where the TDM
+    #     store fires (FFM-validated all-PASS at M/N edges, SourceSwap 0/1, N in {512,1024}).
+    #   - StreamK with UseBeta=False: NOT supported.  StreamK's parallel-reduction SGPR aliasing
+    #     reuses the Beta SGPR (RegSet sgprSkPartialIdx -> sgprBeta), which is not allocated when
+    #     UseBeta=False, so the kernel fails to assemble ("expected absolute expression").  This is
+    #     a pre-existing StreamK limitation independent of the TDM store: non-TDM StreamK with
+    #     UseBeta=False fails identically.  Rejected here so the combo is a clean rejection instead
+    #     of an assembler error.
+    #   - StreamK atomic (StreamKAtomic) / GlobalSplitU>1: NOT supported.  The atomic reduction and
+    #     the GSU workspace-accumulation store paths do not route the final D write through the
+    #     TDM-gated globalWriteBatch, so the TDM store would target the wrong destination.  Tracked
+    #     separately.
     #   - StoreRemapVectorWidth: the TDM store branch is skipped, so TDMStoreInst would be silently
     #     inactive.
     #   - UseE / UseBias / UseScaleAlphaVec / UseScaleAB / UseScaleCD / Activation: epilogue features
@@ -1590,8 +1605,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "TDMStoreInst currently supports only bf16 DestDataType (converted+packed store path)")
       elif not pt["HighPrecisionAccumulate"]:
         reject(state, printRejectionReason, "TDMStoreInst requires HighPrecisionAccumulate (fp32->bf16 convert+pack store path)")
-      elif state["StreamK"] != 0:
-        reject(state, printRejectionReason, "TDMStoreInst does not yet support StreamK (partial-tile workspace store + fixup reduction unimplemented)")
+      elif state["StreamK"] != 0 and state["_GlobalAccumulation"] != 'PartialsBuffer':
+        reject(state, printRejectionReason, "TDMStoreInst supports StreamK only in the non-atomic workspace (PartialsBuffer) mode; the atomic StreamK reduction path does not route the final D store through the TDM-gated globalWriteBatch")
+      elif state["StreamK"] != 0 and not pt.get("UseBeta", False):
+        reject(state, printRejectionReason, "TDMStoreInst + StreamK requires UseBeta=True: StreamK's parallel-reduction SGPR aliasing reuses the Beta SGPR (sgprSkPartialIdx -> sgprBeta), which is unallocated when UseBeta=False and fails to assemble.  Pre-existing StreamK limitation, independent of the TDM store (non-TDM StreamK+UseBeta=False fails identically)")
       elif state["GlobalSplitU"] > 1:
         reject(state, printRejectionReason, "TDMStoreInst does not yet support GlobalSplitU>1 (workspace accumulation store)")
       elif state["StoreRemapVectorWidth"]:
