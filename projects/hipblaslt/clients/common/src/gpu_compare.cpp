@@ -75,6 +75,11 @@ namespace
     {
         return double_almost_equals(a, b);
     }
+    // int32 output uses exact equality, mirroring ASSERT_EQ in the CPU unit_check.
+    __device__ inline bool almost_equals(int32_t a, int32_t b)
+    {
+        return a == b;
+    }
 
     // Per-element error in ULP of the output type, matching ulp_distance() in ulp.hpp.
     __device__ inline double ulp_distance(double exact, double approx, int mant_bits)
@@ -390,6 +395,8 @@ GpuRefResult compare_gemm_device(const void* dGpu,
         GPU_REF_COMPARE(hip_bfloat16, float);
     else if(tD == HIP_R_64F)
         GPU_REF_COMPARE(double, double);
+    else if(tD == HIP_R_32I)
+        GPU_REF_COMPARE(int32_t, int32_t);
     else
         GPU_REF_COMPARE(hipblasLtHalf, float);
 

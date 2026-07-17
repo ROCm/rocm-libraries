@@ -149,17 +149,19 @@ namespace
     }
 
     // Input types accepted by the reference path (a_type/b_type). OCP fp8/bf8 only;
-    // f64 is only valid on the compute-64F path (enforced by the compute gate).
+    // f64 is only valid on the compute-64F path and int8 only on the compute-32I
+    // path (both enforced by the compute gate).
     bool is_supported_input(hipDataType t)
     {
         return t == HIP_R_32F || t == HIP_R_16F || t == HIP_R_16BF || t == HIP_R_8F_E4M3
-               || t == HIP_R_8F_E5M2 || t == HIP_R_64F;
+               || t == HIP_R_8F_E5M2 || t == HIP_R_64F || t == HIP_R_8I;
     }
 
     // C/D types accepted by the reference path (the compare kernel handles these).
     bool is_supported_output(hipDataType t)
     {
-        return t == HIP_R_32F || t == HIP_R_16F || t == HIP_R_16BF || t == HIP_R_64F;
+        return t == HIP_R_32F || t == HIP_R_16F || t == HIP_R_16BF || t == HIP_R_64F
+               || t == HIP_R_32I;
     }
 } // namespace
 
@@ -182,26 +184,39 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
     if(arg.a_type == HIP_R_8F_E4M3_FNUZ || arg.a_type == HIP_R_8F_E5M2_FNUZ
        || arg.b_type == HIP_R_8F_E4M3_FNUZ || arg.b_type == HIP_R_8F_E5M2_FNUZ)
         return fail("FNUZ fp8/bf8 input (only OCP fp8/bf8 supported)");
+    // int8 output is unsupported; only int32 output (int8 in / int32 out).
+    if(arg.c_type == HIP_R_8I || arg.d_type == HIP_R_8I)
+        return fail("int8 output (only int32 output supported)");
     if(!is_supported_input(arg.a_type) || !is_supported_input(arg.b_type))
-        return fail("input type other than f32/f16/bf16/fp8/bf8");
+        return fail("input type other than f32/f16/bf16/fp8/bf8/int8");
     if(!is_supported_output(arg.c_type) || !is_supported_output(arg.d_type))
-        return fail("C/D type other than f32/f16/bf16/f64");
-    // compute 64F requires all of a/b/c/d f64; compute 32F requires none f64.
+        return fail("C/D type other than f32/f16/bf16/f64/int32");
+    // compute 64F requires all f64; compute 32I requires int8 in / int32 out;
+    // compute 32F requires no f64, no int8 in, no int32 out.
     if(arg.compute_type == HIPBLAS_COMPUTE_64F)
     {
         if(arg.a_type != HIP_R_64F || arg.b_type != HIP_R_64F || arg.c_type != HIP_R_64F
            || arg.d_type != HIP_R_64F)
             return fail("compute 64F requires f64 A/B/C/D");
     }
+    else if(arg.compute_type == HIPBLAS_COMPUTE_32I)
+    {
+        if(arg.a_type != HIP_R_8I || arg.b_type != HIP_R_8I || arg.c_type != HIP_R_32I
+           || arg.d_type != HIP_R_32I)
+            return fail("compute 32I requires int8 A/B and int32 C/D");
+    }
     else if(arg.compute_type == HIPBLAS_COMPUTE_32F)
     {
         if(arg.a_type == HIP_R_64F || arg.b_type == HIP_R_64F || arg.c_type == HIP_R_64F
            || arg.d_type == HIP_R_64F)
             return fail("f64 A/B/C/D requires compute 64F");
+        if(arg.a_type == HIP_R_8I || arg.b_type == HIP_R_8I || arg.c_type == HIP_R_32I
+           || arg.d_type == HIP_R_32I)
+            return fail("int8/int32 A/B/C/D requires compute 32I");
     }
     else
     {
-        return fail("compute type other than HIPBLAS_COMPUTE_32F/64F");
+        return fail("compute type other than HIPBLAS_COMPUTE_32F/32I/64F");
     }
     if(arg.compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
        || arg.compute_input_typeB != HIPBLASLT_DATATYPE_INVALID)
@@ -292,6 +307,36 @@ void run_reference_gemm_device(bool        transA_is_n,
                                                              strideD,
                                                              batchCount,
                                                              stream);
+        gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
+        return;
+    }
+
+    // int8 in / int32 out is a single all-int32 instantiation (compute 32I
+    // guarantees int8 A/B and int32 C/D). int32 accumulate matches the hardware
+    // accumulator, including overflow wrap.
+    if(tD == HIP_R_32I)
+    {
+        launch_reference_gemm<hipblasLtInt8, int32_t, int32_t, int32_t>(transA_is_n,
+                                                                        transB_is_n,
+                                                                        M,
+                                                                        N,
+                                                                        K,
+                                                                        alpha,
+                                                                        beta,
+                                                                        dA,
+                                                                        lda,
+                                                                        strideA,
+                                                                        dB,
+                                                                        ldb,
+                                                                        strideB,
+                                                                        dC,
+                                                                        ldc,
+                                                                        strideC,
+                                                                        dDgold,
+                                                                        ldd,
+                                                                        strideD,
+                                                                        batchCount,
+                                                                        stream);
         gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
         return;
     }
