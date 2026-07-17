@@ -184,3 +184,32 @@ st.func @merge_hold_cnt_with_va_vdst() {
   "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { hold_cnt = 1 } }
   v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
 }
+
+#--- WAR on a VALU *source* operand: a VALU reads v0, then a VMEM load writes
+#--- v0. The load must not clobber v0 until the VALU has finished reading it, so
+#--- va_vdst is tracked on the VALU's source operand (not just its dest) and a
+#--- drain is emitted before the writer.
+# CHECK-LABEL: @valu_src_war_before_vmem_write
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: buffer_load_b32
+
+st.func @valu_src_war_before_vmem_write() {
+^entry:
+  v10 = "st.v_add_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- No WAR when the writer targets a different register than the VALU read:
+#--- the VALU reads v0 but the load writes v30, so no va_vdst drain is needed.
+# CHECK-LABEL: @valu_src_no_war_diff_reg
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu
+# CHECK: buffer_load_b32
+
+st.func @valu_src_no_war_diff_reg() {
+^entry:
+  v10 = "st.v_add_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+  v30 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+}
