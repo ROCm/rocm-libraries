@@ -13912,7 +13912,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("TDMStoreBaseSetup")
     bpe = self.states.bpeCexternalGSU1
     MT0 = kernel["MacroTile0"]; MT1 = kernel["MacroTile1"]
-    v = self.vgprPool.checkOut(2, "tdmHybBase")
+    v = self.vgprPool.checkOut(2, "tdmStoreBase")
     module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("WorkGroup0"), src1=MT0, comment="wg0*MT0"))
     module.add(VSubU32(dst=vgpr(v), src0=vgpr(self.vgprs.coord0), src1=sgpr(tmpS01), comment="mLocal=coord0-wg0*MT0"))
     module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("WorkGroup1"), src1=MT1, comment="wg1*MT1"))
@@ -13932,7 +13932,8 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("TDMStoreScratch")
     bpe = self.states.bpeCexternalGSU1
     MT0 = kernel["MacroTile0"]
-    co0 = addrCalc.coordOffset0; co1 = addrCalc.coordOffset1
+    co0 = addrCalc.coordOffset0
+    co1 = addrCalc.coordOffset1
     immOff = (co0 + co1*MT0)*bpe
     baseIdx = sumIdx0 - prefixOffset
     ndw = (gwvw*bpe + 3)//4  # packed output dwords (bf16: gwvw/2)
@@ -13947,8 +13948,10 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SWaitCnt(dscnt=0, comment="TDM store: wait scratch ds_store"))
     module.add(SBarrier(comment="TDM store: all waves staged scratch before TDM store"))
     bpe = self.states.bpeCexternalGSU1
-    log2bpe = int(log2(bpe)); dss = {1:0,2:1,4:2,8:3}[bpe]
-    MT0 = kernel["MacroTile0"]; MT1 = kernel["MacroTile1"]
+    log2bpe = int(log2(bpe))
+    dss = {1:0,2:1,4:2,8:3}[bpe]
+    MT0 = kernel["MacroTile0"]
+    MT1 = kernel["MacroTile1"]
     packedD1 = kernel["PackedC1IndicesX"]
     strideD1 = "StrideD%s" % (self.states.indexChars[packedD1[0]])
     sizeI = self.sizeRef(kernel["ProblemType"]["Index0"])
@@ -13962,8 +13965,10 @@ class KernelWriterAssembly(KernelWriter):
     nSeg = (MT1 // numWaves) if waveSpec else MT1
     ldsPerWaveBytes = nSeg * MT0 * bpe
     with self.allocTmpSgpr(16, alignment=4, tag="tdmStoreDesc") as descS:
-      g0 = descS.idx; g1 = g0 + 4
-      for k in range(12): module.add(SMovB32(dst=sgpr(g0+k), src=0, comment="zero D# dword"))
+      g0 = descS.idx
+      g1 = g0 + 4
+      for k in range(12):
+        module.add(SMovB32(dst=sgpr(g0+k), src=0, comment="zero D# dword"))
       module.add(SMovB32(dst=sgpr(g0+0), src=hex(0x1 | (1<<3)), comment="G0 Reserved0|m_is_store"))
       with self.allocTmpSgpr(1, tag="tdmWaveId") as wS:
         wave = wS.idx
@@ -13971,26 +13976,38 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VReadfirstlaneB32(dst=sgpr(wave), src=vgpr("Serial"), comment="wave-spec: firstlane(Serial)"))
           module.add(SLShiftRightB32(dst=sgpr(wave), shiftHex=hex(int(log2(kernel["WavefrontSize"]))), src=sgpr(wave), comment="waveId = Serial / WavefrontSize"))
           module.add(SMulI32(dst=sgpr(g0+1), src0=sgpr(wave), src1=ldsPerWaveBytes, comment="G0 lds base = waveId*nSeg*MT0*bpe"))
-        with self.allocTmpSgpr(2, alignment=2, tag="tdmStoreAddr") as aS:
-          o = aS.idx
-          module.add(SMulI32(dst=sgpr(o), src0=sgpr("WorkGroup1"), src1=MT1, comment="col0=wg1*MT1"))
-          module.add(SMulI32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(strideD1), comment="*StrideD"))
-          module.add(SMulI32(dst=sgpr(o+1), src0=sgpr("WorkGroup0"), src1=MT0, comment="row0=wg0*MT0"))
-          module.add(SAddU32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(o+1), comment="tileOriginElem"))
+        with self.allocTmpSgpr(4, alignment=2, tag="tdmStoreAddr") as aS:
+          # D byte offset computed in 64-bit: elemOff = colStart*StrideD + rowStart,
+          # then byteOff = elemOff << log2bpe.  colStart*StrideD reaches N*M elements and
+          # overflows 32-bit for large stride/batch, so keep a full (lo,hi) pair.
+          oLo = aS.idx
+          oHi = aS.idx + 1
+          oTmp = aS.idx + 2
+          module.add(SMulI32(dst=sgpr(oLo), src0=sgpr("WorkGroup1"), src1=MT1, comment="colStart=wg1*MT1 (elem)"))
           if waveSpec:
-            module.add(SMulI32(dst=sgpr(o+1), src0=sgpr(wave), src1=nSeg, comment="wave N-col start = waveId*nSeg"))
-            module.add(SMulI32(dst=sgpr(o+1), src0=sgpr(o+1), src1=sgpr(strideD1), comment="*StrideD"))
-            module.add(SAddU32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(o+1), comment="+wave N-col offset"))
-          if log2bpe: module.add(SLShiftLeftB32(dst=sgpr(o), shiftHex=hex(log2bpe), src=sgpr(o), comment="*bpe"))
+            module.add(SMulI32(dst=sgpr(oTmp), src0=sgpr(wave), src1=nSeg, comment="wave N-col start = waveId*nSeg"))
+            module.add(SAddU32(dst=sgpr(oLo), src0=sgpr(oLo), src1=sgpr(oTmp), comment="colStart += wave N-col"))
+          module.add(SMulHIU32(dst=sgpr(oHi), src0=sgpr(oLo), src1=sgpr(strideD1), comment="hi(colStart*StrideD)"))
+          module.add(SMulI32(dst=sgpr(oLo), src0=sgpr(oLo), src1=sgpr(strideD1), comment="lo(colStart*StrideD)"))
+          module.add(SMulI32(dst=sgpr(oTmp), src0=sgpr("WorkGroup0"), src1=MT0, comment="rowStart=wg0*MT0"))
+          module.add(SAddU32(dst=sgpr(oLo), src0=sgpr(oLo), src1=sgpr(oTmp), comment="elemOff lo += rowStart"))
+          module.add(SAddCU32(dst=sgpr(oHi), src0=sgpr(oHi), src1=0, comment="elemOff hi += carry"))
+          if log2bpe:
+            module.add(SLShiftLeftB64(dst=sgpr(oLo,2), src=sgpr(oLo,2), shiftHex=hex(log2bpe), comment="byteOff = elemOff*bpe (64-bit)"))
           module.add(SMovB64(dst=sgpr(g0+2,2), src=sgpr("AddressD",2), comment="G0 D base"))
-          module.add(SAddU32(dst=sgpr(g0+2), src0=sgpr(g0+2), src1=sgpr(o), comment="+tileOff lo"))
-          module.add(SAddCU32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=0, comment="+tileOff hi"))
+          module.add(SAddU32(dst=sgpr(g0+2), src0=sgpr(g0+2), src1=sgpr(oLo), comment="+tileOff lo"))
+          module.add(SAddCU32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=sgpr(oHi), comment="+tileOff hi (64-bit)"))
         module.add(SOrB32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=hex(2<<30), comment="G0 type=2"))
         module.add(SMovB32(dst=sgpr(g1+0), src=hex(dss<<16), comment="G1 data_size"))
         with self.allocTmpSgpr(4, tag="tdmStoreDim") as tS:
-          t = tS.idx; rd0 = tS.idx+1; rd1 = tS.idx+2; cw = tS.idx+3
-          module.add(SMulI32(dst=sgpr(rd0), src0=sgpr("WorkGroup0"), src1=MT0, comment="rowStart"))
-          module.add(SSubU32(dst=sgpr(rd0), src0=sizeI, src1=sgpr(rd0), comment="tdim0=M-rowStart"))
+          t = tS.idx
+          rd0 = tS.idx+1
+          rd1 = tS.idx+2
+          cw = tS.idx+3
+          module.add(SMulI32(dst=sgpr(t), src0=sgpr("WorkGroup0"), src1=MT0, comment="rowStart=wg0*MT0"))
+          module.add(SSubU32(dst=sgpr(rd0), src0=sizeI, src1=sgpr(t), comment="tdim0=M-rowStart"))
+          module.add(SCmpLtU32(src0=sizeI, src1=sgpr(t), comment="row fully OOB? (M<rowStart)"))
+          module.add(SCSelectB32(dst=sgpr(rd0), src0=0, src1=sgpr(rd0), comment="clamp tdim0>=0 (symmetric with N; defends persistent/leaked tiling)"))
           module.add(SMulI32(dst=sgpr(cw), src0=sgpr("WorkGroup1"), src1=MT1, comment="colStart=wg1*MT1"))
           if waveSpec:
             module.add(SMulI32(dst=sgpr(rd1), src0=sgpr(wave), src1=nSeg, comment="waveId*nSeg"))
@@ -13998,10 +14015,14 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SSubU32(dst=sgpr(rd1), src0=sizeJ, src1=sgpr(cw), comment="tdim1=N-colStart_wave"))
           module.add(SCmpLtU32(src0=sizeJ, src1=sgpr(cw), comment="wave fully OOB? (N<colStart_wave)"))
           module.add(SCSelectB32(dst=sgpr(rd1), src0=0, src1=sgpr(rd1), comment="clamp tdim1>=0 (OOB wave writes nothing)"))
-          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+1), src0=sgpr(g1+1), src1=sgpr(t), comment="tdim0 lo"))
-          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim0 hi"))
-          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim1 lo"))
-          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=sgpr(t), comment="tdim1 hi"))
+          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0)))
+          module.add(SOrB32(dst=sgpr(g1+1), src0=sgpr(g1+1), src1=sgpr(t), comment="tdim0 lo"))
+          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0)))
+          module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim0 hi"))
+          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1)))
+          module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim1 lo"))
+          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1)))
+          module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=sgpr(t), comment="tdim1 hi"))
         module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=hex((MT0 & 0xFFFF)<<16), comment="tile_dim0=MT0"))
         module.add(SOrB32(dst=sgpr(g1+4), src0=sgpr(g1+4), src1=hex(nSeg & 0xFFFF), comment="tile_dim1=nSeg (wave-spec N-segment)"))
         module.add(SMovB32(dst=sgpr(g1+5), src=sgpr(strideD1), comment="sgpr5=StrideD"))
