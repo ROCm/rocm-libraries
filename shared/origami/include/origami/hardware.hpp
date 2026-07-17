@@ -27,6 +27,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -842,14 +843,16 @@ class ORIGAMI_EXPORT hardware_t {
  * @brief Resolve the number of compute units to model against.
  *
  * Central helper for honoring a caller-supplied CU budget (problem.num_cus).
- * Returns @p requested_num_cus when it is a non-zero cap below the physical
+ * Returns @p requested_num_cus when it is a positive cap below the physical
  * count, otherwise the full hardware count. Used across solution selection and
- * mapping so that a budget of 0 preserves the "use all CUs" behaviour.
+ * mapping so that a budget of <= 0 preserves the "use all CUs" behaviour.
  *
- * @param requested_num_cus Requested CU budget (0 = use all CUs).
+ * @param requested_num_cus Requested CU budget (<= 0 = use all CUs). A signed
+ *                          type so that invalid/negative inputs are absorbed
+ *                          here rather than wrapping to a huge unsigned value.
  * @param hardware_num_cus Physical number of compute units (hardware_t::N_CU).
  * @return std::size_t Effective number of usable compute units.
  */
-ORIGAMI_EXPORT std::size_t resolve_num_cus(std::size_t requested_num_cus,
+ORIGAMI_EXPORT std::size_t resolve_num_cus(std::int64_t requested_num_cus,
                                            std::size_t hardware_num_cus);
 }  // namespace origami

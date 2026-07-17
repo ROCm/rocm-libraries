@@ -3974,11 +3974,24 @@ namespace TensileLite
                     hip::HipAMDGPU const* hipAMDGPU
                         = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
+                    // Fold both CU budgets into origami_problem.num_cus (the single
+                    // source of truth select_grid_size derives its budget from).
+                    // smCountTarget and skMaxCUs each use 0 to mean "no cap"; take the
+                    // tighter (minimum) positive cap so the analytical path honors both.
+                    auto   smt       = problem.getParams().smCountTarget(); // int, 0 = no cap
+                    auto   skm       = pAMDGPU->skMaxCUs;                   // int, 0 = no cap
+                    size_t budget    = 0;                                  // 0 = use all CUs
+                    if(smt > 0)
+                        budget = static_cast<size_t>(smt);
+                    if(skm > 0)
+                        budget = (budget == 0) ? static_cast<size_t>(skm)
+                                               : std::min(budget, static_cast<size_t>(skm));
+
                     origami::problem_t origami_problem = {
                         .size        = {x, y, z},
                         .batch       = batch,
                         // CU budget hint; 0 = use all CUs.
-                        .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .num_cus     = budget,
                         .a_transpose = problem.transA() ? origami::transpose_t::T
                                                         : origami::transpose_t::N,
                         .b_transpose = problem.transB() ? origami::transpose_t::T
@@ -4014,8 +4027,7 @@ namespace TensileLite
                         origami_problem,
                         *(hipAMDGPU->analyticalHardware),
                         origami_config,
-                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid),
-                        pAMDGPU->skMaxCUs);
+                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
                 }
             }
             // Limit the CUs Stream-K is launched on either max or the specified,

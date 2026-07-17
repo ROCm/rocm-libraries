@@ -578,14 +578,14 @@ double compute_ranked_latency(const problem_t& problem,
       log_config_rejection(config, "LDS capacity exceeded");
       return kRejectedLatency;
     }
-    return attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+    return attention::compute_total_latency(problem, hardware, config);
   }
 
   if (!gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }
-  return gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+  return gemm::compute_total_latency(problem, hardware, config);
 }
 
 }  // namespace
