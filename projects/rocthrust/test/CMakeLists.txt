@@ -69,8 +69,8 @@ function(add_rocthrust_test TEST)
     elseif(USE_SYSTEM_LIB)
         target_link_libraries(${TEST_TARGET} INTERFACE roc::rocthrust)
     else()
-        target_link_libraries(${TEST_TARGET}
-            PRIVATE
+        target_link_libraries(testing_common
+            INTERFACE
                 rocthrust
                 roc::rocprim_hip
         )
