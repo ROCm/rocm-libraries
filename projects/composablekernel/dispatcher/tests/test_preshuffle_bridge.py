@@ -152,5 +152,88 @@ class TestPreshuffleShippedConfigs(unittest.TestCase):
                     self.assertIn(key, tr, f"{path.name} missing {key}")
 
 
+class TestPreshufflePersistentLaunch(unittest.TestCase):
+    """Persistent vs non-persistent launch parity (correctness regression guard).
+
+    Old-TE ships ``persistent: [true, false]`` for the preshuffle op, so BOTH
+    are legitimate, must-support configs. On gfx942 both verify against an fp32
+    reference at rel ~4e-4 (see PR9307/coder/persistent_bug_fix.md). The
+    host-launch invariant that makes the non-persistent kernel correct is the
+    grid choice: a persistent kernel loops over tiles from an occupancy-sized
+    grid (``MaxOccupancyGridSize``); a non-persistent kernel needs a full
+    one-block-per-output-tile grid (``GridSize``). If the codegen ever emitted
+    the occupancy grid for a non-persistent kernel, only a subset of output
+    tiles would be written and the result would be silently wrong (the failure
+    mode originally reported for this PR: rel ~1.4). These tests pin that
+    invariant at the codegen level so a regression is caught without a GPU.
+    """
+
+    @staticmethod
+    def _gen():
+        sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+        import unified_gemm_codegen as ugc
+
+        gen = ugc.CKTileKernelGenerator("fp16", "rcr")
+        tile = ugc.TileConfig(
+            tile_m=128, tile_n=128, tile_k=64,
+            warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        )
+
+        def make(persistent):
+            trait = ugc.TraitConfig(
+                pipeline="preshufflev2", epilogue="default", scheduler="default",
+                pad_m=False, pad_n=False, pad_k=False, persistent=persistent,
+            )
+            return ugc.KernelConfig(
+                tile=tile, trait=trait, variant=ugc.GemmVariant.PRESHUFFLE,
+                preshuffle=True, permute_n=True,
+            )
+
+        return gen, make
+
+    def test_non_persistent_uses_full_gridsize(self):
+        gen, make = self._gen()
+        code = gen._launch_function(make(persistent=False))
+        self.assertIn("GemmKernel::GridSize(args.M, args.N, args.k_batch)", code)
+        self.assertNotIn("MaxOccupancyGridSize", code)
+
+    def test_persistent_uses_occupancy_gridsize(self):
+        gen, make = self._gen()
+        code = gen._launch_function(make(persistent=True))
+        self.assertIn("MaxOccupancyGridSize", code)
+
+    def test_persistent_flag_reaches_kernel_traits(self):
+        # UsePersistentKernel selects the device kernel entry point (tile-looping
+        # vs blockIdx). It is emitted as a compile-time constant in the selected-
+        # kernel struct and must track the trait for both values, otherwise the
+        # host grid and the device entry point disagree.
+        gen, make = self._gen()
+        false_src = gen._selected_kernel_struct(make(False), "k_np")
+        true_src = gen._selected_kernel_struct(make(True), "k_p")
+        self.assertIn("UsePersistentKernel = false", false_src)
+        self.assertIn("UsePersistentKernel = true", true_src)
+
+
+class TestPreshuffleConfigsCoverPersistentFalse(unittest.TestCase):
+    """The shipped configs must exercise persistent=False (an Old-TE config).
+
+    Dropping persistent=False from the sweep would hide the non-persistent path
+    rather than validate it; Old-TE runs both, so the bridge must too.
+    """
+
+    def test_ci_and_default_configs_include_persistent_false(self):
+        for name in ("default_ci_config.json", "default_config.json"):
+            path = _CONFIG_DIR / name
+            if not path.exists():
+                continue
+            with self.subTest(config=name):
+                with open(path) as f:
+                    data = json.load(f)
+                vals = data["trait_config"]["persistent"]["values"]
+                self.assertIn(False, vals, f"{name} must sweep persistent=False")
+                self.assertIn(True, vals, f"{name} must sweep persistent=True")
+
+
 if __name__ == "__main__":
     unittest.main()
