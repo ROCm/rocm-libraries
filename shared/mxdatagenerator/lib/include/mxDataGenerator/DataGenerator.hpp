@@ -2337,9 +2337,8 @@ namespace DGen
             }
         }
 
-        avg_scale /= n;
-
-        uint32_t block_scale = std::round(avg_scale);
+        uint32_t block_scale
+            = n == 0 ? static_cast<uint32_t>(getScaleBias<DTYPE>()) : std::round(avg_scale / n);
 
         //
         // adjust data

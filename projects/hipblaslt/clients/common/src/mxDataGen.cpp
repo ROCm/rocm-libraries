@@ -277,7 +277,8 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
         int M = sizes[0];
         int K = sizes[1];
 
-        DGen::ScaleBlockLayout genLayout{M, elementsPerMXBlock};
+        int const tailStartM
+            = (M % elementsPerMXBlock != 0) ? (M / elementsPerMXBlock) * elementsPerMXBlock : M;
 
 #pragma omp parallel for
         for(size_t mk = 0; mk < static_cast<size_t>(M * K); ++mk)
@@ -287,12 +288,14 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
             auto const kBlock        = k / elementsPerMXBlock;
             auto const offsetInBlock = k - kBlock * elementsPerMXBlock;
             auto const scale_id      = kBlock * M + m;
-            auto const data_id       = scale_id * elementsPerMXBlock + offsetInBlock;
-            auto const genScaleIdx   = genLayout.scaleIndexForData(static_cast<DGen::index_t>(mk));
+            auto const data_id       = (m >= tailStartM)
+                                           ? mk
+                                           : static_cast<size_t>(scale_id) * elementsPerMXBlock
+                                                 + offsetInBlock;
 
             alignedDataBytes[mk] = dataBytes[data_id];
             refFloat[mk]         = DGen::toFloat<DT>(
-                scaleBytes.data(), dataBytes.data(), genScaleIdx, static_cast<DGen::index_t>(mk));
+                scaleBytes.data(), dataBytes.data(), scale_id, static_cast<DGen::index_t>(data_id));
         }
         std::swap(dataBytes, alignedDataBytes);
     }
@@ -301,7 +304,8 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
         int N = sizes[0];
         int K = sizes[1];
 
-        DGen::ScaleBlockLayout genLayout{N, elementsPerMXBlock};
+        int const tailStartN
+            = (N % elementsPerMXBlock != 0) ? (N / elementsPerMXBlock) * elementsPerMXBlock : N;
 
 #pragma omp parallel for
         for(size_t kn = 0; kn < static_cast<size_t>(K * N); ++kn)
@@ -311,12 +315,14 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
             auto const kBlock        = k / elementsPerMXBlock;
             auto const offsetInBlock = k - kBlock * elementsPerMXBlock;
             auto const scale_id      = kBlock * N + n;
-            auto const data_id       = scale_id * elementsPerMXBlock + offsetInBlock;
-            auto const genScaleIdx   = genLayout.scaleIndexForData(static_cast<DGen::index_t>(kn));
+            auto const data_id       = (n >= tailStartN)
+                                           ? kn
+                                           : static_cast<size_t>(scale_id) * elementsPerMXBlock
+                                                 + offsetInBlock;
 
             alignedDataBytes[kn] = dataBytes[data_id];
-            refFloat[kn]           = DGen::toFloat<DT>(
-                scaleBytes.data(), dataBytes.data(), genScaleIdx, static_cast<DGen::index_t>(kn));
+            refFloat[kn]         = DGen::toFloat<DT>(
+                scaleBytes.data(), dataBytes.data(), scale_id, static_cast<DGen::index_t>(data_id));
         }
         std::swap(dataBytes, alignedDataBytes);
     }
