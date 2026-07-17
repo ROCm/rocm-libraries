@@ -253,6 +253,20 @@ public:
         return reinterpret_cast<Fn>(test_plugin_internal::lookupPluginSymbol(_handle, symbolName));
     }
 
+    /// Like `lookup()`, but throws `std::runtime_error` when the symbol is
+    /// missing instead of returning nullptr. Use for mandatory recorder
+    /// symbols whose absence is a test-setup error.
+    template <typename Fn>
+    Fn requireSymbol(const char* symbolName) const
+    {
+        Fn fn = lookup<Fn>(symbolName);
+        if(fn == nullptr)
+        {
+            throw std::runtime_error("Failed to get symbol: " + std::string(symbolName));
+        }
+        return fn;
+    }
+
     const std::string& pluginPath() const
     {
         return _pluginPath;
