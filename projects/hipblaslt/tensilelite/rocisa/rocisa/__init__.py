@@ -42,9 +42,8 @@ def _register_win_dll_dirs() -> None:
 
     Since Python 3.8 the loader resolves an extension module's dependent DLLs
     only from the system directories, the directory containing the .pyd, and
-    directories added via os.add_dll_directory() -- PATH is ignored. Mirrors the
-    runtime resolver _add_dll_dir() in
-    dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/runtime/runtime_coexistence.py.
+    directories added via os.add_dll_directory() -- PATH is ignored. This is the
+    standard CPython 3.8+ pattern for loading an extension's dependent DLLs.
     """
     import os
 
