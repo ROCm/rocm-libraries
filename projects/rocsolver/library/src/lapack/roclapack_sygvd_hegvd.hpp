@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -105,9 +105,8 @@ void rocsolver_sygvd_hegvd_getMemorySize(rocblas_handle handle,
 
     // requirements for calling SYEV/HEEV
     rocsolver_syevd_heevd_getMemorySize<BATCHED, T, S>(
-        handle, evect, uplo, n, batch_count, &unused, &temp1, &temp2, &temp3, size_tmpz,
-        size_splits, &temp4, size_tau, &temp5, size_Aband, size_he2hb_work, size_V_hb2st,
-        size_tau_hb2st);
+        handle, evect, uplo, n, batch_count, &unused, &temp1, &temp2, &temp3, size_tmpz, size_splits,
+        &temp4, size_tau, &temp5, size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st);
     *size_work1 = std::max(*size_work1, temp1);
     *size_work2 = std::max(*size_work2, temp2);
     *size_work3 = std::max(*size_work3, temp3);

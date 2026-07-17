@@ -423,8 +423,8 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
             // Compute 2-stage workspace sizes and split workArr2 accordingly
             size_t wa2_orig, i1 = 0, i2 = 0, i3 = 0, i4 = 0, dum;
             rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
-                handle, rocblas_evect_original, rocblas_fill_upper, n, batch_count, &dum, &dum, &dum,
-                &dum, &dum, &dum, &dum, &dum, &wa2_orig, &i1, &i2, &i3, &i4);
+                handle, rocblas_evect_original, rocblas_fill_upper, n, batch_count, &dum, &dum,
+                &dum, &dum, &dum, &dum, &dum, &dum, &wa2_orig, &i1, &i2, &i3, &i4);
             // workArr2 is laid out as: [workArr portion (wa2_orig bytes)][i1][i2][i3][i4]
             char* wa2_ptr = (char*)workArr2;
             T** gesdd_workArr2 = (T**)wa2_ptr;
@@ -494,8 +494,8 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
             // Compute 2-stage workspace sizes and split workArr2 accordingly
             size_t wa2_orig, i1 = 0, i2 = 0, i3 = 0, i4 = 0, dum;
             rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
-                handle, rocblas_evect_original, rocblas_fill_upper, m, batch_count, &dum, &dum, &dum,
-                &dum, &dum, &dum, &dum, &dum, &wa2_orig, &i1, &i2, &i3, &i4);
+                handle, rocblas_evect_original, rocblas_fill_upper, m, batch_count, &dum, &dum,
+                &dum, &dum, &dum, &dum, &dum, &dum, &wa2_orig, &i1, &i2, &i3, &i4);
             char* wa2_ptr = (char*)workArr2;
             T** gesdd_workArr2 = (T**)wa2_ptr;
             T* gesdd_Aband = (T*)(wa2_ptr + wa2_orig);

@@ -149,8 +149,7 @@ try
     case rocsolver_function_hetrd:
         *mode = handle_data ? handle_data->hetrd_mode : rocsolver_alg_mode_1stage;
         break;
-    default:
-        return rocblas_status_invalid_value;
+    default: return rocblas_status_invalid_value;
     }
 
     return rocblas_status_success;

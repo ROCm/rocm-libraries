@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -198,20 +198,24 @@ TEST_P(HEGVD, strided_batched__double_complex)
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYGVD,
-                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range),
+                         Combine(ValuesIn(large_matrix_size_range),
+                                 ValuesIn(type_range),
                                  ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYGVD,
-                         Combine(ValuesIn(matrix_size_range), ValuesIn(type_range),
+                         Combine(ValuesIn(matrix_size_range),
+                                 ValuesIn(type_range),
                                  ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          HEGVD,
-                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range),
+                         Combine(ValuesIn(large_matrix_size_range),
+                                 ValuesIn(type_range),
                                  ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEGVD,
-                         Combine(ValuesIn(matrix_size_range), ValuesIn(type_range),
+                         Combine(ValuesIn(matrix_size_range),
+                                 ValuesIn(type_range),
                                  ValuesIn(hetrd_stage_range)));

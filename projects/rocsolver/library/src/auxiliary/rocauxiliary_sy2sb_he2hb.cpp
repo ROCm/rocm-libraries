@@ -89,9 +89,9 @@ try
     size_t size_workArr;
     // extra requirements
     size_t size_D, size_V, size_W, size_X, size_Z, size_work;
-    rocsolver_sy2sb_he2hb_getMemorySize<false, T, I>(uplo, n, kd, nb, batch_count, &size_scalars, &size_D,
-                                                     &size_V, &size_W, &size_X, &size_Z, &size_work,
-                                                     &size_workArr);
+    rocsolver_sy2sb_he2hb_getMemorySize<false, T, I>(uplo, n, kd, nb, batch_count, &size_scalars,
+                                                     &size_D, &size_V, &size_W, &size_X, &size_Z,
+                                                     &size_work, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
     {

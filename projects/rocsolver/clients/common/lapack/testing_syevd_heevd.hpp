@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -761,18 +761,16 @@ void testing_syevd_heevd(Arguments& argus)
 
     {
         // 0 = auto, 1 = 1-stage (default), 2 = 2-stage
-        const rocsolver_alg_mode hetrd_mode
+        const rocsolver_alg_mode hetrd_mode //
             = (argus.hetrd_alg_mode == 2) ? rocsolver_alg_mode_2stage
             : (argus.hetrd_alg_mode == 1) ? rocsolver_alg_mode_1stage
                                           : rocsolver_alg_mode_auto;
-        EXPECT_ROCBLAS_STATUS(
-            rocsolver_set_alg_mode(handle, rocsolver_function_hetrd, hetrd_mode),
-            rocblas_status_success);
+        EXPECT_ROCBLAS_STATUS(rocsolver_set_alg_mode(handle, rocsolver_function_hetrd, hetrd_mode),
+                              rocblas_status_success);
 
         rocsolver_alg_mode check_mode;
-        EXPECT_ROCBLAS_STATUS(
-            rocsolver_get_alg_mode(handle, rocsolver_function_hetrd, &check_mode),
-            rocblas_status_success);
+        EXPECT_ROCBLAS_STATUS(rocsolver_get_alg_mode(handle, rocsolver_function_hetrd, &check_mode),
+                              rocblas_status_success);
 
         EXPECT_EQ(check_mode, hetrd_mode);
     }
