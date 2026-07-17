@@ -63,8 +63,9 @@ int dispatcher_run_batched_contraction(
 
 Layouts: `A=[G..,M..,K..]`, `B=[G..,N..,K..]`, `E=[G..,M..,N..]`; the lib derives packed
 row-major strides (matches the Old-TE `HostTensorDescriptor(dims)`), allocates/copies
-each buffer, launches with `k_batch`, copies E back. **v1 scope: `NUM_D_TENSORS == 0`
-(PassThrough).**
+each buffer, launches with `k_batch`, copies E back. Supports `NUM_D_TENSORS`
+`0..8`: the `run()` also accepts the D-tensor pointers (D byte-size keyed off the
+codegen `DBaseDataType` typedef) for the `MultiDAdd`/`MultiDMultiply` epilogue.
 
 ## Coverage (v1) — GPU-verified on gfx950
 
@@ -78,10 +79,23 @@ each buffer, launches with `k_batch`, copies E back. **v1 scope: `NUM_D_TENSORS 
   variable-length dim/stride vectors; multi-dim g/m/n/k verified.
 - **pipeline/scheduler:** `{compv3,compv4,mem} x {intrawave,interwave}` (all verified).
 - **epilogue:** `cshuffle` (v1); `default` is emitted by codegen but not swept.
-- **num_d_tensors:** 0 (the D-tensor epilogue is a follow-up; the ABI rejects `>0`).
-- **k_batch:** `1` only. Split-K (`k_batch>1`) is **not yet numerically correct**
-  through the bridge and is rejected by the ABI (returns -1) rather than returning
-  silently-wrong results — a documented follow-up.
+- **num_d_tensors:** `0..8`. `num_d==0` is a plain contraction (`PassThrough`);
+  `num_d>0` runs the D-tensor epilogue (`MultiDAdd` = `C + D0 + D1 + ...`,
+  `MultiDMultiply` = `C * D0 * D1 * ...`), matching Old-TE
+  `reference_batched_contraction.hpp` / `ck_tile::element_wise::MultiD*`. Each D
+  tensor has E's shape `[G,M,N]` and the A/B dtype; the runner constructs them,
+  marshals them through the ABI, and `reference()` applies the same epilogue in
+  fp32. GPU-verified on gfx950 vs fp32 reference: num_d=1 MultiDAdd max_rel 7.14e-4,
+  num_d=2 MultiDAdd 7.07e-4, num_d=1 MultiDMultiply 8.18e-4. `is_valid()` gates the
+  count (0..8) and enforces num_d<->elementwise consistency.
+- **k_batch:** `1` only. Split-K (`k_batch>1`) is a **shared Old-TE kernel defect**,
+  not a bridge gap. The batched-contraction CShuffle epilogue is hard-wired to
+  `memory_operation_enum::set` (no atomic accumulation), while the grid launches
+  `k_batch` `blockIdx.z` K-split blocks that all write the **same** E tile with no
+  atomic. Driving the exact Old-TE kernel at `k_batch=2` faults with an illegal
+  memory access on gfx950 (`k_batch=1` is correct, max_rel ~4e-4). The bridge
+  hard-rejects `k_batch>1` (returns -1, never silently-wrong) — out of scope until
+  the shared kernel gains atomic accumulation.
 - **problem sizes:** tile-multiple M/N/K. Non-multiples (e.g. 130) are rejected by the
   kernel's `IsSupportedArguments` (surfaced as rc=-2), even with padding flags.
 
@@ -104,6 +118,13 @@ python3 dispatcher/codegen/unified_batched_contraction_codegen.py \
       "tile_config":{"tile_m":128,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":2,"warp_k":1,
       "warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":16},"num_dim_g":1,"num_dim_m":1,
       "num_dim_n":1,"num_dim_k":1,"num_d_tensors":0}'
+
+# Codegen smoke with a D-tensor epilogue (num_d>0, MultiDAdd)
+python3 dispatcher/codegen/unified_batched_contraction_codegen.py \
+    --output-dir /tmp/bc_d --config-json '{"datatype":"fp16","layout":"rcr",
+      "tile_config":{"tile_m":128,"tile_n":128,"tile_k":64,"warp_m":2,"warp_n":2,"warp_k":1,
+      "warp_tile_m":32,"warp_tile_n":32,"warp_tile_k":16},"num_dim_g":1,"num_dim_m":1,
+      "num_dim_n":1,"num_dim_k":1,"num_d_tensors":1,"elementwise":"MultiDAdd"}'
 
 # End-to-end bridge sweep + verify on GPU
 python3 tile_engine/ops/gemm/batched_contraction_full_benchmark.py \
