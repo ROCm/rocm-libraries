@@ -232,7 +232,7 @@ int dispatcher_run_bquant_gemm(const void* A,
             ck_tile::host_tensor_descriptor(static_cast<int>(QK_B),
                                             static_cast<int>(QN_B),
                                             static_cast<int>(QN_B),
-                                            true /*row-major*/));
+                                            ck_tile::bool_constant<true>{} /*row-major*/));
         std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
         auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
         if(hipMemcpy(BQ_dev, bq_shuffled.data(),

@@ -455,7 +455,7 @@ using CDataType   = {ck_c};
 using QDataType   = {ck_q};
 using AccDataType = {ck_acc};
 using QuantGroupSize = {ns}::QuantGroupSize;
-constexpr ck_tile::index_t GroupSizeK = {ns}::GroupSizeK;
+constexpr ck_tile::index_t GroupSizeK = {ns}::{struct}::GroupSizeK;
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 
