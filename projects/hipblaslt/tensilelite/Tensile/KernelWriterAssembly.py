@@ -5905,10 +5905,10 @@ class KernelWriterAssembly(KernelWriter):
     if (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]:
       module = Module("lraDeclareAddresses (Empty)")
     elif (kernel["LdsOffset%s"%tc] != 0) or (kernel.get("LDSSegmentInterleave") == 1 and tc == "B"):
-      _bbase = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"] if (kernel.get("LDSSegmentInterleave") == 1 and tc == "B") \
+      _ldsBase = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"] if (kernel.get("LDSSegmentInterleave") == 1 and tc == "B") \
                else kernel["LdsOffset%s"%tc]
       module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+0"%tc), dst1=VCC(),
-                           src0=hex(_bbase), src1=vgpr("LocalReadAddr%s+0"%tc),
+                           src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
                            comment=" += LdsOffset%s (lower)"%tc))
 
     if tP["isA"]:

@@ -86,11 +86,11 @@ def evaluate(state):
     if list(state.get("MIWaveGroup", [])) != [2, 2]:           return _no("MIWaveGroup!=[2,2]")
     if state.get("TDMSplit") or pt.get("MXBlockA") or pt.get("MXBlockB") or pt.get("Sparse"):
         return _no("split/mxs/sparse")
-    # Subtile is a separate codegen body (kernelBodySubtile); the wave-separated TDM emit path
-    # the offsets rely on runs only for non-subtile kernels, so interleave never applies here.
+    # Subtile uses a separate codegen body; the emit path these offsets target runs only for
+    # non-subtile kernels.
     if state.get("UseSubtileImpl"):                            return _no("subtile")
-    # Needs double-buffering: 1LDSBuffer==1 breaks the layout the offsets assume. It is not yet
-    # resolved here (Solution.py resolves -1 later), so reject both 1 and the unresolved -1.
+    # Needs double-buffering; 1LDSBuffer==1 breaks the assumed layout. Unresolved -1 is rejected too
+    # (Solution.py resolves it later, then re-evaluates).
     if state.get("1LDSBuffer", 0) != 0:                         return _no("needs 1LDSBuffer==0")
     _dt = pt["DataType"]
     if not (_dt.isBFloat16() or _dt.isHalf()):
@@ -103,9 +103,7 @@ def evaluate(state):
 
     if (base % SEG) + fA + fB < SEG:
         # Small MacroTile: A0,B0 fit one segment, so push component 1 to the next segment boundary
-        # via a segment-aligned component stride. Footprint-packed (no re-pad on the component jump,
-        # like tight), so asymmetric A/B pads/blocks are handled by construction. Grows LDS ->
-        # Solution.py budget-checks; supports simple double-buffer only:
+        # with a segment-aligned stride. Grows LDS (Solution.py budget-checks); PGR2 double-buffer only.
         if state.get("PrefetchGlobalRead") != 2:        return _no("small MT: PGR!=2")
         if mode == -1:                                  return _no("auto: skip aligned (LDS growth)")
         pre = _ceil_seg(base + fA + fB) - base          # segment-aligned stride (== SEG for base<SEG)
@@ -122,10 +120,8 @@ def evaluate(state):
                 "segmentMap": "ALIGNED seg%d={A0,B0} seg%d={A1,B1}"
                               % (base // SEG, (base + pre) // SEG)}
 
-    # Tight: pack [A0][B0][A1][B1] by FOOTPRINT (each tile's own post-pad size fX). The component
-    # stride is fA+fB and is applied WITHOUT the per-tensor re-pad (fX already includes each tile's
-    # pad), so A1 lands exactly at B0's end and B1 at A1's end regardless of padA vs padB. The
-    # emit sites honour footprintPacked by skipping the component-offset re-pad on write and read.
+    # Tight: pack [A0][B0][A1][B1] with component stride fA+fB (each footprint already includes its
+    # pad, so the jump is not re-padded -> A1/B1 land exactly at the previous tile's end). No LDS growth.
     offsets = {
         "ldsBaseB":         base + fA,          # B0 right after A0
         "writeStrideBytes": fA + fB,            # footprint stride (post-pad), no re-pad on the jump

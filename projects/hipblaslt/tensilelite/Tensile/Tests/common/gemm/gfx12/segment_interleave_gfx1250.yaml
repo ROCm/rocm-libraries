@@ -2,22 +2,11 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 # End-to-end functional test for the gfx1250 LDS segment-conflict interleave.
-#
-# Forks LDSSegmentInterleave: [0, 1] so EVERY problem is built and run BOTH as
-# baseline (LDSSI0) and interleaved (LDSSI1), and each is validated against the
-# CPU reference (NumElementsToValidate: -1). 
-#
-# Also forks PrefetchGlobalRead: [1, 2] to check that PGR!=2 tight interleave is
-# functionally correct (PGR2 is the originally-validated path).
-#
-# Coverage of both oracle branches:
-#   MT256x256 (fA+fB >= 64KiB) -> TIGHT   : interleave applies at PGR1 and PGR2.
-#   MT256x128 (fA+fB <  64KiB) -> ALIGNED : interleave applies at PGR2 (grows LDS);
-#     MT256x128 + PGR1 + force-on is correctly rejected (aligned needs PGR2).
+# Every problem runs as baseline and interleaved, validated against the CPU reference.
+# Covers both oracle branches (tight: fA+fB >= 64KiB; aligned: < 64KiB, grows LDS),
+# coarse and fine VectorWidthB, and PrefetchGlobalRead 1/2.
 #
 # MatrixInstruction: [M, N, K, B, _, MIWT0, MIWT1, MIWG0, MIWG1]
-#   [16,16,32,1,1,8,8,2,2] -> MT256x256 (tight)
-#   [16,16,32,1,1,8,4,2,2] -> MT256x128 (aligned)
 
 GlobalParameters:
   PrintSolutionRejectionReason: True
@@ -91,7 +80,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1, 4, 2, 1]    # fine-VWB coverage: per-vIdx component-jump addressing
+        - VectorWidthB: [-1, 4, 2, 1]    # coarse (-1=auto) and fine (4/2/1) VWB
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]
