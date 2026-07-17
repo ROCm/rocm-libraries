@@ -48,12 +48,39 @@ def _cases():
         causal=True,
         dtype="bf16",
     )
+
+    def mk(**over):
+        d = dict(base)
+        d.update(over)
+        return lambda: build_attention_dense(AttentionDenseSpec(**d))
+
     return {
-        "attention_dense/default_causal_sq512": lambda: build_attention_dense(
-            AttentionDenseSpec(**base)
+        # --- default (one CTA per q-block/head) grid ---
+        "attention_dense/default_causal_sq512": mk(),
+        "attention_dense/swa_w128_sq512": mk(sliding_window=128),
+        "attention_dense/varlen_sq512": mk(varlen=True),
+        "attention_dense/lazy_rescale_sq512": mk(lazy_rescale=True),
+        "attention_dense/fp16_h64_sq512": mk(dtype="fp16", head_size=64),
+        "attention_dense/bn128_sq512": mk(block_n=128),
+        "attention_dense/noncausal_sq512": mk(causal=False),
+        # --- persistent (grid-stride) grid + decode variants ---
+        "attention_dense/persistent_causal_sq512": mk(
+            persistent=True, num_persistent=256
         ),
-        "attention_dense/persistent_causal_sq512": lambda: build_attention_dense(
-            AttentionDenseSpec(**base, persistent=True, num_persistent=256)
+        "attention_dense/persist_qbmaj_sq512": mk(
+            persistent=True, num_persistent=256, persist_decode="qb_major"
+        ),
+        "attention_dense/persist_hkvmaj_sq512": mk(
+            persistent=True, num_persistent=256, persist_decode="hkv_major"
+        ),
+        "attention_dense/persist_intl_sq512": mk(
+            persistent=True, num_persistent=256, interleave=True
+        ),
+        "attention_dense/persist_lazy_sq512": mk(
+            persistent=True, num_persistent=256, lazy_rescale=True
+        ),
+        "attention_dense/persist_swa_w128_sq512": mk(
+            persistent=True, num_persistent=256, sliding_window=128
         ),
     }
 
@@ -105,6 +132,49 @@ def test_attention_dense_ir_matches_golden():
         if got != want:
             drift.append(f"{cid}: {want} -> {got}")
     assert not drift, "attention_dense IR drift vs golden:\n  " + "\n  ".join(drift)
+
+
+def test_attention_dense_cpp_python_byte_identity():
+    """Stream-4 parity gate: the C++ engine (rocke_engine) lowers every
+    dense-prefill variant to byte-identical LLVM IR vs the Python lowerer.
+
+    Both sides go through ``_lower_llvm_via_backend`` so they resolve the same
+    llvm flavor; ``ROCKE_CPP_STRICT=1`` disables the silent python fallback so a
+    missing/stale C++ engine surfaces as a skip (not a false pass). Requires the
+    C++ ``exp2_fast`` op (added for the dense softmax hot path).
+    """
+    import os
+
+    import pytest
+
+    try:
+        from rocke.helpers.compile import _lower_llvm_via_backend
+    except Exception as e:  # pragma: no cover
+        pytest.skip(f"backend lowering unavailable: {e}")
+
+    prev = os.environ.get("ROCKE_CPP_STRICT")
+    os.environ["ROCKE_CPP_STRICT"] = "1"
+    mism = []
+    try:
+        for cid, build in _cases().items():
+            k = build()
+            py = _lower_llvm_via_backend(k, arch="gfx950", backend="python", spec=None)
+            try:
+                cpp = _lower_llvm_via_backend(
+                    k, arch="gfx950", backend="cpp", spec=None
+                )
+            except Exception as e:  # C++ engine not built / opcode gap
+                pytest.skip(f"C++ engine unavailable ({cid}): {str(e)[:140]}")
+            if py != cpp:
+                mism.append(cid)
+    finally:
+        if prev is None:
+            os.environ.pop("ROCKE_CPP_STRICT", None)
+        else:
+            os.environ["ROCKE_CPP_STRICT"] = prev
+    assert not mism, "attention_dense cpp/python IR byte-mismatch:\n  " + "\n  ".join(
+        mism
+    )
 
 
 if __name__ == "__main__":
