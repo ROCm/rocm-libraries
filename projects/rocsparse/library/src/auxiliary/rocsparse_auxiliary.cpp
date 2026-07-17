@@ -577,7 +577,11 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, handle);
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+    *handle = new _rocsparse_handle(static_cast<hipStream_t>(0));
+#else
     *handle = new _rocsparse_handle();
+#endif
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -587,6 +591,56 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+/********************************************************************************
+ * \brief rocsparse_handle_create creates the rocsparse library context on a
+ * user-defined stream. All device memory allocation and stream-ordered setup
+ * work is enqueued on the provided stream (which also becomes the handle stream),
+ * so handle creation never touches the default (NULL) stream and never blocks
+ * the calling CPU thread or other GPU streams.
+ *******************************************************************************/
+rocsparse_status
+    rocsparse_handle_create(rocsparse_handle* handle, hipStream_t stream, rocsparse_error* p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, handle);
+    *handle = new _rocsparse_handle(stream);
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_handle_destroy destroys the rocsparse library context and
+ * releases all resources used by the rocSPARSE library.
+ *******************************************************************************/
+rocsparse_status rocsparse_handle_destroy(rocsparse_handle handle, rocsparse_error* p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // A null handle is accepted and treated as a no-op (matching free/delete
+    // semantics), so destroying an already-null handle is not an error.
+    if(handle != nullptr)
+    {
+        delete handle;
+    }
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 /********************************************************************************
  * \brief destroy handle
