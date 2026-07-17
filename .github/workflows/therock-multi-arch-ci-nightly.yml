@@ -21,6 +21,12 @@ name: TheRock Multi-Arch Nightly CI
 on:
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+  workflow_dispatch:
+    inputs:
+      therock_ref_override:
+        type: string
+        description: "Optional explicit TheRock ref (branch/tag/SHA) to build against. Empty resolves the live tip of ROCm/TheRock@main."
+        default: ""
 
 permissions:
   contents: read
@@ -46,7 +52,10 @@ jobs:
       prebuilt_stages: ''
       baseline_run_id: ''
       repository: ROCm/TheRock
-      ref: main
+      # Default resolves the live tip of ROCm/TheRock@main; workflow_dispatch can
+      # pin an explicit ref via therock_ref_override. setup resolves this to one
+      # concrete SHA (needs.setup.outputs.ref) for every downstream job.
+      ref: ${{ inputs.therock_ref_override || 'main' }}
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   log_therock_ref:
