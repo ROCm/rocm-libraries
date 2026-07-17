@@ -748,30 +748,30 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         // Run different csrmv kernels
         dim3 csrmvn_blocks((info->adaptive.size) - 1);
         dim3 csrmvn_threads(gen_wg);
-#define ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE(GEN_WG)                                  \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                           \
-        (rocsparse::csrmvn_adaptive_kernel<GEN_WG>),                              \
-        csrmvn_blocks,                                                            \
-        csrmvn_threads,                                                           \
-        0,                                                                        \
-        stream,                                                                   \
-        conj,                                                                     \
-        m,                                                                        \
-        nnz,                                                                      \
-        static_cast<I*>(info->adaptive.row_blocks),                              \
-        info->adaptive.wg_flags,                                                  \
-        static_cast<J*>(info->adaptive.wg_ids),                                   \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),             \
-        csr_row_ptr,                                                              \
-        csr_col_ind,                                                              \
-        csr_val,                                                                  \
-        x,                                                                        \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),              \
-        y,                                                                        \
-        num_extra,                                                                \
-        gamma_device_array,                                                       \
-        z_array,                                                                  \
-        descr->base,                                                              \
+#define ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE(GEN_WG)                      \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+        (rocsparse::csrmvn_adaptive_kernel<GEN_WG>),                  \
+        csrmvn_blocks,                                                \
+        csrmvn_threads,                                               \
+        0,                                                            \
+        stream,                                                       \
+        conj,                                                         \
+        m,                                                            \
+        nnz,                                                          \
+        static_cast<I*>(info->adaptive.row_blocks),                   \
+        info->adaptive.wg_flags,                                      \
+        static_cast<J*>(info->adaptive.wg_ids),                       \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        csr_row_ptr,                                                  \
+        csr_col_ind,                                                  \
+        csr_val,                                                      \
+        x,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        num_extra,                                                    \
+        gamma_device_array,                                           \
+        z_array,                                                      \
+        descr->base,                                                  \
         handle->pointer_mode == rocsparse_pointer_mode_host)
         if(gen_wg == 128)
         {
