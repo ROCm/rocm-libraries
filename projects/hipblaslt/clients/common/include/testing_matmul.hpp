@@ -1510,6 +1510,15 @@ inline void gpu_reference_report(hipStream_t                   stream,
                                                      ulp_mant_bits,
                                                      stream);
 
+        // A HIP error during the device comparison must fail loudly, not read as a
+        // zero-error pass.
+#ifdef GOOGLE_TEST
+        ASSERT_TRUE(res.valid) << "gpu_ref: device comparison failed (HIP error)";
+#else
+        if(!res.valid)
+            throw std::runtime_error("gpu_ref: device comparison failed (HIP error)");
+#endif
+
         if(arg.norm_check)
         {
             double norm_error = (res.num_nan_mismatch > 0)

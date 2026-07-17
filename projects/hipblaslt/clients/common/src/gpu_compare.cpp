@@ -323,7 +323,10 @@ GpuRefResult compare_gemm_device(const void* dGpu,
 {
     GpuRefResult result;
     if(M <= 0 || N <= 0 || batchCount <= 0)
+    {
+        result.valid = true; // nothing to compare is a valid empty result
         return result;
+    }
 
     // Reuse a small accumulator across comparisons. thread_local keeps concurrent
     // multi-thread/multi-stream tests from sharing it; it is reallocated when the
@@ -402,21 +405,28 @@ GpuRefResult compare_gemm_device(const void* dGpu,
 
 #undef GPU_REF_COMPARE
 
-    gpu_ref_hip_check(hipGetLastError(), "compare launch");
+    if(!gpu_ref_hip_check(hipGetLastError(), "compare launch"))
+    {
+        hipStreamSynchronize(stream); // drain the failed launch before returning
+        return result; // invalid
+    }
 
     DevAccum            hAccum{};
     std::vector<double> hBins(2 * size_t(batchCount), 0.0);
-    if(gpu_ref_hip_check(
-           hipMemcpyAsync(&hAccum, dAccum, sizeof(DevAccum), hipMemcpyDeviceToHost, stream),
-           "accumulator copy-back")
-       && gpu_ref_hip_check(hipMemcpyAsync(hBins.data(),
-                                           dBins,
-                                           sizeof(double) * 2 * size_t(batchCount),
-                                           hipMemcpyDeviceToHost,
-                                           stream),
-                            "bins copy-back"))
+    const bool          copied
+        = gpu_ref_hip_check(
+              hipMemcpyAsync(&hAccum, dAccum, sizeof(DevAccum), hipMemcpyDeviceToHost, stream),
+              "accumulator copy-back")
+          && gpu_ref_hip_check(hipMemcpyAsync(hBins.data(),
+                                              dBins,
+                                              sizeof(double) * 2 * size_t(batchCount),
+                                              hipMemcpyDeviceToHost,
+                                              stream),
+                               "bins copy-back");
+    // Sync unconditionally so no in-flight copy into hAccum/hBins outlives this scope.
+    const bool synced = gpu_ref_hip_check(hipStreamSynchronize(stream), "compare sync");
+    if(copied && synced)
     {
-        gpu_ref_hip_check(hipStreamSynchronize(stream), "compare sync");
         result.max_abs_error    = hAccum.max_abs_error;
         result.max_ulp          = hAccum.max_ulp;
         result.sum_ulp          = hAccum.sum_ulp;
@@ -439,6 +449,7 @@ GpuRefResult compare_gemm_device(const void* dGpu,
             norm_sum += diff_norm / ref_norm;
         }
         result.norm_error_sum = norm_sum;
+        result.valid          = true;
     }
 
     return result;

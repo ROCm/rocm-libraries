@@ -41,6 +41,7 @@ struct GpuRefResult
     unsigned long long num_unit_fail    = 0; // finite pairs failing a 4-ULP compare
     unsigned long long num_nan_mismatch = 0; // nan/inf disagreement between gpu and ref
     unsigned long long ulp_count        = 0; // finite pairs contributing to sum_ulp
+    bool               valid = false; // false if a HIP error aborted the comparison
 
     /// Batched Frobenius relative error Sum_b ||diff_b||_F / ||ref_b||_F; each
     /// batch contributes 0 when both its norms are ~0.
