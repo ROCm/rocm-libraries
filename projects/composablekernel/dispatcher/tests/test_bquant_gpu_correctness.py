@@ -260,7 +260,8 @@ def _make_bf16_inputs(M, N, K, gK, gN, seed=42):
 
 
 def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    M, N, K, gK, gN = 16, 64, 256, 128, 1
+    # K=512 = 2*TileK(256): CompV3 needs num_loop>=2 to avoid OOB second prefetch
+    M, N, K, gK, gN = 16, 64, 512, 128, 1
     cfg = default_fp8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "fp8")
     return _run_one("C4/fp8", cfg, M, N, K,
@@ -269,7 +270,8 @@ def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 
 
 def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    M, N, K, gK, gN = 16, 64, 256, 128, 1
+    # K=512 = 2*TileK(256): CompV3 needs num_loop>=2 to avoid OOB second prefetch
+    M, N, K, gK, gN = 16, 64, 512, 128, 1
     cfg = default_bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "bf8")
     return _run_one("C4/bf8", cfg, M, N, K,
@@ -278,7 +280,8 @@ def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 
 
 def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    M, N, K, gK, gN = 128, 128, 128, 32, 1
+    # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch
+    M, N, K, gK, gN = 128, 128, 256, 32, 1
     cfg = default_mx_bf16bf16_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     # C is bf16_t (2 bytes); use uint16 buffer + decode fn so size matches exactly.
     A_raw, A_dec, B_raw, B_dec, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
@@ -289,7 +292,8 @@ def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 
 
 def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    M, N, K, gK, gN = 128, 128, 128, 128, 1
+    # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch
+    M, N, K, gK, gN = 128, 128, 256, 128, 1
     cfg = default_mx_bf16bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
     # B is bf8: encode K*N float32 values as bf8 bytes
@@ -303,9 +307,9 @@ def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 
 
 def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    # pk_fp4: 2 fp4 values per byte → B buffer is K*N/2 bytes
-    # We treat the buffer as uint8 with K*N/2 elements; the kernel unpacks internally.
-    M, N, K, gK, gN = 128, 128, 128, 32, 1
+    # pk_fp4: 2 fp4 values per byte → B buffer is K*N/2 bytes.
+    # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch.
+    M, N, K, gK, gN = 128, 128, 256, 32, 1
     cfg = default_mx_bf16fp4_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
     rng = np.random.default_rng(44)
