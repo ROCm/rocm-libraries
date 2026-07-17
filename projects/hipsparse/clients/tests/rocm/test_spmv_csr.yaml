@@ -47,7 +47,8 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
 
 # Test transpose operations with default algorithm (tests fix for rocsparse fallback)
 - name: spmv_csr_transpose
@@ -63,7 +64,7 @@ Tests:
   betai: [1.0]
   transA: [HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_CSR_ALG3]
 
 - name: spmv_csr_mixed
   category: quick
@@ -80,7 +81,8 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT,
              HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
 
 - name: spmv_csr
   category: pre_checkin
@@ -97,7 +99,8 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
   filename: [nos1,
              nos2,
              nos3,
@@ -121,7 +124,8 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
   filename: [Chebyshev4,
              shipsec1,
              bibd_22_8,
