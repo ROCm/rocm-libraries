@@ -32,6 +32,9 @@ include(hipsparselt_link_blas_libraries)
 include(CMakeDependentOption)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
+include(CheckCXXCompilerFlag)
+
+check_cxx_compiler_flag("-mf16c" HIPSPARSELT_CXX_HAS_MF16C)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 set(hipsparselt_SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
