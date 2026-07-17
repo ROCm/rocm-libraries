@@ -6,7 +6,7 @@ Generates Tensile tuning configs (and related artifacts) from a YAML GEMM specif
 
 ### CLI
 
-From the **geko repo root** ([`scripts/config_generator.py`](../../scripts/config_generator.py)):
+From the **GEKO package root** ([`scripts/config_generator.py`](../../scripts/config_generator.py)):
 
 ```bash
 python3 scripts/config_generator.py [--hipblaslt PATH] [--config PATH] [--outputPath DIR] \

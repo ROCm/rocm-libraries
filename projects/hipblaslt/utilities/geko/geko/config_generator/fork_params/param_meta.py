@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from typing import Dict
+from functools import lru_cache
 
 from geko.config_generator.shared_utils import ParamMeta
 
@@ -16,11 +17,11 @@ def _format_range(rng, start_elements=2, end_elements=2):
     end = ", ".join(map(str, rng[-end_elements:]))
     return f"[{start}, ..., {end}]"
 
-
+@lru_cache(maxsize=1)
 def load_tensile_metadata() -> Dict[str, ParamMeta]:
     """Pull defaults and valid ranges from Tensile's validParameters
     and defaultBenchmarkCommonParameters.  Returns Dict[str, ParamMeta].
-    Called once per OptimizationParams instance."""
+    Loaded lazily and cached for reuse across callers."""
     from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
     from Tensile.Common.ValidParameters import validParameters
 

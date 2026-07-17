@@ -1,18 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# SPDX-License-Identifier: MIT
-
 from __future__ import annotations
 
 # TODO: Add a size to config, for each filter to test the impact of the filter.
-# TODO: ADD A Filter to MIdesign, when we have golden sizes, no need to tests other tiles.
+# TODO: add a Filter to MIdesign, when we have golden sizes, no need to tests other tiles.
 # TODO: add a filter, if TilesPerCU is greater than 3, go only 5 rounds.
 
 
 # MI_FILTER 1 trim from the end
 # MI_FILTER 2 trim from end and in the middle
-# num_MI_per_size 
 
 import logging
 import math

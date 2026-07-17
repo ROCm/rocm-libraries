@@ -139,7 +139,7 @@ def run(
     hipblaslt_path: str | Path,
     configs: List[dict],
     output_dir: str | Path,
-    devices: Sequence[int] = [0, 1, 2, 3, 4, 5, 6, 7],
+    devices: Sequence[int] | None = None,
     bench_freq: bool = False,
     max_chunk_size: int = 25,
 ) -> pd.DataFrame:
@@ -152,7 +152,8 @@ def run(
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
         configs (List[dict]): List of GEMM benchmarking configurations.
         devices (Sequence[int], optional): List of GPU device IDs to use for
-            optimization. Defaults to [0, 1, 2, 3, 4, 5, 6, 7].
+            optimization. Defaults to None, which is interpreted as all available 
+            devices [0, 1, 2, 3, 4, 5, 6, 7].
         bench_freq (bool, optional): Forwarded to bench.run for each
             per-config dense-search benchmark (controls HIPBLASLT_BENCH_FREQ).
             Defaults to False.
@@ -167,6 +168,8 @@ def run(
         - Tracks progress with tqdm progress bar.
         - Creates failed_benchmarks.log for any optimization failures.
     """
+    if devices is None:
+        devices = list(range(8))
     devices = parse_devices(devices)
     logger.debug(
         f"Starting dense search with output_dir={output_dir} devices={devices} "

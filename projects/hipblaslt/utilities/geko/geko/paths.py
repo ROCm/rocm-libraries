@@ -23,6 +23,7 @@ Resolution priority (highest first):
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Union
 
@@ -86,10 +87,12 @@ def resolve_hipblaslt_path(
         if candidate:
             path = Path(candidate).expanduser().resolve()
             if not looks_like_hipblaslt_root(path):
-                raise SystemExit(
-                    f"hipBLASLt path from {source} is not a valid checkout "
-                    f"(no tensilelite/ directory): '{path}'"
+                print(
+                    f"Error: hipBLASLt path from {source} is not a valid checkout "
+                    f"(no tensilelite/ directory): '{path}'",
+                    file=sys.stderr,
                 )
+                raise SystemExit(1)
             root = path
             break
 
@@ -101,15 +104,19 @@ def resolve_hipblaslt_path(
                 break
 
     if root is None:
-        raise SystemExit(
-            "Could not locate the hipBLASLt checkout root. Pass --hipblaslt PATH or "
-            f"set {HIPBLASLT_PATH_ENV_VAR} to a built hipBLASLt checkout."
+        print(
+            "Error: Could not locate the hipBLASLt checkout root. Pass --hipblaslt PATH or "
+            f"set {HIPBLASLT_PATH_ENV_VAR} to a built hipBLASLt checkout.",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
 
     if require_built and not is_hipblaslt_built(root):
-        raise SystemExit(
-            f"hipBLASLt checkout at '{root}' does not appear to be built "
-            "(missing build/release/). Build hipBLASLt before running this workflow."
+        print(
+            f"Error: hipBLASLt checkout at '{root}' does not appear to be built "
+            "(missing build/release/). Build hipBLASLt before running this workflow.",
+            file=sys.stderr,
         )
+        raise SystemExit(1)
 
     return root

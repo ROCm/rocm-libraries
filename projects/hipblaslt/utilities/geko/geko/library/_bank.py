@@ -18,6 +18,7 @@ Functions:
 """
 
 import copy
+import logging
 import pandas as pd
 import numpy as np
 
@@ -27,6 +28,9 @@ from typing import Set, List, Tuple, Sequence
 from geko.library import Library
 from geko.constants import GEMM_FIELDS
 from geko import bench
+
+
+logger = logging.getLogger("GEKO")
 
 
 def cluster_solutions(lib: Library, other_keys: Sequence[str] = None) -> dict:
@@ -130,7 +134,7 @@ def min_assigment(
     lib: Library,
     cluster_dir: Path,
     custom_lib_dir: Path,
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     tol: float = 0.02,
     scale_tol: bool = True,
 ) -> Tuple[List[dict], List]:
@@ -152,11 +156,10 @@ def min_assigment(
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation
         lib (Library): Input Library data structure with solutions and sizes.
-        output_file (str | Path): Output file for benchmark results.
         cluster_dir (str | Path): Working directory path for the given cluster.
         custom_lib_dir (str | Path): Custom library directory.
         devices (Sequence[int], optional): GPU device IDs to use for benchmarking.
-            Defaults to [0].
+            Defaults to None, which is interpreted as [0] if not specified.
         tol (float, optional): Performance error threshold to consider a solution
             'optimal' for a size. Defaults to 0.02 (2%).
         scale_tol (bool, optional): Whether to scale the tolerance based on the FLOPs 
@@ -167,6 +170,8 @@ def min_assigment(
         Tuple[List[dict], List]: Tuple containing the new subset of solutions
             and their sizes.
     """
+    if devices is None:
+        devices = [0]
     bench_file = lib.create_bench_input(cluster_dir)[0]
     bench_data = bench.log.parse(bench_file)
     bench_data = bench.log.update(bench_data, beta=False, flush=False)[0]
@@ -215,6 +220,13 @@ def min_assigment(
         valid_sols.append((gsi, set(row["GEMMID"].values.tolist())))
 
     keep_indices = solve_set_cover(set(df["GEMMID"]), valid_sols)
+    if keep_indices is None:
+        logger.warning(
+            "Skipping pruning for cluster '%s': infeasible set cover after EFF filtering (tol=%s)",
+            cluster_dir,
+            tol,
+        )
+        return copy.deepcopy(lib.solutions), copy.deepcopy(lib.sizes)
 
     new_sizes = []
     new_sols = copy.deepcopy([lib.solutions[i] for i in keep_indices])

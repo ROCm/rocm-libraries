@@ -51,7 +51,7 @@ def run_silent_command(cmd: List[str], cwd: str | Path = None) -> None:
     )
     _, err = proc.communicate()
     logger.debug(f"Silent command completed: returncode={proc.returncode}")
-    if proc.returncode > 0:
+    if proc.returncode != 0:
         if err:
             logger.debug(f"Silent command stderr (truncated): {err[:500]}")
         raise ValueError(err)

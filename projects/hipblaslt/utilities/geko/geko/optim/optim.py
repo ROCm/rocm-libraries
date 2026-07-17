@@ -194,7 +194,7 @@ def configure(
 def run(
     hipblaslt_path: str | Path,
     tuning_dir: str | Path,
-    devices: Sequence[int] = [0, 1, 2, 3, 4, 5, 6, 7],
+    devices: Sequence[int] | None = None,
     client_build_dir: str | Path = Path("build_tmp"),
     n_slots: int = 4,
     retry: bool = True,
@@ -212,7 +212,8 @@ def run(
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
-            balancer. Defaults to range(8).
+            balancer. 
+            Defaults to None, which is interpreted as all 8 devices if not specified.
         client_build_dir (str | Path, optional): Build directory for the
             tensilelite client (see build_tensilelite_client).
             Defaults to Path("build_tmp").
@@ -230,6 +231,8 @@ def run(
         failed_jobs.log, and per-config build_* artifact trees underneath
         tuning_dir.
     """
+    if devices is None:
+        devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
     logger.debug(
         f"Starting optimization run_new with tuning_dir={tuning_dir} devices={devices} "
@@ -358,7 +361,7 @@ def analyze(
     output_dir: str | Path,
     benchmark_dir: str | Path = Path("benchmarks"),
     custom_lib_dir: str | Path = Path("build"),
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     error_thr: float = 0.03,
     up_thr: float = 1.03,
     duration: float = 1.0,
@@ -382,7 +385,7 @@ def analyze(
         custom_lib_dir (str | Path, optional): Directory for custom library creation.
             Defaults to "build".
         devices (Sequence[int], optional): GPU device IDs used by the load
-            balancer for benchmarking. Defaults to range(1).
+            Defaults to None, which is interpreted as [0] if not specified.
         error_thr (float, optional): Maximum acceptable numerical error threshold.
             Defaults to 0.03.
         up_thr (float, optional): Minimum performance improvement ratio threshold.
@@ -409,6 +412,8 @@ def analyze(
     """
     if device is not None:
         devices = [device]
+    if devices is None:
+        devices = [0]  # Default to device 0 if not specified
     devices = parse_devices(devices)
 
     df = bench.compare(

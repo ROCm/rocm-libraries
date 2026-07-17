@@ -67,7 +67,7 @@ def run_bench(
     hipblaslt_path: str,
     workload_path: str,
     output_dir: str | Path,
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     benchmark_duration: float = 0.5,
     bench_freq: bool = False,
     device: int | None = None,
@@ -102,6 +102,8 @@ def run_bench(
 
     if device is not None:
         devices = [device]
+    if devices is None:
+        devices = [0]  # Default to device 0 if not specified
     devices = parse_devices(devices)
 
     data = bench.log.update(bench.log.parse(log_path, as_df=False))[0]
@@ -125,7 +127,7 @@ def run_search(
     hipblaslt_path: str,
     log_file: str,
     *,
-    devices: Sequence[int] = [0, 1, 2, 3, 4, 5, 6, 7],
+    devices: Sequence[int] | None = None,
     keep_thr: float = 0.1,
     up_thr: float = 1.03,
     workdir: str = "workdir",
@@ -150,7 +152,7 @@ def run_search(
         hipblaslt_path (str): hipBLASLt checkout root.
         log_file (str): Workload YAML/CSV path.
         devices (Sequence[int], optional): GPU device IDs used by search and
-            downstream analysis. Defaults to range(8).
+            Defaults to None, which is interpreted as all 8 devices if not specified.
         keep_thr (float, optional): Minimum grouped % of total time to keep
             a GEMM row when summarizing. Defaults to 0.1.
         up_thr (float, optional): Minimum speedup ratio vs reference kept by
@@ -172,6 +174,8 @@ def run_search(
     hipblaslt_path, log_file, workdir, state, state_path = _prepare_workflow_context(
         hipblaslt_path, log_file, workdir, verbose
     )
+    if devices is None:
+        devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
     output_dir = workdir / "final_libs"
 
@@ -271,7 +275,7 @@ def run_search(
 def run_configure(
     hipblaslt_path: str,
     log_file: str,
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     keep_thr: float = 0,
     arch: str = "gfx950",
     backend: str = "ductile",
@@ -307,6 +311,8 @@ def run_configure(
     """
     if device is not None:
         devices = [device]
+    if devices is None:
+        devices = [0]  # Default to device 0 if not specified
     devices = parse_devices(devices)
 
     for d in devices:
@@ -372,7 +378,7 @@ def run_configure(
 def run_optimize(
     hipblaslt_path: str,
     workdir: str = "workdir",
-    devices: Sequence[int] = [0, 1, 2, 3, 4, 5, 6, 7],
+    devices: Sequence[int] | None = None,
     n_slots: int = 4,
     up_thr: float = 1.03,
     err_thr: float = 0.03,
@@ -422,6 +428,8 @@ def run_optimize(
         raise FileNotFoundError(f"Optimizations directory not found: {input_dir}")
 
     _set_log_level(verbose)
+    if devices is None:
+        devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
     output_dir = workdir / "final_libs"
 

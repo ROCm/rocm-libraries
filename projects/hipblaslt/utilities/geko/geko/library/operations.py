@@ -438,7 +438,7 @@ def prune_library(
     base_lib: Library,
     workdir: str | Path = ".",
     cluster: bool = True,
-    devices: Sequence[int] = [0, 1, 2, 3, 4, 5, 6, 7],
+    devices: Sequence[int] | None = None,
     tol: float = 0.02,
     scale_tol: bool = True,
     other_keys: Sequence[str] = None,
@@ -457,11 +457,12 @@ def prune_library(
             with solutions and sizes.
         workdir (str | Path, optional): Working directory for intermediate files and configs.
             Defaults to '.'.
-        cluster (bool, optional): Wheter to cluster the solutions by MacroTile and Depthu. 
+        cluster (bool, optional): Whether to cluster the solutions by MacroTile and DepthU. 
             If false, each size will be benchmarked against all other solutions in the library.
             Potentially slower, but more accurate.
-            Defaults to False.
-        devices (Sequence[int]): List of GPU device IDs to use.
+            Defaults to True.
+        devices (Sequence[int]): List of GPU device IDs to use. 
+            Defaults to None, which is interpreted as all 8 devices if not specified.
         tol (float, optional): Performance error threshold to consider a solution 'optimal' for a size.
             Defaults to 0.02 (2%).
         scale_tol (bool, optional): Whether to scale ``tol`` using the cluster's
@@ -485,6 +486,8 @@ def prune_library(
     if not hipblaslt_path.is_dir():
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
+    if devices is None:
+        devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
     workdir = Path(workdir)
 

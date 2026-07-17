@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from geko.config_generator.constants import LIST_OF_MT_MAX_SIZE
 from geko.config_generator.mi_designer import MIDesign
-from geko.config_generator.fork_params.post_processor import BasePostProcessor, post_process
+from geko.config_generator.fork_params.post_processor import BasePostProcessor, mark_post_process
 from geko.config_generator.shared_utils import (
     ForkParameter,
     GroupDimension,
@@ -21,7 +21,7 @@ class GFX950PostProcessor(BasePostProcessor):
     Adjusts fork params and MI groups based on MI-derived properties.
     """
 
-    @post_process
+    @mark_post_process
     def augment_mi_arch_vgpr(
         self,
         fork_params: Dict[str, ForkParameter],
@@ -38,7 +38,7 @@ class GFX950PostProcessor(BasePostProcessor):
                 entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
-    @post_process
+    @mark_post_process
     def adjust_prefetch_global_read(
         self,
         fork_params: Dict[str, ForkParameter],
@@ -57,7 +57,7 @@ class GFX950PostProcessor(BasePostProcessor):
                 pgr.values.insert(0, 1)
         return fork_params, mi_groups
 
-    @post_process
+    @mark_post_process
     def adjust_depth_u(
         self,
         fork_params: Dict[str, ForkParameter],
@@ -77,7 +77,7 @@ class GFX950PostProcessor(BasePostProcessor):
             du.values.pop(0)
         return fork_params, mi_groups
 
-    @post_process
+    @mark_post_process
     def adjust_work_group_mapping(
         self,
         fork_params: Dict[str, ForkParameter],
@@ -96,7 +96,7 @@ class GFX950PostProcessor(BasePostProcessor):
                 wgm.values[wgm.values.index(16)] = 1
         return fork_params, mi_groups
 
-    @post_process
+    @mark_post_process
     def merge_cms_groups(
         self,
         fork_params: Dict[str, ForkParameter],
@@ -128,7 +128,7 @@ class GFX950GAPostProcessor(BasePostProcessor):
     Augments MI groups with MIArchVgpr and merges CMS groups.
     """
 
-    @post_process
+    @mark_post_process
     def augment_mi_arch_vgpr(
         self,
         fork_params: Dict[str, ForkParameter],
@@ -145,7 +145,7 @@ class GFX950GAPostProcessor(BasePostProcessor):
                 entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
-    @post_process
+    @mark_post_process
     def merge_cms_groups(
         self,
         fork_params: Dict[str, ForkParameter],

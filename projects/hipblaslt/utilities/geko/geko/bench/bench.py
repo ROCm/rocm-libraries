@@ -63,7 +63,7 @@ def run(
     bench_file: str | Path,
     output_file: str | Path,
     custom_lib_dir: str | Path = None,
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     cache: bool = False,
     bench_freq: bool = False,
     min_chunk_size: int = 1,
@@ -81,7 +81,7 @@ def run(
         custom_lib_dir (str | Path, optional): Custom library directory.
             Defaults to None.
         devices (Sequence[int], optional): GPU device IDs used by the 
-            concurrency runner. Defaults to [0].
+            concurrency runner. Defaults to None, which is interpreted as [0].
         cache (bool, optional): Whether to use cached results if available.
             Defaults to False.
         bench_freq (bool, optional): If True, set HIPBLASLT_BENCH_FREQ=true so
@@ -100,6 +100,8 @@ def run(
     Note:
         Sets HIPBLASLT_TENSILE_LIBPATH environment variable when using custom library.
     """
+    if devices is None:
+        devices = [0]
     devices = parse_devices(devices)
 
     hipblaslt_path = Path(hipblaslt_path)
@@ -154,9 +156,11 @@ def run(
         logger.info(
             f"Running hipblaslt-bench for '{bench_file}' in device {devices[0]}, output will be saved in '{output_file}'"
         )
-        hipblaslt_bench(bench_file, output_file, devices[0])
-        if mute_for_progress:
-            logger.setLevel(prev_level)
+        try:
+            hipblaslt_bench(bench_file, output_file, devices[0])
+        finally:
+            if mute_for_progress:
+                logger.setLevel(prev_level)
         return parse_benchmark_output(output_file)
 
     workdir = output_file.parent / f"{output_file.stem}_chunks"
@@ -189,8 +193,11 @@ def run(
             return verify_output(self.output_file, self.bench_file)
 
         def teardown(self) -> None:
+            output_file = getattr(self, "output_file", None)
+            if output_file is None or not output_file.is_file():
+                return
             with _queue_lock:
-                output_file_data.append(self.output_file.read_text())
+                output_file_data.append(output_file.read_text())
     
     data = read_bench_yaml(bench_file)
 
@@ -230,7 +237,7 @@ def standard_benchmark(
     bench_file: str | Path,
     output_file: str | Path,
     custom_lib_dir: str | Path = None,
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     duration: float = 0.5,
     initial_iters: int = 10,
     initial_cold_iters: int = 2,
@@ -250,7 +257,7 @@ def standard_benchmark(
         custom_lib_dir (str | Path, optional): Custom library directory.
             Defaults to None.
         devices (Sequence[int], optional): GPU device IDs used by the 
-            concurrency runner. Defaults to [0].
+            concurrency runner. Defaults to None, which is interpreted as [0] if not specified.
         duration (float, optional): Target seconds for the cold phase and for the timed phase.
             Defaults to 0.5.
         initial_iters (int, optional): Timed iterations for the probe run.
@@ -272,6 +279,8 @@ def standard_benchmark(
         Both benchmark passes call run with cache=False. Writes probe and scaled YAML
         files in the same directory as output_file, using output_file's stem in the filenames.
     """
+    if devices is None:
+        devices = [0]
     bench_file = Path(bench_file)
     output_file = Path(output_file)
     if not bench_file.is_file():
@@ -351,7 +360,7 @@ def compare(
     cache: bool = False,
     duration: float = 0.5,
     beta: bool = False,
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     bench_freq: bool = False,
 ) -> pd.DataFrame:
     """Compare performance between reference and tuned solution libraries.
@@ -376,7 +385,7 @@ def compare(
         beta (bool, optional): Whether to use non-zero beta values in benchmarks.
             Defaults to False.
         devices (Sequence[int], optional): GPU device IDs used by the 
-            concurrency runner. Defaults to [0].
+            concurrency runner. Defaults to None, which is interpreted as [0] if not specified.
         bench_freq (bool, optional): Forwarded to run for every reference,
             tuned, and verify pass. Defaults to False.
 
@@ -392,6 +401,8 @@ def compare(
         - Generates benchmark input files for each library.
         - Compares reference vs tuned performance with ratio calculation.
     """
+    if devices is None:
+        devices = [0]
     lib_dir = Path(lib_dir)
     libs = library.load_collection(lib_dir)
     if len(libs) == 0:
@@ -411,62 +422,64 @@ def compare(
     mute_for_progress = logger.getEffectiveLevel() > logging.DEBUG
     if mute_for_progress:
         logger.setLevel(logging.WARNING)
-    ref, tuned, error = [], [], []
-    for lib in tqdm(libs, desc=f"Benchmarking libraries in '{lib_dir}'"):
-        logger.debug(f"Benchmarking library {lib.name}")
-        bench_file, verif_file = lib.create_bench_input(
-            benchmark_dir,
-            duration=duration,
-            verify=verify,
-            beta=beta,
-        )
 
-        # Benchmark default library
-        bench_file = Path(bench_file)
-        log_file = benchmark_dir / (bench_file.stem + "-reference.out")
-        res = run(
-            hipblaslt_path, bench_file, log_file,
-            custom_lib_dir=None, devices=devices, cache=cache, bench_freq=bench_freq,
-            silent=True
-        )
+    try:
+        ref, tuned, error = [], [], []
+        for lib in tqdm(libs, desc=f"Benchmarking libraries in '{lib_dir}'"):
+            logger.debug(f"Benchmarking library {lib.name}")
+            bench_file, verif_file = lib.create_bench_input(
+                benchmark_dir,
+                duration=duration,
+                verify=verify,
+                beta=beta,
+            )
 
-        # add lib_source column
-        matchtable_path = Path(hipblaslt_path / "build/release/device-library/MatchTable.yaml")
-        res = update_lib_source(res, matchtable_path)
-
-        res.rename({c: c + "_reference" for c in UNIQ_COLS}, axis=1, inplace=True)
-        res["lib"] = bench_file.stem.split("_bench")[0] + ".yaml"
-        ref.append(res)
-
-        # Benchmark optimized library
-        log_file = benchmark_dir / (bench_file.stem + "-tuned.out")
-        res = run(
-            hipblaslt_path, bench_file, log_file,
-            custom_lib_dir=custom_lib_dir, devices=devices, cache=cache, bench_freq=bench_freq,
-            silent=True
-        )
-        res.rename({c: c + "_tuned" for c in UNIQ_COLS}, axis=1, inplace=True)
-        tuned.append(res)
-
-        # Verify optimized library
-        if verif_file is not None:
-            verif_file = Path(verif_file)
-            log_file = benchmark_dir / (verif_file.stem + "-tuned.out")
+            # Benchmark default library
+            bench_file = Path(bench_file)
+            log_file = benchmark_dir / (bench_file.stem + "-reference.out")
             res = run(
-                hipblaslt_path, verif_file, log_file,
+                hipblaslt_path, bench_file, log_file,
+                custom_lib_dir=None, devices=devices, cache=cache, bench_freq=bench_freq,
+                silent=True
+            )
+
+            # add lib_source column
+            matchtable_path = Path(hipblaslt_path / "build/release/device-library/MatchTable.yaml")
+            res = update_lib_source(res, matchtable_path)
+
+            res.rename({c: c + "_reference" for c in UNIQ_COLS}, axis=1, inplace=True)
+            res["lib"] = bench_file.stem.split("_bench")[0] + ".yaml"
+            ref.append(res)
+
+            # Benchmark optimized library
+            log_file = benchmark_dir / (bench_file.stem + "-tuned.out")
+            res = run(
+                hipblaslt_path, bench_file, log_file,
                 custom_lib_dir=custom_lib_dir, devices=devices, cache=cache, bench_freq=bench_freq,
                 silent=True
             )
             res.rename({c: c + "_tuned" for c in UNIQ_COLS}, axis=1, inplace=True)
-            error.append(res)
+            tuned.append(res)
 
-        logger.debug(
-            f"Library benchmark summary: lib={lib.name} ref_rows={len(ref[-1])} "
-            f"tuned_rows={len(tuned[-1])} verify_rows={(len(error[-1]) if len(error) > 0 else 0)}"
-        )
+            # Verify optimized library
+            if verif_file is not None:
+                verif_file = Path(verif_file)
+                log_file = benchmark_dir / (verif_file.stem + "-tuned.out")
+                res = run(
+                    hipblaslt_path, verif_file, log_file,
+                    custom_lib_dir=custom_lib_dir, devices=devices, cache=cache, bench_freq=bench_freq,
+                    silent=True
+                )
+                res.rename({c: c + "_tuned" for c in UNIQ_COLS}, axis=1, inplace=True)
+                error.append(res)
 
-    if mute_for_progress:
-        logger.setLevel(prev_level)
+            logger.debug(
+                f"Library benchmark summary: lib={lib.name} ref_rows={len(ref[-1])} "
+                f"tuned_rows={len(tuned[-1])} verify_rows={(len(error[-1]) if len(error) > 0 else 0)}"
+            )
+    finally:
+        if mute_for_progress:
+            logger.setLevel(prev_level)
 
     dfr = pd.concat(ref, ignore_index=True).reset_index(drop=True)
     dft = pd.concat(tuned, ignore_index=True).reset_index(drop=True)

@@ -12,7 +12,7 @@ from geko.config_generator.shared_utils import (
 )
 
 
-def post_process(fn):
+def mark_post_process(fn):
     """Mark a method as a post-processing step."""
     fn._is_post_process = True
     return fn
@@ -24,7 +24,7 @@ class BasePostProcessor(BaseParamBuilder):
     Runs after MIDesigner + OptimizationParams have produced their
     outputs.  Heuristic-only (GA params don't depend on MI properties).
 
-    Decorate methods with @post_process.  Each receives
+    Decorate methods with @mark_post_process.  Each receives
     (fork_params, mi_groups) and returns the modified pair.
     Discovery uses vars(type(self)) — same pattern as OptimizationParams.
     """
@@ -42,7 +42,7 @@ class BasePostProcessor(BaseParamBuilder):
         mi_groups: GroupDimension,
         size: Tuple[int, int, int, int],
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
-        """Run MT_DU adjustments (if active), then all @post_process methods.
+        """Run MT_DU adjustments (if active), then all @mark_post_process methods.
 
         *size* is ``(M, N, B, K)``.
         """

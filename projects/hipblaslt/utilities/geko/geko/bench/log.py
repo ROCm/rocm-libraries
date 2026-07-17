@@ -261,7 +261,7 @@ def update(
         if "function" not in row:
             row["function"] = "matmul"
         if "initialization" not in row:
-            row["initalization"] = "trig_float"
+            row["initialization"] = "trig_float"
 
         row["compute_type"] = update_compute_type(row["compute_type"])
         if "scale_type" not in row:
@@ -375,7 +375,7 @@ def summarize(
     hipblaslt_path: str | Path,
     log_file: str | Path,
     output_dir: str | Path = ".",
-    devices: Sequence[int] = [0],
+    devices: Sequence[int] | None = None,
     keep_thr: float = 0.0,
     cache: bool = False,
     use_standard_benchmark: bool = False,
@@ -427,6 +427,8 @@ def summarize(
 
     if device is not None:
         devices = [device]
+    if devices is None:
+        devices = [0]
     devices = parse_devices(devices)
 
     data = update(parse(log_file, as_df=False))[0]

@@ -296,7 +296,7 @@ invoke format             # black + isort
 invoke build              # build sdist + wheel into dist/
 ```
 
-From the GEKO repo root you can also run the driver without installing (same code path as the installed CLI; adds the repo root to ``PYTHONPATH``):
+From the GEKO package root you can also run the driver without installing (same code path as the installed CLI; adds the package root to ``PYTHONPATH``):
 
 ```bash
 ./bin/geko --help

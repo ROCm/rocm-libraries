@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Tuple
 
 from geko.config_generator.constants import LIST_OF_MT_MAX_SIZE
 from geko.config_generator.mi_designer import MIDesign
-from geko.config_generator.fork_params.post_processor import BasePostProcessor, post_process
+from geko.config_generator.fork_params.post_processor import BasePostProcessor, mark_post_process
 from geko.config_generator.shared_utils import (
     ForkParameter,
     GroupDimension,
@@ -21,7 +21,7 @@ class GFX942PostProcessor(BasePostProcessor):
     (legacy code guards them with CUs==256).
     """
 
-    @post_process
+    @mark_post_process
     def augment_mi_arch_vgpr(
         self,
         fork_params: Dict[str, ForkParameter],
@@ -45,7 +45,7 @@ class GFX942GAPostProcessor(BasePostProcessor):
     No CMS support on GFX942.
     """
 
-    @post_process
+    @mark_post_process
     def augment_mi_arch_vgpr(
         self,
         fork_params: Dict[str, ForkParameter],
