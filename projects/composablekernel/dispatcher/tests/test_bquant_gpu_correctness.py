@@ -104,6 +104,31 @@ def _decode_e8m0(arr: np.ndarray) -> np.ndarray:
     return np.exp2(arr.astype(np.float32) - 127.0)
 
 
+# OCP FP4 E2M1 lookup table (from pk_fp4.hpp e2m1_to_fp32_table).
+# Index i (0-15) gives the float32 value for the 4-bit code i.
+_FP4_E2M1_LUT: np.ndarray = np.array([
+    0.0,  0.5,  1.0,  1.5,  2.0,  3.0,  4.0,  6.0,
+   -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+], dtype=np.float32)
+
+
+def _decode_fp4(packed: np.ndarray, K: int, N: int) -> np.ndarray:
+    """Unpack K*N OCP FP4 E2M1 values from K*N/2 packed bytes.
+
+    pk_fp4_t packing (from pk_fp4.hpp _pack/_unpack):
+      byte = (element1 << 4) | (element0 & 0xF)
+    Low nibble = element at flat index 2i; high nibble = element at flat index 2i+1.
+    The flat layout is row-major [K, N], so each byte contains two consecutive N-elements.
+    """
+    flat = packed.flatten()
+    lo = (flat & 0x0F).astype(np.uint8)
+    hi = ((flat >> 4) & 0x0F).astype(np.uint8)
+    out = np.empty(K * N, dtype=np.float32)
+    out[0::2] = _FP4_E2M1_LUT[lo]
+    out[1::2] = _FP4_E2M1_LUT[hi]
+    return out.reshape(K, N)
+
+
 def _bf16_raw_to_f32(arr: np.ndarray) -> np.ndarray:
     """Reinterpret a uint16 array of bf16 bit patterns as float32."""
     u16 = arr.flatten().astype(np.uint16)
@@ -131,8 +156,14 @@ def _reference_gemm(A_f32: np.ndarray, B_f32: np.ndarray,
 
 
 def _max_rel_err(C_gpu: np.ndarray, C_ref: np.ndarray) -> float:
-    num = np.abs(C_gpu.astype(np.float32) - C_ref.astype(np.float32))
-    den = np.abs(C_ref.astype(np.float32)) + 1e-6
+    C_gpu_f = C_gpu.astype(np.float32)
+    C_ref_f = C_ref.astype(np.float32)
+    num = np.abs(C_gpu_f - C_ref_f)
+    # Use 1% of the global max magnitude as the denominator floor to avoid
+    # inflating the relative error when individual elements are near zero
+    # (a common occurrence with random inputs that partially cancel in GEMM).
+    ref_max = float(np.abs(C_ref_f).max())
+    den = np.abs(C_ref_f) + max(ref_max * 1e-2, 1e-6)
     return float(np.max(num / den))
 
 
@@ -260,8 +291,10 @@ def _make_bf16_inputs(M, N, K, gK, gN, seed=42):
 
 
 def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    # K=512 = 2*TileK(256): CompV3 needs num_loop>=2 to avoid OOB second prefetch
-    M, N, K, gK, gN = 16, 64, 512, 128, 1
+    # K=768 = 3*TileK(256): use num_loop=3 (TailNumber::Odd) for better coverage.
+    # num_loop=2 works but exercises only the no-hot-loop/Even tail path; 3 gives
+    # the no-hot-loop/Odd tail path and exercises the BQ scale prefetch more robustly.
+    M, N, K, gK, gN = 16, 64, 768, 128, 1
     cfg = default_fp8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "fp8")
     return _run_one("C4/fp8", cfg, M, N, K,
@@ -270,8 +303,8 @@ def test_c4_fp8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 
 
 def test_c4_bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    # K=512 = 2*TileK(256): CompV3 needs num_loop>=2 to avoid OOB second prefetch
-    M, N, K, gK, gN = 16, 64, 512, 128, 1
+    # K=768 = 3*TileK(256): use num_loop=3 for the same reason as test_c4_fp8.
+    M, N, K, gK, gN = 16, 64, 768, 128, 1
     cfg = default_bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, B_raw, B_dec, BQ = _make_fp8_inputs(M, N, K, gK, gN, "bf8")
     return _run_one("C4/bf8", cfg, M, N, K,
@@ -292,8 +325,8 @@ def test_h3_mx_bf16bf16(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
 
 
 def test_h3_mx_bf16bf8(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
-    # K=256 = 2*TileK(128): MicroscaleCompV3 needs num_loop>=2 to avoid OOB second prefetch
-    M, N, K, gK, gN = 128, 128, 256, 128, 1
+    # K=384 = 3*TileK(128): use num_loop=3 (TailNumber::Odd) for broader pipeline coverage.
+    M, N, K, gK, gN = 128, 128, 384, 128, 1
     cfg = default_mx_bf16bf8_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
     # B is bf8: encode K*N float32 values as bf8 bytes
@@ -315,9 +348,8 @@ def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     rng = np.random.default_rng(44)
     # pk_fp4: K*N values packed 2-per-byte
     B_raw = rng.integers(0, 256, size=(K * N // 2,), dtype=np.uint8)
-    # Reference: approximate fp4 values as small floats in [-1,1]
-    B_f32_approx = (B_raw.astype(np.float32) / 128.0 - 1.0).reshape(K // 2, N)
-    B_f32_approx = np.repeat(B_f32_approx, 2, axis=0)  # rough unpack approximation
+    # Reference: unpack OCP FP4 E2M1 values using the canonical lookup table.
+    B_f32_approx = _decode_fp4(B_raw, K, N)
     return _run_one("H3/mx_bf16fp4", cfg, M, N, K,
                     A_raw, A_dec, B_raw, B_f32_approx, BQ_e8m0,
                     out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
