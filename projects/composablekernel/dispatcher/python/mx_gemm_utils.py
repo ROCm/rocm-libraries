@@ -314,11 +314,13 @@ class MxGemmResult:
 
 
 class MxGemmDispatcherLib:
-    def __init__(self, so_path: Path):
+    def __init__(self, so_path: Path, dtype: Optional[str] = None, arch: Optional[str] = None):
         self.so_path = Path(so_path)
         if not self.so_path.exists():
             raise FileNotFoundError(f"mx_gemm .so not found: {self.so_path}")
         self._lib = ctypes.CDLL(str(self.so_path))
+        self._dtype = dtype
+        self._arch = arch
         self._setup()
         # Contract exposes both dispatcher_initialize() and dispatcher_init().
         init = getattr(self._lib, "dispatcher_initialize", None)
@@ -361,6 +363,11 @@ class MxGemmDispatcherLib:
         return 1
 
     def run(self, A, B, C, scale_a, scale_b, prob: MxGemmProblem) -> float:
+        # Guard: fp8 OCP bytes only match the device on gfx950/gfx12.  If the lib
+        # was constructed with dtype="fp8", fail loudly now rather than silently
+        # diverging from the numpy reference on an FNUZ arch.
+        if self._dtype == "fp8":
+            assert_fp8_ocp_supported(self._arch or _DEFAULT_ARCH)
         A = np.ascontiguousarray(A)
         B = np.ascontiguousarray(B)
         # C is the OUTPUT buffer: the kernel writes results into it in place via a

@@ -102,7 +102,7 @@ void dispatcher_cleanup() { g_initialized = false; }
  * builds HostTensors from them, runs the SAME preShuffleScaleBuffer_gfx950 path
  * as the Old-TE profiler, uploads everything, and calls SelectedKernel::launch.
  *
- * Returns 0 ok, -1 HIP/bad-args, -2 kernel reports unsupported args.
+ * Returns 0 ok, -1 HIP/bad-args, -2 unsupported shape (divisibility) or kernel rejects.
  */
 int dispatcher_run_mx_gemm(const void* A,
                            const void* B,
@@ -208,8 +208,9 @@ int dispatcher_run_mx_gemm(const void* A,
     // scale_k_size/k_xdl_pack). If M/N/scale_k are not exact multiples of their
     // pack factors, that division silently truncates the shuffled buffers, so the
     // pre-shuffle would read/write past valid data and the kernel would consume a
-    // corrupt scale layout. Fail loudly instead (matches the -1 error convention
-    // used above). ----
+    // corrupt scale layout. Return -2 (unsupported shape for the selected warp
+    // tile) rather than -1 (bad-args/HIP error), consistent with the IsSupportedArguments-
+    // style rejects used elsewhere in the dispatcher ctypes layer. ----
     if(m % m_xdl_pack != 0 || n % n_xdl_pack != 0 || scale_k_size % k_xdl_pack != 0)
     {
         std::cerr << "dispatcher_run_mx_gemm: M, N, and scale_k (=K/32) must be divisible by the "
@@ -217,7 +218,7 @@ int dispatcher_run_mx_gemm(const void* A,
                   << m_xdl_pack << ", n_xdl_pack=" << n_xdl_pack << ", k_xdl_pack=" << k_xdl_pack
                   << ") for the selected warp tile; got M=" << m << ", N=" << n
                   << ", scale_k=" << scale_k_size << "\n";
-        return -1;
+        return -2;
     }
 
     // ---- Build unshuffled scale HostTensors from the incoming raw e8m0 bytes.
