@@ -22,17 +22,47 @@ namespace
 {
 
 // SDPA-specific runner: iterates over data types with BHSD and BSHD layouts.
-// Both layouts are controlled via strides on TensorAttributes.
+// Both layouts are controlled via strides on TensorAttributes. Filtering mirrors
+// the shared run() in Helpers.hpp: an empty config.dtype/config.layout means
+// "run all", otherwise only the requested combination is run.
 template <typename F>
 bool runSdpa(F&& f)
 {
     bool allPassed = true;
-    allPassed &= f.template operator()<float, float>(TensorLayout::BHSD);
-    allPassed &= f.template operator()<half, float>(TensorLayout::BHSD);
-    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::BHSD);
-    allPassed &= f.template operator()<float, float>(TensorLayout::BSHD);
-    allPassed &= f.template operator()<half, float>(TensorLayout::BSHD);
-    allPassed &= f.template operator()<bfloat16, float>(TensorLayout::BSHD);
+
+    const std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
+    const std::vector<std::pair<std::string, TensorLayout>> layouts
+        = {{"bhsd", TensorLayout::BHSD}, {"bshd", TensorLayout::BSHD}};
+
+    for(const auto& dt : dtypes)
+    {
+        if(!f.config.dtype.empty() && f.config.dtype != dt)
+        {
+            continue;
+        }
+
+        for(const auto& [layoutName, layout] : layouts)
+        {
+            if(!f.config.layout.empty() && f.config.layout != layoutName)
+            {
+                continue;
+            }
+
+            if(dt == "fp32")
+            {
+                allPassed &= f.template operator()<float, float>(layout);
+            }
+            else if(dt == "fp16")
+            {
+                allPassed &= f.template operator()<half, float>(layout);
+            }
+            else if(dt == "bf16")
+            {
+                allPassed &= f.template operator()<bfloat16, float>(layout);
+            }
+        }
+    }
+
     return allPassed;
 }
 

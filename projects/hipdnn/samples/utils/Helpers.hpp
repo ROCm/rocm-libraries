@@ -107,8 +107,16 @@ inline void printSampleHelp(const std::string& sampleName,
               << "  --verify-cpu, -vc           Enable CPU reference validation\n"
               << "  --engine-id <int>           Preferred engine ID\n"
               << "  --engine-name <name>        Preferred engine name\n"
-              << "  --dtype <fp32|fp16|bf16>    Data type\n"
-              << "  --layout <nchw|nhwc>        Tensor layout\n";
+              << "  --dtype <fp32|fp16|bf16>    Data type\n";
+
+    if(sampleType == SampleType::SDPA)
+    {
+        std::cout << "  --layout <bhsd|bshd>        Tensor layout\n";
+    }
+    else
+    {
+        std::cout << "  --layout <nchw|nhwc>        Tensor layout\n";
+    }
 
     // SDPA's tensor shapes are hardcoded constants (batch/heads/seq_len/head_dim),
     // so the shape-related options below don't apply and would be misleading to list.
@@ -326,7 +334,16 @@ inline Config
 
             config.layout = argv[++i];
 
-            if(config.layout != "nchw" && config.layout != "nhwc")
+            if(sampleType == SampleType::SDPA)
+            {
+                if(config.layout != "bhsd" && config.layout != "bshd")
+                {
+                    std::cerr << "Invalid value for --layout: " << config.layout
+                              << " (expected: bhsd, bshd)\n";
+                    exit(EXIT_FAILURE);
+                }
+            }
+            else if(config.layout != "nchw" && config.layout != "nhwc")
             {
                 std::cerr << "Invalid value for --layout: " << config.layout
                           << " (expected: nchw, nhwc)\n";
