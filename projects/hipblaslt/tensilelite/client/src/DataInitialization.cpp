@@ -2039,6 +2039,19 @@ namespace TensileLite
             std::memset(buffer + compactRow, 0x00, padTail);
         }
 
+        // mxDataGenerator requires the contiguous (stride-1) dimension to be a multiple
+        // of mxBlock. Some tests deliberately use invalid tail sizes (e.g. K=136 with
+        // MXBlock=32) to verify TensileLite rejects them at runtime; skip generateMXInput
+        // for those configs and fall back to default init so the client does not abort.
+        static bool canGenerateMXInput(TensorDescriptor const& dataDesc,
+                                       size_t                  mxBlock,
+                                       size_t                  boundIdx)
+        {
+            if(mxBlock == 0)
+                return false;
+            return dataDesc.sizes()[boundIdx] % mxBlock == 0;
+        }
+
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
         {
             // Seeds A, B, MXSA, MXSB so the default-init loop in initializeCPUInputs
@@ -2281,10 +2294,14 @@ namespace TensileLite
                           << std::endl;
                   };
 
-            // MX sides go through initOneMXSide (which throws for unsupported
-            // data/scale combinations); non-MX sides reuse the default initArray
-            // path so buffers don't stay uninitialised.
-            if(isMXTensor(problem.a(), problem.mxBlockA()))
+            // MX sides go through initOneMXSide when K is mxBlock-aligned; invalid
+            // tail sizes fall back to default init so TensileLite can reject them.
+            // Non-MX sides reuse the default initArray path so buffers don't stay
+            // uninitialised.
+            if(isMXTensor(problem.a(), problem.mxBlockA())
+               && canGenerateMXInput(problem.a(),
+                                     problem.mxBlockA(),
+                                     problem.boundIndices()[0].a))
             {
                 warnIfScaleInitUnsupported(ContractionProblemGemm::TENSOR::A,
                                           ContractionProblemGemm::TENSOR::MXSA);
@@ -2301,14 +2318,16 @@ namespace TensileLite
             }
             else
             {
-                // A is non-MX: seed via the default initArray path so it doesn't
-                // get skipped by the MX-aware default loop.
+                // A is non-MX or has an invalid mxBlock tail: seed via default init.
                 initTensorFromDefault(ContractionProblemGemm::TENSOR::A);
                 if(problem.mxBlockA() > 0)
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSA);
             }
 
-            if(isMXTensor(problem.b(), problem.mxBlockB()))
+            if(isMXTensor(problem.b(), problem.mxBlockB())
+               && canGenerateMXInput(problem.b(),
+                                     problem.mxBlockB(),
+                                     problem.boundIndices()[0].b))
             {
                 warnIfScaleInitUnsupported(ContractionProblemGemm::TENSOR::B,
                                           ContractionProblemGemm::TENSOR::MXSB);
@@ -2325,7 +2344,7 @@ namespace TensileLite
             }
             else
             {
-                // B is non-MX: same fallback as the A side.
+                // B is non-MX or has an invalid mxBlock tail: same fallback as A.
                 initTensorFromDefault(ContractionProblemGemm::TENSOR::B);
                 if(problem.mxBlockB() > 0)
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSB);
