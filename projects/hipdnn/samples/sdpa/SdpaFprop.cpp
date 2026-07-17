@@ -154,7 +154,7 @@ int main(int argc, char* argv[])
 {
     try
     {
-        auto config = parseCommandLineArgs(argc, argv);
+        auto config = parseCommandLineArgs(argc, argv, SampleType::SDPA);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

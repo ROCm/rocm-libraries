@@ -93,7 +93,8 @@ using hipdnn_data_sdk::types::half;
 enum class SampleType
 {
     GENERIC,
-    BN_TRAINING
+    BN_TRAINING,
+    SDPA
 };
 
 // HELP MESSAGE
@@ -107,12 +108,18 @@ inline void printSampleHelp(const std::string& sampleName,
               << "  --engine-id <int>           Preferred engine ID\n"
               << "  --engine-name <name>        Preferred engine name\n"
               << "  --dtype <fp32|fp16|bf16>    Data type\n"
-              << "  --layout <nchw|nhwc>        Tensor layout\n"
-              << "  --dims N,C,H,W              Input dimensions\n"
-              << "  --filter R,S                Filter size\n"
-              << "  --stride U,V                Stride\n"
-              << "  --padding PH,PW             Padding\n"
-              << "  --dilation DH,DW            Dilation\n";
+              << "  --layout <nchw|nhwc>        Tensor layout\n";
+
+    // SDPA's tensor shapes are hardcoded constants (batch/heads/seq_len/head_dim),
+    // so the shape-related options below don't apply and would be misleading to list.
+    if(sampleType != SampleType::SDPA)
+    {
+        std::cout << "  --dims N,C,H,W              Input dimensions\n"
+                  << "  --filter K,R,S              Filter size (output channels, height, width)\n"
+                  << "  --stride U,V                Stride\n"
+                  << "  --padding PH,PW             Padding\n"
+                  << "  --dilation DH,DW            Dilation\n";
+    }
 
     if(sampleType == SampleType::BN_TRAINING)
     {
@@ -176,6 +183,79 @@ inline std::vector<int64_t> parseList(const std::string& str)
     }
 
     return result;
+}
+
+// Parses a comma-separated list and enforces it contains exactly `expectedSize`
+// elements, exiting with a message naming the option and its expected format on
+// mismatch. Used for every list-valued option so malformed/truncated input is
+// caught explicitly instead of silently falling back to per-field defaults.
+inline std::vector<int64_t> parseListWithLength(const std::string& str,
+                                                size_t expectedSize,
+                                                const std::string& optionName,
+                                                const std::string& expectedFormat)
+{
+    auto result = parseList(str);
+
+    if(result.size() != expectedSize)
+    {
+        std::cerr << optionName << " must contain " << expectedSize << " values (" << expectedFormat
+                  << ")\n";
+        exit(EXIT_FAILURE);
+    }
+
+    return result;
+}
+
+// Prints the resolved CLI configuration so users can visually confirm how their
+// input was interpreted before the sample runs. Only non-default fields are shown
+// to keep output concise for the common case of few/no options being passed.
+inline void printConfig(const Config& config)
+{
+    std::cout << "Configuration:\n";
+    std::cout << "  --verify-cpu: " << (config.cpuValidation ? "true" : "false") << '\n';
+
+    if(config.engineId != -1)
+    {
+        std::cout << "  --engine-id: " << config.engineId << '\n';
+    }
+    if(!config.engineName.empty())
+    {
+        std::cout << "  --engine-name: " << config.engineName << '\n';
+    }
+    if(!config.dtype.empty())
+    {
+        std::cout << "  --dtype: " << config.dtype << '\n';
+    }
+    if(!config.layout.empty())
+    {
+        std::cout << "  --layout: " << config.layout << '\n';
+    }
+
+    auto printList = [](const char* name, const std::vector<int64_t>& values) {
+        if(values.empty())
+        {
+            return;
+        }
+
+        std::cout << "  " << name << ": ";
+        for(size_t i = 0; i < values.size(); ++i)
+        {
+            std::cout << values[i];
+            if(i + 1 < values.size())
+            {
+                std::cout << ",";
+            }
+        }
+        std::cout << '\n';
+    };
+
+    printList("--dims", config.dims);
+    printList("--filter", config.filter);
+    printList("--stride", config.stride);
+    printList("--padding", config.padding);
+    printList("--dilation", config.dilation);
+
+    std::cout << '\n';
 }
 
 // CLI PARSER
@@ -253,7 +333,7 @@ inline Config
                 exit(EXIT_FAILURE);
             }
         }
-        else if(arg == "--dims")
+        else if(arg == "--dims" && sampleType != SampleType::SDPA)
         {
             if(i + 1 >= argc)
             {
@@ -261,49 +341,43 @@ inline Config
                 exit(EXIT_FAILURE);
             }
 
-            config.dims = parseList(argv[++i]);
-
-            if(config.dims.size() != 4)
-            {
-                std::cerr << "--dims must contain 4 values (N,C,H,W)\n";
-                exit(EXIT_FAILURE);
-            }
+            config.dims = parseListWithLength(argv[++i], 4, "--dims", "N,C,H,W");
         }
-        else if(arg == "--filter")
+        else if(arg == "--filter" && sampleType != SampleType::SDPA)
         {
             if(i + 1 >= argc)
             {
                 std::cerr << "--filter requires a value\n";
                 exit(EXIT_FAILURE);
             }
-            config.filter = parseList(argv[++i]);
+            config.filter = parseListWithLength(argv[++i], 3, "--filter", "K,R,S");
         }
-        else if(arg == "--stride")
+        else if(arg == "--stride" && sampleType != SampleType::SDPA)
         {
             if(i + 1 >= argc)
             {
                 std::cerr << "--stride requires a value\n";
                 exit(EXIT_FAILURE);
             }
-            config.stride = parseList(argv[++i]);
+            config.stride = parseListWithLength(argv[++i], 2, "--stride", "U,V");
         }
-        else if(arg == "--padding")
+        else if(arg == "--padding" && sampleType != SampleType::SDPA)
         {
             if(i + 1 >= argc)
             {
                 std::cerr << "--padding requires a value\n";
                 exit(EXIT_FAILURE);
             }
-            config.padding = parseList(argv[++i]);
+            config.padding = parseListWithLength(argv[++i], 2, "--padding", "PH,PW");
         }
-        else if(arg == "--dilation")
+        else if(arg == "--dilation" && sampleType != SampleType::SDPA)
         {
             if(i + 1 >= argc)
             {
                 std::cerr << "--dilation requires a value\n";
                 exit(EXIT_FAILURE);
             }
-            config.dilation = parseList(argv[++i]);
+            config.dilation = parseListWithLength(argv[++i], 2, "--dilation", "DH,DW");
         }
         else if(arg == "--help" || arg == "-h")
         {
@@ -324,6 +398,8 @@ inline Config
         std::cerr << "Specify either --engine-id or --engine-name, not both\n";
         exit(EXIT_FAILURE);
     }
+
+    printConfig(config);
 
     return config;
 }
