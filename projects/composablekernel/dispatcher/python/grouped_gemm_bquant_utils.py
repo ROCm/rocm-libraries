@@ -288,7 +288,10 @@ class BQuantDispatcherLib:
         import numpy as np
 
         A   = np.ascontiguousarray(A)
-        B   = np.ascontiguousarray(B)
+        # Kernel BLayout is ColumnMajor (rcr): B[k,n] lives at offset n*K+k.
+        # Supply column-major bytes for 2-D B; ascontiguousarray would force
+        # row-major and silently transpose. Packed 1-D B (fp4) stays as-is.
+        B   = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
         BQ  = np.ascontiguousarray(BQ)
         C   = np.ascontiguousarray(C)
 
