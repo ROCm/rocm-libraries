@@ -25,8 +25,8 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
-#include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
-#include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/input-init/SynthesizeInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
