@@ -49,7 +49,7 @@
         if(error != hipSuccess)                                                             \
         {                                                                                   \
             std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
-                    << std::endl;                                                           \
+                      << std::endl;                                                         \
             exit(error);                                                                    \
         }                                                                                   \
     }
@@ -234,7 +234,7 @@ void sort_keys()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0; // default
-    
+
     if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
@@ -247,7 +247,8 @@ void sort_keys()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size :
+            test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -509,7 +510,8 @@ void sort_pairs()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size :
+            test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -807,7 +809,8 @@ void sort_keys_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size :
+            test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -1048,7 +1051,8 @@ void sort_pairs_double_buffer()
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
+        for(size_t size :
+            test_common_utils::TempDisablement::filter_sizes(test_utils::get_sizes(seed_value)))
         {
             if(size > (1 << 20) && !check_large_sizes)
             {
@@ -1240,8 +1244,8 @@ inline void sort_keys_over_4g()
     HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
 
 #if defined(HIPCUB_ROCPRIM_API)
-	if (test_common_utils::TempDisablement::is_arch_disabled())
-		GTEST_SKIP() << "Temporarily skipping test on gfx115x.";
+    if(test_common_utils::TempDisablement::is_arch_disabled())
+        GTEST_SKIP() << "Temporarily skipping test on gfx115x.";
 #endif
 
     // Radix sort requires 2 buffers of `size`, so a minimum of 8 GB of vram for this test.
@@ -1436,6 +1440,123 @@ inline void sort_keys_large_sizes()
             }
             ASSERT_EQ(keys_output[i], expected) << "with index = " << i;
         }
+    }
+}
+
+template<class Key, size_t Size, unsigned int StartBit = 0, unsigned int EndBit = sizeof(Key) * 8>
+struct FFMParams
+{
+    using key_type                          = Key;
+    static constexpr size_t       size      = Size;
+    static constexpr unsigned int start_bit = StartBit;
+    static constexpr unsigned int end_bit   = EndBit;
+};
+
+template<class Params>
+class HipcubDeviceRadixSortFFM : public ::testing::Test
+{
+public:
+    using params = Params;
+};
+TYPED_TEST_SUITE_P(HipcubDeviceRadixSortFFM);
+
+template<typename TestFixture>
+inline void sort_keys_ffm_full()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type                     = typename TestFixture::params::key_type;
+    constexpr size_t       size        = TestFixture::params::size;
+    constexpr unsigned int start_bit   = TestFixture::params::start_bit;
+    constexpr unsigned int end_bit     = TestFixture::params::end_bit;
+    const size_t           bit_length  = end_bit - start_bit;
+    const size_t           unique_keys = std::min(500ul, 1ul << bit_length);
+
+    hipStream_t stream = 0;
+
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    // Generate data
+    std::vector<key_type> keys_input;
+    try
+    {
+        keys_input.resize(size);
+    }
+    catch(const std::bad_alloc& e)
+    {
+
+        GTEST_SKIP() << "insufficient memory";
+    }
+
+    for(size_t i = 0; i < size; i++)
+    {
+        keys_input[i] = i % unique_keys;
+    }
+
+    key_type* d_keys;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, size * sizeof(key_type)));
+    HIP_CHECK(hipMemcpy(d_keys, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+
+    void*  d_temporary_storage     = nullptr;
+    size_t temporary_storage_bytes = 0;
+    HIP_CHECK(invoke_sort_keys<false>(d_temporary_storage,
+                                      temporary_storage_bytes,
+                                      d_keys,
+                                      d_keys,
+                                      size,
+                                      start_bit,
+                                      end_bit,
+                                      stream));
+
+    ASSERT_GT(temporary_storage_bytes, 0U);
+
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+    HIP_CHECK(invoke_sort_keys<false>(d_temporary_storage,
+                                      temporary_storage_bytes,
+                                      d_keys,
+                                      d_keys,
+                                      size,
+                                      start_bit,
+                                      end_bit,
+                                      stream));
+
+    HIP_CHECK(hipFree(d_temporary_storage));
+
+    std::vector<key_type> keys_output(size);
+    try
+    {
+        keys_output.resize(size);
+    }
+    catch(const std::bad_alloc& e)
+    {
+        HIP_CHECK(hipFree(d_keys));
+        GTEST_SKIP() << "insufficient memory";
+    }
+
+    HIP_CHECK(
+        hipMemcpy(keys_output.data(), d_keys, size * sizeof(key_type), hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipFree(d_keys));
+
+    // Check if output values are as expected
+    const size_t segment_length = test_utils::ceiling_div(size, unique_keys);
+    const size_t full_segments  = size % unique_keys == 0 ? unique_keys : size % unique_keys;
+    for(size_t i = 0; i < size; i += 4321)
+    {
+        key_type expected;
+        if(i / segment_length < full_segments)
+        {
+            expected = key_type(i / segment_length);
+        }
+        else
+        {
+            expected = key_type((i - full_segments * segment_length) / (segment_length - 1)
+                                + full_segments);
+        }
+        ASSERT_EQ(keys_output[i], expected) << "with index = " << i;
     }
 }
 

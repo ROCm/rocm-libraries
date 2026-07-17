@@ -23,6 +23,7 @@
 #include "test_hipcub_device_radix_sort.hpp"
 
 #define SUITE HipcubDeviceRadixSort
+#define FFM_SUITE HipcubDeviceRadixSortFFM
 
 #define INSTANTIATE(...) INSTANTIATE_TYPED_TEST(SUITE, __VA_ARGS__);
 
@@ -47,6 +48,12 @@
 #if   HIPCUB_TEST_SLICE == 0
     TEST(SUITE, SortKeysOver4G) { sort_keys_over_4g(); }
     TEST(SUITE, SortKeysLargeSizes) { sort_keys_large_sizes(); }
+#elif HIPCUB_TEST_SLICE == 1
+    TYPED_TEST_P(FFM_SUITE, SortKeysFFM) { sort_keys_ffm_full<TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(FFM_SUITE, SortKeysFFM);
+    INSTANTIATE_TYPED_TEST(FFM_SUITE, FFMParams<int32_t, 67100000, 0, 32>)
+    INSTANTIATE_TYPED_TEST(FFM_SUITE, FFMParams<int32_t, 100000, 0, 8>)
+    INSTANTIATE_TYPED_TEST(FFM_SUITE, FFMParams<uint64_t, 6000000, 0, 49>)
 #endif
 
 #if   HIPCUB_TEST_TYPE_SLICE == 0
