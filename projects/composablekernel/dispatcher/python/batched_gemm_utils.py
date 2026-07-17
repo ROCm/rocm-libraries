@@ -64,13 +64,6 @@ class BatchedGemmKernelConfig(_gu.GemmKernelConfig):
     variant: str = "batched"
 
 
-def _make_batched_name(base: _gu.GemmKernelConfig) -> str:
-    """Runtime lookup key for a batched kernel: the standard GEMM name plus the
-    ``_batched`` suffix. Kept as a helper so the suffix rule lives in one place.
-    """
-    return base.name if base.variant == "batched" else base.name + "_batched"
-
-
 # Extend GemmKernelConfig.name handling for the batched variant. The parent
 # already appends "_streamk"/"_preshuffle" for those variants; "batched" needs
 # the same treatment, so we patch the property lookup by overriding name here.
