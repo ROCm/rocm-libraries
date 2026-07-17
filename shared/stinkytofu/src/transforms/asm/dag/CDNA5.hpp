@@ -683,12 +683,12 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
         overlapChecks.push_back(
             {groupBarrier, group.barriers, afterThreshold, lastOverlap, wmmaWindowsNeeded});
-        (std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
-                   << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
-                   << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
-                   << " latencyWmmaBudget=" << latencyWmmaBudget << " wmmaWindowsNeeded="
-                   << wmmaWindowsNeeded << " overlapOrWindowBase=" << overlapOrWindowBase
-                   << " lastOverlap=" << lastOverlap << "\n");
+        PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
+                             << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
+                             << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
+                             << " latencyWmmaBudget=" << latencyWmmaBudget << " wmmaWindowsNeeded="
+                             << wmmaWindowsNeeded << " overlapOrWindowBase=" << overlapOrWindowBase
+                             << " lastOverlap=" << lastOverlap << "\n");
     }
 
     // Step 5: each group's interval is [afterThreshold - wmmaWindowsNeeded, afterThreshold).
@@ -740,15 +740,16 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
             barrierWmmaThresholds_[barrier] = adjustedAfterThreshold;
             result[barrier] = {adjustedAfterThreshold, shift};
         }
-        (std::cerr << "[CDNA5 computeBarrierAfterThresholds overlap] barrier=" << summary.barrierKey
-                   << " barrierGroupSize=" << summary.barriers.size()
-                   << " baseAfterThreshold=" << summary.afterThreshold
-                   << " adjustedAfterThreshold=" << adjustedAfterThreshold << " shift=" << shift
-                   << " intervalStart=" << (summary.afterThreshold - summary.wmmaWindowsNeeded)
-                   << " intervalEnd=" << summary.afterThreshold << " wmmaWindowsNeeded="
-                   << summary.wmmaWindowsNeeded << " pushedStart=" << pushedStart[i]
-                   << " frontOverlapBudget=" << frontOverlapBudget[i]
-                   << " lastOverlap=" << summary.lastOverlap << "\n");
+        PASS_DEBUG(
+            std::cerr << "[CDNA5 computeBarrierAfterThresholds overlap] barrier="
+                      << summary.barrierKey << " barrierGroupSize=" << summary.barriers.size()
+                      << " baseAfterThreshold=" << summary.afterThreshold
+                      << " adjustedAfterThreshold=" << adjustedAfterThreshold << " shift=" << shift
+                      << " intervalStart=" << (summary.afterThreshold - summary.wmmaWindowsNeeded)
+                      << " intervalEnd=" << summary.afterThreshold << " wmmaWindowsNeeded="
+                      << summary.wmmaWindowsNeeded << " pushedStart=" << pushedStart[i]
+                      << " frontOverlapBudget=" << frontOverlapBudget[i]
+                      << " lastOverlap=" << summary.lastOverlap << "\n");
     }
     return result;
 }
