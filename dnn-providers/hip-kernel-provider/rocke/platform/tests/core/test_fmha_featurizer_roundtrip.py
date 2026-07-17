@@ -249,12 +249,40 @@ void featurize_c(
     # Platform-appropriate shared library extension
     ext = ".dll" if sys.platform == "win32" else ".so"
     so = os.path.join(tmp, "feat" + ext)
-    subprocess.run(
-        [_CXX, "-std=c++17", "-O2", "-I", tmp, "-shared", "-fPIC", "-o", so, shim],
-        check=True,
-        capture_output=True,
-    )
-    lib = ctypes.CDLL(so)
+    if sys.platform == "win32":
+        # Windows: -fPIC is not needed, omit it
+        compile_cmd = [_CXX, "-std=c++17", "-O2", "-I", tmp, "-shared", "-o", so, shim]
+    else:
+        compile_cmd = [
+            _CXX,
+            "-std=c++17",
+            "-O2",
+            "-I",
+            tmp,
+            "-shared",
+            "-fPIC",
+            "-o",
+            so,
+            shim,
+        ]
+    result = subprocess.run(compile_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"C++ compilation failed ({_CXX}):\n{result.stderr or result.stdout}"
+        )
+    if not os.path.exists(so):
+        raise RuntimeError(f"Compilation produced no output: {so}")
+
+    try:
+        # On Windows, use winmode=0 to search for DLL dependencies in system paths
+        if sys.platform == "win32":
+            lib = ctypes.CDLL(so, winmode=0)
+        else:
+            lib = ctypes.CDLL(so)
+    except OSError as e:
+        raise RuntimeError(
+            f"Failed to load {so} (compiler: {_CXX}, exists: {os.path.exists(so)}): {e}"
+        ) from e
     # shim signature: 7 problem doubles, dtype char*, 17 config doubles,
     # 8 hw doubles, out*.
     lib.featurize_c.argtypes = (
