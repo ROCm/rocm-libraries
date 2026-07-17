@@ -111,6 +111,7 @@ class Pass {
 // It does not own a Function; the Function is passed to PassManager::run(Function&).
 class STINKYTOFU_EXPORT PassContext {
     GemmTileConfig gemmConfig;
+    ArchCapsConfig archCapsConfig;
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
     bool enableRemarks_ = false;
@@ -127,6 +128,14 @@ class STINKYTOFU_EXPORT PassContext {
 
     const GemmTileConfig& getGemmTileConfig() const {
         return gemmConfig;
+    }
+
+    void setArchCapsConfig(const ArchCapsConfig& config) {
+        archCapsConfig = config;
+    }
+
+    const ArchCapsConfig& getArchCapsConfig() const {
+        return archCapsConfig;
     }
 
     /// Get wavefront size (derived from architecture, not user-configurable)
@@ -280,6 +289,9 @@ class STINKYTOFU_EXPORT PassManager {
 
     // Set assembler capability configuration (propagated from rocisa asmCaps)
     void setAsmCapsConfig(const AsmCapsConfig& config);
+
+    // Set architecture capability configuration (derived from archCaps)
+    void setArchCapsConfig(const ArchCapsConfig& config);
 
     void setBasicBlockFilter(BasicBlockFilter filter) {
         passCtx.setBasicBlockFilter(std::move(filter));

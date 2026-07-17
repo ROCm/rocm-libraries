@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# RequiresXCntForVolatileVMEM need an XNACK-replay drain before volatile/atomic
+# VMEM ops.
+#
+# Pattern:
+#   buffer_store_b32         ordinary VMEM store; should not get xcnt
+#   buffer_atomic_add_f32    MUBUF VMEM RMW; must get s_wait_xcnt 0
+#   flat_atomic_dec_u32      FLAT VMEM RMW; must get s_wait_xcnt 0
+#   global_atomic_inc_u32    GLOBAL VMEM RMW; must get s_wait_xcnt 0
+#
+# CHECK-LABEL: @waitcnt_insertion_xcnt_atomic_vmem
+# CHECK-NOT: s_wait_xcnt
+# CHECK: buffer_store_b32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: buffer_atomic_add_f32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: flat_atomic_dec_u32
+# CHECK-NEXT: s_wait_xcnt"(0)
+# CHECK-NEXT: global_atomic_inc_u32
+
+st.func @waitcnt_insertion_xcnt_atomic_vmem() {
+^entry:
+  "st.buffer_store_b32"(v2, v3, s[0:3], s4)
+  v0 = "st.buffer_atomic_add_f32"(v0, v1, s[0:3], s4)
+  v5 = "st.flat_atomic_dec_u32"(v[6:7], v8, s[6:7])
+  v9 = "st.global_atomic_inc_u32"(v10, v11, s[8:9])
+}

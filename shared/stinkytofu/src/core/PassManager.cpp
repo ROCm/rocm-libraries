@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <iostream>
 
+#include "stinkytofu/hardware/ArchCaps.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 
@@ -31,8 +32,9 @@ void PassContext::setGemmTileConfig(const GemmTileConfig& config) {
     // Automatically compute WavefrontSize from architecture
     // WavefrontSize is stored separately as it's derived, not configured
     if (gemmConfig.arch[0] != 0) {
-        wavefrontSize =
-            getWaveFrontSize(gemmConfig.arch[0], gemmConfig.arch[1], gemmConfig.arch[2]);
+        GfxArchID archID = getGfxArchID(gemmConfig.arch[0], gemmConfig.arch[1], gemmConfig.arch[2]);
+        archCapsConfig = ArchCaps::query(archID);
+        wavefrontSize = getWaveFrontSize(archID);
     } else {
         STINKY_UNREACHABLE("Invalid architecture, unable to compute wavefront size");
     }
@@ -159,5 +161,9 @@ void PassManager::setPassFeatureConfig(const PassFeatureConfig& config) {
 
 void PassManager::setAsmCapsConfig(const AsmCapsConfig& config) {
     passCtx.setAsmCapsConfig(config);
+}
+
+void PassManager::setArchCapsConfig(const ArchCapsConfig& config) {
+    passCtx.setArchCapsConfig(config);
 }
 }  // namespace stinkytofu

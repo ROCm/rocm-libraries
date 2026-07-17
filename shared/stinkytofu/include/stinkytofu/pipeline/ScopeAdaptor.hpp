@@ -241,6 +241,7 @@ class ScopeAdaptor : public Pass {
                           AnalysisManager& /*AM*/) override {
         // Propagate config from outer PassContext to inner PM
         innerPM.setGemmTileConfig(outerCtx.getGemmTileConfig());
+        innerPM.setArchCapsConfig(outerCtx.getArchCapsConfig());
         innerPM.setAsmCapsConfig(outerCtx.getAsmCapsConfig());
         // innerPM.setPassFeatureConfig(outerCtx.getPassFeatureConfig());
 

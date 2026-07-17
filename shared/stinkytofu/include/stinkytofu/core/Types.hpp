@@ -99,4 +99,10 @@ enum class VgprMsbMode : uint8_t {
 struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
 };
+
+/// Architecture capabilities derived from the ISA tuple. These mirror the archCaps
+/// names used by rocisa/TensileLite where a pass needs the same policy in C++.
+struct ArchCapsConfig {
+    bool RequiresXCntForVolatileVMEM = false;
+};
 }  // namespace stinkytofu

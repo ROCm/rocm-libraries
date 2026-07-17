@@ -1,25 +1,5 @@
-/* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 // StinkyWaitCntInsertionPass
 //
@@ -62,6 +42,14 @@
 namespace {
 using namespace stinkytofu;
 using namespace stinkytofu::waitcnt;
+
+bool isVolatileVmemAtomic(const StinkyInstruction& inst) {
+    return isMUBUFAtomic(inst) || isFLATAtomic(inst) || isGLOBALAtomic(inst);
+}
+
+bool isXcntDrain(const StinkyInstruction* inst) {
+    return inst != nullptr && inst->getUnifiedOpcode() == GFX::s_wait_xcnt;
+}
 
 class StinkyWaitCntInsertionPass : public StinkyInstPass {
    public:
@@ -106,6 +94,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
         df.finalizePlan(plan);
 
+        addRequiredXcntDrains(func, passCtx, plan);
         emitWaits(func, passCtx, arch, plan);
         removePHIs(passCtx, rpo);
         return preserveCFGAnalyses();
@@ -113,6 +102,31 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
    private:
     WaitCntInsertionOptions options;
+
+    void addRequiredXcntDrains(Function& func, PassContext& passCtx, WaitInsertionPlan& plan) {
+        if (!passCtx.getArchCapsConfig().RequiresXCntForVolatileVMEM) return;
+
+        for (BasicBlock& bb : func) {
+            if (!passCtx.shouldProcessBasicBlock(bb)) continue;
+
+            StinkyInstruction* prevInst = nullptr;
+            for (IRBase& ir : bb) {
+                auto* inst = dyn_cast<StinkyInstruction>(&ir);
+                if (inst == nullptr) continue;
+
+                if (isVolatileVmemAtomic(*inst)) {
+                    auto it = plan.anchorWaits.find(inst);
+                    if (it != plan.anchorWaits.end() && it->second.isValid()) {
+                        it->second.xCount = 0;
+                    } else if (!isXcntDrain(prevInst)) {
+                        plan.anchorWaits[inst].xCount = 0;
+                    }
+                }
+
+                prevInst = inst;
+            }
+        }
+    }
 
     void emitWaits(Function& func, PassContext& passCtx, GfxArchID arch,
                    const WaitInsertionPlan& plan) {
@@ -175,6 +189,10 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitTensorCntData d;
             d.tlcnt = spec.tensorCount;
             w->addModifier<SWaitTensorCntData>(d);
+        }
+        if (spec.xCount != WaitCountSpec::kUnused) {
+            StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_xcnt, arch), anchor);
+            w->addSrcReg(StinkyRegister(spec.xCount));
         }
     }
 
