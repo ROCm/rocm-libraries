@@ -35,6 +35,8 @@
 * where they are needed.
 */
 
+#include <tensilelitehost/export.h>
+
 // Fwd declarations
 namespace cl
 {

@@ -57,6 +57,7 @@ inline void reverse(execution::parallel_unsequenced_policy, I f, I l)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::reverse(::thrust::device, f, l);
 }
 
@@ -75,6 +76,7 @@ inline void reverse_copy(execution::parallel_unsequenced_policy, I fi, I li, O f
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::reverse_copy(::thrust::device, fi, li, fo);
 }
 

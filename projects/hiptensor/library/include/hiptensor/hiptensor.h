@@ -332,6 +332,90 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorContract(const hiptensorHandle_t han
                                                      uint64_t                workspaceSize,
                                                      hipStream_t             stream);
 
+//! @brief Allocates and initializes a `hiptensorOperationDescriptor` object for a trinary tensor contraction of the form:
+//!   \f$\mathcal{E}_{{modes}_\mathcal{E}} \gets \alpha\; op_\mathcal{A}(\mathcal{A}_{{modes}_\mathcal{A}})
+//!   \; op_\mathcal{B}(\mathcal{B}_{{modes}_\mathcal{B}})
+//!   \; op_\mathcal{C}(\mathcal{C}_{{modes}_\mathcal{C}})
+//!   + \beta\; op_\mathcal{D}(\mathcal{D}_{{modes}_\mathcal{D}})\f$.
+//!
+//! Free this object by calling `hiptensorDestroyOperationDescriptor()`.
+//! @param[in] handle Opaque handle representing the hipTensor library context.
+//! @param[out] desc Pointer to the `hiptensorOperationDescriptor_t` that will be populated.
+//! @param[in] descA Tensor descriptor for A.
+//! @param[in] modeA Array representing tensor A's modes.
+//! @param[in] opA Unary operator applied to each element of A.
+//! @param[in] descB Tensor descriptor for B.
+//! @param[in] modeB Array representing tensor B's modes.
+//! @param[in] opB Unary operator applied to each element of B.
+//! @param[in] descC Tensor descriptor for C.
+//! @param[in] modeC Array representing tensor C's modes.
+//! @param[in] opC Unary operator applied to each element of C.
+//! @param[in] descD Tensor descriptor for D.
+//! @param[in] modeD Array representing tensor D's modes.
+//! @param[in] opD Unary operator applied to each element of D.
+//! @param[in] descE Tensor descriptor for E (output, must match `descD`).
+//! @param[in] modeE Array representing tensor E's modes (must match `modeD`).
+//! @param[in] descCompute Data type used for intermediate computation.
+//! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When tensor dimensions or modes contain illegal values.
+HIPTENSOR_EXPORT hiptensorStatus_t
+    hiptensorCreateContractionTrinary(const hiptensorHandle_t            handle,
+                                      hiptensorOperationDescriptor_t*    desc,
+                                      const hiptensorTensorDescriptor_t  descA,
+                                      const int32_t                      modeA[],
+                                      hiptensorOperator_t                opA,
+                                      const hiptensorTensorDescriptor_t  descB,
+                                      const int32_t                      modeB[],
+                                      hiptensorOperator_t                opB,
+                                      const hiptensorTensorDescriptor_t  descC,
+                                      const int32_t                      modeC[],
+                                      hiptensorOperator_t                opC,
+                                      const hiptensorTensorDescriptor_t  descD,
+                                      const int32_t                      modeD[],
+                                      hiptensorOperator_t                opD,
+                                      const hiptensorTensorDescriptor_t  descE,
+                                      const int32_t                      modeE[],
+                                      const hiptensorComputeDescriptor_t descCompute);
+
+//! @brief Performs trinary tensor contraction \f$E = \alpha A B C + \beta D\f$.
+//!
+//! @details Computes:
+//! \f$\mathcal{E}_{{modes}_\mathcal{E}} \gets \alpha \mathcal{A}_{{modes}_\mathcal{A}}
+//!   \mathcal{B}_{{modes}_\mathcal{B}} \mathcal{C}_{{modes}_\mathcal{C}}
+//!   + \beta \mathcal{D}_{{modes}_\mathcal{D}}\f$.
+//! The active HIP device must match the device that was active during plan creation.
+//! @param[in] handle Opaque handle representing the hipTensor library context.
+//! @param[in] plan Opaque handle containing the trinary contraction execution plan.
+//! @param[in] alpha Scaling factor for A*B*C. Pointer to host memory.
+//! @param[in] A Pointer to tensor A data in GPU-accessible memory.
+//! @param[in] B Pointer to tensor B data in GPU-accessible memory.
+//! @param[in] C Pointer to tensor C data in GPU-accessible memory.
+//! @param[in] beta Scaling factor for D. Pointer to host memory.
+//! @param[in] D Pointer to tensor D data in GPU-accessible memory.
+//! @param[out] E Pointer to tensor E data in GPU-accessible memory.
+//! @param[in] workspace Device memory workspace (must hold at least the intermediate tensor).
+//! @param[in] workspaceSize Size of the `workspace` array in bytes.
+//! @param[in] stream HIP stream for all computations.
+//! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
+//! @retval `HIPTENSOR_STATUS_ARCH_MISMATCH` When the plan was created for a different device.
+//! @retval `HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE` When workspace is too small.
+HIPTENSOR_EXPORT hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
+                                                            const hiptensorPlan_t   plan,
+                                                            const void*             alpha,
+                                                            const void*             A,
+                                                            const void*             B,
+                                                            const void*             C,
+                                                            const void*             beta,
+                                                            const void*             D,
+                                                            void*                   E,
+                                                            void*                   workspace,
+                                                            uint64_t                workspaceSize,
+                                                            hipStream_t             stream);
+
 //! @brief Returns a descriptive string for a given error code.
 //! @param[in] error The error code to convert to a string.
 //! @retval ErrorString A string describing the error.

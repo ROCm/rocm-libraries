@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spsm_alg value_)
 {
@@ -46,9 +47,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsm_alg value_)
         CASE(rocsparse_spsm_alg_default);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -64,10 +63,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsm_stage value_)
         CASE(rocsparse_spsm_stage_compute);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spsm_alg value_)
@@ -161,25 +159,25 @@ namespace rocsparse
             const size_t sizeof_datatype = rocsparse::datatype_sizeof(matC->data_type);
             if(matB->order == rocsparse_order_column)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(matC->values,
-                                                     sizeof_datatype * matC->ld,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->rows,
-                                                     matB->cols,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(matC->values,
+                                                               sizeof_datatype * matC->ld,
+                                                               matB->const_values,
+                                                               sizeof_datatype * matB->ld,
+                                                               sizeof_datatype * matB->rows,
+                                                               matB->cols,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
             }
             else
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(matC->values,
-                                                     sizeof_datatype * matC->ld,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->cols,
-                                                     matB->rows,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(matC->values,
+                                                               sizeof_datatype * matC->ld,
+                                                               matB->const_values,
+                                                               sizeof_datatype * matB->ld,
+                                                               sizeof_datatype * matB->cols,
+                                                               matB->rows,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
             }
         }
 
@@ -280,25 +278,25 @@ namespace rocsparse
         {
             if(matB->order == rocsparse_order_column)
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(spsm_buffer,
-                                                     sizeof_datatype * matB->rows,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->rows,
-                                                     matB->cols,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(spsm_buffer,
+                                                               sizeof_datatype * matB->rows,
+                                                               matB->const_values,
+                                                               sizeof_datatype * matB->ld,
+                                                               sizeof_datatype * matB->rows,
+                                                               matB->cols,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
             }
             else
             {
-                RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(spsm_buffer,
-                                                     sizeof_datatype * matB->cols,
-                                                     matB->const_values,
-                                                     sizeof_datatype * matB->ld,
-                                                     sizeof_datatype * matB->cols,
-                                                     matB->rows,
-                                                     hipMemcpyDeviceToDevice,
-                                                     handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(spsm_buffer,
+                                                               sizeof_datatype * matB->cols,
+                                                               matB->const_values,
+                                                               sizeof_datatype * matB->ld,
+                                                               sizeof_datatype * matB->cols,
+                                                               matB->rows,
+                                                               hipMemcpyDeviceToDevice,
+                                                               handle->stream));
             }
         }
 

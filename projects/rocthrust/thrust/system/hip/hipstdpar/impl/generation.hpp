@@ -59,6 +59,7 @@ inline void fill(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::fill(::thrust::device, f, l, x);
 }
 
@@ -77,6 +78,7 @@ inline void fill_n(execution::parallel_unsequenced_policy, I f, N n, const T& x)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::fill_n(::thrust::device, f, n, x);
 }
 
@@ -97,6 +99,7 @@ inline void generate(execution::parallel_unsequenced_policy, I f, I l, G g)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   using g_t = ::std::decay_t<G>;
 
   if constexpr (::std::is_trivially_destructible_v<g_t>)
@@ -147,6 +150,7 @@ inline void generate_n(execution::parallel_unsequenced_policy, I f, N n, G g)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   using g_t = ::std::decay_t<G>;
 
   if constexpr (::std::is_trivially_destructible_v<g_t>)

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,7 +43,7 @@ public:
         // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
         // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
         // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-        WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+        WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
         std::ignore = rocsparse_hipFree(this->m_device_nnz);
     }
@@ -106,7 +106,7 @@ public:
     /// @param[in] target The target sparse matrix descriptor.
     /// @param[in] stage  The stage to use.
     /// @param[out] buffer_size_in_bytes The calculated buffer size in bytes.
-    /// @return rocsparse_status_success if the operation succesfull, the appropriate enumeration value otherwise.
+    /// @return rocsparse_status_success if the operation is successful, the appropriate enumeration value otherwise.
     ///
     virtual rocsparse_status buffer_size(rocsparse_handle            handle,
                                          rocsparse_const_spmat_descr source,
@@ -123,7 +123,7 @@ public:
     /// @param[in] stage  The stage to use.
     /// @param[in] buffer_size_in_bytes The calculated buffer size in bytes.
     /// @param[in] buffer The calculated buffer size in bytes.
-    /// @return rocsparse_status_success if the operation succesfull, the appropriate enumeration value otherwise.
+    /// @return rocsparse_status_success if the operation is successful, the appropriate enumeration value otherwise.
     ///
     virtual rocsparse_status run(rocsparse_handle            handle,
                                  rocsparse_const_spmat_descr source,

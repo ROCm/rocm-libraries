@@ -19,15 +19,18 @@ class BatchnormFwdInferenceWithVarianceParams
 {
 public:
     BatchnormFwdInferenceWithVarianceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+            attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceWithVarianceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
             inferenceAttributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceWithVarianceParams(const BatchnormFwdInferenceWithVarianceParams&)
@@ -46,7 +49,8 @@ public:
     const MiopenTensor& bias() const;
     const MiopenTensor& estMean() const;
     const MiopenTensor& variance() const;
-    double epsilonValue() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
 
     const std::optional<MiopenActivationDescriptor>& optActivation() const;
     const std::optional<MiopenTensor>& activationOut() const;
@@ -58,7 +62,7 @@ private:
     MiopenTensor _bias;
     MiopenTensor _estMean;
     MiopenTensor _variance;
-    double _epsilonValue;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     std::optional<MiopenActivationDescriptor> _optActivation;
     std::optional<MiopenTensor> _activationOut;

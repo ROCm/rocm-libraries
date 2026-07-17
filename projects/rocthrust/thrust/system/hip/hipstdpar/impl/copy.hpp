@@ -57,6 +57,7 @@ inline O copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::copy(::thrust::device, fi, li, fo);
 }
 
@@ -79,6 +80,7 @@ inline O copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::copy_if(::thrust::device, fi, li, fo, ::std::move(p));
 }
 
@@ -108,6 +110,7 @@ inline O copy_n(execution::parallel_unsequenced_policy, I fi, N n, O fo)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::copy_n(::thrust::device, fi, n, fo);
 }
 
@@ -127,6 +130,7 @@ inline O move(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::copy(::thrust::device, make_move_iterator(fi), make_move_iterator(li), fo);
 }
 

@@ -8,12 +8,19 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'set\( VERSION_STRING \"?([0-9.]+)[^0-9.]+', f.read())
-    if not match:
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    content = f.read()
+    major = re.search(r'set\s*\(\s*HIPFFT_VERSION_MAJOR\s+"(\d+)"\s*\)', content)
+    minor = re.search(r'set\s*\(\s*HIPFFT_VERSION_MINOR\s+"(\d+)"\s*\)', content)
+    patch = re.search(r'set\s*\(\s*HIPFFT_VERSION_PATCH\s+"(\d+)"\s*\)', content)
+
+    if not (major and minor and patch):
         raise ValueError("VERSION not found!")
-    version_number = match[1]
+
+    version_number = f"{major[1]}.{minor[1]}.{patch[1]}"
+
 left_nav_title = f"hipFFT {version_number} Documentation"
+
 
 # for PDF output on Read the Docs
 project = "hipFFT Documentation"
@@ -32,3 +39,5 @@ external_projects_current_project = "hipfft"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

@@ -80,10 +80,10 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
     }
 
     const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                                       0,
-                                       sizeof(int32_t) * A->rows * A_batch_count,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                                 0,
+                                                 sizeof(int32_t) * A->rows * A_batch_count,
+                                                 handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrilu0_info, A, boost, buffer_size, buffer));
     return rocsparse_status_success;

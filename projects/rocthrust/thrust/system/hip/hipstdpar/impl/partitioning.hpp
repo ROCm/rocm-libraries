@@ -59,6 +59,7 @@ inline bool is_partitioned(execution::parallel_unsequenced_policy, I f, I l, P p
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::is_partitioned(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -88,6 +89,7 @@ inline I partition(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::partition(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -120,6 +122,7 @@ inline pair<O0, O1> partition_copy(execution::parallel_unsequenced_policy, I f, 
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   auto [r0, r1] = ::thrust::partition_copy(::thrust::device, f, l, fo0, fo1, ::std::move(p));
 
   return {::std::move(r0), ::std::move(r1)};
@@ -156,6 +159,7 @@ inline I stable_partition(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::stable_partition(::thrust::device, f, l, ::std::move(p));
 }
 

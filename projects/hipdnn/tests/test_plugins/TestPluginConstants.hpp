@@ -114,4 +114,92 @@ inline const std::string& testIncompatibleVersionPluginPath()
         = getTestCustomFilepathForPlugin(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME);
     return s_testIncompatibleVersionPluginPath;
 }
+
+// Override-execute fake-plugin paths.
+inline const std::string& testOverrideImplementingPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_OVERRIDE_IMPLEMENTING_PLUGIN_NAME);
+    return s_path;
+}
+
+// Runtime pass-by-value fake reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
+inline const std::string& testPassByValuePluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_PASS_BY_VALUE_PLUGIN_NAME);
+    return s_path;
+}
+
+// Runtime pass-by-value RECORDER fake reports "1.2.0" and records the host scalar
+// it resolves from device_buffers at execute, for delivery verification.
+#ifdef TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME
+inline const std::string& testPassByValueRecorderPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME);
+    return s_path;
+}
+#endif
+
+inline const std::string& testOverrideOmittingPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_OVERRIDE_OMITTING_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testVersionLiarPluginPath()
+{
+    static const std::string s_path = getTestCustomFilepathForPlugin(TEST_VERSION_LIAR_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testSecondOverridePluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_SECOND_OVERRIDE_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testMalformedVersionPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_MALFORMED_VERSION_PLUGIN_NAME);
+    return s_path;
+}
+
+inline const std::string& testVersionZeroPluginPath()
+{
+    static const std::string s_path = getTestCustomFilepathForPlugin(TEST_VERSION_ZERO_PLUGIN_NAME);
+    return s_path;
+}
+
+// Heuristic test plugins. Policy name registered by test_good_heuristic_plugin --
+// callers that need a specific policy should set HIPDNN_HEUR_POLICY_ORDER to
+// this value via a scoped env guard.
+inline const char* testGoodHeuristicPolicyName()
+{
+    return "TestGoodHeuristicPolicy";
+}
+
+inline const std::string& testGoodHeuristicPluginPath()
+{
+    static const std::string s_testGoodHeuristicPluginPath
+        = getTestCustomFilepathForPlugin(TEST_GOOD_HEURISTIC_PLUGIN_NAME);
+    return s_testGoodHeuristicPluginPath;
+}
+
+// The autotune plugin is consumed only by the frontend autotune integration
+// tests. Only targets that define TEST_AUTOTUNE_PLUGIN_NAME (the frontend test
+// target) get this accessor; the backend test target deliberately carries no
+// autotune-plugin wiring, so the macro is absent there and this is compiled out.
+#ifdef TEST_AUTOTUNE_PLUGIN_NAME
+inline const std::string& testAutotunePluginPath()
+{
+    static const std::string s_testAutotunePluginPath
+        = getTestCustomFilepathForPlugin(TEST_AUTOTUNE_PLUGIN_NAME);
+    return s_testAutotunePluginPath;
+}
+#endif
 } // namespace hipdnn_tests::plugin_constants

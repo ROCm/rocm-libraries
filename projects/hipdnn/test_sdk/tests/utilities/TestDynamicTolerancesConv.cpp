@@ -308,12 +308,9 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     // Populate with values
     // Correct value: 1.0
@@ -332,7 +329,7 @@ TEST(TestCalculateConvWrwTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.09f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
@@ -418,7 +415,8 @@ std::vector<ConvDgradToleranceTestCase>
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+        // wDims=[K=1, C=1, R=1] (1D). Accum = K * R = 1. Tol = 2 * 1^2 * 2^-23 = 2 * 2^-23
+        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 2.0 * hipdnn_data_sdk::types::pow(2.0, -23)},
         // wDims=[K=1, C=1, R=1, S=1]. Accum = 1 * 1 * 1 = 1. Tol = 2 * 1^2 * 2^-23 = 2 * 2^-23
         {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, 2.0 * hipdnn_data_sdk::types::pow(2.0, -23)},
         // wDims=[K=2, C=1, R=1, S=1]. Accum = 2. Tol = 2 * 2^2 * 2^-23 = 8 * 2^-23
@@ -485,7 +483,13 @@ std::vector<ConvDgradToleranceTestCase>
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+        // wDims=[K=1, C=1, R=1] (1D). Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-7
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 1, 1},
+         2.0 * hipdnn_data_sdk::types::pow(2.0, -23) + hipdnn_data_sdk::types::pow(2.0, -7)},
         // wDims=[1, 1, 1, 1]. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-7
         {-1.0,
          1.0,
@@ -519,7 +523,13 @@ std::vector<ConvDgradToleranceTestCase>
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+            // wDims=[K=1, C=1, R=1] (1D). Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-7
+            {-1.0,
+             1.0,
+             -1.0,
+             1.0,
+             {1, 1, 1},
+             6.0 * hipdnn_data_sdk::types::sqrt(2.0) * hipdnn_data_sdk::types::pow(2.0, -7)},
             // wDims=[1, 1, 1, 1]. Accum = 1. Tol = 6 * 1 * sqrt(2) * 2^-7
             {-1.0,
              1.0,
@@ -549,7 +559,13 @@ std::vector<ConvDgradToleranceTestCase>
         {-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
         {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-        {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+        // wDims=[K=1, C=1, R=1] (1D). Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-10
+        {-1.0,
+         1.0,
+         -1.0,
+         1.0,
+         {1, 1, 1},
+         2.0 * hipdnn_data_sdk::types::pow(2.0, -23) + hipdnn_data_sdk::types::pow(2.0, -10)},
         // wDims=[1, 1, 1, 1]. Accum = 1. Tol = 2 * 2^-23 + 1 * 2^-10
         {-1.0,
          1.0,
@@ -585,7 +601,8 @@ std::vector<ConvDgradToleranceTestCase>
     return {{-1.0, 1.0, -1.0, 1.0, {}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1}, 0.0, true},
             {-1.0, 1.0, -1.0, 1.0, {1, 1}, 0.0, true},
-            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, 0.0, true},
+            // wDims=[K=1, C=1, R=1] (1D). Accum = 1. sumAbsProductBound = 1
+            {-1.0, 1.0, -1.0, 1.0, {1, 1, 1}, computeGamma(1, u) * 1.0},
             // wDims=[1, 1, 1, 1]. Accum = 1. sumAbsProductBound = 1
             {-1.0, 1.0, -1.0, 1.0, {1, 1, 1, 1}, computeGamma(1, u) * 1.0},
             // wDims=[2, 1, 1, 1]. Accum = 2. sumAbsProductBound = 2
@@ -693,12 +710,9 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     // Populate with values
     baseline->fillTensorWithValue(1.0f);
@@ -714,7 +728,7 @@ TEST(TestCalculateConvDgradTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.1f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
@@ -1049,12 +1063,9 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
     // Create tensors
-    auto baseline = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, dims, strides);
+    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     baseline->fillTensorWithValue(1.0f);
     actualPassing->fillTensorWithValue(1.05f);
@@ -1067,7 +1078,7 @@ TEST(TestCalculateConvFpropTolerance, DetectsFailure)
     EXPECT_GT(tol, 0.09f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     {
         SCOPED_TRACE("Validator should have passed");

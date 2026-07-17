@@ -1,11 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <variant>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -99,34 +98,6 @@ TEST(TestTensorAttributes, SetFromGraphAttributes)
     EXPECT_EQ(tensor.get_data_type(), DataType::HALF);
 }
 
-TEST(TestTensorAttributes, PackAttributes)
-{
-    TensorAttributes tensor;
-    tensor.set_uid(1)
-        .set_name("PackedTensor")
-        .set_data_type(DataType::FLOAT)
-        .set_stride({1, 2, 3})
-        .set_dim({4, 5, 6})
-        .set_is_virtual(true);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto packed = tensor.pack_attributes(builder);
-    builder.Finish(packed);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto tensorAttributesFlatbuffer
-        = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::TensorAttributes>(bufferPointer);
-    auto unpacked = std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>(
-        tensorAttributesFlatbuffer->UnPack());
-
-    EXPECT_EQ(unpacked->uid, 1);
-    EXPECT_EQ(unpacked->name, "PackedTensor");
-    EXPECT_EQ(unpacked->data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-    EXPECT_EQ(unpacked->strides, std::vector<int64_t>({1, 2, 3}));
-    EXPECT_EQ(unpacked->dims, std::vector<int64_t>({4, 5, 6}));
-    EXPECT_TRUE(unpacked->virtual_);
-}
-
 TEST(TestTensorAttributes, ValidateSucceedsOnValueTensor)
 {
     const TensorAttributes tensor(1.f);
@@ -215,7 +186,8 @@ TEST(TestTensorAttributes, ValidateDataType)
            {DataType::INT4, ErrorCode::OK},
            {DataType::FP6_E2M3, ErrorCode::OK},
            {DataType::FP6_E3M2, ErrorCode::OK},
-           {DataType::INT64, ErrorCode::OK}};
+           {DataType::INT64, ErrorCode::OK},
+           {DataType::BOOLEAN, ErrorCode::OK}};
 
     for(auto [dataType, errorCode] : expectedResults)
     {
@@ -223,4 +195,87 @@ TEST(TestTensorAttributes, ValidateDataType)
         auto result = tensor.validate();
         EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
     }
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeWithDefaultTensor)
+{
+    // flag true + value present; set_value seeded dims/strides/data_type.
+    TensorAttributes tensor(1.F);
+    tensor.set_is_pass_by_value(true);
+    ASSERT_TRUE(tensor.get_is_runtime_pass_by_value());
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeUserSuppliedTensor)
+{
+    // flag true + value cleared; dims/strides/data_type survive set_value seeding.
+    TensorAttributes tensor(1.F);
+    tensor.set_as_runtime_parameter();
+    ASSERT_TRUE(tensor.get_is_runtime_pass_by_value());
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(tensor.get_value_variant()));
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnVirtualRuntimePassByValueTensor)
+{
+    // virtual + runtime flag (no stored value) is the flag-exclusion case.
+    TensorAttributes tensor;
+    tensor.set_dim({1});
+    tensor.set_stride({1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_as_runtime_parameter();
+    tensor.set_is_virtual(true);
+
+    EXPECT_EQ(
+        tensor.validate(),
+        Error(ErrorCode::INVALID_VALUE, "Tensor  cannot be virtual and runtime pass by value"));
+}
+
+TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
+{
+    TensorAttributes tensorA;
+    tensorA.set_dim({1, 64, 28, 28});
+    tensorA.set_stride({50176, 784, 28, 1});
+    tensorA.set_data_type(DataType::HALF);
+    tensorA.set_uid(1);
+    tensorA.set_name("Tensor_A");
+
+    TensorAttributes tensorB;
+    tensorB.set_dim({1, 64, 28, 28});
+    tensorB.set_stride({50176, 784, 28, 1});
+    tensorB.set_data_type(DataType::HALF);
+    tensorB.set_uid(2);
+    tensorB.set_name("Tensor_B");
+
+    EXPECT_TRUE(tensorA.logicallyEquals(tensorB));
+    EXPECT_TRUE(tensorB.logicallyEquals(tensorA));
+
+    EXPECT_FALSE(tensorA == tensorB);
+    EXPECT_TRUE(tensorA != tensorB);
+
+    tensorB.set_name("Tensor_A");
+    tensorB.set_uid(1);
+    EXPECT_TRUE(tensorA == tensorB);
+    EXPECT_FALSE(tensorA != tensorB);
+
+    tensorB.set_is_virtual(true);
+    EXPECT_FALSE(tensorA.logicallyEquals(tensorB));
+    EXPECT_FALSE(tensorA == tensorB);
+
+    const TensorAttributes scalarA(2.5f);
+    const TensorAttributes scalarB(2.5f);
+    const TensorAttributes scalarC(3.5f);
+
+    EXPECT_TRUE(scalarA.logicallyEquals(scalarB));
+    EXPECT_FALSE(scalarA.logicallyEquals(scalarC));
+
+    // Same value, different pass-by-value mode: runtime-with-default (floors the
+    // provider at 1.2.0) vs. compile-time constant (1.0.0) are not interchangeable
+    // even though the baked value matches.
+    const TensorAttributes runtimeWithDefault(2.5f, ScalarType::RUNTIME_PARAM);
+    const TensorAttributes compileTimeConstant(2.5f, ScalarType::COMPILE_TIME_CONST);
+    EXPECT_TRUE(runtimeWithDefault.get_is_runtime_pass_by_value());
+    EXPECT_FALSE(compileTimeConstant.get_is_runtime_pass_by_value());
+    EXPECT_FALSE(runtimeWithDefault.logicallyEquals(compileTimeConstant));
+    EXPECT_FALSE(compileTimeConstant.logicallyEquals(runtimeWithDefault));
 }

@@ -59,6 +59,7 @@ inline O uninitialized_copy(execution::parallel_unsequenced_policy, I fi, I li, 
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::uninitialized_copy(::thrust::device, fi, li, fo);
 }
 
@@ -78,6 +79,7 @@ inline O uninitialized_copy_n(execution::parallel_unsequenced_policy, I fi, N n,
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::uninitialized_copy_n(::thrust::device, fi, n, fo);
 }
 
@@ -97,6 +99,7 @@ inline void uninitialized_fill(execution::parallel_unsequenced_policy, I f, I l,
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::uninitialized_fill(::thrust::device, f, l, x);
 }
 
@@ -115,6 +118,7 @@ inline void uninitialized_fill(execution::parallel_unsequenced_policy, I f, N n,
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::uninitialized_fill_n(::thrust::device, f, n, x);
 }
 
@@ -133,6 +137,7 @@ inline O uninitialized_move(execution::parallel_unsequenced_policy, I fi, I li, 
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::uninitialized_copy(::thrust::device, make_move_iterator(fi), make_move_iterator(li), fo);
 }
 
@@ -152,6 +157,7 @@ inline O uninitialized_move_n(execution::parallel_unsequenced_policy, I fi, N n,
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::uninitialized_copy_n(::thrust::device, make_move_iterator(fi), n, fo);
 }
 
@@ -171,6 +177,7 @@ inline void uninitialized_default_construct(execution::parallel_unsequenced_poli
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type;
@@ -192,6 +199,7 @@ inline void uninitialized_default_construct_n(execution::parallel_unsequenced_po
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type;
@@ -213,6 +221,7 @@ inline void uninitialized_value_construct(execution::parallel_unsequenced_policy
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type{};
@@ -234,6 +243,7 @@ inline void uninitialized_value_construct_n(execution::parallel_unsequenced_poli
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
     auto p = const_cast<void*>(static_cast<const volatile void*>((addressof(x))));
     ::new (p) typename iterator_traits<I>::value_type{};
@@ -255,6 +265,7 @@ inline void destroy(execution::parallel_unsequenced_policy, I f, I l)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   ::thrust::for_each(f, l, [](auto& x) {
     destroy_at(addressof(x));
   });
@@ -275,6 +286,7 @@ inline void destroy_n(execution::parallel_unsequenced_policy, I f, N n)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   ::thrust::for_each_n(f, n, [](auto& x) {
     destroy_at(addressof(x));
   });

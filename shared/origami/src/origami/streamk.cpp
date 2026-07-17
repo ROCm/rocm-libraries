@@ -4,6 +4,7 @@
 #include "origami/streamk.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/math.hpp"
 #include "origami/types.hpp"
 
@@ -158,7 +159,7 @@ reduction_t select_reduction(const problem_t& problem,
       // For problems with large k and low number of tiles, use parallel reduction
       // TODO Benchmark to check if limits are correct
       constexpr int MinItersForParallel = 64;
-      const int MaxTilesForParallel = cu_count / 4;
+      const int MaxTilesForParallel     = cu_count / 4;
       if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
         reduction_strategy = reduction_t::parallel;
     }
@@ -267,7 +268,6 @@ size_t grid_reduction_cost_aware(const problem_t& problem,
     }
   }
 
-
   return min_grid_runtime_v2.first;
 }
 
@@ -308,7 +308,7 @@ size_t grid_analytical(const problem_t& problem,
   double best_latency = std::numeric_limits<double>::infinity();
 
   for (size_t split = 1; split <= MAX_SPLIT; ++split) {
-    double latency = compute_total_latency(problem, hardware, config, max_cus);
+    double latency = gemm::compute_total_latency(problem, hardware, config, max_cus);
 
     if (latency < best_latency) {
       best_latency = latency;
@@ -339,6 +339,28 @@ size_t grid_k_split_aware(const problem_t& problem,
 
   const size_t tile_size = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
 
+  // Returns true if the candidate sk_grid produces per-CTA k-iter stripes whose
+  // contiguous-dim footprint does not align to a full cache line on either operand.
+  auto causes_partial_cachelines = [&](size_t candidate_grid) -> bool {
+    constexpr size_t CACHE_LINE_BYTES = 128;
+    if (candidate_grid == 0 || iters_per_tile == 0) return false;
+    const size_t iters_total    = num_iters_total(tiles, iters_per_tile);
+    const size_t iters_per_cta  = num_iters_per_cta(iters_total, candidate_grid);
+    const size_t fragment_iters = iters_per_cta % iters_per_tile;
+    const size_t bpe_a          = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
+    const size_t bpe_b          = static_cast<size_t>(data_type_to_bytes(problem.b_dtype));
+    const size_t a_contig_bytes = (problem.a_transpose == transpose_t::T)
+                                      ? fragment_iters * config.mt.k * bpe_a
+                                      : 0;
+    const size_t b_contig_bytes = (problem.b_transpose == transpose_t::N)
+                                      ? fragment_iters * config.mt.k * bpe_b
+                                      : 0;
+    auto not_aligned_to_cache_line = [](size_t bytes) {
+      return bytes > 0 && (bytes % CACHE_LINE_BYTES) != 0;
+    };
+    return not_aligned_to_cache_line(a_contig_bytes) || not_aligned_to_cache_line(b_contig_bytes);
+  };
+
   // More tiles than CUs
   // Distribute tiles evenly across maximum number of CUs
   // Split remaining tiles as evenly as possible for better caching
@@ -348,7 +370,8 @@ size_t grid_k_split_aware(const problem_t& problem,
 
     const std::vector<double> tile_fractions = {
         0.0, 1.0 / 2.0, 1.0 / 8.0, 1.0 / 5.0, 1.0 / 4.0, 1.0 / 3.0};
-    const size_t min_even_tiles = tiles / virt_cu_count;
+    // When virt_cu_count is greater than tiles, min_even_tiles is 0 which enforces partial tiles.
+    const size_t min_even_tiles = std::max<size_t>(1, tiles / virt_cu_count);
 
     for (double frac : tile_fractions) {
       const size_t frac_grid = static_cast<size_t>((tiles / (min_even_tiles + frac)) + 0.5);
@@ -356,6 +379,10 @@ size_t grid_k_split_aware(const problem_t& problem,
       // Check if higher occupancy would cause excessive workspace requirements (set current limit
       // to 128MB)
       if ((tiles % frac_grid != 0) && (tile_size * frac_grid > 128ull * 1024ull * 1024ull))
+        continue;
+
+      // Skip grids whose per-CTA k-iter fragment crosses a cache line boundary
+      if (causes_partial_cachelines(frac_grid)) 
         continue;
 
       if (frac_grid <= virt_cu_count) {
@@ -436,6 +463,53 @@ size_t select_grid_size(const problem_t& problem,
     case grid_selection_t::number_of_cus:
     default: return hardware.N_CU;
   }
+}
+
+hybrid_mode_t select_hybrid_mode(const problem_t& problem,
+                                 const hardware_t& hardware,
+                                 const config_t& config,
+                                 size_t sm_count_target) {
+  // Fit on gfx950 (MI350X) sweeps only; other architectures stay static
+  // until tuned in a follow-up PR.
+  if (hardware.arch != hardware_t::architecture_t::gfx950)
+    return hybrid_mode_t::static_;
+
+  const size_t MT_M  = config.mt.m;
+  const size_t MT_N  = config.mt.n;
+  const size_t batch = std::max<size_t>(problem.batch, 1);
+  const size_t tiles = compute_number_of_output_tiles(
+      MT_M, MT_N, problem.size.m, problem.size.n, batch);
+
+  // Too little work in the grid for dynamic rebalancing to be worth its
+  // overhead.
+  if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
+
+  size_t available_cus = (sm_count_target > 0)
+                             ? std::min<size_t>(sm_count_target, hardware.N_CU)
+                             : hardware.N_CU;
+  if (available_cus == 0) available_cus = hardware.N_CU;
+
+  // No cotenant means static already matches the full CU count -- nothing
+  // left for dynamic to rebalance.
+  const bool has_cotenant = available_cus < hardware.N_CU;
+  if (!has_cotenant) return hybrid_mode_t::static_;
+
+  // Few wavefronts resident per CU means little overlap to absorb a
+  // cotenant's CU-count mismatch on its own, so dynamic rebalancing helps
+  // regardless of tiles_per_cu. (occupancy <= 0 means "unknown" -- fall
+  // through to the tiles_per_cu check instead.)
+  if (config.occupancy > 0 &&
+      config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
+    return hybrid_mode_t::dynamic;
+
+  // At higher occupancy that overlap already absorbs small mismatches, so
+  // dynamic only pays off once the grid is heavily overloaded relative to
+  // the CUs actually available to it.
+  const double tiles_per_cu =
+      static_cast<double>(tiles) / static_cast<double>(available_cus);
+  return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
+             ? hybrid_mode_t::dynamic
+             : hybrid_mode_t::static_;
 }
 }  // namespace streamk
 }  // namespace origami

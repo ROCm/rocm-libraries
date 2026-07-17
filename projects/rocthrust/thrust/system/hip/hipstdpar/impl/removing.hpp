@@ -58,6 +58,7 @@ inline I remove(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove(::thrust::device, f, l, x);
 }
 
@@ -78,6 +79,7 @@ inline I remove_if(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove_if(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -105,6 +107,7 @@ inline O remove_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, c
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove_copy(::thrust::device, fi, li, fo, x);
 }
 
@@ -127,6 +130,7 @@ inline O remove_copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::remove_copy_if(::thrust::device, fi, li, fo, ::std::move(p));
 }
 
@@ -156,6 +160,7 @@ inline I unique(execution::parallel_unsequenced_policy, I f, I l)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique(::thrust::device, f, l);
 }
 
@@ -174,6 +179,7 @@ inline I unique(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -201,6 +207,7 @@ inline O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique_copy(::thrust::device, fi, li, fo);
 }
 
@@ -221,6 +228,7 @@ inline O unique_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, R
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::unique_copy(::thrust::device, fi, li, fo, ::std::move(r));
 }
 

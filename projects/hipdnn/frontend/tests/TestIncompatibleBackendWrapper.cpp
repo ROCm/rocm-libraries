@@ -2,8 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <string>
 
 #include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
+
+#include <array>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
@@ -87,14 +90,14 @@ TEST(TestIncompatibleBackendWrapper, BackendGetAttribute)
     hipdnnBackendDescriptor_t descriptor = nullptr;
     int64_t elementCount = 0;
     void* arrayOfElements = nullptr;
-    EXPECT_EQ(backendWrapper.backendGetAttribute(
-                  descriptor,
-                  hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE_EXT,
-                  hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
-                  1,
-                  &elementCount,
-                  arrayOfElements),
-              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_EQ(
+        backendWrapper.backendGetAttribute(descriptor,
+                                           hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE,
+                                           hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
+                                           1,
+                                           &elementCount,
+                                           arrayOfElements),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
 TEST(TestIncompatibleBackendWrapper, BackendSetAttribute)
@@ -102,13 +105,13 @@ TEST(TestIncompatibleBackendWrapper, BackendSetAttribute)
     IncompatibleBackendWrapper backendWrapper;
     hipdnnBackendDescriptor_t descriptor = nullptr;
     int64_t value = 0;
-    EXPECT_EQ(backendWrapper.backendSetAttribute(
-                  descriptor,
-                  hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE_EXT,
-                  hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
-                  1,
-                  &value),
-              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_EQ(
+        backendWrapper.backendSetAttribute(descriptor,
+                                           hipdnnBackendAttributeName_t::HIPDNN_ATTR_KNOB_INFO_TYPE,
+                                           hipdnnBackendAttributeType_t::HIPDNN_TYPE_DATA_TYPE,
+                                           1,
+                                           &value),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
 TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeGraphExt)
@@ -117,6 +120,68 @@ TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeGraphExt)
     hipdnnBackendDescriptor_t descriptor;
     const uint8_t* serializedGraph = nullptr;
     EXPECT_EQ(backendWrapper.backendCreateAndDeserializeGraphExt(&descriptor, serializedGraph, 0),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendGetSerializedExecutionPlanExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    size_t planByteSize = 0;
+    EXPECT_EQ(
+        backendWrapper.backendGetSerializedExecutionPlanExt(descriptor, 0, &planByteSize, nullptr),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeExecutionPlanExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    hipdnnHandle_t handle = nullptr;
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    const std::array<uint8_t, 1> serializedPlan{0};
+    EXPECT_EQ(backendWrapper.backendCreateAndDeserializeExecutionPlanExt(
+                  handle, &descriptor, serializedPlan.data(), serializedPlan.size()),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendGetSerializedBinaryGraphExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    size_t graphByteSize = 0;
+    EXPECT_EQ(
+        backendWrapper.backendGetSerializedBinaryGraphExt(nullptr, 0, &graphByteSize, nullptr),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendGetSerializedJsonGraphExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    size_t graphByteSize = 0;
+    EXPECT_EQ(backendWrapper.backendGetSerializedJsonGraphExt(nullptr, 0, &graphByteSize, nullptr),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeJsonGraphExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    EXPECT_EQ(backendWrapper.backendCreateAndDeserializeJsonGraphExt(nullptr, nullptr, 0),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendGetSerializedBinaryGraphAndPlanExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    size_t blobByteSize = 0;
+    EXPECT_EQ(backendWrapper.backendGetSerializedBinaryGraphAndPlanExt(
+                  nullptr, nullptr, 0, &blobByteSize, nullptr),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendGetSerializedBinaryContentsExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    int contentFlags = 0;
+    EXPECT_EQ(backendWrapper.backendGetSerializedBinaryContentsExt(nullptr, 0, &contentFlags),
               hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -143,6 +208,56 @@ TEST(TestIncompatibleBackendWrapper, SetEnginePluginPathsExt)
               hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
+TEST(TestIncompatibleBackendWrapper, SetHeuristicPluginPathsExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    std::array<const char*, 2> paths = {"path1", "path2"};
+    EXPECT_EQ(backendWrapper.setHeuristicPluginPathsExt(
+                  paths.size(),
+                  paths.data(),
+                  hipdnnPluginLoadingMode_ext_t::HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, GetLoadedEnginePluginPathsExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    size_t count = 0;
+    size_t maxStringLen = 0;
+    EXPECT_EQ(backendWrapper.getLoadedEnginePluginPathsExt(nullptr, &count, nullptr, &maxStringLen),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, GetHeuristicPolicyCount)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    size_t count = 0;
+    EXPECT_EQ(backendWrapper.getHeuristicPolicyCount(nullptr, &count),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, GetHeuristicPolicyInfo)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    int64_t policyId = 0;
+    size_t policyNameLen = 0;
+    size_t pluginNameLen = 0;
+    size_t pluginVersionLen = 0;
+    size_t apiVersionLen = 0;
+    EXPECT_EQ(backendWrapper.getHeuristicPolicyInfo(nullptr,
+                                                    0,
+                                                    &policyId,
+                                                    nullptr,
+                                                    &policyNameLen,
+                                                    nullptr,
+                                                    &pluginNameLen,
+                                                    nullptr,
+                                                    &pluginVersionLen,
+                                                    nullptr,
+                                                    &apiVersionLen),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
 TEST(TestIncompatibleBackendWrapper, GetErrorString)
 {
     IncompatibleBackendWrapper backendWrapper;
@@ -166,4 +281,26 @@ TEST(TestIncompatibleBackendWrapper, LoggingCallbackExt)
     // loggingCallbackExt is a void function that does nothing
     // Just verify it doesn't crash
     backendWrapper.loggingCallbackExt(hipdnnSeverity_t::HIPDNN_SEV_INFO, "test message");
+}
+
+TEST(TestIncompatibleBackendWrapper, SetUserLogCallbackExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    EXPECT_EQ(backendWrapper.setUserLogCallbackExt(
+                  nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendSetGlobalLogLevelExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    EXPECT_EQ(backendWrapper.backendSetGlobalLogLevelExt(HIPDNN_SEV_INFO),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendGetGlobalLogLevelExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    EXPECT_EQ(backendWrapper.backendGetGlobalLogLevelExt(nullptr),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }

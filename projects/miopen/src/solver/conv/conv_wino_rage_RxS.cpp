@@ -194,7 +194,7 @@ class ShaderModelFactory
 {
 public:
     // We keep two kernel versions because V4_6 delivers better performance
-    // on both gfx12x(+4%) and gfx942(+6%) for cases where input channels <= 16.
+    // on both gfx120x(+4%) and gfx942(+6%) for cases where input channels <= 16.
     enum class KernelVersion
     {
         V4_6, // 3x3 filters, FP16 only
@@ -211,8 +211,8 @@ public:
         static constexpr PerfModelParams GFX942_V4_9_fp32{128, {26044, 512, 2468, 2504}};
         static constexpr PerfModelParams GFX942_V4_6{1024, {22850, 244, 1396, 2244}};
 
-        static constexpr PerfModelParams GFX12_V4_9{512, {9740, 182, 1506, 1533}};
-        static constexpr PerfModelParams GFX12_V4_6{512, {9505, 79, 1522, 1533}};
+        static constexpr PerfModelParams GFX120_V4_9{512, {9740, 182, 1506, 1533}};
+        static constexpr PerfModelParams GFX120_V4_6{512, {9505, 79, 1522, 1533}};
         // clang-format on
     };
 
@@ -240,10 +240,10 @@ public:
                    : (problem.IsBfp16())                   ? PerfParams::GFX942_V4_9_bf16
                                                            : PerfParams::GFX942_V4_9_fp32;
         }
-        else if(StartsWith(dev_name, "gfx12"))
+        else if(StartsWith(dev_name, "gfx120"))
         {
-            return (kernel_version == KernelVersion::V4_6) ? PerfParams::GFX12_V4_6
-                                                           : PerfParams::GFX12_V4_9;
+            return (kernel_version == KernelVersion::V4_6) ? PerfParams::GFX120_V4_6
+                                                           : PerfParams::GFX120_V4_9;
         }
         else
         {
@@ -309,25 +309,13 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
     if(problem.IsTensorsCasted())
         return false;
+    if(!problem.IsFp16())
+        return false;
     if(problem.HasNonPackedTensors())
         return false;
 
-    WinoShaderArgs args;
-    if(!args.SetConvParams(problem))
-        return false;
-
     const auto devName = ctx.GetStream().GetDeviceName();
-    if(devName == "gfx942")
-    {
-        if(!(problem.IsFp16() || problem.IsFp32() || problem.IsBfp16()))
-            return false;
-    }
-    else if(StartsWith(devName, "gfx12"))
-    {
-        if(!(problem.IsFp16()))
-            return false;
-    }
-    else
+    if(!(StartsWith(devName, "gfx942") || StartsWith(devName, "gfx120")))
     {
         return false;
     }
@@ -341,7 +329,20 @@ bool ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
     if(!(problem.GetDilationH() == 1 && problem.GetDilationW() == 1))
         return false;
 
-    args.n_groups     = getMaxNGroups(ctx);
+    WinoShaderArgs args;
+    if(!args.SetConvParams(problem))
+        return false;
+
+    if(StartsWith(devName, "gfx942"))
+    {
+        constexpr uint64_t maxNGroups = WinoShaderArgsV2::PowOf2<16>() - 1;
+        args.n_groups                 = std::min(
+            static_cast<uint64_t>(ctx.GetStream().GetMaxHardwareComputeUnits()), maxNGroups);
+    }
+    else
+    {
+        args.n_groups = getMaxNGroups(ctx);
+    }
     auto shader_model = ShaderModelFactory::Create(
         devName, args, ctx.GetStream().GetMaxHardwareComputeUnits(), problem);
 
@@ -352,9 +353,6 @@ template <uint32_t Winodata, uint32_t Winofilter>
 float ConvWinoRageRxSCommon<Winodata, Winofilter>::GetWti(const ExecutionContext& ctx,
                                                           const ProblemDescription& problem)
 {
-    std::ignore = ctx;
-    std::ignore = problem;
-
     const auto dev_name = ctx.GetStream().GetDeviceName();
     const auto cu_count = ctx.GetStream().GetMaxHardwareComputeUnits();
     WinoShaderArgsV2 args;
@@ -400,74 +398,51 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     if(do_bias)
         flags |= WinoShaderFlagsV2::F_BIAS;
 
-    const auto devName  = ctx.GetStream().GetDeviceName();
-    auto kernel_version = ShaderModelFactory::DetermineKernelVersion(args, problem.IsFp16());
-    auto shader_model   = ShaderModelFactory::Create(
-        devName, args, ctx.GetStream().GetMaxHardwareComputeUnits(), problem, kernel_version);
+    const auto devName = ctx.GetStream().GetDeviceName();
+    auto kernelVersion = ShaderModelFactory::DetermineKernelVersion(args, problem.IsFp16());
+    auto shader_model  = ShaderModelFactory::Create(
+        devName, args, ctx.GetStream().GetMaxHardwareComputeUnits(), problem, kernelVersion);
     auto perfmodel_result = shader_model->ComputeWti(problem.IsFp32());
     auto nGroups          = perfmodel_result.n_groups;
-
+    if(StartsWith(devName, "gfx942"))
+    {
+        constexpr uint64_t maxNGroups = WinoShaderArgsV2::PowOf2<16>() - 1;
+        nGroups = std::min(static_cast<uint64_t>(ctx.GetStream().GetMaxHardwareComputeUnits()),
+                           maxNGroups);
+    }
     args.SetShaderParams(nGroups, flags, 0, 0);
 
     // Kernel name and file
-    std::string kernelVersion;
-    if(kernel_version == ShaderModelFactory::KernelVersion::V4_6)
-    {
-        kernelVersion = "_v4_6_1";
-    }
-    else // V4_9
-    {
-        kernelVersion = "_v4_9_0";
-    }
-    std::string kernelName = "miopenSp3AsmConvRage" + kernelVersion;
-    std::string kernelFile = "Conv_Winograd_Rage" + kernelVersion;
+    const auto versionStr = [](ShaderModelFactory::KernelVersion kv,
+                               const std::string& dn) -> std::string {
+        if(StartsWith(dn, "gfx120"))
+            return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_1" : "_v4_9_1";
+        return (kv == ShaderModelFactory::KernelVersion::V4_6) ? "_v4_6_0" : "_v4_7_0";
+    }(kernelVersion, devName);
 
-    if(devName == "gfx942")
-    {
-        kernelName += "_gfx9";
-    }
-    else if(StartsWith(devName, "gfx12"))
-    {
-        kernelName += "_gfx12";
-    }
-    else
-    {
+    const auto archStr = [](const std::string& dn) -> std::string {
+        if(StartsWith(dn, "gfx942"))
+            return "_gfx9";
+        if(StartsWith(dn, "gfx120"))
+            return "_gfx12";
         MIOPEN_THROW(miopenStatusInternalError);
-    }
+    }(devName);
 
-    std::string kernelPostfix;
+    const std::string dTypeStr  = "_fp16_fp32acc";
+    const std::string strideStr = "_stride1";
+    const auto winoVariantStr   = []() -> std::string {
+        if constexpr(Winodata == 2 && Winofilter == 3)
+            return "_f2x3";
+        else
+            static_assert(Winodata == 2 && Winofilter == 3);
+    }();
 
-    if(problem.IsFp16())
-    {
-        kernelPostfix += "_fp16_fp32acc";
-    }
-    else if(problem.IsFp32())
-    {
-        kernelPostfix += "_fp32_fp32acc";
-    }
-    else if(problem.IsBfp16())
-    {
-        kernelPostfix += "_bf16_fp32acc";
-    }
-    else
-    {
-        MIOPEN_THROW(miopenStatusInternalError);
-    }
-
-    if constexpr(Winodata == 2 && Winofilter == 3)
-    {
-        kernelPostfix += "_f2x3";
-    }
-    else
-    {
-        static_assert(Winodata == 2 && Winofilter == 3);
-    }
-
-    kernelPostfix += "_stride1";
-
-    kernelName += kernelPostfix;
-    kernelFile += kernelPostfix;
-    kernelFile += ".s";
+    // e.g. miopenSp3AsmConvRage_v4_6_1_gfx12_fp16_fp32acc_f2x3_stride1
+    std::string kernelName =
+        "miopenSp3AsmConvRage" + versionStr + archStr + dTypeStr + winoVariantStr + strideStr;
+    // e.g. Conv_Winograd_Rage_v4_6_1_fp16_fp32acc_f2x3_stride1.s
+    std::string kernelFile =
+        "Conv_Winograd_Rage" + versionStr + dTypeStr + winoVariantStr + strideStr + ".s";
 
     // Kernel info
 
@@ -483,7 +458,7 @@ ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     kernelInfo.comp_options += std::string(" -mcumode");
 
     uint64_t wgSize = 768U; // value for gfx942
-    if(StartsWith(devName, "gfx12"))
+    if(StartsWith(devName, "gfx120"))
     {
         wgSize = 384U;
     }
@@ -539,6 +514,97 @@ template struct MIOPEN_INTERNALS_EXPORT ConvWinoRageRxS<2, 3>;
 template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinoRageRxS<2, 3>;
 
 } // namespace conv
+
+namespace fusion {
+
+template <uint32_t Winodata, uint32_t Winofilter>
+bool ConvWinoRageRxSFused<Winodata, Winofilter>::IsApplicable(
+    const FusionContext& ctx, const FusionDescription& problem) const
+{
+    const auto& desc = *problem.fusion_plan_desc;
+
+    if(desc.op_map.empty())
+    {
+        MIOPEN_THROW(miopenStatusInternalError);
+    }
+
+    if(desc.op_map.size() > 3)
+        return false;
+    if(desc.op_map[0]->kind() != miopenFusionOpConvForward)
+        return false;
+    if(desc.op_map.size() == 2)
+    {
+        const auto prim = desc.op_map[1]->kind();
+        if(!(prim == miopenFusionOpBiasForward || prim == miopenFusionOpActivForward))
+            return false;
+    }
+    if(desc.op_map.size() == 3)
+    {
+        if(desc.op_map[1]->kind() != miopenFusionOpBiasForward)
+            return false;
+        if(desc.op_map[2]->kind() != miopenFusionOpActivForward)
+            return false;
+    }
+
+    const int activ_idx = GetOpIdx(desc.op_map, miopenFusionOpActivForward);
+    if(activ_idx != -1)
+    {
+        const auto& activ_op = dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[activ_idx]);
+        switch(activ_op.activMode)
+        {
+        case miopenActivationPASTHRU:
+        case miopenActivationLOGISTIC:
+        case miopenActivationTANH:
+        case miopenActivationRELU:
+        case miopenActivationLEAKYRELU: break;
+
+        case miopenActivationSOFTRELU:
+        case miopenActivationABS:
+        case miopenActivationPOWER:
+        case miopenActivationCLIPPEDRELU:
+        case miopenActivationELU:
+        case miopenActivationCLAMP: return false;
+        }
+    }
+
+    const auto conv_problem = problem.GetConvProblem(0, miopen::conv::Direction::Forward);
+    return ConvWinoRageRxSCommon<Winodata, Winofilter>::IsApplicable(ctx, conv_problem);
+}
+
+template <uint32_t Winodata, uint32_t Winofilter>
+float ConvWinoRageRxSFused<Winodata, Winofilter>::GetWti(const FusionContext& ctx,
+                                                         const FusionDescription& problem) const
+{
+    const auto conv_problem = problem.GetConvProblem(0, miopen::conv::Direction::Forward);
+    return ConvWinoRageRxSCommon<Winodata, Winofilter>::GetWti(ctx, conv_problem);
+}
+
+template <uint32_t Winodata, uint32_t Winofilter>
+ConvSolution
+ConvWinoRageRxSFused<Winodata, Winofilter>::GetSolution(const FusionContext& ctx,
+                                                        const FusionDescription& problem) const
+{
+    const auto& desc    = *problem.fusion_plan_desc;
+    const int bias_idx  = GetOpIdx(desc.op_map, miopenFusionOpBiasForward);
+    const int activ_idx = GetOpIdx(desc.op_map, miopenFusionOpActivForward);
+
+    const auto conv_problem = problem.GetConvProblem(0, miopen::conv::Direction::Forward);
+
+    const bool do_bias = (bias_idx != -1);
+    auto activ_mode    = miopenActivationPASTHRU;
+    if(activ_idx != -1)
+    {
+        const auto& activ_op = dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[activ_idx]);
+        activ_mode           = activ_op.activMode;
+    }
+
+    return ConvWinoRageRxSCommon<Winodata, Winofilter>::GetSolution(
+        ctx, conv_problem, true, do_bias, activ_mode);
+}
+
+template struct MIOPEN_INTERNALS_EXPORT ConvWinoRageRxSFused<2, 3>;
+
+} // namespace fusion
 
 } // namespace solver
 

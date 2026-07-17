@@ -95,8 +95,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -291,7 +291,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -473,7 +473,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -655,8 +655,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -851,7 +851,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -1033,7 +1033,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -1215,7 +1215,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -1397,8 +1397,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -1593,7 +1593,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -1775,7 +1775,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -1957,7 +1957,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -1976,7 +1976,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA8_GSU1_LPA8_LPB16_LPMn1_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA8_GSU1_LPA8_LPB16_LPMn1_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 64
     LSCB: 128
     LSPA: 8
@@ -2065,13 +2065,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 10
-    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA8_GSU1_LPA8_LPB16_LPMn1_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA8_GSU1_LPA8_LPB16_LPMn1_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
@@ -2139,7 +2139,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -2158,7 +2158,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA16_GSU1_LPA16_LPB16_LPMn1_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA16_GSU1_LPA16_LPB16_LPMn1_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 64
     LSCB: 128
     LSPA: 16
@@ -2247,13 +2247,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 11
-    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA16_GSU1_LPA16_LPB16_LPMn1_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM1_GRVWA16_GSU1_LPA16_LPB16_LPMn1_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
@@ -2321,7 +2321,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -2503,7 +2503,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -2685,8 +2685,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -2881,7 +2881,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -3063,8 +3063,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -3256,8 +3256,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -3449,8 +3449,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -3566,12 +3566,12 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 18
-    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x128x128_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM8_GRVWB16_GSU3_LPB16_MIWT4_1_PLR3_SUS128_WG32_8_1
+    SolutionNameMin: Cijk_Alik_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x128x128_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM8_GRVWB16_GSU3_LPB16_MIWT4_1_PLR1_SUS128_WG32_8_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -3642,8 +3642,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -3835,8 +3835,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -4028,8 +4028,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -4221,8 +4221,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -4414,8 +4414,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -4607,8 +4607,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -4800,8 +4800,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -4993,8 +4993,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -5186,8 +5186,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -5379,8 +5379,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -5572,8 +5572,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -5765,8 +5765,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
@@ -5958,8 +5958,8 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true

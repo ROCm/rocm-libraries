@@ -59,6 +59,16 @@ rocsparse_get_git_rev()
 
 .. doxygenfunction:: rocsparse_get_git_rev
 
+rocsparse_get_status_name()
+---------------------------
+
+.. doxygenfunction:: rocsparse_get_status_name
+
+rocsparse_get_status_description()
+----------------------------------
+
+.. doxygenfunction:: rocsparse_get_status_description
+
 rocsparse_destroy_error()
 -------------------------
 
@@ -268,6 +278,11 @@ rocsparse_create_const_csc_descr
 
 .. doxygenfunction:: rocsparse_create_const_csc_descr
 
+rocsparse_create_const_bsr_descr
+--------------------------------
+
+.. doxygenfunction:: rocsparse_create_const_bsr_descr
+
 rocsparse_create_const_bell_descr
 ---------------------------------
 
@@ -406,6 +421,27 @@ rocsparse_spic0_get_output
 .. doxygenfunction:: rocsparse_spic0_get_output
 
 
+rocsparse_spildlt0_descr_create
+-------------------------------
+
+.. doxygenfunction:: rocsparse_spildlt0_descr_create
+
+rocsparse_spildlt0_descr_destroy
+--------------------------------
+
+.. doxygenfunction:: rocsparse_spildlt0_descr_destroy
+
+rocsparse_spildlt0_set_input
+----------------------------
+
+.. doxygenfunction:: rocsparse_spildlt0_set_input
+
+rocsparse_spildlt0_get_output
+-----------------------------
+
+.. doxygenfunction:: rocsparse_spildlt0_get_output
+
+
 rocsparse_spilu0_descr_create
 -----------------------------
 
@@ -496,6 +532,11 @@ rocsparse_bsr_set_pointers
 --------------------------
 
 .. doxygenfunction:: rocsparse_bsr_set_pointers
+
+rocsparse_bell_set_pointers
+---------------------------
+
+.. doxygenfunction:: rocsparse_bell_set_pointers
 
 rocsparse_spmat_get_size
 ------------------------
@@ -631,8 +672,6 @@ rocsparse_dnmat_set_strided_batch
 ---------------------------------
 
 .. doxygenfunction:: rocsparse_dnmat_set_strided_batch
-
-
 
 rocsparse_create_const_spvec_descr
 ----------------------------------

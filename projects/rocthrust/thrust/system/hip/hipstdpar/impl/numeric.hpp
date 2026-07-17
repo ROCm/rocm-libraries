@@ -64,6 +64,7 @@ inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li,
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::adjacent_difference(::thrust::device, fi, li, fo);
 }
 
@@ -84,6 +85,7 @@ inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li,
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::std::move(op));
 }
 
@@ -113,6 +115,7 @@ inline typename iterator_traits<I>::value_type reduce(execution::parallel_unsequ
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::reduce(::thrust::device, f, l);
 }
 
@@ -129,6 +132,7 @@ inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::reduce(::thrust::device, f, l, ::std::move(x));
 }
 
@@ -148,6 +152,7 @@ inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::std::move(op));
 }
 
@@ -176,6 +181,7 @@ inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x));
 }
 
@@ -197,6 +203,7 @@ inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x), ::std::move(op));
 }
 
@@ -227,6 +234,7 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::inclusive_scan(::thrust::device, fi, li, fo);
 }
 
@@ -247,6 +255,7 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op));
 }
 
@@ -277,6 +286,7 @@ template <typename I,
 inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op, T x)
 { // TODO: this is highly inefficient due to rocThrust not exposing
   //       this particular interface where the user provides x.
+  ::hipstd::warn_if_no_xnack();
   if (fi == li)
   {
     return fo;
@@ -341,6 +351,7 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, 
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x));
 }
 
@@ -364,6 +375,7 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, 
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x), ::std::move(op0), ::std::move(op1));
 }
 
@@ -398,6 +410,7 @@ inline T transform_reduce(execution::parallel_unsequenced_policy, I f, I l, T x,
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::transform_reduce(::thrust::device, f, l, ::std::move(op1), ::std::move(x), ::std::move(op0));
 }
 
@@ -434,6 +447,7 @@ inline O transform_exclusive_scan(execution::parallel_unsequenced_policy, I fi, 
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::transform_exclusive_scan(
     ::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(x), ::std::move(op0));
 }
@@ -473,6 +487,7 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
 {
   ::hipstd::__maybe_bind_globals();
 
+  ::hipstd::warn_if_no_xnack();
   return ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(op0));
 }
 
@@ -506,6 +521,7 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
 inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op0 op0, Op1 op1, T x)
 { // TODO: this is inefficient.
+  ::hipstd::warn_if_no_xnack();
   if (fi == li)
   {
     return fo;

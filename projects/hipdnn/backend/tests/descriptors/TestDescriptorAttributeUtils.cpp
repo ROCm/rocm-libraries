@@ -9,9 +9,9 @@
 #include "descriptors/TensorDescriptor.hpp"
 #include <array>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <vector>
 
 namespace hipdnn_backend
@@ -19,134 +19,151 @@ namespace hipdnn_backend
 namespace testing
 {
 
-// --- setInt64Vector ---
+// --- setScalarVector (int64_t) ---
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnNegativeElementCount)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnNegativeElementCount)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {1, 2, 3};
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, -1, data.data(), "test"),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, -1, data.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnZeroElementCount)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnZeroElementCount)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {1, 2, 3};
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, 0, data.data(), "test"),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 0, data.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnNullArrayOfElements)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnNullArrayOfElements)
 {
     std::vector<int64_t> target;
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, 1, nullptr, "test"),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 1, nullptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnNullErrorPrefix)
-{
-    std::vector<int64_t> target;
-    std::array<int64_t, 3> data = {1, 2, 3};
-
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_INT64, 3, data.data(), nullptr),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-}
-
-TEST(TestDescriptorAttributeUtils, SetInt64VectorThrowsOnWrongAttributeType)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnNullErrorPrefix)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {1, 2, 3};
 
-    ASSERT_THROW_HIPDNN_STATUS(setInt64Vector(target, HIPDNN_TYPE_BOOLEAN, 3, data.data(), "test"),
-                               HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, data.data(), nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, SetInt64VectorSuccess)
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64ThrowsOnWrongAttributeType)
+{
+    std::vector<int64_t> target;
+    std::array<int64_t, 3> data = {1, 2, 3};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setScalarVector<int64_t>(
+            target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_BOOLEAN, 3, data.data(), "test"),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetScalarVectorInt64Success)
 {
     std::vector<int64_t> target;
     std::array<int64_t, 3> data = {10, 20, 30};
 
-    ASSERT_NO_THROW(setInt64Vector(target, HIPDNN_TYPE_INT64, 3, data.data(), "test"));
+    ASSERT_NO_THROW(setScalarVector<int64_t>(
+        target, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, data.data(), "test"));
     ASSERT_EQ(target.size(), 3u);
     EXPECT_EQ(target[0], 10);
     EXPECT_EQ(target[1], 20);
     EXPECT_EQ(target[2], 30);
 }
 
-// --- getInt64Vector ---
+// --- getScalarVector (int64_t) ---
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNegativeRequestedElementCount)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64ThrowsOnNegativeRequestedElementCount)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_INT64, -1, &count, output.data(), "test"),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, -1, &count, output.data(), "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnNullArray)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64QueryReturnsSizeOnNullArray)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, nullptr, "test"));
+    ASSERT_NO_THROW(getScalarVector<int64_t>(
+        source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, &count, nullptr, "test"));
     ASSERT_EQ(count, 3);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryReturnsSizeOnZeroRequestedCount)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64QueryReturnsSizeOnZeroRequestedCount)
 {
     const std::vector<int64_t> source = {10, 20, 30, 40};
     int64_t count = 0;
     std::array<int64_t, 4> output = {};
 
-    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 0, &count, output.data(), "test"));
+    ASSERT_NO_THROW(getScalarVector<int64_t>(
+        source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 0, &count, output.data(), "test"));
     ASSERT_EQ(count, 4);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorQueryThrowsWhenBothPointersNull)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64QueryThrowsWhenBothPointersNull)
 {
     const std::vector<int64_t> source = {1, 2, 3};
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_INT64, 3, nullptr, nullptr, "test"),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, nullptr, nullptr, "test"),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnNullErrorPrefix)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64ThrowsOnNullErrorPrefix)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, output.data(), nullptr),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, &count, output.data(), nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorThrowsOnWrongAttributeType)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64ThrowsOnWrongAttributeType)
 {
     const std::vector<int64_t> source = {1, 2, 3};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        getInt64Vector(source, HIPDNN_TYPE_BOOLEAN, 3, &count, output.data(), "test"),
+        getScalarVector<int64_t>(
+            source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_BOOLEAN, 3, &count, output.data(), "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST(TestDescriptorAttributeUtils, GetInt64VectorSuccess)
+TEST(TestDescriptorAttributeUtils, GetScalarVectorInt64Success)
 {
     const std::vector<int64_t> source = {10, 20, 30};
     std::array<int64_t, 3> output = {};
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getInt64Vector(source, HIPDNN_TYPE_INT64, 3, &count, output.data(), "test"));
+    ASSERT_NO_THROW(getScalarVector<int64_t>(
+        source, HIPDNN_TYPE_INT64, HIPDNN_TYPE_INT64, 3, &count, output.data(), "test"));
     ASSERT_EQ(count, 3);
     EXPECT_EQ(output[0], 10);
     EXPECT_EQ(output[1], 20);
@@ -273,7 +290,7 @@ TEST(TestDescriptorAttributeUtils, GetScalarSuccess)
 
 TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnNullArrayOfElements)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     auto target = DataType::UNSET;
 
     ASSERT_THROW_HIPDNN_STATUS(setDataType(target, HIPDNN_TYPE_DATA_TYPE, 1, nullptr, "test"),
@@ -282,7 +299,7 @@ TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnNullArrayOfElements)
 
 TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnNullErrorPrefix)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     auto target = DataType::UNSET;
     auto value = HIPDNN_DATA_FLOAT;
 
@@ -292,7 +309,7 @@ TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnNullErrorPrefix)
 
 TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnWrongAttributeType)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     auto target = DataType::UNSET;
     auto value = HIPDNN_DATA_FLOAT;
 
@@ -302,7 +319,7 @@ TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnWrongAttributeType)
 
 TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnWrongElementCount)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     auto target = DataType::UNSET;
     auto value = HIPDNN_DATA_FLOAT;
 
@@ -312,7 +329,7 @@ TEST(TestDescriptorAttributeUtils, SetDataTypeThrowsOnWrongElementCount)
 
 TEST(TestDescriptorAttributeUtils, SetDataTypeSuccess)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     auto target = DataType::UNSET;
     auto value = HIPDNN_DATA_FLOAT;
 
@@ -324,7 +341,7 @@ TEST(TestDescriptorAttributeUtils, SetDataTypeSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetDataTypeQueryReturnsOneOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     int64_t count = 0;
 
     ASSERT_NO_THROW(
@@ -334,7 +351,7 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeQueryReturnsOneOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, GetDataTypeQueryReturnsOneOnZeroRequestedCount)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     int64_t count = 0;
     hipdnnDataType_t output = HIPDNN_DATA_FLOAT;
 
@@ -345,7 +362,7 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeQueryReturnsOneOnZeroRequestedCoun
 
 TEST(TestDescriptorAttributeUtils, GetDataTypeQueryThrowsWhenBothPointersNull)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getDataType(DataType::FLOAT, HIPDNN_TYPE_DATA_TYPE, 1, nullptr, nullptr, "test"),
@@ -354,7 +371,7 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeQueryThrowsWhenBothPointersNull)
 
 TEST(TestDescriptorAttributeUtils, GetDataTypeThrowsOnNullErrorPrefix)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     int64_t count = 0;
     hipdnnDataType_t output = HIPDNN_DATA_FLOAT;
 
@@ -365,7 +382,7 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeThrowsOnNullErrorPrefix)
 
 TEST(TestDescriptorAttributeUtils, GetDataTypeThrowsOnWrongAttributeType)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     int64_t count = 0;
     hipdnnDataType_t output = HIPDNN_DATA_FLOAT;
 
@@ -376,7 +393,7 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeThrowsOnWrongAttributeType)
 
 TEST(TestDescriptorAttributeUtils, GetDataTypeSuccess)
 {
-    using hipdnn_data_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
     int64_t count = 0;
     hipdnnDataType_t output = {};
 
@@ -386,11 +403,33 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeSuccess)
     ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
 }
 
+TEST(TestDescriptorAttributeUtils, GetDataTypeUnsetReturnsZeroCount)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    int64_t count = -1;
+    hipdnnDataType_t output = HIPDNN_DATA_FLOAT;
+
+    ASSERT_NO_THROW(
+        getDataType(DataType::UNSET, HIPDNN_TYPE_DATA_TYPE, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 0);
+    ASSERT_EQ(output, HIPDNN_DATA_FLOAT);
+}
+
+TEST(TestDescriptorAttributeUtils, GetDataTypeUnsetThrowsOnNullElementCount)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    hipdnnDataType_t output = {};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getDataType(DataType::UNSET, HIPDNN_TYPE_DATA_TYPE, 1, nullptr, &output, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
 // --- setConvMode ---
 
 TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullArrayOfElements)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -400,9 +439,9 @@ TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullArrayOfElements)
 
 TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullErrorPrefix)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(
         setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, nullptr),
@@ -411,9 +450,9 @@ TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullErrorPrefix)
 
 TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongAttributeType)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(setConvMode(target, HIPDNN_TYPE_INT64, 1, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -421,9 +460,9 @@ TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongAttributeType)
 
 TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongElementCount)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 2, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -431,9 +470,9 @@ TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongElementCount)
 
 TEST(TestDescriptorAttributeUtils, SetConvModeSuccessCrossCorrelation)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    auto value = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_NO_THROW(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, "test"));
     ASSERT_EQ(target, ConvMode::CROSS_CORRELATION);
@@ -441,9 +480,9 @@ TEST(TestDescriptorAttributeUtils, SetConvModeSuccessCrossCorrelation)
 
 TEST(TestDescriptorAttributeUtils, SetConvModeSuccessConvolution)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     auto target = ConvMode::UNSET;
-    auto value = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    auto value = HIPDNN_CONVOLUTION;
 
     ASSERT_NO_THROW(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, "test"));
     ASSERT_EQ(target, ConvMode::CONVOLUTION);
@@ -453,7 +492,7 @@ TEST(TestDescriptorAttributeUtils, SetConvModeSuccessConvolution)
 
 TEST(TestDescriptorAttributeUtils, GetConvModeQueryReturnsOneOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     int64_t count = 0;
 
     ASSERT_NO_THROW(getConvMode(
@@ -463,9 +502,9 @@ TEST(TestDescriptorAttributeUtils, GetConvModeQueryReturnsOneOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, GetConvModeQueryReturnsOneOnZeroRequestedCount)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_NO_THROW(getConvMode(
         ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 0, &count, &output, "test"));
@@ -474,7 +513,7 @@ TEST(TestDescriptorAttributeUtils, GetConvModeQueryReturnsOneOnZeroRequestedCoun
 
 TEST(TestDescriptorAttributeUtils, GetConvModeQueryThrowsWhenBothPointersNull)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getConvMode(
@@ -484,9 +523,9 @@ TEST(TestDescriptorAttributeUtils, GetConvModeQueryThrowsWhenBothPointersNull)
 
 TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnNullErrorPrefix)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getConvMode(
@@ -496,9 +535,9 @@ TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnNullErrorPrefix)
 
 TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnWrongAttributeType)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getConvMode(ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
@@ -507,24 +546,24 @@ TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnWrongAttributeType)
 
 TEST(TestDescriptorAttributeUtils, GetConvModeSuccessCrossCorrelation)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION;
 
     ASSERT_NO_THROW(getConvMode(
         ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, "test"));
-    ASSERT_EQ(output, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+    ASSERT_EQ(output, HIPDNN_CROSS_CORRELATION);
 }
 
 TEST(TestDescriptorAttributeUtils, GetConvModeSuccessConvolution)
 {
-    using hipdnn_data_sdk::data_objects::ConvMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
     int64_t count = 0;
-    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    hipdnnConvolutionMode_t output = HIPDNN_CROSS_CORRELATION;
 
     ASSERT_NO_THROW(getConvMode(
         ConvMode::CONVOLUTION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, "test"));
-    ASSERT_EQ(output, HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+    ASSERT_EQ(output, HIPDNN_CONVOLUTION);
 }
 
 // --- getOperationType ---
@@ -533,7 +572,7 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnNullArray)
 {
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
@@ -545,9 +584,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnNullArray)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnZeroRequestedCount)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      0,
                                      &count,
@@ -558,7 +597,7 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryReturnsOneOnZeroRequeste
 
 TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryThrowsWhenBothPointersNull)
 {
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                                 1,
                                                 nullptr,
@@ -570,9 +609,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeQueryThrowsWhenBothPointersNu
 TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnNullErrorPrefix)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                                 1,
                                                 &count,
@@ -584,9 +623,9 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnNullErrorPrefix)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnWrongAttributeType)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_THROW_HIPDNN_STATUS(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                                 HIPDNN_TYPE_INT64,
                                                 1,
                                                 &count,
@@ -598,29 +637,29 @@ TEST(TestDescriptorAttributeUtils, GetOperationTypeThrowsOnWrongAttributeType)
 TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessConvForward)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
                                      &output,
                                      "test"));
-    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT);
 }
 
 TEST(TestDescriptorAttributeUtils, GetOperationTypeSuccessBatchnormInference)
 {
     int64_t count = 0;
-    hipdnnOperationType_t output = HIPDNN_OPERATION_TYPE_NOT_SET;
+    hipdnnOperationType_ext_t output = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
 
-    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE,
+    ASSERT_NO_THROW(getOperationType(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT,
                                      HIPDNN_TYPE_OPERATION_TYPE_EXT,
                                      1,
                                      &count,
                                      &output,
                                      "test"));
-    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE);
+    ASSERT_EQ(output, HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT);
 }
 
 // --- setTensorDescriptor ---
@@ -866,7 +905,7 @@ TEST(TestDescriptorAttributeUtils, GetStringThrowsOnWrongAttributeType)
 
 TEST(TestDescriptorAttributeUtils, SetKnobValueUnionInt64)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion target;
     int64_t value = 42;
 
@@ -877,7 +916,7 @@ TEST(TestDescriptorAttributeUtils, SetKnobValueUnionInt64)
 
 TEST(TestDescriptorAttributeUtils, SetKnobValueUnionDouble)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion target;
     double value = 3.14;
 
@@ -888,7 +927,7 @@ TEST(TestDescriptorAttributeUtils, SetKnobValueUnionDouble)
 
 TEST(TestDescriptorAttributeUtils, SetKnobValueUnionString)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion target;
     const char* value = "hello";
 
@@ -899,7 +938,7 @@ TEST(TestDescriptorAttributeUtils, SetKnobValueUnionString)
 
 TEST(TestDescriptorAttributeUtils, SetKnobValueUnionThrowsOnUnsupportedType)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion target;
     int64_t value = 1;
 
@@ -910,7 +949,7 @@ TEST(TestDescriptorAttributeUtils, SetKnobValueUnionThrowsOnUnsupportedType)
 
 TEST(TestDescriptorAttributeUtils, SetKnobValueUnionThrowsOnNullArray)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion target;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -920,7 +959,7 @@ TEST(TestDescriptorAttributeUtils, SetKnobValueUnionThrowsOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, SetKnobValueUnionThrowsOnWrongElementCount)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion target;
     int64_t value = 42;
 
@@ -930,7 +969,7 @@ TEST(TestDescriptorAttributeUtils, SetKnobValueUnionThrowsOnWrongElementCount)
 
 TEST(TestDescriptorAttributeUtils, SetKnobValueUnionStringExceedsMaxLength)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion target;
     const char* value = "too long";
 
@@ -942,7 +981,7 @@ TEST(TestDescriptorAttributeUtils, SetKnobValueUnionStringExceedsMaxLength)
 
 TEST(TestDescriptorAttributeUtils, GetKnobValueUnionInt64)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion source;
     IntValueT intVal;
     intVal.value = 42;
@@ -957,7 +996,7 @@ TEST(TestDescriptorAttributeUtils, GetKnobValueUnionInt64)
 
 TEST(TestDescriptorAttributeUtils, GetKnobValueUnionDouble)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion source;
     FloatValueT floatVal;
     floatVal.value = 2.718;
@@ -972,7 +1011,7 @@ TEST(TestDescriptorAttributeUtils, GetKnobValueUnionDouble)
 
 TEST(TestDescriptorAttributeUtils, GetKnobValueUnionString)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion source;
     StringValueT strVal;
     strVal.value = "hello";
@@ -987,7 +1026,7 @@ TEST(TestDescriptorAttributeUtils, GetKnobValueUnionString)
 
 TEST(TestDescriptorAttributeUtils, GetKnobValueUnionStringSizeQuery)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion source;
     StringValueT strVal;
     strVal.value = "hello";
@@ -1000,7 +1039,7 @@ TEST(TestDescriptorAttributeUtils, GetKnobValueUnionStringSizeQuery)
 
 TEST(TestDescriptorAttributeUtils, GetKnobValueUnionInt64TypeMismatch)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion source;
     IntValueT intVal;
     intVal.value = 42;
@@ -1015,7 +1054,7 @@ TEST(TestDescriptorAttributeUtils, GetKnobValueUnionInt64TypeMismatch)
 
 TEST(TestDescriptorAttributeUtils, GetKnobValueUnionThrowsOnNoneType)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     const KnobValueUnion source; // default is NONE
 
     int64_t output = 0;
@@ -1027,7 +1066,7 @@ TEST(TestDescriptorAttributeUtils, GetKnobValueUnionThrowsOnNoneType)
 
 TEST(TestDescriptorAttributeUtils, GetKnobValueUnionInt64SizeQuery)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion source;
     IntValueT intVal;
     intVal.value = 99;
@@ -1180,7 +1219,7 @@ TEST(TestDescriptorAttributeUtils, GetScalarVectorQueryReturnsSizeOnZeroCount)
 
 TEST(TestDescriptorAttributeUtils, SetPointwiseModeSuccess)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     auto target = PointwiseMode::UNSET;
     auto value = HIPDNN_POINTWISE_RELU_FWD;
 
@@ -1190,7 +1229,7 @@ TEST(TestDescriptorAttributeUtils, SetPointwiseModeSuccess)
 
 TEST(TestDescriptorAttributeUtils, SetPointwiseModeThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     auto target = PointwiseMode::UNSET;
     auto value = HIPDNN_POINTWISE_RELU_FWD;
 
@@ -1200,7 +1239,7 @@ TEST(TestDescriptorAttributeUtils, SetPointwiseModeThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, SetPointwiseModeThrowsOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     auto target = PointwiseMode::UNSET;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -1210,7 +1249,7 @@ TEST(TestDescriptorAttributeUtils, SetPointwiseModeThrowsOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, SetPointwiseModeThrowsOnWrongElementCount)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     auto target = PointwiseMode::UNSET;
     auto value = HIPDNN_POINTWISE_RELU_FWD;
 
@@ -1221,7 +1260,7 @@ TEST(TestDescriptorAttributeUtils, SetPointwiseModeThrowsOnWrongElementCount)
 
 TEST(TestDescriptorAttributeUtils, GetPointwiseModeSuccess)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     int64_t count = 0;
     hipdnnPointwiseMode_t output = HIPDNN_POINTWISE_ABS;
 
@@ -1233,7 +1272,7 @@ TEST(TestDescriptorAttributeUtils, GetPointwiseModeSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetPointwiseModeThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     int64_t count = 0;
     hipdnnPointwiseMode_t output = HIPDNN_POINTWISE_ABS;
 
@@ -1244,7 +1283,7 @@ TEST(TestDescriptorAttributeUtils, GetPointwiseModeThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, GetPointwiseModeQueryReturnsSizeOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     int64_t count = 0;
 
     ASSERT_NO_THROW(getPointwiseMode(
@@ -1254,7 +1293,7 @@ TEST(TestDescriptorAttributeUtils, GetPointwiseModeQueryReturnsSizeOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, GetPointwiseModeQueryReturnsSizeOnZeroCount)
 {
-    using hipdnn_data_sdk::data_objects::PointwiseMode;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     int64_t count = 0;
     hipdnnPointwiseMode_t output = HIPDNN_POINTWISE_ABS;
 
@@ -1344,9 +1383,9 @@ TEST(TestDescriptorAttributeUtils, GetOptionalScalarQueryReturnsSizeOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseSuccess)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     auto target = NormFwdPhase::NOT_SET;
-    auto value = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto value = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_NO_THROW(setNormFwdPhase(target, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &value, "test"));
     ASSERT_EQ(target, NormFwdPhase::TRAINING);
@@ -1354,9 +1393,9 @@ TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseSuccess)
 
 TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     auto target = NormFwdPhase::NOT_SET;
-    auto value = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto value = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_THROW_HIPDNN_STATUS(setNormFwdPhase(target, HIPDNN_TYPE_INT64, 1, &value, "test"),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -1364,7 +1403,7 @@ TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     auto target = NormFwdPhase::NOT_SET;
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -1374,9 +1413,9 @@ TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnWrongElementCount)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     auto target = NormFwdPhase::NOT_SET;
-    auto value = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    auto value = HIPDNN_NORM_FWD_TRAINING;
 
     ASSERT_THROW_HIPDNN_STATUS(
         setNormFwdPhase(target, HIPDNN_TYPE_NORM_FWD_PHASE, 2, &value, "test"),
@@ -1385,21 +1424,21 @@ TEST(TestDescriptorAttributeUtils, SetNormFwdPhaseThrowsOnWrongElementCount)
 
 TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseSuccess)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     int64_t count = 0;
-    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_NO_THROW(getNormFwdPhase(
         NormFwdPhase::TRAINING, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &count, &output, "test"));
     ASSERT_EQ(count, 1);
-    ASSERT_EQ(output, HIPDNN_NORM_FWD_PHASE_TRAINING);
+    ASSERT_EQ(output, HIPDNN_NORM_FWD_TRAINING);
 }
 
 TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     int64_t count = 0;
-    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_THROW_HIPDNN_STATUS(
         getNormFwdPhase(NormFwdPhase::TRAINING, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
@@ -1408,7 +1447,7 @@ TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseQueryReturnsSizeOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     int64_t count = 0;
 
     ASSERT_NO_THROW(getNormFwdPhase(
@@ -1418,9 +1457,9 @@ TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseQueryReturnsSizeOnNullArray)
 
 TEST(TestDescriptorAttributeUtils, GetNormFwdPhaseQueryReturnsSizeOnZeroCount)
 {
-    using hipdnn_data_sdk::data_objects::NormFwdPhase;
+    using hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase;
     int64_t count = 0;
-    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    hipdnnNormFwdPhase_t output = HIPDNN_NORM_FWD_INFERENCE;
 
     ASSERT_NO_THROW(getNormFwdPhase(
         NormFwdPhase::TRAINING, HIPDNN_TYPE_NORM_FWD_PHASE, 0, &count, &output, "test"));
@@ -1610,18 +1649,18 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorArrayQueryReturnsSizeOnNul
 
 TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentSuccess)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     auto target = DiagonalAlignment::TOP_LEFT;
     auto value = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
 
     ASSERT_NO_THROW(
-        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &value, "test"));
+        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1, &value, "test"));
     ASSERT_EQ(target, DiagonalAlignment::BOTTOM_RIGHT);
 }
 
 TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     auto target = DiagonalAlignment::TOP_LEFT;
     auto value = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
 
@@ -1631,33 +1670,33 @@ TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentThrowsOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     auto target = DiagonalAlignment::TOP_LEFT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, nullptr, "test"),
+        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1, nullptr, "test"),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST(TestDescriptorAttributeUtils, SetDiagonalAlignmentThrowsOnWrongElementCount)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     auto target = DiagonalAlignment::TOP_LEFT;
     auto value = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 2, &value, "test"),
+        setDiagonalAlignment(target, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 2, &value, "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentSuccess)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     int64_t count = 0;
     hipdnnDiagonalAlignment_t output = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
     ASSERT_NO_THROW(getDiagonalAlignment(DiagonalAlignment::BOTTOM_RIGHT,
-                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                          1,
                                          &count,
                                          &output,
@@ -1668,7 +1707,7 @@ TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     int64_t count = 0;
     hipdnnDiagonalAlignment_t output = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
@@ -1680,22 +1719,30 @@ TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentQueryReturnsSizeOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     int64_t count = 0;
 
-    ASSERT_NO_THROW(getDiagonalAlignment(
-        DiagonalAlignment::TOP_LEFT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1, &count, nullptr, "test"));
+    ASSERT_NO_THROW(getDiagonalAlignment(DiagonalAlignment::TOP_LEFT,
+                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                         1,
+                                         &count,
+                                         nullptr,
+                                         "test"));
     ASSERT_EQ(count, 1);
 }
 
 TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentQueryReturnsSizeOnZeroCount)
 {
-    using hipdnn_data_sdk::data_objects::DiagonalAlignment;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     int64_t count = 0;
     hipdnnDiagonalAlignment_t output = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
-    ASSERT_NO_THROW(getDiagonalAlignment(
-        DiagonalAlignment::TOP_LEFT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 0, &count, &output, "test"));
+    ASSERT_NO_THROW(getDiagonalAlignment(DiagonalAlignment::TOP_LEFT,
+                                         HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                         0,
+                                         &count,
+                                         &output,
+                                         "test"));
     ASSERT_EQ(count, 1);
 }
 
@@ -1703,18 +1750,18 @@ TEST(TestDescriptorAttributeUtils, GetDiagonalAlignmentQueryReturnsSizeOnZeroCou
 
 TEST(TestDescriptorAttributeUtils, SetAttentionImplementationSuccess)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     auto target = AttentionImplementation::AUTO;
     auto value = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
 
     ASSERT_NO_THROW(setAttentionImplementation(
-        target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1, &value, "test"));
+        target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 1, &value, "test"));
     ASSERT_EQ(target, AttentionImplementation::UNIFIED);
 }
 
 TEST(TestDescriptorAttributeUtils, SetAttentionImplementationThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     auto target = AttentionImplementation::AUTO;
     auto value = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
 
@@ -1725,34 +1772,35 @@ TEST(TestDescriptorAttributeUtils, SetAttentionImplementationThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, SetAttentionImplementationThrowsOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     auto target = AttentionImplementation::AUTO;
 
     ASSERT_THROW_HIPDNN_STATUS(
         setAttentionImplementation(
-            target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1, nullptr, "test"),
+            target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 1, nullptr, "test"),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST(TestDescriptorAttributeUtils, SetAttentionImplementationThrowsOnWrongElementCount)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     auto target = AttentionImplementation::AUTO;
     auto value = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        setAttentionImplementation(target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 2, &value, "test"),
+        setAttentionImplementation(
+            target, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, 2, &value, "test"),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST(TestDescriptorAttributeUtils, GetAttentionImplementationSuccess)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     int64_t count = 0;
     hipdnnAttentionImplementation_t output = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_NO_THROW(getAttentionImplementation(AttentionImplementation::COMPOSITE,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                1,
                                                &count,
                                                &output,
@@ -1763,7 +1811,7 @@ TEST(TestDescriptorAttributeUtils, GetAttentionImplementationSuccess)
 
 TEST(TestDescriptorAttributeUtils, GetAttentionImplementationThrowsOnWrongType)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     int64_t count = 0;
     hipdnnAttentionImplementation_t output = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
@@ -1775,11 +1823,11 @@ TEST(TestDescriptorAttributeUtils, GetAttentionImplementationThrowsOnWrongType)
 
 TEST(TestDescriptorAttributeUtils, GetAttentionImplementationQueryReturnsSizeOnNullArray)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     int64_t count = 0;
 
     ASSERT_NO_THROW(getAttentionImplementation(AttentionImplementation::AUTO,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                1,
                                                &count,
                                                nullptr,
@@ -1789,12 +1837,12 @@ TEST(TestDescriptorAttributeUtils, GetAttentionImplementationQueryReturnsSizeOnN
 
 TEST(TestDescriptorAttributeUtils, GetAttentionImplementationQueryReturnsSizeOnZeroCount)
 {
-    using hipdnn_data_sdk::data_objects::AttentionImplementation;
+    using hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
     int64_t count = 0;
     hipdnnAttentionImplementation_t output = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_NO_THROW(getAttentionImplementation(AttentionImplementation::AUTO,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                0,
                                                &count,
                                                &output,
@@ -1830,7 +1878,7 @@ TEST(TestDescriptorAttributeUtils, FindTensorInMapThrowsWhenNotFound)
 
 TEST(TestDescriptorAttributeUtils, CopyKnobValueUnionInt)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion src;
     IntValueT intVal;
     intVal.value = 77;
@@ -1844,7 +1892,7 @@ TEST(TestDescriptorAttributeUtils, CopyKnobValueUnionInt)
 
 TEST(TestDescriptorAttributeUtils, CopyKnobValueUnionDouble)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion src;
     FloatValueT floatVal;
     floatVal.value = 1.5;
@@ -1858,7 +1906,7 @@ TEST(TestDescriptorAttributeUtils, CopyKnobValueUnionDouble)
 
 TEST(TestDescriptorAttributeUtils, CopyKnobValueUnionString)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     KnobValueUnion src;
     StringValueT strVal;
     strVal.value = "copy_test";
@@ -1872,7 +1920,7 @@ TEST(TestDescriptorAttributeUtils, CopyKnobValueUnionString)
 
 TEST(TestDescriptorAttributeUtils, CopyKnobValueUnionThrowsOnNoneType)
 {
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
     const KnobValueUnion src; // default is NONE
 
     KnobValueUnion dst;

@@ -1,0 +1,35 @@
+# rocke library: the SDPA/MHA authoring tree (kernels / builders / dispatch).
+#
+# This declares the build-time Python packages so they can be editable-installed:
+#     pip install -e .            (run from rocke/library/)
+# After an editable install of BOTH this and the platform `rocke` package, every
+# script and test resolves `rocke`, `kernels`, `builders`, `dispatch` through the
+# normal import machinery -- no PYTHONPATH, no per-file sys.path surgery.
+#
+# This tree is BUILD-TIME ONLY: it is editable-installed into the dev/build
+# environment but is intentionally NOT packaged or installed by CMake into the
+# product (only the platform `rocke` package and the C-api plugin ship).
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocke-library"
+version = "0.1.0"
+description = "rocke SDPA/MHA authoring tree: kernels, builders, dispatch"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# One-way dependency: library -> platform. The `rocke` distribution is provided
+# by the editable install of rocke/platform; it is not fetched from an index.
+dependencies = [
+    "rocke",
+]
+
+[tool.setuptools]
+# The library source root IS this directory; packages live directly under it.
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kernels*", "builders*", "dispatch*"]

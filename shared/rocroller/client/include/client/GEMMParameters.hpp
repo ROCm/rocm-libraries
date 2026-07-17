@@ -9,6 +9,7 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
@@ -149,6 +150,10 @@ namespace rocRoller
                 bool workgroupRemapXCC      = false;
                 int  workgroupRemapXCCValue = -1;
 
+                unsigned int workgroupClusterSizeX = 0;
+                unsigned int workgroupClusterSizeY = 0;
+                unsigned int workgroupClusterSizeZ = 0;
+
                 // Datatype of inputs and outputs
                 TypeParameters types;
 
@@ -184,6 +189,8 @@ namespace rocRoller
                 bool tailLoops = true;
 
                 StreamKMode streamK = StreamKMode::None;
+
+                LDSBankSwizzleMode ldsBankSwizzle = LDSBankSwizzleMode::None;
 
                 std::string version;
 

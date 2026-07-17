@@ -41,6 +41,8 @@
 #include <Tensile/Properties.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -1431,3 +1433,4 @@ kd_tree_batch_1_again:
         };
     } // namespace Matching
 } // namespace TensileLite
+

@@ -150,7 +150,7 @@ namespace hipdnn_frontend::detail
 
     // Unpack compute data type
     auto [dt, dtErr] = unpackGraphDataType(
-        opDesc, HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, "batchnorm compute data type");
+        opDesc, HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, "batchnorm compute data type");
     if(dtErr.is_bad())
     {
         return dtErr;

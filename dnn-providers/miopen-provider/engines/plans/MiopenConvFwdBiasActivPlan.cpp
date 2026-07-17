@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
 #include "MiopenConvFwdBiasActivPlan.hpp"
 
@@ -10,10 +10,11 @@ namespace miopen_plugin
 {
 
 ConvFwdBiasActivParams::ConvFwdBiasActivParams(
-    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes* biasAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& activAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes& convAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
@@ -27,8 +28,10 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     const auto& attrX = findTensorAttributes(tensorMap, _x.uid());
     const auto& attrW = findTensorAttributes(tensorMap, _w.uid());
 
-    const auto xDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
-    const auto wDims = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
+    const auto xDims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+    const auto wDims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(xDims, wDims);
 
     _conv = MiopenConvDescriptor(
@@ -113,7 +116,8 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnMiopenHandle& handle,
     , _executionSettings(executionSettings)
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     miopenFusionPlanDescriptor_t fusePlanDesc;
     THROW_ON_MIOPEN_FAILURE(miopenCreateFusionPlan(
@@ -189,7 +193,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
         });
 
     auto wBuffer
-        = miopen_utils::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.w().uid(), deviceBuffers, numDeviceBuffers);
 
     int opIdx = 0;
     miopenFusionOpDescriptor_t convoOp;
@@ -202,7 +206,7 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
 
     if(_params.bias().has_value())
     {
-        auto biasBuffer = miopen_utils::findDeviceBuffer(
+        auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _params.bias().value().uid(), deviceBuffers, numDeviceBuffers);
 
         miopenFusionOpDescriptor_t biasOp;
@@ -232,9 +236,9 @@ void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
     }
 
     auto xBuffer
-        = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto yBuffer
-        = miopen_utils::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.y().uid(), deviceBuffers, numDeviceBuffers);
 
     THROW_ON_MIOPEN_FAILURE(miopenExecuteFusionPlan_v2(handle.miopenHandle,
                                                        _fusePlanDesc.get(),

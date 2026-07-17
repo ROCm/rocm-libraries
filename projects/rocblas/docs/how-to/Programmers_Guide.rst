@@ -1636,6 +1636,10 @@ The following test situations require additional consideration:
 
       ROCBLAS_CLIENT_RAM_GB_LIMIT=32 ./rocblas-test --gtest_filter=*stress*
 
+   If the ``rocblas-test`` process is being killed due to an out of memory (OOM) condition, then reduce the client limit by half
+   and try again.  It is not advisable to run any stress tests if you have less than 8 GB VRAM available to your graphics device.
+   Use the test subtraction syntax if combining with other filters, for example, ``-*stress*``.
+
 *  Long-running tests
 
    The rocblas-test process will be terminated if a single test takes longer than the configured timeout.
@@ -1654,6 +1658,13 @@ The following test situations require additional consideration:
    .. code-block:: bash
 
       ROCBLAS_TEST_NO_SIGACTION=1 rocgdb ./rocblas-test --gtest_filter=*stress*
+
+   On Linux the rocblas-test process now aborts when catching signals to log a stack dump. To disable this feature,
+   set the environment variable ``ROCBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL``:
+
+   .. code-block:: bash
+
+      ROCBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL=1 ./rocblas-test --gtest_filter=*stress*
 
 
 Adding a new rocBLAS unit test

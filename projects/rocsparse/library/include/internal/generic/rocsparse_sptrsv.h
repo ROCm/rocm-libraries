@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup generic_module
 *  \details
 *  \p rocsparse_sptrsv_buffer_size returns the size of the required buffer to execute the given stage of the SpTrSV operation.
-*  This routine is used in conjunction with \ref rocsparse_sptrsv(). See \ref rocsparse_sptrsv for full description and example.
+*  This routine is used in conjunction with \ref rocsparse_sptrsv(). See \ref rocsparse_sptrsv for a full description and example.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -45,9 +45,9 @@ extern "C" {
 *
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
-*  sptrsv_descr SpTrSV descriptor
+*  sptrsv_descr SpTrSV descriptor.
 *  @param[in]
 *  spmat_descr  sparse matrix descriptor.
 *  @param[in]
@@ -59,7 +59,7 @@ extern "C" {
 *  @param[out]
 *  buffer_size_in_bytes  number of bytes of the buffer.
 *  @param[out]
-*  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+*  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -77,7 +77,7 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
                                               rocsparse_error*            p_error);
 
 /*! \ingroup generic_module
-*  \brief Sparse Triangular solve
+*  \brief Sparse triangular solve.
 *
 *  \details
 *  \p rocsparse_sptrsv solves a triangular linear system of equations defined by a sparse \f$m \times m\f$ square matrix \f$op(A)\f$,
@@ -98,7 +98,7 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  and where \f$y\f$ is the dense solution vector and \f$x\f$ is the dense right-hand side vector.
 *
 *  Performing the above operation requires two stages, the stage \ref rocsparse_sptrsv_stage_analysis and the stage \ref rocsparse_sptrsv_stage_compute.
-*  The stage \ref rocsparse_sptrsv_stage_analysis is required to perform the stage \ref rocsparse_sptrsv_stage_compute and only need to be called once for a given sparse matrix \f$op(A)\f$ while the stage \ref rocsparse_sptrsv_stage_compute can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors.
+*  The stage \ref rocsparse_sptrsv_stage_analysis is required to perform the stage \ref rocsparse_sptrsv_stage_compute and only need to be called once for a given sparse matrix \f$op(A)\f$, while the stage \ref rocsparse_sptrsv_stage_compute can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors.
 *
 *  \p rocsparse_sptrsv supports the following
 *  data types for \f$op(A)\f$, \f$x\f$, \f$y\f$, and scalar \f$\alpha\f$:
@@ -118,12 +118,12 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
 *
 *  \note
-*  the \ref rocsparse_sptrsv_stage_compute stage is non blocking
-*  and executed asynchronously with respect to the host. It may return before the actual computation has finished.
+*  the \ref rocsparse_sptrsv_stage_compute stage is non-blocking
+*  and executed asynchronously with respect to the host. It can return before the actual computation has finished.
 *  The \ref rocsparse_sptrsv_stage_analysis stage is blocking with respect to the host.
 *
 *  \note
-*  Currently, only \p trans == \ref rocsparse_operation_none and \p trans == \ref rocsparse_operation_transpose is supported.
+*  Currently, only \p trans == \ref rocsparse_operation_none and \p trans == \ref rocsparse_operation_transpose are supported.
 *  Only the \ref rocsparse_sptrsv_stage_compute stage
 *  supports execution in a hipGraph context. The \ref rocsparse_sptrsv_stage_analysis stage does not support hipGraph.
 *
@@ -131,7 +131,7 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  This routine does not support batched computation.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  sptrsv_descr descriptor of the routine.
 *  @param[in]
@@ -151,7 +151,7 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval      rocsparse_status_invalid_pointer \p sptrsv_descr, \p A, \p x, or \p y is invalid, or if \p buffer is null and \p buffer_size_in_bytes is non zero, or if \p buffer is non null and \p buffer_size_in_bytes is zero.
+*  \retval      rocsparse_status_invalid_pointer \p sptrsv_descr, \p A, \p x, or \p y is invalid, or \p buffer is null and \p buffer_size_in_bytes is non-zero, or \p buffer is not null and \p buffer_size_in_bytes is zero.
 *  \retval      rocsparse_status_invalid_value \p sptrsv_stage is invalid.
 *
 *  \par Example

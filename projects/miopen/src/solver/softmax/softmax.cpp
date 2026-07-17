@@ -190,15 +190,15 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     {
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::softmax::InvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel(params.x,
-                       params.forward_y,
-                       params.xdx_offset,
-                       params.y_offset,
-                       params.alpha,
-                       params.beta);
+                kernel_(params.x,
+                        params.forward_y,
+                        params.xdx_offset,
+                        params.y_offset,
+                        params.alpha,
+                        params.beta);
             };
         };
     }
@@ -206,17 +206,17 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     {
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::softmax::InvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel(params.backward_y,
-                       params.dy,
-                       params.dx,
-                       params.y_offset,
-                       params.dy_offset,
-                       params.xdx_offset,
-                       params.alpha,
-                       params.beta);
+                kernel_(params.backward_y,
+                        params.dy,
+                        params.dx,
+                        params.y_offset,
+                        params.dy_offset,
+                        params.xdx_offset,
+                        params.alpha,
+                        params.beta);
             };
         };
     }
@@ -234,13 +234,13 @@ void PerformanceConfigSoftmax::HeuristicInit(const miopen::softmax::ProblemDescr
     case miopenHalf:
     case miopenFloat:
     case miopenBFloat16: local_size = PerformanceConfigSoftmax::start_local_size; break;
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
     initialized = true;
@@ -282,13 +282,13 @@ bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
     case miopenHalf:
     case miopenFloat:
     case miopenBFloat16: return true;
+
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenInt8:
     case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
+    case miopenInt64: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
 }

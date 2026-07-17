@@ -3,20 +3,24 @@
 
 #pragma once
 
-#include <functional>
 #include <variant>
 
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVariancePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleDequantizePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormBpropPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanRegistrySignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdPlan.hpp>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <sstream>
@@ -67,6 +71,7 @@ private:
         }
     }
 
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     void initializePlanBuilders()
     {
         registerBuildersForVariant(PlanRegistrySignatureKey{});

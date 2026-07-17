@@ -1,15 +1,15 @@
 TestParameters:
-  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported yet
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   NumElementsToValidate: 128
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
 
 BenchmarkProblems:
@@ -20,10 +20,9 @@ BenchmarkProblems:
     - # ProblemType
       OperationType: GEMM
       DataType: s
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
-      Batched: True
       UseBias: 1
       Batched: True
       Activation: True
@@ -168,7 +167,7 @@ BenchmarkProblems:
         - DepthU: [16,32]
         - LocalReadVectorWidth: [4]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0,1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -177,7 +176,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

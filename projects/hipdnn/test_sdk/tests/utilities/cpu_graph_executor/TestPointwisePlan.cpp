@@ -5,9 +5,9 @@
 
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -16,9 +16,9 @@
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
@@ -44,9 +44,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
                                    TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Verify output is correct (non-negative since it's RELU)
     // For this test we just verify execution succeeded without throwing
@@ -74,9 +75,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBinaryAdd)
                                     TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Verify execution succeeded
     SUCCEED();
@@ -103,9 +105,10 @@ TEST_F(TestPointwisePlan, ExecutePlanBackwardReluBwd)
                                     TensorLayout::NCHW);
 
     // Execute using CpuReferenceGraphExecutor
-    CpuReferenceGraphExecutor graphExecutor;
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Verify execution succeeded
     SUCCEED();
@@ -127,9 +130,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryGeluFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }
@@ -150,9 +154,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnaryGeluApproxTanhFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }
@@ -173,9 +178,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwd)
                                    seed,
                                    TensorLayout::NCHW);
 
-    CpuReferenceGraphExecutor graphExecutor;
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }
@@ -200,9 +206,10 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwdWithBeta)
                                    std::nullopt,
                                    0.5f);
 
-    CpuReferenceGraphExecutor graphExecutor;
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     SUCCEED();
 }
@@ -222,9 +229,10 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnary)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -253,9 +261,10 @@ TEST(TestPointwisePlanBuilder, PlanConstructionBinary)
                                     1,
                                     TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -281,9 +290,10 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGelu)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -309,9 +319,10 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnaryGeluApproxTanh)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -337,9 +348,10 @@ TEST(TestPointwisePlanBuilder, PlanConstructionUnarySwish)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -365,9 +377,10 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnary)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -397,9 +410,10 @@ TEST(TestPointwisePlanBuilder, IsApplicableBinary)
                                     1,
                                     TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -426,9 +440,10 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnaryGelu)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -454,9 +469,10 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnaryGeluApproxTanh)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -482,9 +498,10 @@ TEST(TestPointwisePlanBuilder, IsApplicableUnarySwish)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -510,9 +527,10 @@ TEST(TestPointwisePlanBuilder, UnsupportedOperation)
                                    1,
                                    TensorLayout::NCHW);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -539,9 +557,10 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfEluAlphaValueSet)
                                    std::nullopt,
                                    1.0f);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -570,9 +589,10 @@ TEST(TestPointwisePlanBuilder, PlanBuilderThrowsIfSoftPlusBetaValueSet)
 
                                    1.0f);
 
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const PointwisePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;

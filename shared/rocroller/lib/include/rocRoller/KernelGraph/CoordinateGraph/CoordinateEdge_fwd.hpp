@@ -15,6 +15,8 @@ namespace rocRoller
         struct Forget;
         struct Inherit;
         struct Join;
+        struct PairSwap;
+        struct Rotate;
         struct MakeOutput;
         struct PassThrough;
         struct PiecewiseAffineJoin;
@@ -28,6 +30,8 @@ namespace rocRoller
                                                      Forget,
                                                      Inherit,
                                                      Join,
+                                                     PairSwap,
+                                                     Rotate,
                                                      MakeOutput,
                                                      PassThrough,
                                                      PiecewiseAffineJoin,
@@ -54,6 +58,7 @@ namespace rocRoller
         struct Segment;
         struct Stride;
         struct View;
+        struct TDM;
 
         using DataFlowEdge = std::variant<DataFlow,
                                           Alias,
@@ -65,7 +70,8 @@ namespace rocRoller
                                           Offset,
                                           Segment,
                                           Stride,
-                                          View>;
+                                          View,
+                                          TDM>;
 
         template <typename T>
         concept CDataFlowEdge = std::constructible_from<DataFlowEdge, T>;

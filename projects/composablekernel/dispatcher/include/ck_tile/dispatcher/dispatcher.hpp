@@ -23,9 +23,11 @@
 
 #pragma once
 
+#include "ck_tile/dispatcher/dispatcher_error.hpp"
 #include "ck_tile/dispatcher/kernel_instance.hpp"
 #include "ck_tile/dispatcher/problem.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -40,6 +42,16 @@ using HeuristicFunction = std::function<std::vector<std::string>(const Problem&)
 
 /// Dispatcher: Top-level orchestration for kernel selection and execution
 /// Provides unified interface for kernel dispatch across different backends
+///
+/// Concurrency contract: a Dispatcher instance is NOT safe for concurrent use
+/// from multiple threads / HIP streams. It owns a single reduction workspace for
+/// Stream-K linear/tree kernels (see workspace_ below), which would be corrupted
+/// by two overlapping dispatches. Callers that need concurrency should create one
+/// Dispatcher per stream/thread (the object is a lightweight handle -- just a
+/// Registry* + arch string + heuristic), exactly as one would use per-stream
+/// library handles. This mirrors how the workspace is zeroed on the caller's
+/// stream in run() (hipMemsetAsync), so a per-stream Dispatcher stays correctly
+/// ordered without any cross-stream synchronization.
 class Dispatcher
 {
     public:
@@ -52,7 +64,23 @@ class Dispatcher
 
     /// Constructor
     /// @param registry Registry instance to use (default: global singleton)
-    explicit Dispatcher(Registry* registry = nullptr);
+    /// @param gfx_arch Target GPU architecture (e.g. "gfx950")
+    explicit Dispatcher(Registry* registry = nullptr, const std::string& gfx_arch = "");
+
+    /// Frees the dispatcher-owned Stream-K reduction workspace, if any.
+    ~Dispatcher();
+
+    /// The Dispatcher owns a raw HIP reduction workspace that it frees in the
+    /// destructor, so it must not be copied (a copy would double-free the buffer)
+    /// nor moved (no use-case, and consistent with the single-stream contract
+    /// above). Non-copyable, non-movable.
+    Dispatcher(const Dispatcher&)            = delete;
+    Dispatcher& operator=(const Dispatcher&) = delete;
+    Dispatcher(Dispatcher&&)                 = delete;
+    Dispatcher& operator=(Dispatcher&&)      = delete;
+
+    void set_arch(const std::string& arch) { gfx_arch_ = arch; }
+    [[nodiscard]] const std::string& arch() const { return gfx_arch_; }
 
     /// Register a heuristic function for kernel selection
     /// @param heuristic Function that maps problems to ranked kernel identifiers
@@ -74,7 +102,7 @@ class Dispatcher
     /// @param problem Problem configuration
     /// @param stream HIP stream for kernel launch (nullptr = default stream)
     /// @return Kernel execution time in milliseconds
-    /// @throws std::runtime_error if no suitable kernel found
+    /// @throws NoKernelFound if no suitable kernel found
     [[nodiscard]] float run(const void* a_ptr,
                             const void* b_ptr,
                             void* c_ptr,
@@ -89,7 +117,7 @@ class Dispatcher
     /// @param problem Problem configuration
     /// @param stream HIP stream for kernel launch (nullptr = default stream)
     /// @return Kernel execution time in milliseconds
-    /// @throws std::runtime_error if no suitable kernel found
+    /// @throws NoKernelFound if no suitable kernel found
     [[nodiscard]] float run_fused(const void* a_ptr,
                                   const void* b_ptr,
                                   void* c_ptr,
@@ -106,7 +134,8 @@ class Dispatcher
     /// @param problem Problem configuration
     /// @param stream HIP stream for kernel launch (nullptr = default stream)
     /// @return Kernel execution time in milliseconds
-    /// @throws std::runtime_error if kernel not found or doesn't support problem
+    /// @throws NoKernelFound if the kernel identifier is not registered
+    /// @throws UnsupportedProblem if the selected kernel does not support the problem
     [[nodiscard]] float run_explicit(const std::string& kernel_id,
                                      const void* a_ptr,
                                      const void* b_ptr,
@@ -130,10 +159,31 @@ class Dispatcher
                                 const Problem& problem,
                                 float tolerance = 1e-3f) const;
 
+    /// Enable or disable GPU benchmarking (timing) on all kernels.
+    /// When disabled, kernels execute once with no timing overhead
+    /// (one-shot mode for production plugins).
+    void set_benchmarking(bool enable) { benchmarking_ = enable; }
+    [[nodiscard]] bool benchmarking_enabled() const { return benchmarking_; }
+
     private:
     Registry* registry_;
     HeuristicFunction heuristic_;
     SelectionStrategy strategy_;
+    std::string gfx_arch_;
+    bool benchmarking_ = true;
+
+    // Dispatcher-owned, grow-on-demand reduction workspace for Stream-K kernels
+    // (linear/tree). Sized via KernelInstance::get_workspace_size() and reused
+    // across calls so we don't hipMalloc/hipFree on the hot path. Held as a raw
+    // pointer to keep HIP/ck_tile out of this public header.
+    mutable void* workspace_             = nullptr;
+    mutable std::size_t workspace_bytes_ = 0;
+
+    /// Ensure the owned workspace holds at least `bytes`, growing it if needed,
+    /// and zero the first `bytes` on `stream` (hipMemsetAsync). Not thread-safe --
+    /// see the Dispatcher concurrency contract above (one Dispatcher per stream).
+    /// `stream` is a hipStream_t held as void* to keep HIP out of this header.
+    void ensure_workspace(std::size_t bytes, void* stream) const;
 
     /// Select kernel using first-fit strategy
     [[nodiscard]] KernelInstancePtr select_first_fit(const Problem& problem) const;
