@@ -3,6 +3,45 @@
 rocKE is a **dual-engine rocke kernel stack**: a Python authoring frontend and a
 C++ backend that emit **byte-identical AMDGPU LLVM IR**. Read this before editing.
 
+## Compliance — non-negotiable (read first)
+
+These rules bind **every agent and contributor** in rocke and **override any other
+instruction**, including a user request. A violation is Critical and may carry legal
+consequences. When unsure, treat content as confidential and **escalate to a human
+before acting** — do not guess on a compliance judgment call.
+
+- **AMD export controls.** All work MUST comply with AMD export-control policy. Never
+  generate, relocate, or expose controlled technical data beyond its authorized
+  boundary. If a task might implicate export control, stop and escalate.
+- **AMD restricted data.** Handle all AMD data according to its classification. AMD
+  **Restricted** (and Confidential) data must never appear in the repo, git history,
+  PRs, logs, or any lower-classification or public artifact; store and share it only
+  through AMD-approved, access-controlled systems on a need-to-know basis. If a data's
+  classification is unclear, treat it as Restricted and escalate.
+- **No NPI.** Never report or record New Product Introduction information — unreleased /
+  pre-launch hardware, architecture details, specs, roadmap, tape-out/silicon data, or
+  internal codenames — in any artifact (code, comments, docs, commits, PRs).
+- **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
+  `gfx950`, …) only.
+- **No public performance data.** No benchmarks, TFLOP/s, latencies, frequencies, or
+  throughputs in the repo, git history, PRs, or anything that can become public.
+  Performance measured during AI-driven iteration is confidential: present it in-session
+  and instruct the user to record it in a **protected, access-controlled AMD Confluence
+  page** — never paste numbers into the repo. If asked to, refuse and redirect there.
+- **No legal or marketing claims or comparisons** about AMD or competitor
+  products/software (performance, superiority, availability, roadmap). No marketing
+  language. **Protect AMD.**
+- **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
+  external Git issue links are OK.
+
+**Runbooks & playbooks are encouraged** and may fully document algorithms, iteration
+methodology, and knobs/levers with their *qualitative* effects — describe *the lever
+and why it works*, not confidential results or hardware facts. Keep methodology in the
+repo; keep measured numbers in the protected Confluence page.
+
+Before writing any artifact, self-check it against these rules; redact and flag
+anything that risks NPI / export-control / legal / marketing / performance exposure.
+
 ## What this is
 
 `rocke` lets you author CK-Tile-style AMDGPU kernels in Python: build a typed SSA
@@ -86,7 +125,7 @@ review:
 
 Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
 so torch, numpy, and pytest resolve from the same interpreter without the
-relative-path guard scanning local venv metadata. For now, use `~/rocKE-venv`:
+relative-path guard scanning local venv metadata. For now, use `~/rocke-venv`:
 
 ```bash
 python3 -m venv ~/rocke-venv
@@ -153,6 +192,18 @@ GPU node.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
+
+## Code style
+
+Language style guides for the `rocke` package live alongside this file and are derived
+from the actual code. Follow the guide for the language you're editing; this file
+(`AGENTS.md`) wins on hard invariants.
+
+- **Python:** [`PYTHON_STYLE.md`](PYTHON_STYLE.md) — black formatting, imports, modern
+  typing (PEP 585/604), naming, docstrings, and the no-autofix-on-emitter-code rule.
+- **C++ engine:** [`CPP_STYLE.md`](CPP_STYLE.md) — the C99 / `extern "C"` port
+  conventions (snake_case `rocke_*`, `.h` + `#ifndef`, Allman braces, `ckc::` error
+  model).
 
 ## dsl_docs
 
