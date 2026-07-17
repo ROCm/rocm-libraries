@@ -8,41 +8,52 @@
 
 #include "dispatcher/sdpa_fwd/FmhaFeatures.hpp"
 
-namespace rocke_client::dispatcher {
+namespace rocke_client::dispatcher
+{
 
-inline double fmha_dtype_bytes(const std::string& dt) {
-    if (dt == "fp32") return 4.0;
-    if (dt == "fp8" || dt == "bf8") return 1.0;
+inline double fmha_dtype_bytes(const std::string& dt)
+{
+    if(dt == "fp32")
+        return 4.0;
+    if(dt == "fp8" || dt == "bf8")
+        return 1.0;
     return 2.0;
 }
-inline double fmha_dtype_enc(const std::string& dt) {
-    if (dt == "fp16") return 0.0;
-    if (dt == "f16") return 0.0;
-    if (dt == "bf16") return 1.0;
+inline double fmha_dtype_enc(const std::string& dt)
+{
+    if(dt == "fp16")
+        return 0.0;
+    if(dt == "f16")
+        return 0.0;
+    if(dt == "bf16")
+        return 1.0;
     return 0.0;
 }
 
 // Raw problem-shape inputs (from SdpaProblem).
-struct FmhaProblemInputs {
+struct FmhaProblemInputs
+{
     double batch = 0, sq = 0, sk = 0, hq = 0, hk = 0, dq = 0, dv = 0;
     std::string dtype = "fp16";
 };
 // Raw config/knob inputs (from AotInstance + arch defaults).
-struct FmhaConfigInputs {
+struct FmhaConfigInputs
+{
     double pip = 1, tm0 = 16, tn0 = 0, tk0 = 0, tn1 = 0, tk1 = 0, tk0max = 0;
     double num_warps = 1;
     double ps = 0, psk = 0, pd = 0, pdv = 0, mask = 0, bias = 0, lse = 0;
     double dropout = 0, logits = 0, sink = 0, skip = 0, qscale = 0, paged = 1;
 };
 // hw fields (name-matched to FmhaFeatureEngine._hw).
-struct FmhaHwInputs {
+struct FmhaHwInputs
+{
     double num_cus = 0, simds_per_cu = 4, total_simds = 0, shader_engines = 0;
     double max_clock_mhz = 0, wavefront_size = 64, lds_capacity = 0, num_xcd = 0;
 };
 
-inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
-                                   const FmhaConfigInputs& c,
-                                   const FmhaHwInputs& hw) {
+inline FmhaFeatures
+    fmha_featurize(const FmhaProblemInputs& p, const FmhaConfigInputs& c, const FmhaHwInputs& hw)
+{
     const double batch = p.batch, sq = p.sq, sk = p.sk, hq = p.hq;
     const double hk = std::max(p.hk, 1.0);
     const double dq = p.dq;
@@ -55,10 +66,9 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double gqa = hq / hk;
     const double asp = sq / std::max(sk, 1.0);
     const double ops = 2.0 * batch * hq * sq * sk * (dq + dv);
-    const double mem = (batch * hq * sq * dq
-                        + batch * hk * sk * dq
-                        + batch * hk * sk * dv
-                        + batch * hq * sq * dv) * bpe;
+    const double mem = (batch * hq * sq * dq + batch * hk * sk * dq + batch * hk * sk * dv
+                        + batch * hq * sq * dv)
+                       * bpe;
     const double ai = ops / std::max(mem, 1.0);
     const double decode = (sq <= 1.0) ? 1.0 : 0.0;
 
@@ -79,7 +89,8 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double tot = batch * hq * ntm * ntk;
 
     auto eff = [](double d, double t) -> double {
-        if (t <= 0.0) return 1.0;
+        if(t <= 0.0)
+            return 1.0;
         double r = std::fmod(d, t);
         return (r > 0.0) ? r / t : 1.0;
     };
@@ -99,8 +110,7 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double gqa_f = (hq != hk) ? 1.0 : 0.0;
     const double totq = batch * hq * sq * dq;
     const double totkv = batch * hk * sk * (dq + dv);
-    const double fc = lse + dropout + logits + sink + skip + paged
-                      + ((mask > 0.0) ? 1.0 : 0.0)
+    const double fc = lse + dropout + logits + sink + skip + paged + ((mask > 0.0) ? 1.0 : 0.0)
                       + ((bias > 0.0) ? 1.0 : 0.0);
 
     FmhaFeatures f;
@@ -176,4 +186,4 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     return f;
 }
 
-}  // namespace rocke_client::dispatcher
+} // namespace rocke_client::dispatcher
