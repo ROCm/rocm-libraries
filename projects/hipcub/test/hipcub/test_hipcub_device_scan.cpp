@@ -137,8 +137,8 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
     using scan_op_type = typename TestFixture::scan_op_type;
     // if scan_op_type is plus and input_type is bfloat16 or half,
     // use float as device-side accumulator and double as host-side accumulator
-    using is_add_op    = test_utils::is_add_operator<scan_op_type>;
-    using acc_type     = typename accum_type<T, scan_op_type>::type;
+    using is_add_op        = test_utils::is_add_operator<scan_op_type>;
+    using acc_type         = typename accum_type<T, scan_op_type>::type;
     using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
     constexpr bool inplace = std::is_same<T, U>::value && std::is_same<acc_type, T>::value;
 
@@ -268,13 +268,13 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -329,8 +329,8 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
     using scan_op_type = typename TestFixture::scan_op_type;
     // if scan_op_type is plus and input_type is bfloat16 or half,
     // use float as device-side accumulator and double as host-side accumulator
-    using is_add_op    = test_utils::is_add_operator<scan_op_type>;
-    using acc_type     = typename accum_type<T, scan_op_type>::type;
+    using is_add_op        = test_utils::is_add_operator<scan_op_type>;
+    using acc_type         = typename accum_type<T, scan_op_type>::type;
     using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
     constexpr bool inplace = std::is_same<T, U>::value && std::is_same<acc_type, T>::value;
 
@@ -627,7 +627,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -655,7 +655,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                                                                  stream));
             }
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -698,8 +698,8 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
     using scan_op_type = typename TestFixture::scan_op_type;
     // if scan_op_type is plus and input_type is bfloat16 or half,
     // use float as device-side accumulator and double as host-side accumulator
-    using is_add_op    = test_utils::is_add_operator<scan_op_type>;
-    using acc_type     = typename accum_type<T, scan_op_type>::type;
+    using is_add_op        = test_utils::is_add_operator<scan_op_type>;
+    using acc_type         = typename accum_type<T, scan_op_type>::type;
     using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
     constexpr bool inplace = std::is_same<T, U>::value && std::is_same<acc_type, T>::value;
 
@@ -841,13 +841,13 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -1030,7 +1030,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -1059,7 +1059,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                                  stream));
             }
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -1369,7 +1369,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
             HIP_CHECK(hipGetLastError());
 
             test_utils::GraphHelper gHelper;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.startStreamCapture(stream);
 
             // Run
@@ -1382,7 +1382,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
                                                         input.size(),
                                                         stream));
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
@@ -1411,4 +1411,81 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
 
     if(TestFixture::use_graphs)
         HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TEST(HipcubDeviceScanTests, InclusiveScanFFM)
+{
+    constexpr size_t size = 3'000'000;
+
+    std::random_device                     rd;
+    std::mt19937                           gen(rd());
+    std::uniform_int_distribution<int32_t> dis(0, 10);
+
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    hipStream_t stream = 0; // default
+
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    int32_t* input = new int32_t[size];
+    for(size_t i = 0; i < size; i++)
+        input[i] = dis(gen);
+
+    int32_t* d_input;
+    int32_t* d_output;
+
+    HIP_CHECK(hipMalloc(&d_input, sizeof(int32_t) * size));
+    HIP_CHECK(hipMalloc(&d_output, sizeof(int32_t) * size));
+    HIP_CHECK(hipMemcpy(d_input, input, size * sizeof(int32_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    int32_t* expected = new int32_t[size];
+
+    std::inclusive_scan(input, input + size, expected);
+
+    // first call is to get the size of temp storage
+    size_t temp_storage_size_bytes;
+    void*  d_temp_storage = nullptr;
+
+    HIP_CHECK(hipcub::DeviceScan::InclusiveSum(d_temp_storage,
+                                               temp_storage_size_bytes,
+                                               d_input,
+                                               d_output,
+                                               size,
+                                               stream));
+    ASSERT_GT(temp_storage_size_bytes, 0U);
+
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+
+    // second call actually does the sum
+    HIP_CHECK(hipcub::DeviceScan::InclusiveSum(d_temp_storage,
+                                               temp_storage_size_bytes,
+                                               d_input,
+                                               d_output,
+                                               size,
+                                               stream));
+
+    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    //coppying results back to host
+    int32_t* output = new int32_t[size];
+    HIP_CHECK(hipMemcpy(output, d_output, size * sizeof(int32_t), hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Check if output values are as expected
+
+    for(size_t i = 0; i < size; i++)
+        ASSERT_EQ(output[i], expected[i]);
+
+    delete[] input;
+    delete[] output;
+    delete[] expected;
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_temp_storage));
 }
