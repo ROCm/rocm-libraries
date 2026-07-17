@@ -41,7 +41,6 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
 from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel, TemporalHint, NonVolatile
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
-from rocisa.instruction import TensorStoreFromLds, SWaitTensorcnt
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
   BufferLoadB16, BufferLoadU16, BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
@@ -59,7 +58,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SLShiftRightB64, SLoadB32, SLoadB64, SMFMAInstruction, SMemLoadInstruction, SMaxU32, SMinI32, \
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
-  SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
+  SWaitCnt, SWaitAlu, SWaitTensorcnt, TensorStoreFromLds, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
   VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
   VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
