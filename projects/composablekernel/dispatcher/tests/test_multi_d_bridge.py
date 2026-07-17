@@ -18,7 +18,7 @@ Everything under test is pure host-side logic (name generation, the codegen
 JSON projection, and the shipped configs/*.json). No GPU, hipcc, or dispatcher
 build is required.
 
-Run: python3 -m pytest tests/test_multi_d_bridge.py -v
+Run: python3 -m pytest dispatcher/tests/test_multi_d_bridge.py -v
 """
 
 import json
