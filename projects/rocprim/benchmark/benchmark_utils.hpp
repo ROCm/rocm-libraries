@@ -27,7 +27,6 @@
 #include "../common/utils_data_generation.hpp"
 #include "../common/utils_half.hpp"
 
-#include <cstdint>
 #include <rocprim/block/block_load.hpp>
 #include <rocprim/block/block_scan.hpp>
 #include <rocprim/config.hpp>
@@ -40,18 +39,10 @@
 #include <rocprim/types/tuple.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
 #include <limits>
-#include <memory>
-#include <numeric>
 #include <random>
-#include <regex>
-#include <sstream>
+#include <cstdint>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
@@ -591,6 +582,9 @@ PRIMBENCH_REGISTER_TYPE(huge_2048_f32_f32, "huge<2048,f32,f32>")
 
 struct benchmark_types
 {
+    // Important: the ordering of these types should correspond with
+    // the bit order of the `Type_Category` enum. Modifications here
+    // should be reflected there as well!
     using types = std::tuple<
         // Signed integer types
         int8_t,
@@ -633,8 +627,11 @@ struct benchmark_types
     * Each type is assigned a unique bit in a 32-bit bit mask, allowing for efficient combination and checking of type categories with bitwise operators.
     * Some commonly used predefined categories are provided.
     */
-    enum class Type_Category : u_int32_t
+    enum class Type_Category : uint32_t
     {
+        // Important: the ordering of these enums should correspond with
+        // the bit order of the above `types` type. Modifications here 
+        // should be reflected there as well!
         none        = 0,
         type_int8   = 1u << 0,
         type_int16  = 1u << 1,
