@@ -1,0 +1,30 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# miopen-provider CTest Categories (RFC0010).
+#
+# miopen-provider's GTest binaries are categorised by the GTest-filtered
+# categories in test_categories.yaml. This file labels the *pre-registered*
+# (non-GTest) CTest tests that share this provider's check targets.
+#
+# The only such test today is the generated <project>_test_name_validation
+# meta-test (see dnn-providers/cmake/Tests.cmake
+# _create_test_name_validation_target_internal). Without an entry here it
+# carries no labels and is never selected by `ctest -L <tier>`, so it silently
+# drops out of every check target. Label it into the quick tier; the shared
+# parser's tier cascade (quick -> quick, standard, comprehensive, full) then
+# runs it in every cumulative check target, matching the pre-YAML behaviour
+# where the validation test carried the quick label.
+#
+# The pattern is the exact CTest test name (miopen-provider_test_name_validation)
+# so it matches only the validation meta-test and never the
+# external-integration-check target, which is categorised separately via
+# test_categories_integration.yaml.
+test_categories:
+  quick:
+    description: "Pre-registered CTest meta-checks (test-name validation)"
+    test_patterns:
+      - "miopen-provider_test_name_validation"
+    labels:
+      - "quick"
+      - "pre-commit"

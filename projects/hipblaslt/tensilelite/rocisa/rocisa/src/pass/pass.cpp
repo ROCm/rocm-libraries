@@ -44,13 +44,26 @@ namespace rocisa
 
         if(option.doOpt())
         {
-            auto maxVgpr = kernel->totalVgprs;
-            auto maxSgpr = kernel->totalSgprs;
-            auto graph   = buildGraph(kernel->body, maxVgpr, maxSgpr);
+            auto vgprMax = kernel->totalVgprs;
+            auto sgprMax = kernel->totalSgprs;
+            auto graph   = buildGraph(kernel->body, vgprMax, sgprMax);
             if(option.removeDupAssign)
             {
                 removeDuplicateAssignment(graph);
             }
+            // Derive the post-pass max VGPR from the graph that was just built.
+            // graph.maxVgprSeen is the highest VGPR index referenced by any
+            // instruction (set in _addRegToGraph).  Add 1 to convert to a count.
+            // Falls back to the pool estimate (vgprMax) when no VGPR was seen
+            // (degenerate/empty kernel), which is conservative and safe.
+            result.maxVgpr = (graph.maxVgprSeen >= 0) ? (graph.maxVgprSeen + 1) : vgprMax;
+        }
+        else
+        {
+            // doOpt() is false (e.g. ActivationType=="all"): the graph is not
+            // built, so conservatively return the pool estimate.  Python will
+            // see max_vgpr == vgprPool.size() and skip the update.
+            result.maxVgpr = kernel->totalVgprs;
         }
 
         if(option.insertDelayAlu)
@@ -84,5 +97,6 @@ void init_pass(nb::module_ m)
 
     nb::class_<rocisa::rocIsaPassResult>(m_pass, "rocIsaPassResult")
         .def(nb::init<>())
-        .def_ro("cycles", &rocisa::rocIsaPassResult::cycles);
+        .def_ro("cycles",   &rocisa::rocIsaPassResult::cycles)
+        .def_ro("maxVgpr",  &rocisa::rocIsaPassResult::maxVgpr);
 }

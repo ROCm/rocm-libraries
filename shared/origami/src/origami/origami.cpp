@@ -6,8 +6,11 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 
+#include "origami/attention.hpp"
 #include "origami/gemm.hpp"
+#include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
@@ -18,9 +21,10 @@ namespace origami {
 std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const hardware_t& hardware,
                                                      const std::vector<config_t>& configs,
-                                                     std::size_t topk) {
+                                                     std::size_t topk,
+                                                     model_t model) {
   // Use rank_configs to get configurations with latencies ranked by performance
-  auto ranked_configs = rank_configs(problem, hardware, configs);
+  auto ranked_configs = rank_configs(problem, hardware, configs, model);
 
   // Return only the top K configurations
   std::vector<prediction_result_t> topk_configs;
@@ -79,7 +83,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // What SK does -- we already have skGrid so just compute num_timesteps and split_factor
   auto num_timesteps =
       skGrid > numMTs ? math::safe_ceil_div(skGrid, numCUs) : math::safe_ceil_div(numMTs, numCUs);
-  auto split_factor = math::safe_ceil_div(skGrid, numMTs);
+  auto split_factor = math::safe_ceil_div(skGrid, numMTs * batch);
 
   // Stream-K fixup deadlock prevention:
   // When the SK grid doesn't evenly divide tiles, some workgroups produce partial
@@ -88,6 +92,13 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   // The chunk transform reorders WG IDs across XCDs, breaking this assumption and potentially
   // filling all GPU execution slots with spinning fixup waves resulting in a cooperative deadlock.
   bool sk_has_partial_tiles = (skGrid > 0 && skGrid < (numMTs * batch) && (numMTs * batch) % skGrid != 0);
+
+  // The same hazard exists when a single output tile is finished by more than one workgroup
+  // because the K dimension is split across workgroups (skGrid > tiles): the fixup handoff
+  // still needs a tile's co-op workgroups to stay in consecutive physical-WG order, and the
+  // chunk transform reorders them. Disable chunking whenever tiles are split or partial.
+  bool sk_split_tiles  = (skGrid > 0 && split_factor > 1);
+  bool sk_disable_chunk = sk_has_partial_tiles || sk_split_tiles;
 
   // -------------------
   // NonTemporal Cases
@@ -104,7 +115,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
     // If we are using chunking, we use the minimum of the number of tiles per XCD and the number of CUs per XCD.
     size_t out_wgmxccchunk = use_chunk ? std::min(math::safe_ceil_div(numMTs, numXCD), numCUsPerXCD) : 0;
-    if (sk_has_partial_tiles) out_wgmxccchunk = 0;
+    if (sk_disable_chunk) out_wgmxccchunk = 0;
     // If we are using wgmxcc, we use the number of XCDs.
     size_t out_wgmxcc = use_wgmxcc ? numXCD : 1;
     // If we are using wgm, we use the number of tiles in the smaller dimension.
@@ -146,7 +157,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
       wgm         = 1;
     }
 
-    if (sk_has_partial_tiles) wgmxccchunk = 0;
+    if (sk_disable_chunk) wgmxccchunk = 0;
     return workgroup_mapping_t{wgmxccchunk, wgmxcc, wgm};
   }
 
@@ -165,7 +176,7 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   else
     out_wgmxccchunk = 0;
 
-  if (sk_has_partial_tiles) out_wgmxccchunk = 0;
+  if (sk_disable_chunk) out_wgmxccchunk = 0;
 
   // -------------------
   // WGMXCC Prediction
@@ -302,6 +313,9 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     // Set the best WGM
     out_wgm = bestWGM;
   }
+
+  // Split/partial Stream-K tiles must not use the chunk transform (see sk_disable_chunk).
+  if (sk_disable_chunk) out_wgmxccchunk = 0;
 
   return workgroup_mapping_t{out_wgmxccchunk, out_wgmxcc, out_wgm};
 }
@@ -539,9 +553,45 @@ staggerU_t select_staggerU(const problem_t& problem,
   return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};
 }
 
+namespace {
+
+constexpr double kRejectedLatency = std::numeric_limits<double>::max();
+
+void log_config_rejection(const config_t& config, const char* reason) {
+  OLOG_DEBUG("  Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
+             << ") MI=(" << config.mi.m << "," << config.mi.n << "," << config.mi.k
+             << ") REJECTED: " << reason);
+}
+
+double compute_ranked_latency(const problem_t& problem,
+                              const hardware_t& hardware,
+                              const config_t& config,
+                              model_t model) {
+  if (model == model_t::attention) {
+    if (!attention::check_rf_capacity(hardware, config.mt, problem.a_dtype)) {
+      log_config_rejection(config, "Register File (RF) capacity exceeded");
+      return kRejectedLatency;
+    }
+    if (!attention::check_lds_capacity(hardware, config.mt, problem.a_dtype)) {
+      log_config_rejection(config, "LDS capacity exceeded");
+      return kRejectedLatency;
+    }
+    return attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+  }
+
+  if (!gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
+    log_config_rejection(config, "LDS capacity exceeded");
+    return kRejectedLatency;
+  }
+  return gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+}
+
+}  // namespace
+
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
-                                              const std::vector<config_t>& configs) {
+                                              const std::vector<config_t>& configs,
+                                              model_t model) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
   struct prediction_result_wrapper_t {
@@ -549,29 +599,37 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     std::reference_wrapper<const config_t> config;
   };
 
-  std::vector<prediction_result_wrapper_t> latencies_configs;
-  latencies_configs.reserve(configs.size());
+  std::vector<prediction_result_wrapper_t> valid_configs;
+  std::vector<prediction_result_wrapper_t> invalid_configs;
+  valid_configs.reserve(configs.size());
+  invalid_configs.reserve(configs.size());
 
   for (auto& config : configs) {
-    if (!check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype))
-      continue;
-    double latency = compute_total_latency(problem, hardware, config, hardware.N_CU);
-    if (latency != std::numeric_limits<double>::max())
-      latencies_configs.push_back({latency, std::cref(config)});
+    const double latency = compute_ranked_latency(problem, hardware, config, model);
+
+    if (latency != kRejectedLatency) {
+      valid_configs.push_back({latency, std::cref(config)});
+    } else {
+      invalid_configs.push_back({latency, std::cref(config)});
+    }
   }
 
-  if (latencies_configs.empty()) { throw std::runtime_error("No valid configs found."); }
+  // Fallback: when the analytical model rejected every candidate, rank the
+  // invalid configs so the caller still gets a usable kernel rather than failing.
+  if (valid_configs.empty()) {
+    valid_configs = std::move(invalid_configs);
+  }
 
-  std::stable_sort(latencies_configs.begin(),
-                   latencies_configs.end(),
+  std::stable_sort(valid_configs.begin(),
+                   valid_configs.end(),
                    [](const auto& a, const auto& b) {
                      return a.latency < b.latency;
                    });
 
   std::vector<prediction_result_t> results;
-  results.reserve(latencies_configs.size());
-  std::transform(latencies_configs.begin(),
-                 latencies_configs.end(),
+  results.reserve(valid_configs.size());
+  std::transform(valid_configs.begin(),
+                 valid_configs.end(),
                  std::back_inserter(results),
                  [&](const auto& r) -> prediction_result_t {
                    return {r.latency, r.config.get()};
@@ -600,6 +658,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
   // Use runtime_options from first config if available, otherwise global singleton
   const double top_N_heuristic = origami::runtime_options::get().heuristics_variance;
+
   for (const auto& res : results) {
     bool within_top;
     const double diff = std::abs(res.latency - best_latency);
@@ -688,6 +747,10 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     }
   }
 
+  OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << ","
+             << results[0].config.mt.n << "," << results[0].config.mt.k << ")"
+             << " latency=" << results[0].latency);
+
   return results;
 }
 
@@ -718,8 +781,9 @@ prediction_result_t select_config_mnk(size_t M,
 
 prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
-                                  const std::vector<config_t>& configs) {
-  auto ranked_configs = rank_configs(problem, hardware, configs);
+                                  const std::vector<config_t>& configs,
+                                  model_t model) {
+  auto ranked_configs = rank_configs(problem, hardware, configs, model);
 
   // Return the top configuration
   return ranked_configs[0];

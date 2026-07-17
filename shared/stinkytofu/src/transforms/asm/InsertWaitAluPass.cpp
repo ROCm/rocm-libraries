@@ -66,7 +66,7 @@ enum WaitEventType : uint8_t {
     // VM_VSRC events
     EV_VGPR_LDS_READ,   // ds_read / ds_write reading a VGPR source
     EV_VGPR_FLAT_READ,  // FLAT reading a VGPR source
-    EV_VGPR_VMEM_READ,  // buffer / global / image / tensor reading a VGPR source
+    EV_VGPR_VMEM_READ,  // buffer / global / image reading a VGPR source
     EV_NUM,
 };
 
@@ -187,8 +187,7 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     if (isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst)) return EV_VGPR_FLAT_READ;
     // VMEM family. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALLoad(inst) ||
-        isGLOBALStore(inst) || isTensorLoad(inst))
+    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALOrAtomic(inst))
         return EV_VGPR_VMEM_READ;
     return std::nullopt;
 }
@@ -199,6 +198,23 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
 inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
     auto mc = inst.getHwInstDesc()->microcode;
     return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
+}
+
+// Walk `numRegs` register operands (via getReg), skipping non-VGPR ones, and
+// invoke fn(vgprIdx, half) for each VGPR. halfFn maps an operand's position
+// (VGPR-only) to its True16 half selector, so fn may act at half-word (LOW/HIGH)
+// granularity. Shared by producer stamping and consumer probing.
+template <typename GetReg, typename HalfFn, typename Fn>
+inline void forEachVGPR(size_t numRegs, GetReg&& getReg, HalfFn&& halfFn, Fn&& fn) {
+    size_t opIdx = 0;
+    for (size_t i = 0; i < numRegs; ++i) {
+        const auto& reg = getReg(i);
+        if (reg.dataType != StinkyRegister::Type::Register) continue;
+        if (reg.reg.type != RegType::V) continue;
+        HighBitSel half = halfFn(opIdx);
+        ++opIdx;
+        for (uint16_t off = 0; off < reg.reg.num; ++off) fn(reg.reg.idx + off, half);
+    }
 }
 
 // EXEC writes invalidate any non-zero VA_VDST wait (skipped VALUs don't bump
@@ -223,6 +239,17 @@ inline bool isWaitAluInst(const StinkyInstruction& inst) {
 // handled here — mode2 is confined to the loop region.
 inline bool isReturn(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_endpgm;
+}
+
+// Last real (non-pseudo) instruction in a block, or nullptr if the block is
+// label-only. Walks back from the terminator, skipping trailing pseudos
+// (label / asm directive).
+inline StinkyInstruction* lastRealInst(BasicBlock& bb) {
+    for (IRBase* n = bb.getTerminator(); n; n = n->getPrev()) {
+        auto* inst = dyn_cast<StinkyInstruction>(n);
+        if (inst && !isPseudoInst(inst)) return inst;
+    }
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,40 +351,27 @@ class WaitcntBrackets {
 
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
+        auto srcReg = [&](size_t i) -> const auto& { return inst.getSrcReg(i); };
+        auto destReg = [&](size_t i) -> const auto& { return inst.getDestReg(i); };
+        auto stamp = [&](unsigned idx, HighBitSel half, CounterType c) {
+            RegKey k = keyer.producerKey(idx, half);
+            scores[k][c] = curr;
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx << "("
+                                 << halfName(k.half) << ") " << eventName(ev) << "\n");
+        };
+
         if (ct == CT_VA_VDST) {
-            size_t destIdx = 0;
-            for (size_t i = 0; i < inst.getNumDestRegs(); ++i) {
-                const auto& reg = inst.getDestReg(i);
-                if (reg.dataType != StinkyRegister::Type::Register) continue;
-                if (reg.reg.type != RegType::V) continue;
-                HighBitSel half = destHalfSel(true16Mod, destIdx);
-                ++destIdx;
-                for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                    RegKey k = keyer.producerKey(reg.reg.idx + off, half);
-                    scores[k][CT_VA_VDST] = curr;
-                    // Per-VGPR stamp record so a later "wait hit ... score=N"
-                    // can be grepped back to the producer instruction.
-                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx
-                                         << "(" << halfName(k.half) << ") " << eventName(ev)
-                                         << "\n");
-                }
-            }
+            forEachVGPR(
+                inst.getNumSrcRegs(), srcReg, [&](size_t i) { return srcHalfSel(true16Mod, i); },
+                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
+            forEachVGPR(
+                inst.getNumDestRegs(), destReg, [&](size_t i) { return destHalfSel(true16Mod, i); },
+                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
         } else {
-            for (size_t i = 0; i < inst.getNumSrcRegs(); ++i) {
-                const auto& reg = inst.getSrcReg(i);
-                if (reg.dataType != StinkyRegister::Type::Register) continue;
-                if (reg.reg.type != RegType::V) continue;
-                // VM_VSRC tracks "in-flight VMEM read of this VGPR". The
-                // potential WAR is against a 32-bit VALU write to the same
-                // DWORD, so a full-DWORD key is correct.
-                for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                    RegKey k{RegType::V, reg.reg.idx + off, RegHalf::NONE};
-                    scores[k][CT_VM_VSRC] = curr;
-                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx
-                                         << "(" << halfName(k.half) << ") " << eventName(ev)
-                                         << "\n");
-                }
-            }
+            // VM_VSRC tracks in-flight VMEM reads, which are always full DWORD.
+            forEachVGPR(
+                inst.getNumSrcRegs(), srcReg, [](size_t) { return HighBitSel::NONE; },
+                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VM_VSRC); });
         }
     }
 
@@ -366,39 +380,30 @@ class WaitcntBrackets {
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        size_t srcIdx = 0;
-        for (size_t i = 0; i < inst.getNumSrcRegs(); ++i) {
-            const auto& reg = inst.getSrcReg(i);
-            if (reg.dataType != StinkyRegister::Type::Register) continue;
-            if (reg.reg.type != RegType::V) continue;
-            HighBitSel half = srcHalfSel(true16Mod, srcIdx);
-            ++srcIdx;
-            for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                keyer.forEachConsumerKey(reg.reg.idx + off, half, [&](RegKey k) {
+        auto srcReg = [&](size_t i) -> const auto& { return inst.getSrcReg(i); };
+        auto destReg = [&](size_t i) -> const auto& { return inst.getDestReg(i); };
+
+        forEachVGPR(
+            inst.getNumSrcRegs(), srcReg, [&](size_t i) { return srcHalfSel(true16Mod, i); },
+            [&](unsigned idx, HighBitSel half) {
+                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
                     determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
                                           "src(RAW)");
                 });
-            }
-        }
+            });
 
-        size_t destIdx = 0;
-        for (size_t i = 0; i < inst.getNumDestRegs(); ++i) {
-            const auto& reg = inst.getDestReg(i);
-            if (reg.dataType != StinkyRegister::Type::Register) continue;
-            if (reg.reg.type != RegType::V) continue;
-            HighBitSel half = destHalfSel(true16Mod, destIdx);
-            ++destIdx;
-            for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                keyer.forEachConsumerKey(reg.reg.idx + off, half, [&](RegKey k) {
+        forEachVGPR(
+            inst.getNumDestRegs(), destReg, [&](size_t i) { return destHalfSel(true16Mod, i); },
+            [&](unsigned idx, HighBitSel half) {
+                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
                     determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
                                           "dst(WAW)");
                 });
                 // WAR on VM_VSRC: writer-vs-in-flight-VMEM-read uses full DWORD.
-                RegKey full{RegType::V, reg.reg.idx + off, RegHalf::NONE};
+                RegKey full{RegType::V, idx, RegHalf::NONE};
                 determineWaitForScore(CT_VM_VSRC, getVGPRScore(full, CT_VM_VSRC), wait, full,
                                       "dst(WAR)");
-            }
-        }
+            });
     }
 
     void determineWaitForScore(CounterType c, unsigned score, Wait& wait, const RegKey& k,
@@ -586,6 +591,16 @@ class InsertWaitAluPassImpl : public Pass {
                              << "; vm_vsrc LB=" << sb.getScoreLB(CT_VM_VSRC)
                              << " UB=" << sb.getScoreUB(CT_VM_VSRC) << "]\n");
 
+        // Once an s_swappc is seen, the rest of THIS block runs in mode0 (the
+        // SCHED_MODE=0 setreg sits before the call and is not re-enabled in-block),
+        // where the hardware auto-stalls on every hazard. So any s_wait_alu that
+        // would be emitted after a call in the same block is redundant — we skip
+        // emitting it. This is a purely local, per-BB decision (no cross-block
+        // propagation): the scoreboard is still tracked normally, and a block
+        // re-entered via a loop back-edge starts fresh (mode2), so its own leading
+        // waits are still emitted.
+        bool inMode0 = false;
+
         for (auto it = bb.begin(); it != bb.end();) {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if (!inst) {
@@ -634,6 +649,7 @@ class InsertWaitAluPassImpl : public Pass {
                                         "HW handles hazards)\n");
                 sb.applyWaitcnt(CT_VA_VDST, 0);
                 sb.applyWaitcnt(CT_VM_VSRC, 0);
+                inMode0 = true;  // rest of this block is mode0 — HW handles hazards
                 ++it;
                 continue;
             }
@@ -646,7 +662,7 @@ class InsertWaitAluPassImpl : public Pass {
                            << " vm_vsrc="
                            << (isNoWait(wait, CT_VM_VSRC) ? -1 : int(wait.get(CT_VM_VSRC)))
                            << "\n");
-                if (emit) {
+                if (emit && !inMode0) {
                     // If the immediately-preceding instruction is a hold_cnt-only
                     // s_wait_alu survivor, fold its hold_cnt into our new wait
                     // so the constraint isn't lost and we don't emit two
@@ -792,99 +808,69 @@ class InsertWaitAluPassImpl : public Pass {
             return true;  // no real in-region content reachable -> true exit
         };
 
-        // Scope-exit via control transfer to an out-of-region target. After
-        // LongBranchLowering stamps LabelData on a long branch, CFGBuilder wires
-        // an edge to the target; if that target's real IR is outside the
-        // extracted scope it becomes an empty placeholder BB. The source BB then
-        // still has a successor, so the no-successor fallback below misses it.
-        // Detect "branch/long-branch whose successor is a true exit placeholder"
-        // and drop mode2 BEFORE the terminator so the exit path runs in mode0.
-        for (BasicBlock& bb : func) {
-            if (bbsWithExitDisable.count(&bb)) continue;
-            bool exitsRegion = false;
-            for (BasicBlock* succ : bb.getSuccessors()) {
-                if (succ && isExitPlaceholder(*succ)) {
-                    exitsRegion = true;
-                    break;
-                }
-            }
-            if (!exitsRegion) continue;
-            StinkyInstruction* tail = nullptr;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst || isPseudoInst(inst)) continue;
-                tail = inst;
-            }
-            if (!tail) continue;
-            // If the BB branches out (tail is a branch / long-branch), the disable
-            // must precede the terminator. If it falls through to the out-of-region
-            // placeholder (tail is an ordinary instruction), the disable goes
-            // AFTER the tail — at the very end of the BB — so that ALL incoming
-            // paths (fall-through AND any long-branch that targets this BB's label,
-            // landing after an earlier same-BB disable) flow through it before
-            // leaving the region.
-            const bool tailTransfers =
-                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
-            work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
-            bbsWithExitDisable.insert(&bb);
-        }
-        // Region-exit fallback: any BB with no in-region successor leaves the
-        // mode2 scope and needs a disable. Two flavors:
-        //   * exits via a control-transfer terminator — a long-branch-out
-        //     (s_setpc_b64 carrying LabelData to an out-of-region label, which
-        //     CFGBuilder gave no in-region successor) or an s_branch/s_cbranch to
-        //     an out-of-region label. The disable must go BEFORE that terminator
-        //     so it runs on the way out.
-        //   * genuine fall-off at the natural end of the region — the disable
-        //     goes after the tail.
-        // (mode2->mode0 is HW-free, so a redundant disable here is harmless.)
+        // Region-exit disables: one mode0 per edge leaving the mode2 region, none
+        // on in-region edges. Never disable before a conditional branch (it would
+        // clobber the in-region edge); conditional exits converge at the boundary label.
+        std::unordered_set<BasicBlock*> coveredAtLabel;
         for (BasicBlock& bb : func) {
             if (bbsWithExitDisable.count(&bb)) continue;
             if (!bb.getSuccessors().empty()) continue;
-            StinkyInstruction* tail = nullptr;
-            StinkyInstruction* labelAnchor = nullptr;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst) continue;
-                if (isPseudoInst(inst)) {
-                    if (!labelAnchor && inst->getUnifiedOpcode() == GFX::LABEL) labelAnchor = inst;
-                    continue;
-                }
-                tail = inst;
-            }
+            StinkyInstruction* tail = lastRealInst(bb);
             if (tail) {
                 const bool tailExits =
                     isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
                 work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailExits});
+                bbsWithExitDisable.insert(&bb);
                 continue;
             }
-            // Label-only trailing BB (e.g. the --to-label boundary BB in
-            // label-scoped runs). Anchor mode=0 *before* the label so it
-            // executes on the way into the scope-exit marker, matching the
-            // pipeline-path placement of "mode=0 right before s_endpgm".
-            //
-            // Skip if the BB is unreachable — every predecessor terminates
-            // with a return (s_endpgm). That covers the pipeline-path trailing
-            // `label_ASM_End:` that follows `s_endpgm`, where the disable
-            // would be dead code after the kernel has already exited.
+            // Label-only BB. Skip if unreachable — every predecessor terminates
+            // with a return (s_endpgm), e.g. a trailing `label_ASM_End:` after
+            // `s_endpgm`, where the disable would be dead code.
+            StinkyInstruction* labelAnchor = nullptr;
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (inst && inst->getUnifiedOpcode() == GFX::LABEL) {
+                    labelAnchor = inst;
+                    break;
+                }
+            }
             if (labelAnchor) {
                 bool reachable = bb.getPredecessors().empty();
                 for (BasicBlock* pred : bb.getPredecessors()) {
-                    StinkyInstruction* predTail = nullptr;
-                    for (auto it = pred->begin(); it != pred->end(); ++it) {
-                        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                        if (!inst || isPseudoInst(inst)) continue;
-                        predTail = inst;
-                    }
+                    StinkyInstruction* predTail = lastRealInst(*pred);
                     if (!predTail || !isReturn(*predTail)) {
                         reachable = true;
                         break;
                     }
                 }
                 if (reachable) {
-                    work.push_back({&bb, labelAnchor, /*value=*/0, /*insertAfter=*/false});
+                    work.push_back({&bb, labelAnchor, /*value=*/0, /*insertAfter=*/true});
+                    bbsWithExitDisable.insert(&bb);
+                    coveredAtLabel.insert(&bb);
                 }
             }
+        }
+        // Pass B — unconditional out-transfer (s_branch / s_setpc) not already
+        // covered by Pass A: disable before the terminator. Conditional branches
+        // are never disabled here (their exit converges at the label, Pass A).
+        for (BasicBlock& bb : func) {
+            if (bbsWithExitDisable.count(&bb)) continue;
+            StinkyInstruction* tail = lastRealInst(bb);
+            if (!tail) continue;
+            if (isConditionalBranch(*tail)) continue;
+            BasicBlock* exitSucc = nullptr;
+            for (BasicBlock* succ : bb.getSuccessors()) {
+                if (succ && isExitPlaceholder(*succ)) {
+                    exitSucc = succ;
+                    break;
+                }
+            }
+            if (!exitSucc) continue;
+            if (coveredAtLabel.count(exitSucc)) continue;
+            const bool tailTransfers =
+                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+            work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
+            bbsWithExitDisable.insert(&bb);
         }
         for (const auto& w : work) {
             IRBase* insertBefore = nullptr;

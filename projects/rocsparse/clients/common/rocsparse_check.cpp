@@ -575,10 +575,6 @@ void unit_check_garray(rocsparse_indextype ind_type,
         unit_check_segments<int64_t>(size, (const int64_t*)s, (const int64_t*)t);
         break;
     }
-    case rocsparse_indextype_u16:
-    {
-        break;
-    }
     }
     CHECK_HIP_ERROR(rocsparse_hipHostFree(s));
     CHECK_HIP_ERROR(rocsparse_hipHostFree(t));
