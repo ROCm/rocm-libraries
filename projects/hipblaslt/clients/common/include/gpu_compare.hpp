@@ -27,16 +27,21 @@ struct GpuRefResult
     // allclose_g[k] = max over elements of (|diff| - GPU_REF_TOL_GRID[k]*|gpu|);
     // pair (atol, rtol=GPU_REF_TOL_GRID[k]) passes iff allclose_g[k] <= atol.
     double             allclose_g[GPU_REF_TOL_GRID_N] = {0, 0, 0, 0, 0, 0};
+    double             max_ulp          = 0.0; // max per-element ULP error over finite pairs
+    double             sum_ulp          = 0.0; // sum of per-element ULP error (for the average)
     unsigned long long num_unit_fail    = 0; // finite pairs failing a 4-ULP compare
     unsigned long long num_nan_mismatch = 0; // nan/inf disagreement between gpu and ref
-    unsigned long long num_elements     = 0; // element pairs compared
+    unsigned long long ulp_count        = 0; // finite pairs contributing to sum_ulp
 
     /// Frobenius relative error ||gpu - ref||_F / ||ref||_F; 0 when both norms are ~0.
     double norm_error() const;
+    /// Mean per-element ULP error; 0 when no finite pairs were compared.
+    double avg_ulp() const;
 };
 
 /// Compare the GPU output `dGpu` against the reference `dRef` on the device over
-/// the valid M x N x batch region and return the reduced result.
+/// the valid M x N x batch region and return the reduced result. `ulpMantBits` is
+/// the output type's mantissa width (ulp_mantissa_bits() in ulp.hpp).
 GpuRefResult compare_gemm_device(const void* dGpu,
                                  const void* dRef,
                                  hipDataType tD,
@@ -45,4 +50,5 @@ GpuRefResult compare_gemm_device(const void* dGpu,
                                  int64_t     ldd,
                                  int64_t     strideD,
                                  int32_t     batchCount,
+                                 int         ulpMantBits,
                                  hipStream_t stream);

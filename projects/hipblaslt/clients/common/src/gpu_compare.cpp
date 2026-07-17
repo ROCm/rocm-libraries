@@ -12,6 +12,8 @@
 
 namespace
 {
+    constexpr int GPU_REF_BLOCK = 256; // threads per block; block reductions assume this
+
     // Log and return false on HIP error rather than silently reporting a pass.
     inline bool gpu_ref_hip_check(hipError_t err, const char* what)
     {
@@ -22,21 +24,6 @@ namespace
             return false;
         }
         return true;
-    }
-
-    __device__ inline void atomicMaxDouble(double* addr, double val)
-    {
-        auto*              as_ull  = reinterpret_cast<unsigned long long*>(addr);
-        unsigned long long old     = *as_ull;
-        unsigned long long assumed = old;
-        do
-        {
-            assumed    = old;
-            double cur = __longlong_as_double(assumed);
-            if(cur >= val)
-                break;
-            old = atomicCAS(as_ull, assumed, __double_as_longlong(val));
-        } while(assumed != old);
     }
 
     template <typename T>
@@ -65,6 +52,84 @@ namespace
         return dist <= 4u;
     }
 
+    // Per-element error in ULP of the output type, matching ulp_distance() in ulp.hpp.
+    __device__ inline double ulp_distance(double exact, double approx, int mant_bits)
+    {
+        if(exact == approx)
+            return 0.0;
+        int          e = 0;
+        const double m = frexp(exact, &e);
+        if(fabs(m) == 0.5) // power-of-2 boundary
+            --e;
+        const double ulp_size = ldexp(1.0, e - mant_bits);
+        return fabs(exact - approx) / ulp_size;
+    }
+
+    // Block reductions over GPU_REF_BLOCK threads. One shared buffer per variant,
+    // reused across sequential calls; each call brackets its use with syncs.
+    __device__ inline double block_reduce_max(double v)
+    {
+        __shared__ double s[GPU_REF_BLOCK];
+        const unsigned    t = threadIdx.x;
+        __syncthreads();
+        s[t] = v;
+        __syncthreads();
+        for(unsigned stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+        {
+            if(t < stride)
+                s[t] = fmax(s[t], s[t + stride]);
+            __syncthreads();
+        }
+        return s[0];
+    }
+
+    __device__ inline double block_reduce_sum(double v)
+    {
+        __shared__ double s[GPU_REF_BLOCK];
+        const unsigned    t = threadIdx.x;
+        __syncthreads();
+        s[t] = v;
+        __syncthreads();
+        for(unsigned stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+        {
+            if(t < stride)
+                s[t] += s[t + stride];
+            __syncthreads();
+        }
+        return s[0];
+    }
+
+    __device__ inline unsigned long long block_reduce_sum_ull(unsigned long long v)
+    {
+        __shared__ unsigned long long s[GPU_REF_BLOCK];
+        const unsigned                t = threadIdx.x;
+        __syncthreads();
+        s[t] = v;
+        __syncthreads();
+        for(unsigned stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+        {
+            if(t < stride)
+                s[t] += s[t + stride];
+            __syncthreads();
+        }
+        return s[0];
+    }
+
+    __device__ inline void atomicMaxDouble(double* addr, double val)
+    {
+        auto*              as_ull  = reinterpret_cast<unsigned long long*>(addr);
+        unsigned long long old     = *as_ull;
+        unsigned long long assumed = old;
+        do
+        {
+            assumed    = old;
+            double cur = __longlong_as_double(assumed);
+            if(cur >= val)
+                break;
+            old = atomicCAS(as_ull, assumed, __double_as_longlong(val));
+        } while(assumed != old);
+    }
+
     // Device reduction accumulator; zero-initialized via hipMemset before launch.
     struct DevAccum
     {
@@ -72,13 +137,17 @@ namespace
         double             sum_ref_sq;
         double             sum_diff_sq;
         double             allclose_g[GPU_REF_TOL_GRID_N];
+        double             max_ulp;
+        double             sum_ulp;
         unsigned long long num_unit_fail;
         unsigned long long num_nan_mismatch;
-        unsigned long long num_elements;
+        unsigned long long ulp_count;
     };
 
-    // Grid-stride compare over the valid M x N x batch region (ld padding skipped);
-    // per-thread partials combined via atomics.
+    // Grid-stride compare over the valid M x N x batch region (ld padding skipped).
+    // Each thread accumulates locals, the block reduces them in shared memory, and
+    // thread 0 issues one atomic per accumulator -- keeping global-atomic traffic to
+    // one op per block rather than one per element.
     template <typename To>
     __global__ void compare_kernel(const To* gpu,
                                    const To* ref,
@@ -87,30 +156,28 @@ namespace
                                    int64_t   ldd,
                                    int64_t   strideD,
                                    int32_t   batchCount,
+                                   int       mant_bits,
                                    DevAccum* out)
     {
-        // Tied to GPU_REF_TOL_GRID so the kernel and the host-side allclose search
-        // (gpu_reference_report) never drift.
-        static_assert(GPU_REF_TOL_GRID_N == 6, "update the rtol initializer below");
         const double rtol[GPU_REF_TOL_GRID_N] = {GPU_REF_TOL_GRID[0],
                                                  GPU_REF_TOL_GRID[1],
                                                  GPU_REF_TOL_GRID[2],
                                                  GPU_REF_TOL_GRID[3],
                                                  GPU_REF_TOL_GRID[4],
                                                  GPU_REF_TOL_GRID[5]};
+        static_assert(GPU_REF_TOL_GRID_N == 6, "update the rtol initializer above");
 
-        double l_max = 0.0, l_sref = 0.0, l_sdiff = 0.0;
+        double l_max = 0.0, l_sref = 0.0, l_sdiff = 0.0, l_max_ulp = 0.0, l_sum_ulp = 0.0;
         double l_g[GPU_REF_TOL_GRID_N];
         for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
             l_g[k] = 0.0;
-        unsigned long long l_unit_fail = 0, l_nan = 0, l_cnt = 0;
+        unsigned long long l_unit_fail = 0, l_nan = 0, l_ulp_cnt = 0;
 
         const size_t MN     = size_t(M) * size_t(N);
         const size_t total  = MN * size_t(batchCount);
-        const size_t gid    = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
         const size_t stride = size_t(gridDim.x) * blockDim.x;
 
-        for(size_t t = gid; t < total; t += stride)
+        for(size_t t = size_t(blockIdx.x) * blockDim.x + threadIdx.x; t < total; t += stride)
         {
             const size_t b   = t / MN;
             const size_t rem = t % MN;
@@ -122,18 +189,13 @@ namespace
             const float  rf = to_float(ref[idx]);
             const double g  = double(gf);
             const double r  = double(rf);
-            ++l_cnt;
 
             if(isnan(g) || isinf(g) || isnan(r) || isinf(r))
             {
                 // Matching same-signed infinities agree; any nan or inf disagreement
                 // is a failure that also poisons the allclose grid. Non-finite values
-                // stay out of the norm sums so ||ref||_F does not become nan.
-                if(isinf(g) && isinf(r) && g == r)
-                {
-                    // agreement, contributes nothing
-                }
-                else
+                // stay out of the norm/ulp sums so they do not become nan.
+                if(!(isinf(g) && isinf(r) && g == r))
                 {
                     ++l_nan;
                     for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
@@ -152,16 +214,45 @@ namespace
             const double ag = fabs(g);
             for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
                 l_g[k] = fmax(l_g[k], d - rtol[k] * ag);
+
+            const double u = ulp_distance(r, g, mant_bits);
+            l_max_ulp      = fmax(l_max_ulp, u);
+            l_sum_ulp += u;
+            ++l_ulp_cnt;
         }
 
-        atomicMaxDouble(&out->max_abs_error, l_max);
-        atomicAdd(&out->sum_ref_sq, l_sref);
-        atomicAdd(&out->sum_diff_sq, l_sdiff);
+        const bool lead = threadIdx.x == 0;
+
+        double bmax = block_reduce_max(l_max);
+        if(lead)
+            atomicMaxDouble(&out->max_abs_error, bmax);
+        double bsref = block_reduce_sum(l_sref);
+        if(lead)
+            atomicAdd(&out->sum_ref_sq, bsref);
+        double bsdiff = block_reduce_sum(l_sdiff);
+        if(lead)
+            atomicAdd(&out->sum_diff_sq, bsdiff);
         for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
-            atomicMaxDouble(&out->allclose_g[k], l_g[k]);
-        atomicAdd(&out->num_unit_fail, l_unit_fail);
-        atomicAdd(&out->num_nan_mismatch, l_nan);
-        atomicAdd(&out->num_elements, l_cnt);
+        {
+            double bg = block_reduce_max(l_g[k]);
+            if(lead)
+                atomicMaxDouble(&out->allclose_g[k], bg);
+        }
+        double bmaxu = block_reduce_max(l_max_ulp);
+        if(lead)
+            atomicMaxDouble(&out->max_ulp, bmaxu);
+        double bsumu = block_reduce_sum(l_sum_ulp);
+        if(lead)
+            atomicAdd(&out->sum_ulp, bsumu);
+        unsigned long long buf = block_reduce_sum_ull(l_unit_fail);
+        if(lead)
+            atomicAdd(&out->num_unit_fail, buf);
+        unsigned long long bnan = block_reduce_sum_ull(l_nan);
+        if(lead)
+            atomicAdd(&out->num_nan_mismatch, bnan);
+        unsigned long long bcnt = block_reduce_sum_ull(l_ulp_cnt);
+        if(lead)
+            atomicAdd(&out->ulp_count, bcnt);
     }
 } // namespace
 
@@ -177,6 +268,11 @@ double GpuRefResult::norm_error() const
     return diff_norm / ref_norm;
 }
 
+double GpuRefResult::avg_ulp() const
+{
+    return ulp_count ? sum_ulp / double(ulp_count) : 0.0;
+}
+
 GpuRefResult compare_gemm_device(const void* dGpu,
                                  const void* dRef,
                                  hipDataType tD,
@@ -185,6 +281,7 @@ GpuRefResult compare_gemm_device(const void* dGpu,
                                  int64_t     ldd,
                                  int64_t     strideD,
                                  int32_t     batchCount,
+                                 int         ulpMantBits,
                                  hipStream_t stream)
 {
     GpuRefResult result;
@@ -212,22 +309,23 @@ GpuRefResult compare_gemm_device(const void* dGpu,
     if(!gpu_ref_hip_check(hipMemsetAsync(dAccum, 0, sizeof(DevAccum), stream), "accumulator zero"))
         return result;
 
-    const int    block = 256;
-    const size_t total = size_t(M) * size_t(N) * size_t(batchCount);
-    // Cap the grid; the grid-stride loop covers the rest.
-    const int grid = int(std::min<size_t>((total + block - 1) / block, size_t(65535)));
+    // Bound the grid: one atomic per block, and each block grid-strides over the rest.
+    const size_t total  = size_t(M) * size_t(N) * size_t(batchCount);
+    const size_t blocks = (total + GPU_REF_BLOCK - 1) / GPU_REF_BLOCK;
+    const int    grid   = int(std::min<size_t>(blocks, 8192));
 
     if(tD == HIP_R_32F)
-        compare_kernel<float><<<grid, block, 0, stream>>>(static_cast<const float*>(dGpu),
-                                                          static_cast<const float*>(dRef),
-                                                          M,
-                                                          N,
-                                                          ldd,
-                                                          strideD,
-                                                          batchCount,
-                                                          dAccum);
+        compare_kernel<float><<<grid, GPU_REF_BLOCK, 0, stream>>>(static_cast<const float*>(dGpu),
+                                                                  static_cast<const float*>(dRef),
+                                                                  M,
+                                                                  N,
+                                                                  ldd,
+                                                                  strideD,
+                                                                  batchCount,
+                                                                  ulpMantBits,
+                                                                  dAccum);
     else
-        compare_kernel<hipblasLtHalf><<<grid, block, 0, stream>>>(
+        compare_kernel<hipblasLtHalf><<<grid, GPU_REF_BLOCK, 0, stream>>>(
             static_cast<const hipblasLtHalf*>(dGpu),
             static_cast<const hipblasLtHalf*>(dRef),
             M,
@@ -235,6 +333,7 @@ GpuRefResult compare_gemm_device(const void* dGpu,
             ldd,
             strideD,
             batchCount,
+            ulpMantBits,
             dAccum);
 
     gpu_ref_hip_check(hipGetLastError(), "compare launch");
@@ -248,9 +347,11 @@ GpuRefResult compare_gemm_device(const void* dGpu,
         result.max_abs_error    = hAccum.max_abs_error;
         result.sum_ref_sq       = hAccum.sum_ref_sq;
         result.sum_diff_sq      = hAccum.sum_diff_sq;
+        result.max_ulp          = hAccum.max_ulp;
+        result.sum_ulp          = hAccum.sum_ulp;
         result.num_unit_fail    = hAccum.num_unit_fail;
         result.num_nan_mismatch = hAccum.num_nan_mismatch;
-        result.num_elements     = hAccum.num_elements;
+        result.ulp_count        = hAccum.ulp_count;
         for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
             result.allclose_g[k] = hAccum.allclose_g[k];
     }

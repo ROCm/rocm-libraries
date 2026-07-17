@@ -1484,10 +1484,13 @@ inline void gpu_reference_report(hipStream_t                   stream,
                                  double&                       hipblaslt_error,
                                  double&                       hipblaslt_atol,
                                  double&                       hipblaslt_rtol,
+                                 double&                       hipblaslt_max_ulp,
+                                 double&                       hipblaslt_avg_ulp,
                                  hipDataType                   To,
                                  bool                          report)
 {
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+    const int ulp_mant_bits = ulp_mantissa_bits(To);
 
     for(uint32_t gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
@@ -1499,6 +1502,7 @@ inline void gpu_reference_report(hipStream_t                   stream,
                                                      ldd[gemmIdx],
                                                      stride_d[gemmIdx],
                                                      num_batches[gemmIdx],
+                                                     ulp_mant_bits,
                                                      stream);
 
         if(arg.norm_check)
@@ -1511,6 +1515,12 @@ inline void gpu_reference_report(hipStream_t                   stream,
             if(arg.norm_check_assert)
                 CHECK_SUCCESS(
                     norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+        }
+
+        if(arg.ulp_check && report)
+        {
+            hipblaslt_max_ulp = std::max(hipblaslt_max_ulp, res.max_ulp);
+            hipblaslt_avg_ulp = res.avg_ulp();
         }
 
         if(arg.allclose_check && report)
@@ -2071,10 +2081,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         };
         if(!gpu_ref_supported(arg, reason))
             fail_gpu_ref("unsupported configuration for GPU reference: " + reason);
-        // ULP reporting needs the CPU reference; it is only available when the CPU
-        // leg also runs (cpu/both), not in gpu-only mode.
-        else if(arg.ulp_check && !use_cpu_ref)
-            fail_gpu_ref("ULP check requires the CPU reference (use --check_ref both)");
     }
     std::vector<HipDeviceBuffer>  dScaleAlphaVec, dScaleA, dScaleB, dScaleC, dScaleD, dScaleE,
         dAmaxD;
@@ -5638,6 +5644,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                          hipblaslt_error,
                                          hipblaslt_atol,
                                          hipblaslt_rtol,
+                                         hipblaslt_max_ulp,
+                                         hipblaslt_avg_ulp,
                                          To,
                                          /*report=*/!use_cpu_ref);
                 }
@@ -6289,6 +6297,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                          hipblaslt_error,
                                          hipblaslt_atol,
                                          hipblaslt_rtol,
+                                         hipblaslt_max_ulp,
+                                         hipblaslt_avg_ulp,
                                          To,
                                          /*report=*/!use_cpu_ref);
                 }
