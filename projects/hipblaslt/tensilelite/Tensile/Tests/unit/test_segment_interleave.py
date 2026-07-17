@@ -48,10 +48,26 @@ def test_non_gfx1250_skips():
         r = evaluate(_vw8_state(ISA=isa))
         assert r["applicable"] is False and "gfx1250" in r["reason"]
 
-def test_vwb_fine_skips():
-    # B can be fine-VW even when A is coarse (odd WaveTile -> VWB=1). Must skip:
-    # GPU-confirmed MT128x224 VWA4_VWB1 gave wrong results before this gate.
-    r = evaluate(_vw8_state(VectorWidthB=1))
+def test_vwb_fine_aligned_applies():
+    # Fine VWB is OK when each VW-group (vIdx) stays within one component, i.e. the
+    # component column span is a whole multiple of one vIdx's column advance. For
+    # MT256x256 (compCols=128), VWB in {1,2,4} all divide cleanly -> apply. LocalRead
+    # (calcGfx1250LdsOffset) adds the per-vIdx component jump. GPU-validated 8/4/2/1.
+    for vwb in (4, 2, 1):
+        r = evaluate(_vw8_state(VectorWidthB=vwb))
+        assert r["applicable"] is True, f"VWB={vwb} should apply"
+
+def test_vwb_fine_unaligned_skips():
+    # When a single vIdx would straddle a component (component span not a multiple of the
+    # vIdx column advance), the per-vIdx fix can't place it -> must skip. MT*x224 VWB1:
+    # compCols=112, vIdxCols=32, 112 % 32 != 0. (GPU-confirmed MT128x224 was wrong.)
+    r = evaluate(_vw8_state(MacroTile1=224, VectorWidthB=1))
+    assert r["applicable"] is False and "fine VW" in r["reason"]
+
+def test_vwa_fine_always_skips():
+    # A is the de-conflicted operand; its own read must never cross a component -> coarseA
+    # stays mandatory regardless of B.
+    r = evaluate(_vw8_state(VectorWidthA=4))
     assert r["applicable"] is False and "fine VW" in r["reason"]
 
 def test_small_mt_skips_without_pgr2():
@@ -82,6 +98,13 @@ def test_aligned_applies_small_mt():
     assert r["blockSpan"] == SEG + 16512 + 16512    # base(0) + pre(SEG) + fA + fB
     assert _aligned_tiles_disjoint(r, 16512, 16512)
     assert "ALIGNED" in r["segmentMap"]
+
+def test_aligned_fine_vwb_applies():
+    # Fine-VWB is supported on the aligned branch too (per-vIdx component jump + enough
+    # LocalReadAddr +64K registers, see KernelWriter numVgprLocalReadAddr). MT128x128 VWB2.
+    r = evaluate(_vw8_state(MacroTile0=128, MacroTile1=128, PrefetchGlobalRead=2,
+                            LDSSegmentInterleave=1, VectorWidthB=2))
+    assert r["applicable"] is True and r["aligned"] is True
 
 def test_aligned_unequal_pad_no_overlap():
     # Asymmetric pads (padA=16 != padB=8): footprint packing places each tile at its own post-pad

@@ -198,8 +198,6 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         strideTile   = int(int(tP["localReadInstruction"].blockWidth * writer.states.bpr) // tP["bpeDS"])
         strideUnroll = mt + ldsPad
         strideWave   = numTileInInst * matrixInstT * vectorWidth
-        if kernel.get("LDSSegmentInterleave") == 1:
-            strideWave = kernel["LDSSegInterleaveOffsets"]["readWaveStride"]
 
         with writer.allocTmpSgpr(1, tag="LraTileAssignmentTransposedMFMA_tmpSgprInfo") as tmpSgprInfo:
             # tile offset = (wtId%16)//8*8
@@ -851,8 +849,15 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
 
+        # When one wave's read spans a whole LDS component, the component jump lives in the wave
+        # stride. A narrower VW makes the wave straddle two components; then LocalRead applies the
+        # jump instead, so keep the baseline wave stride here.
+        segILWaveSpansComp = False
         if kernel.get("LDSSegmentInterleave") == 1:
-            strideWave = kernel["LDSSegInterleaveOffsets"]["readWaveStride"]
+            _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
+            segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
+            if segILWaveSpansComp:
+                strideWave = kernel["LDSSegInterleaveOffsets"]["readWaveStride"]
 
         lsu              = kernel["LocalSplitU"]
 
@@ -983,9 +988,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
                 module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
-                if kernel.get("LDSSegmentInterleave") == 1 and kernel["LDSSegInterleaveOffsets"].get("footprintPacked"):
-                    # footprintPacked: the component jump (fA+fB, in bytes) is added AFTER the
-                    # per-block re-pad (in lraFinalOffset) so it is not itself re-padded. Stash it.
+                if kernel.get("LDSSegmentInterleave") == 1 and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILWaveSpansComp:
+                    # wave spans a whole component: stash its component jump; added post-pad in lraFinalOffset.
                     segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
                     module.add(vectorStaticMultiply(vgpr(segOff), vgpr(dummy), kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], tmpSgprInfo, \
                                              "seg interleave: component byte offset = wtid0 * (fA+fB)"))

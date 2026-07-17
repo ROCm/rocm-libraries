@@ -20,6 +20,7 @@ TestParameters:
 #   [16,16,32,1,1,8,4,2,2] -> MT256x128 (aligned)
 
 GlobalParameters:
+  PrintSolutionRejectionReason: True
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1        # full validation: interleave must match reference
   KernelTime: False
@@ -90,7 +91,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
+        - VectorWidthB: [-1, 4, 2, 1]    # fine-VWB coverage: per-vIdx component-jump addressing
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
         - SourceSwap: [True]

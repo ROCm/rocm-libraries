@@ -1569,12 +1569,25 @@ class LocalReadMFMA(LocalRead):
                                 return int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
 
                             for oIdx in range(0, numOffsets):
+                                # segment-interleave: a vIdx group can cross the LDS component
+                                # boundary. Split it into within-component (vCols) + component jump
+                                # (segCompByteOff, added post-pad below).
+                                segCompByteOff = 0
+                                vCols = (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]
+                                if (kernel.get("LDSSegmentInterleave") == 1
+                                        and kernel["LDSSegInterleaveOffsets"].get("footprintPacked")
+                                        and tc in ("A", "B")):
+                                    numComp  = kernel["NumWaves"] // 2
+                                    compCols = kernel["MacroTile%u" % tile01] // numComp
+                                    if compCols > 0 and MIWaveGroupShape[tile01] > 0:
+                                        segCompByteOff = (vCols // compCols) * kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+                                        vCols = vCols % compCols
                                 if perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0:
                                     permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
                                     perpStrideInv = permBlock // perpStride
-                                    offset_val = (eIdx * (perpStrideInv) + ((vIdx) * numOffsets+oIdx) * MIWaveGroupShape[tile01]) * tileStride
+                                    offset_val = (eIdx * (perpStrideInv) + vCols) * tileStride
                                 else:
-                                    offset_val = (eIdx + (vIdx * numOffsets + oIdx) * MIWaveGroupShape[tile01]) * tileStride
+                                    offset_val = (eIdx + vCols) * tileStride
 
                                 if kernel["ProblemType"]["Sparse"] != 0:
                                     if blocksPerTGroupSMFMA > 1:
@@ -1636,6 +1649,8 @@ class LocalReadMFMA(LocalRead):
 
                                 if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                                     offset_val = int(offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
+                                # component jump is post-pad: writeStrideBytes already includes pad.
+                                offset_val = int(offset_val + segCompByteOff)
                                 offset_val = offset_val + tP["localReadSwapByteOffset"]
                                 # TODO: Add NLC>1 offset calcs here? 
                                 if (kernel["DirectToLds%s" % tc] and  \

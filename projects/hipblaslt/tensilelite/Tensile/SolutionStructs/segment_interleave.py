@@ -32,13 +32,19 @@ def _footprint(state, tc):
     return d + _pad(d, blk, padElems, _bpe(state))
 
 def _coarse_vw(state):
-    # Each read port must cover one contiguous group per tensor; check A and B, since a
-    # fine VW (e.g. VWB=1 from an odd WaveTile) reads stripes spanning both wave-halves.
+    # A must cover a full component (never crosses one). B may be narrower, as long as its column
+    # span (vIdxColsB below) divides compColsB evenly so B reads split on component boundaries.
     numComp = state["NumWaves"] // 2
     mi_threads = min(state["MatrixInstM"], state["MatrixInstN"])
     coarseA = mi_threads * state["VectorWidthA"] >= state["MacroTile0"] // numComp
+    if not coarseA:
+        return False
     coarseB = mi_threads * state["VectorWidthB"] >= state["MacroTile1"] // numComp
-    return coarseA and coarseB
+    if coarseB:
+        return True
+    compColsB = state["MacroTile1"] // numComp
+    vIdxColsB = state["MatrixInstN"] * state.get("MatrixInstBN", 1) * state["MIWaveGroup"][1] * state["VectorWidthB"]
+    return vIdxColsB > 0 and compColsB % vIdxColsB == 0
 
 def _no(reason):
     return {"applicable": False, "aligned": False, "offsets": None,
