@@ -155,12 +155,31 @@ class TestCounterMedians(unittest.TestCase):
             harness._counter_medians(rows, {"C1": "cyc"}, warmup=0)["cyc"], 20
         )
 
-    def test_warmup_ge_dispatches_keeps_all(self):
+    def test_warmup_ge_dispatches_fails(self):
         rows = self._rows([(1, 10), (2, 20)])
-        # dropping 5 would leave nothing -> fall back to all
-        self.assertEqual(
-            harness._counter_medians(rows, {"C1": "cyc"}, warmup=5)["cyc"], 15
-        )
+        for warmup in (2, 5):
+            with self.subTest(warmup=warmup), self.assertRaisesRegex(
+                RuntimeError, "leaves no measured dispatches"
+            ):
+                harness._counter_medians(rows, {"C1": "cyc"}, warmup=warmup)
+
+    def test_warmup_dropped_independently_per_counter_pass(self):
+        rows = []
+        for counter_pass, values in (
+            ("pmc_1", (1000, 10, 20)),
+            ("pmc_2", (900, 30, 40)),
+        ):
+            rows.extend(
+                {
+                    "Dispatch_Id": str(dispatch_id),
+                    "Counter_Name": "C1",
+                    "Counter_Value": str(value),
+                    "counter_pass": counter_pass,
+                }
+                for dispatch_id, value in enumerate(values, start=1)
+            )
+        out = harness._counter_medians(rows, {"C1": "cyc"}, warmup=1)
+        self.assertEqual(out["cyc"], 25)
 
     def test_ignores_unrequested_counters(self):
         rows = self._rows([(1, 10)], counter="OTHER")

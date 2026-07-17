@@ -106,13 +106,10 @@ def _read_counter_csvs(outdir: Path) -> list[dict]:
 def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
     """normalized -> median counter value across the target kernel's dispatches.
 
-    Drops the first `warmup` dispatches per counter (ordered by `Dispatch_Id`) so
-    the counters exclude cold-cache warmup launches and line up with the timed-only
-    wall/profiled ms. Each counter lives in exactly one collection pass, so its
-    per-dispatch ordering is that pass's launch order. We key by
-    `(counter_pass, dispatch_id)` per counter so that if a block is ever split
-    across passes (see the pass-count warning in `profile`), the same dispatch is
-    not counted twice.
+    Drops the first `warmup` dispatches independently for every counter pass so the
+    counters exclude cold-cache launches and line up with timed-only wall/profiled
+    measurements. Raises when warmup consumes an entire populated pass rather than
+    silently treating warmup samples as measured data.
     """
     by_raw: dict[str, dict[tuple[str, int], float]] = {}
     for r in trows:
@@ -128,9 +125,19 @@ def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
         by_raw.setdefault(cn, {})[(counter_pass, did)] = val
     out: dict = {}
     for raw, by_key in by_raw.items():
-        # (counter_pass, dispatch_id) launch order; one value per key already deduped
-        ordered = [by_key[k] for k in sorted(by_key)]
-        kept = ordered[warmup:] or ordered  # keep all if warmup >= dispatches
+        by_pass: dict[str, list[tuple[int, float]]] = {}
+        for (counter_pass, dispatch_id), value in by_key.items():
+            by_pass.setdefault(counter_pass, []).append((dispatch_id, value))
+        kept: list[float] = []
+        for counter_pass, pairs in sorted(by_pass.items()):
+            ordered = [value for _, value in sorted(pairs)]
+            measured = ordered[warmup:]
+            if not measured:
+                raise RuntimeError(
+                    f"warmup={warmup} leaves no measured dispatches for "
+                    f"counter {raw!r} in {counter_pass}"
+                )
+            kept.extend(measured)
         m = _median(kept)
         if m is not None:
             out[raw_to_norm[raw]] = int(m) if m == int(m) else m
