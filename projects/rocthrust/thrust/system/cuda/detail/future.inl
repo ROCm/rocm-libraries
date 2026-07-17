@@ -17,7 +17,7 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/cpp14_required.h>
+#include <thrust/detail/cpp_version_check.h>
 
 #if _CCCL_STD_VER >= 2014
 

@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -287,7 +294,7 @@ OutputIterator remove_copy(InputIterator first, InputIterator last, OutputIterat
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -357,7 +364,7 @@ THRUST_HOST_DEVICE ForwardIterator remove_if(
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -432,7 +439,7 @@ ForwardIterator remove_if(ForwardIterator first, ForwardIterator last, Predicate
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;
@@ -492,7 +499,7 @@ THRUST_HOST_DEVICE OutputIterator remove_copy_if(
  *  ...
  *  struct is_even
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(const int x)
  *    {
  *      return (x % 2) == 0;

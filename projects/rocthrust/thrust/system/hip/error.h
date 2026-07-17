@@ -23,9 +23,15 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/system/error_code.h>
-#include <thrust/system/hip/detail/guarded_driver_types.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -35,15 +41,13 @@ namespace system
 namespace hip_rocprim
 {
 
-/*! \addtogroup system
- *  \{
- */
-
 // To construct an error_code after a HIP Runtime error:
 //
 //   error_code(::hipGetLastError(), hip_category())
 
 // XXX N3000 prefers enum class errc { ... }
+/*! Namespace for HIP Runtime errors.
+ */
 namespace errc
 {
 
@@ -68,17 +72,17 @@ enum errc_t
   invalid_symbol                    = hipErrorInvalidSymbol,
   map_buffer_object_failed          = hipErrorMapBufferObjectFailed,
   unmap_buffer_object_failed        = hipErrorTbd,
-  invalid_texture                   = hipErrorTbd,
+  invalid_texture                   = hipErrorInvalidTexture,
   invalid_texture_binding           = hipErrorTbd,
-  invalid_channel_descriptor        = hipErrorTbd,
+  invalid_channel_descriptor        = hipErrorInvalidChannelDescriptor,
   invalid_memcpy_direction          = hipErrorInvalidMemcpyDirection,
   invalid_filter_setting            = hipErrorTbd,
   invalid_norm_setting              = hipErrorTbd,
-  cuda_runtime_unloading            = hipErrorTbd,
+  hip_runtime_unloading             = hipErrorTbd,
   unknown                           = hipErrorUnknown,
   invalid_resource_handle           = hipErrorInvalidResourceHandle,
   not_ready                         = hipErrorNotReady,
-  insufficient_driver               = hipErrorTbd,
+  insufficient_driver               = hipErrorInsufficientDriver,
   set_on_active_process_error       = hipErrorSetOnActiveProcess,
   no_device                         = hipErrorNoDevice,
   ecc_uncorrectable                 = hipErrorTbd,
@@ -95,25 +99,25 @@ enum errc_t
   peer_access_already_enabled       = hipErrorPeerAccessAlreadyEnabled,
   peer_access_not_enabled           = hipErrorPeerAccessNotEnabled,
   device_already_in_use             = hipErrorTbd,
-  profiler_disabled                 = hipErrorTbd,
-  assert_triggered                  = hipErrorTbd,
+  profiler_disabled                 = hipErrorProfilerDisabled,
+  assert_triggered                  = hipErrorAssert,
   too_many_peers                    = hipErrorTbd,
   host_memory_already_registered    = hipErrorHostMemoryAlreadyRegistered,
   host_memory_not_registered        = hipErrorHostMemoryNotRegistered,
-  operating_system_error            = hipErrorTbd,
-  peer_access_unsupported           = hipErrorTbd,
+  operating_system_error            = hipErrorOperatingSystem,
+  peer_access_unsupported           = hipErrorPeerAccessUnsupported,
   launch_max_depth_exceeded         = hipErrorTbd,
   launch_file_scoped_texture_used   = hipErrorTbd,
   launch_file_scoped_surface_used   = hipErrorTbd,
   sync_depth_exceeded               = hipErrorTbd,
   attempted_operation_not_permitted = hipErrorTbd,
-  attempted_operation_not_supported = hipErrorTbd,
+  attempted_operation_not_supported = hipErrorNotSupported,
   startup_failure                   = hipErrorTbd
 }; // end errc_t
 
 } // end namespace errc
 
-} // end namespace hip_rocprim
+} // namespace hip_rocprim
 
 /*! \return A reference to an object of a type derived from class \p thrust::error_category.
  *  \note The object's \p equivalent virtual functions shall behave as specified
@@ -125,7 +129,7 @@ enum errc_t
  *        shall return <tt>error_condition(ev,hip_category())</tt>.
  *        Otherwise, the function shall return <tt>system_category.default_error_condition(ev)</tt>.
  */
-inline const error_category& hip_category(void);
+inline const error_category& hip_category();
 
 // XXX N3000 prefers is_error_code_enum<hip::errc>
 
@@ -135,16 +139,15 @@ template <>
 struct is_error_code_enum<hip_rocprim::errc::errc_t> : thrust::detail::true_type
 {};
 
+// XXX replace hip_rocprim::errc::errc_t with hip_rocprim::errc upon c++0x
 /*! \return <tt>error_code(static_cast<int>(e), hip::error_category())</tt>
  */
 inline error_code make_error_code(hip_rocprim::errc::errc_t e);
 
+// XXX replace hip_rocprim::errc::errc_t with hip_rocprim::errc upon c++0x
 /*! \return <tt>error_condition(static_cast<int>(e), hip::error_category())</tt>.
  */
 inline error_condition make_error_condition(hip_rocprim::errc::errc_t e);
-
-/*! \} // end system
- */
 
 } // namespace system
 
@@ -152,10 +155,7 @@ namespace system
 {
 namespace hip
 {
-namespace errc
-{
-using system::hip_rocprim::errc::errc_t;
-} // namespace errc
+namespace errc = system::hip_rocprim::errc;
 } // namespace hip
 } // namespace system
 

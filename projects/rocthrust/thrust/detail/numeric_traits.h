@@ -27,6 +27,8 @@
 #endif // no system header
 #include <thrust/detail/type_traits.h>
 
+#include _THRUST_STD_INCLUDE(type_traits)
+
 #include <limits>
 
 // #include <stdint.h> // for intmax_t (not provided on MSVS 2005)

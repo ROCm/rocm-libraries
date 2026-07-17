@@ -24,6 +24,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/functional.h>
@@ -68,7 +75,7 @@ struct is_operator_greater_function_object_impl;
 template <typename T>
 using is_operator_less_function_object = detail::is_operator_less_function_object_impl<T>;
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c T is a
  *  <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">BinaryPredicate</a>
  *  equivalent to \c operator<, and \c false otherwise.
@@ -95,7 +102,7 @@ constexpr bool is_operator_less_function_object_v = is_operator_less_function_ob
 template <typename T>
 using is_operator_greater_function_object = detail::is_operator_greater_function_object_impl<T>;
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c T is a
  *  <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">BinaryPredicate</a>
  *  equivalent to \c operator>, and \c false otherwise.
@@ -125,7 +132,7 @@ using is_operator_less_or_greater_function_object =
                     detail::is_operator_less_function_object_impl<T>::value
                       || detail::is_operator_greater_function_object_impl<T>::value>;
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c T is a
  *  <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">BinaryPredicate</a>
  *  equivalent to \c operator< or \c operator>, and \c false otherwise.

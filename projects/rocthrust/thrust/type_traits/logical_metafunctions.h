@@ -59,6 +59,7 @@ using _THRUST_STD::negation_v;
 template <bool... Bs>
 using conjunction_value = conjunction<_THRUST_STD::bool_constant<Bs>...>;
 
+#if THRUST_CPP_DIALECT >= 2014
 //! \brief <tt>constexpr bool</tt> whose value is <tt>(... && Bs)</tt>.
 //!
 //! \see conjunction_value
@@ -66,6 +67,7 @@ using conjunction_value = conjunction<_THRUST_STD::bool_constant<Bs>...>;
 //! \see <a href="https://en.cppreference.com/w/cpp/types/conjunction"><tt>std::conjunction</tt></a>
 template <bool... Bs>
 constexpr bool conjunction_value_v = conjunction_value<Bs...>::value;
+#endif
 
 //! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
 //! whose value is <tt>(... || Bs)</tt>.
@@ -76,6 +78,7 @@ constexpr bool conjunction_value_v = conjunction_value<Bs...>::value;
 template <bool... Bs>
 using disjunction_value = disjunction<_THRUST_STD::bool_constant<Bs>...>;
 
+#if THRUST_CPP_DIALECT >= 2014
 //! \brief <tt>constexpr bool</tt> whose value is <tt>(... || Bs)</tt>.
 //!
 //! \see disjunction_value
@@ -83,6 +86,7 @@ using disjunction_value = disjunction<_THRUST_STD::bool_constant<Bs>...>;
 //! \see <a href="https://en.cppreference.com/w/cpp/types/disjunction"><tt>std::disjunction</tt></a>
 template <bool... Bs>
 constexpr bool disjunction_value_v = disjunction_value<Bs...>::value;
+#endif
 
 //! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
 //! whose value is <tt>!Bs</tt>.
@@ -93,6 +97,7 @@ constexpr bool disjunction_value_v = disjunction_value<Bs...>::value;
 template <bool B>
 using negation_value = _THRUST_STD::bool_constant<!B>;
 
+#if THRUST_CPP_DIALECT >= 2014
 //! \brief <tt>constexpr bool</tt> whose value is <tt>!Bs</tt>.
 //!
 //! \see negation_value
@@ -100,6 +105,7 @@ using negation_value = _THRUST_STD::bool_constant<!B>;
 //! \see <a href="https://en.cppreference.com/w/cpp/types/negation"><tt>std::negation</tt></a>
 template <bool B>
 constexpr bool negation_value_v = negation_value<B>::value;
+#endif
 
 //! \} // type traits
 //! \} // utility

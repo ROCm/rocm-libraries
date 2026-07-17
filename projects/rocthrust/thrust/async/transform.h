@@ -22,9 +22,16 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
@@ -44,8 +51,12 @@ namespace unimplemented
 {
 
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename UnaryOperation>
-THRUST_HOST event<DerivedPolicy>
-async_transform(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, OutputIt, UnaryOperation)
+THRUST_HOST event<DerivedPolicy> async_transform(
+  thrust::execution_policy<DerivedPolicy>& /*exec*/,
+  ForwardIt /*first*/,
+  Sentinel /*last*/,
+  OutputIt /*output*/,
+  UnaryOperation /*op*/)
 {
   THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<ForwardIt, false>::value),
                            "this algorithm is not implemented for the specified system");

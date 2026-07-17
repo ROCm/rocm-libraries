@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/range/tail_flags.h>
 #include <thrust/detail/seq.h>
@@ -28,11 +35,15 @@
 #include <thrust/system/tbb/detail/execution_policy.h>
 #include <thrust/system/tbb/detail/reduce_by_key.h>
 #include <thrust/system/tbb/detail/reduce_intervals.h>
-#include <thrust/type_traits/void_t.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+// clang-format on
+#endif
 
 #include <cassert>
 #include <thread>
-#include <type_traits>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_for.h>
@@ -56,7 +67,7 @@ inline L divide_ri(const L x, const R y)
 template <typename InputIterator, typename BinaryFunction, typename SFINAE = void>
 struct partial_sum_type
 {
-  using type = thrust::iterator_value<InputIterator>;
+  using type = thrust::iterator_value_t<InputIterator>;
 };
 
 template <typename InputIterator1, typename InputIterator2, typename BinaryPredicate, typename BinaryFunction>
@@ -77,7 +88,7 @@ reduce_last_segment_backward(
   thrust::reverse_iterator<InputIterator1> keys_last_r(keys_first);
   thrust::reverse_iterator<InputIterator2> values_first_r(values_first + n);
 
-  typename thrust::iterator_value_t<InputIterator1> result_key                      = *keys_first_r;
+  thrust::iterator_value_t<InputIterator1> result_key                          = *keys_first_r;
   typename partial_sum_type<InputIterator2, BinaryFunction>::type result_value = *values_first_r;
 
   // consume the entirety of the first key's sequence
@@ -98,7 +109,7 @@ template <typename InputIterator1,
           typename BinaryFunction>
 thrust::tuple<OutputIterator1,
               OutputIterator2,
-              typename thrust::iterator_value_t<InputIterator1>,
+              thrust::iterator_value_t<InputIterator1>,
               typename partial_sum_type<InputIterator2, BinaryFunction>::type>
 reduce_by_key_with_carry(
   InputIterator1 keys_first,
@@ -190,7 +201,7 @@ struct serial_reduce_by_key_body
     const size_type interval_idx = r.begin();
 
     const size_type offset_to_first = interval_size * interval_idx;
-    const size_type offset_to_last  = (thrust::min) (n, offset_to_first + interval_size);
+    const size_type offset_to_last  = (thrust::min)(n, offset_to_first + interval_size);
 
     Iterator1 my_keys_first    = keys_first + offset_to_first;
     Iterator1 my_keys_last     = keys_first + offset_to_last;
@@ -201,7 +212,7 @@ struct serial_reduce_by_key_body
     Iterator6 my_carry_result  = carry_result + interval_idx;
 
     // consume the rest of the interval with reduce_by_key
-    using key_type   = typename thrust::iterator_value_t<Iterator1>;
+    using key_type   = thrust::iterator_value_t<Iterator1>;
     using value_type = typename partial_sum_type<Iterator2, BinaryFunction>::type;
 
     // XXX is there a way to pose this so that we don't require default construction of carry?

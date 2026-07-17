@@ -30,6 +30,7 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/scan.h>
 
@@ -37,10 +38,6 @@
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
-
-#  include <thrust/detail/alignment.h>
-
-#  include <cstdint> // IWYU pragma: export
 
 THRUST_NAMESPACE_BEGIN
 

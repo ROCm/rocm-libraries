@@ -22,9 +22,16 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/detail/execution_policy.h>
 #  include <thrust/detail/select_system.h>
@@ -39,9 +46,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace async
 {
-
-/*! \cond
- */
 
 // Fallback implementations used when no overloads are found via ADL:
 namespace unimplemented
@@ -175,7 +179,9 @@ struct inclusive_scan_fn final
 
 } // namespace inclusive_scan_detail
 
+#  ifndef THRUST_DOXYGEN_INVOKED
 THRUST_INLINE_CONSTANT inclusive_scan_detail::inclusive_scan_fn inclusive_scan{};
+#  endif
 
 namespace exclusive_scan_detail
 {
@@ -284,10 +290,9 @@ struct exclusive_scan_fn final
 
 } // namespace exclusive_scan_detail
 
+#  ifndef THRUST_DOXYGEN_INVOKED
 THRUST_INLINE_CONSTANT exclusive_scan_detail::exclusive_scan_fn exclusive_scan{};
-
-/*! \endcond
- */
+#  endif
 
 } // namespace async
 

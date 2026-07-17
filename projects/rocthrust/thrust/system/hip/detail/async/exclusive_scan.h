@@ -39,7 +39,7 @@
 #endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -146,4 +146,4 @@ THRUST_NAMESPACE_END
 
 #  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#endif // C++17
+#endif // C++14

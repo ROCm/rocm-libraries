@@ -314,6 +314,7 @@ get_temporary_buffer(my_memory_system& system, std::ptrdiff_t size)
   return thrust::make_pair(thrust::pointer<T, my_memory_system>(result.first.get()), result.second);
 }
 
+// [NON-CCCL PARITY BEGIN]
 template <typename Pointer>
 void return_temporary_buffer(my_memory_system& system, Pointer p, std::ptrdiff_t n)
 {
@@ -324,6 +325,7 @@ void return_temporary_buffer(my_memory_system& system, Pointer p, std::ptrdiff_t
                            thrust::device_system_tag> device_ptr(p.get());
   thrust::return_temporary_buffer(device_sys, device_ptr, n);
 }
+// [NON-CCCL PARITY END]
 
 TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
 {

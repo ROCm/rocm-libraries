@@ -30,7 +30,6 @@
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
-#include <thrust/sequence_access.h>
 #include <thrust/tuple.h>
 
 THRUST_NAMESPACE_BEGIN

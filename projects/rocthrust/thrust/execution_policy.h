@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execute_with_allocator.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/seq.h>
@@ -265,7 +272,7 @@ struct device_execution_policy : thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPAC
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -291,13 +298,13 @@ static const detail::host_t host;
  *  algorithm dispatch at Thrust's device system by providing \p thrust::device as an algorithm parameter.
  *
  *  Explicit dispatch can be useful in avoiding the introduction of data copies into containers such as
- *  \p thrust::device_vector or to avoid wrapping e.g. raw pointers allocated by the HIP API with types
+ *  \p thrust::device_vector or to avoid wrapping e.g. raw pointers allocated by the CUDA or HIP API with types
  *  such as \p thrust::device_ptr.
  *
  *  The user must take care to guarantee that the iterators provided to an algorithm are compatible with
  *  the device backend system. For example, raw pointers allocated by <tt>std::malloc</tt> typically
  *  cannot be dereferenced by a GPU. For this reason, raw pointers allocated by host APIs should not be mixed
- *  with a \p thrust::device algorithm invocation when the device backend is HIP.
+ *  with a \p thrust::device algorithm invocation when the device backend is CUDA or HIP.
  *
  *  The type of \p thrust::device is implementation-defined.
  *
@@ -312,7 +319,7 @@ static const detail::host_t host;
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -351,7 +358,7 @@ THRUST_INLINE_CONSTANT detail::device_t device;
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);

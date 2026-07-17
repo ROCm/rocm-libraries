@@ -21,9 +21,9 @@
 #include <thrust/sequence.h>
 #include <thrust/transform.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-
 #include <unittest/unittest.h>
+
+#include _THRUST_STD_INCLUDE(type_traits)
 
 using namespace unittest;
 

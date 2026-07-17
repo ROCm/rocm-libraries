@@ -90,7 +90,7 @@ struct is_trivially_relocatable_impl;
 template <typename T>
 using is_trivially_relocatable = detail::is_trivially_relocatable_impl<T>;
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c T is
  *  <a href="https://wg21.link/P1144"><i>TriviallyRelocatable</i></a>,
  *  aka can be bitwise copied with a facility like
@@ -124,7 +124,7 @@ template <typename From, typename To>
 using is_trivially_relocatable_to =
   integral_constant<bool, _THRUST_STD::is_same<From, To>::value && is_trivially_relocatable<To>::value>;
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c From is
  *  <a href="https://wg21.link/P1144"><i>TriviallyRelocatable</i></a>,
  *  to \c To, aka can be bitwise copied with a facility like
@@ -162,7 +162,7 @@ using is_indirectly_trivially_relocatable_to =
                       && is_trivially_relocatable_to<typename thrust::iterator_traits<FromIterator>::value_type,
                                                      typename thrust::iterator_traits<ToIterator>::value_type>::value>;
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 /*! \brief <tt>constexpr bool</tt> that is \c true if the element type of
  *  \c FromIterator is
  *  <a href="https://wg21.link/P1144"><i>TriviallyRelocatable</i></a>,

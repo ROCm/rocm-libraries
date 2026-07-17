@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -164,7 +171,7 @@ void replace(ForwardIterator first, ForwardIterator last, const T& old_value, co
  *  ...
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -225,7 +232,7 @@ THRUST_HOST_DEVICE void replace_if(
  *  ...
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -290,7 +297,7 @@ void replace_if(ForwardIterator first, ForwardIterator last, Predicate pred, con
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -360,7 +367,7 @@ THRUST_HOST_DEVICE void replace_if(
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -547,7 +554,7 @@ replace_copy(InputIterator first, InputIterator last, OutputIterator result, con
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -617,7 +624,7 @@ THRUST_HOST_DEVICE OutputIterator replace_copy_if(
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -689,7 +696,7 @@ replace_copy_if(InputIterator first, InputIterator last, OutputIterator result, 
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;
@@ -771,7 +778,7 @@ THRUST_HOST_DEVICE OutputIterator replace_copy_if(
  *
  *  struct is_less_than_zero
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x < 0;

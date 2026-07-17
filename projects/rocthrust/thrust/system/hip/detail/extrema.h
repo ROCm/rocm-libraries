@@ -45,6 +45,7 @@
 #  include <thrust/distance.h>
 #  include <thrust/extrema.h>
 #  include <thrust/pair.h>
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/reduce.h>
@@ -178,7 +179,7 @@ struct arg_minmax_f
 // this is an init-less reduce, needed for min/max-element functionality
 // this will avoid copying the first value from device->host
 template <typename Derived, typename InputIt, typename Size, typename BinaryOp, typename T>
-THRUST_RUNTIME_FUNCTION T
+THRUST_HIP_RUNTIME_FUNCTION T
 extrema(execution_policy<Derived>& policy, InputIt first, Size num_items, BinaryOp binary_op, T*)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
@@ -225,7 +226,7 @@ extrema(execution_policy<Derived>& policy, InputIt first, Size num_items, Binary
 }
 
 template <template <class, class, class> class ArgFunctor, class Derived, class ItemsIt, class BinaryPred>
-ItemsIt THRUST_RUNTIME_FUNCTION
+ItemsIt THRUST_HIP_RUNTIME_FUNCTION
 element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPred binary_pred)
 {
   if (first == last)
@@ -262,11 +263,8 @@ ItemsIt THRUST_HOST_DEVICE
 min_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPred binary_pred)
 {
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__extrema::element<__extrema::arg_min_f, Derived, ItemsIt, BinaryPred>) );
-#  if __THRUST_HAS_HIPRT__
-  last = __extrema::element<__extrema::arg_min_f>(policy, first, last, binary_pred);
-#  else // __THRUST_HAS_HIPRT__
-  last = thrust::min_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
-#  endif // __THRUST_HAS_HIPRT__
+  THRUST_CDP_DISPATCH((last = __extrema::element<__extrema::arg_min_f>(policy, first, last, binary_pred);),
+                      (last = thrust::min_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);));
   return last;
 }
 
@@ -285,11 +283,8 @@ ItemsIt THRUST_HOST_DEVICE
 max_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPred binary_pred)
 {
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__extrema::element<__extrema::arg_max_f, Derived, ItemsIt, BinaryPred>) );
-#  if __THRUST_HAS_HIPRT__
-  last = __extrema::element<__extrema::arg_max_f>(policy, first, last, binary_pred);
-#  else // __THRUST_HAS_HIPRT__
-  last = thrust::max_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
-#  endif // __THRUST_HAS_HIPRT__
+  THRUST_CDP_DISPATCH((last = __extrema::element<__extrema::arg_max_f>(policy, first, last, binary_pred);),
+                      (last = thrust::max_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);));
   return last;
 }
 
@@ -322,23 +317,19 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__extrema::extrema<Derived, transform_t, IndexType, arg_minmax_t, two_pairs_type>) );
-#  if __THRUST_HAS_HIPRT__
-  if (first == last)
-  {
-    return ret;
-  }
+  THRUST_CDP_DISPATCH(
+    (if (first == last) { return ret; }
 
-  const auto num_items = static_cast<IndexType>(thrust::distance(first, last));
+     const auto num_items = static_cast<IndexType>(thrust::distance(first, last));
 
-  iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
+     iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
 
-  zip_iterator begin    = make_zip_iterator(iter_tuple);
-  two_pairs_type result = __extrema::extrema(
-    policy, transform_t(begin, duplicate_t()), num_items, arg_minmax_t(binary_pred), (two_pairs_type*) (nullptr));
-  ret = thrust::make_pair(first + get<1>(get<0>(result)), first + get<1>(get<1>(result)));
-#  else // __THRUST_HAS_HIPRT__
-  ret = thrust::minmax_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
-#  endif // __THRUST_HAS_HIPRT__
+     zip_iterator begin    = make_zip_iterator(iter_tuple);
+     two_pairs_type result = __extrema::extrema(
+       policy, transform_t(begin, duplicate_t()), num_items, arg_minmax_t(binary_pred), (two_pairs_type*) (nullptr));
+     ret = thrust::make_pair(first + get<1>(get<0>(result)), first + get<1>(get<1>(result)));),
+    // Sequential impl:
+    (ret = thrust::minmax_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);));
   return ret;
 }
 

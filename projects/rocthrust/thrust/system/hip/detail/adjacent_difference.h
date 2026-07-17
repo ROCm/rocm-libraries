@@ -45,6 +45,7 @@
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/functional.h>
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
@@ -204,12 +205,8 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
     }
 # endif
   };
-#  if __THRUST_HAS_HIPRT__
-  workaround::par(policy, first, last, result, binary_op);
-#  else
-  workaround::seq(policy, first, last, result, binary_op);
-#  endif
-
+  THRUST_CDP_DISPATCH((workaround::par(policy, first, last, result, binary_op);),
+                      (workaround::seq(policy, first, last, result, binary_op);));
   return result;
 }
 

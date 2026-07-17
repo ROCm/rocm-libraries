@@ -18,11 +18,19 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/detail/static_assert.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/iterator_traits.h>
 #include <thrust/reduce.h>
 #include <thrust/system/detail/generic/reduce.h>
-#include <thrust/iterator/iterator_traits.h>
-#include <thrust/functional.h>
-#include <thrust/detail/static_assert.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -32,11 +40,9 @@ namespace detail
 namespace generic
 {
 
-
-template<typename ExecutionPolicy, typename InputIterator>
-THRUST_HOST_DEVICE
-  typename thrust::iterator_traits<InputIterator>::value_type
-    reduce(thrust::execution_policy<ExecutionPolicy> &exec, InputIterator first, InputIterator last)
+template <typename ExecutionPolicy, typename InputIterator>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::value_type
+reduce(thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last)
 {
   using InputType = typename thrust::iterator_value<InputIterator>::type;
 
@@ -44,34 +50,22 @@ THRUST_HOST_DEVICE
   return thrust::reduce(exec, first, last, InputType(0));
 } // end reduce()
 
-
-template<typename ExecutionPolicy, typename InputIterator, typename T>
-THRUST_HOST_DEVICE
-  T reduce(thrust::execution_policy<ExecutionPolicy> &exec, InputIterator first, InputIterator last, T init)
+template <typename ExecutionPolicy, typename InputIterator, typename T>
+THRUST_HOST_DEVICE T
+reduce(thrust::execution_policy<ExecutionPolicy>& exec, InputIterator first, InputIterator last, T init)
 {
   // use plus<T> by default
   return thrust::reduce(exec, first, last, init, thrust::plus<T>());
 } // end reduce()
 
-
-template<typename ExecutionPolicy,
-         typename RandomAccessIterator,
-         typename OutputType,
-         typename BinaryFunction>
-THRUST_HOST_DEVICE
-  OutputType reduce(thrust::execution_policy<ExecutionPolicy> &,
-                    RandomAccessIterator,
-                    RandomAccessIterator,
-                    OutputType,
-                    BinaryFunction)
+template <typename ExecutionPolicy, typename RandomAccessIterator, typename OutputType, typename BinaryFunction>
+THRUST_HOST_DEVICE OutputType reduce(
+  thrust::execution_policy<ExecutionPolicy>&, RandomAccessIterator, RandomAccessIterator, OutputType, BinaryFunction)
 {
-  THRUST_STATIC_ASSERT_MSG(
-    (thrust::detail::depend_on_instantiation<RandomAccessIterator, false>::value)
-  , "unimplemented for this system"
-  );
+  THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<RandomAccessIterator, false>::value),
+                           "unimplemented for this system");
   return OutputType();
 } // end reduce()
-
 
 } // end namespace generic
 } // end namespace detail

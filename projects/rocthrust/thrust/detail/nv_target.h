@@ -23,7 +23,10 @@
  *  \brief Includes nv macros depending on the backend.
  */
 
-#include <thrust/detail/config.h>
+// TODO(libhipcxx): remove this file and replace <thrust/detail/nv_target.h> with <nv/target>
+// in rocThrust once libhipcxx gets ready
+
+#include <thrust/detail/config/libcxx.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <nv/target>

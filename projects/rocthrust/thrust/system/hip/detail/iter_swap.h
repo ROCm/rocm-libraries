@@ -34,7 +34,12 @@
 #  include <thrust/detail/raw_pointer_cast.h>
 #  include <thrust/swap.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
-#  include <thrust/system/hip/detail/nv/target.h>
+
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+#    include _THRUST_STD_INCLUDE(utility)
+#  endif
+
+#  include <thrust/detail/nv_target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -53,7 +58,11 @@ inline THRUST_HOST_DEVICE void iter_swap(thrust::hip::execution_policy<DerivedPo
 
     THRUST_DEVICE inline static void device_path(Pointer1 a, Pointer2 b)
     {
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+      using _THRUST_STD::swap;
+#  else
       using thrust::swap;
+#  endif
       swap(*thrust::raw_pointer_cast(a), *thrust::raw_pointer_cast(b));
     }
   };

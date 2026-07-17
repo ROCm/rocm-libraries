@@ -39,7 +39,6 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/attributes.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_categories.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -155,7 +154,7 @@ public:
   /*! Default constructor initializes this \p counting_iterator's counter to
    * `Incrementable{}`.
    */
-  THRUST_HOST_DEVICE constexpr counting_iterator()
+  THRUST_HOST_DEVICE counting_iterator()
       : super_t(Incrementable{})
   {}
 

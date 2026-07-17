@@ -32,17 +32,12 @@
 #endif // no system header
 #include <thrust/universal_allocator.h>
 
-/*! \cond
- *  skip overloaded implementation
- */
-
+#ifndef THRUST_DOXYGEN_INVOKED
 // #include the device system's vector header
-#define __THRUST_DEVICE_SYSTEM_VECTOR_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/vector.h>
-#include __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
-#undef __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
-
-/*! \endcond
- */
+#  define __THRUST_DEVICE_SYSTEM_VECTOR_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/vector.h>
+#  include __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
+#  undef __THRUST_DEVICE_SYSTEM_VECTOR_HEADER
+#endif
 
 THRUST_NAMESPACE_BEGIN
 

@@ -18,27 +18,23 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/integer_math.h>
 #include <thrust/detail/integer_traits.h>
 #include <thrust/detail/preprocessor.h>
 
-#ifndef ST_DEVICE_ERROR
-#  if defined(__HIP_DEVICE_COMPILE__)
-#    include <hip/hip_runtime.h>
-#    define THRUST_DEVICE_ERROR(message) (printf("%s\n", (messa
-#  elif defined(__CUDA_ARCH__)
-#    include <cuda/std/detail/libcxx/include/stdexcept>
-#    define THRUST_DEVICE_ERROR(message) ::cuda::std::__throw_runtime_error(message)
-#  else
-#    include <stdexcept>
-#    define THRUST_DEVICE_ERROR(message) throw std::runtime_error(message)
-#  endif
-#endif
+#include <cuda/std/detail/libcxx/include/stdexcept>
+#include <cuda/std/type_traits>
 
 #include <cstdint>
-#include <cstdio>
 #include <string>
-#include <type_traits>
 
 #if defined(THRUST_FORCE_32_BIT_OFFSET_TYPE) && defined(THRUST_FORCE_64_BIT_OFFSET_TYPE)
 #  error "Only THRUST_FORCE_32_BIT_OFFSET_TYPE or THRUST_FORCE_64_BIT_OFFSET_TYPE may be defined!"
@@ -57,10 +53,10 @@
     status                              = call arguments;                                 \
   }
 
-#define _THRUST_INDEX_TYPE_DISPATCH_GUARD_UNDERFLOW(count)            \
-  if (thrust::detail::is_negative(count))                             \
-  {                                                                   \
-    THRUST_DEVICE_ERROR("Invalid input range, passed negative size"); \
+#define _THRUST_INDEX_TYPE_DISPATCH_GUARD_UNDERFLOW(count)                           \
+  if (thrust::detail::is_negative(count))                                            \
+  {                                                                                  \
+    ::cuda::std::__throw_runtime_error("Invalid input range, passed negative size"); \
   }
 
 #define _THRUST_INDEX_TYPE_DISPATCH_GUARD_UNDERFLOW2(count1, count2) \
@@ -100,7 +96,7 @@
     if (static_cast<std::uint64_t>(count)                                                     \
         > static_cast<std::uint64_t>(thrust::detail::integer_traits<index_type>::const_max))  \
     {                                                                                         \
-      THRUST_DEVICE_ERROR(                                                                    \
+      ::cuda::std::__throw_runtime_error(                                                     \
         "Input size exceeds the maximum allowable value for " #index_type                     \
         ". It was used because the macro THRUST_FORCE_32_BIT_OFFSET_TYPE was defined. "       \
         "To handle larger input sizes, either remove this macro to dynamically dispatch "     \
@@ -112,7 +108,7 @@
     if (static_cast<std::uint64_t>(count1) + static_cast<std::uint64_t>(count2)               \
         > static_cast<std::uint64_t>(thrust::detail::integer_traits<index_type>::const_max))  \
     {                                                                                         \
-      THRUST_DEVICE_ERROR(                                                                    \
+      ::cuda::std::__throw_runtime_error(                                                     \
         "Input size exceeds the maximum allowable value for " #index_type                     \
         ". It was used because the macro THRUST_FORCE_32_BIT_OFFSET_TYPE was defined. "       \
         "To handle larger input sizes, either remove this macro to dynamically dispatch "     \

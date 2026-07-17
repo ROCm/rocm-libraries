@@ -12,32 +12,26 @@
 #ifndef ITERATOR_DETAIL_ITERATOR_TRAITS_H
 #define ITERATOR_DETAIL_ITERATOR_TRAITS_H
 
-#include <thrust/detail/config.h>
+// TODO(libhipcxx): remove this file once libhipcxx gets ready
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
+#include <thrust/detail/config.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 // clang-format off
 #  include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 // clang-format on
 #else
+#  if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+#    if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#      include <xutility> // for ::std::input_iterator_tag
+#    else // ^^^ THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC ^^^ / vvv THRUST_HOST_COMPILER !=
+          // THRUST_HOST_COMPILER_MSVC vvv
+#      include <iterator> // for ::std::input_iterator_tag
+#    endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#  endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
+
 #  include <type_traits>
 #endif
-
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
-#  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-#    include <xutility> // for ::std::input_iterator_tag
-#  else // ^^^ THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC ^^^ / vvv THRUST_HOST_COMPILER !=
-        // THRUST_HOST_COMPILER_MSVC vvv
-#    include <iterator> // for ::std::input_iterator_tag
-#  endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 
 THRUST_NAMESPACE_BEGIN
 

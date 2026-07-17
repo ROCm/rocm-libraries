@@ -23,7 +23,7 @@
 
 #include <cmath>
 
-#include <math.h> // IWYU pragma: export
+#include <math.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -69,24 +69,6 @@ inline THRUST_HOST_DEVICE double infinity<double>()
   return res;
 }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  ifdef __HIP_DEVICE_COMPILE__
-using ::atan2;
-using ::cos;
-using ::exp;
-using ::log;
-using ::sin;
-using ::sqrt;
-#  else
-using std::atan2;
-using std::cos;
-using std::exp;
-using std::log;
-using std::sin;
-using std::sqrt;
-#  endif
-#endif // HIP compiler
-
 #if defined _MSC_VER
 THRUST_HOST_DEVICE inline int isinf(float x)
 {
@@ -130,24 +112,14 @@ THRUST_HOST_DEVICE inline int isfinite(double x)
 
 #else
 
-#  if defined(__CUDACC__) && !(defined(__CUDA__) && defined(__clang__)) && !defined(_NVHPC_CUDA)
+#  if (defined(__CUDACC__) && !(defined(__CUDA__) && defined(__clang__)) && !defined(_NVHPC_CUDA)) \
+    || defined(__HIP_DEVICE_COMPILE__)
 // NVCC implements at least some signature of these as functions not macros.
 using ::isfinite;
 using ::isinf;
 using ::isnan;
 using ::signbit;
 #  else
-
-#    ifdef __HIP_DEVICE_COMPILE__
-
-// hip_runtime.h provides these functions in the global scope
-using ::isfinite;
-using ::isinf;
-using ::isnan;
-using ::signbit;
-
-#    else
-
 // Some compilers do not provide these in the global scope, because they are
 // supposed to be macros. The versions in `std` are supposed to be functions.
 // Since we're not compiling with nvcc, it's safe to use the functions in std::
@@ -155,9 +127,7 @@ using std::isfinite;
 using std::isinf;
 using std::isnan;
 using std::signbit;
-#    endif // __HIP_COMPILER__
-
-#  endif // __CUDACC__
+#  endif // __CUDACC__ || __HIP_DEVICE_COMPILE__
 #endif // _MSC_VER
 
 using ::atanh;
@@ -227,10 +197,8 @@ THRUST_HOST_DEVICE inline float log1pf(float x)
   }
 }
 
-#  endif // __HIP__
-
-#  if _MSC_VER <= 1500 && !defined(__clang__)
-#    include <complex>
+#    if _MSV_VER <= 1500 && !defined(__clang__)
+#      include <complex>
 
 inline float hypotf(float x, float y)
 {
@@ -242,9 +210,11 @@ inline double hypot(double x, double y)
   return _hypot(x, y);
 }
 
-#  endif // _MSC_VER <= 1500
+#    endif // _MSC_VER <= 1500 && !defined(__clang__)
 
-#endif // __CUDACC__
+#  endif // __CUDACC__
+
+#endif // _MSC_VER
 
 } // namespace complex
 

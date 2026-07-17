@@ -48,6 +48,7 @@
 #  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
+#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
@@ -78,7 +79,7 @@ namespace __reduce
 {
 
 template <typename Derived, typename InputIt, typename Size, typename T, typename BinaryOp>
-THRUST_RUNTIME_FUNCTION T
+THRUST_HIP_RUNTIME_FUNCTION T
 reduce(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
@@ -158,11 +159,9 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, num_items, init, binary_op);
-#  else
-  return workaround::seq(policy, first, num_items, init, binary_op);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(policy, first, num_items, init, binary_op);),
+                      (return workaround::seq(policy, first, num_items, init, binary_op);));
 }
 
 template <class Derived, class InputIt, class T, class BinaryOp>

@@ -507,7 +507,11 @@ TEST(TupleTests, TestTupleSwap)
   thrust::tuple<int, int, int> t1(a, b, c);
   thrust::tuple<int, int, int> t2(x, y, z);
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
   using _THRUST_STD::swap;
+#else
+  using ::thrust::swap;
+#endif
   swap(t1, t2);
 
   ASSERT_EQ(x, thrust::get<0>(t1));

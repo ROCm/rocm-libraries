@@ -330,7 +330,7 @@ private:
     iterator_value_t<Iterator> const& x = *this->base();
     // FIXME(bgruber): x may be a reference to a temporary (e.g. if the base iterator is a counting_iterator). If `m_f`
     // does not produce an independent copy and super_t::reference is a reference, we return a dangling reference (e.g.
-    // for any `[thrust|::cuda::std]::identity` functor).
+    // for any `[thrust|_THRUST_STD]::identity` functor).
     return m_f(x);
   }
 

@@ -26,10 +26,9 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
-pow(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
+  using T = ::internal::common_type_t<T0, T1>;
   return exp(log(complex<T>(x)) * complex<T>(y));
 }
 
@@ -65,24 +64,18 @@ THRUST_HOST_DEVICE inline complex<float> pow(const complex<float>& x, const comp
 #endif
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
-pow(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const complex<T0>& x, const T1& y)
 {
-  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
+  using T = ::internal::common_type_t<T0, T1>;
   return exp(log(complex<T>(x)) * T(y));
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
-pow(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> pow(const T0& x, const complex<T1>& y)
 {
-  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
-#ifdef __HIP_DEVICE_COMPILE__
-  using ::log;
-#else
+  using T = ::internal::common_type_t<T0, T1>;
   // Find `log` by ADL.
   using std::log;
-#endif
   return exp(log(T(x)) * complex<T>(y));
 }
 

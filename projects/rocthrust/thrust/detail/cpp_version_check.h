@@ -18,12 +18,15 @@
 
 #include <thrust/detail/config/cpp_dialect.h>
 
-// This should be removed after cpp14 is fully deprecated.
-#ifdef THRUST_CPP14_REQUIRED_NO_ERROR
-#  define THRUST_CPP_VERSTION_CHECK_NO_ERROR
-#endif
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
-#ifndef THRUST_CPP_VERSTION_CHECK_NO_ERROR
+#ifndef THRUST_CPP14_REQUIRED_NO_ERROR
 #  if THRUST_CPP_DIALECT < 2017
 #    error C++17 is required for this Thrust feature; please upgrade your compiler or pass the appropriate -std=c++17 flag to it.
 #  endif

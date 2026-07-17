@@ -30,7 +30,11 @@
 #include <thrust/iterator/detail/iterator_category_to_traversal.h>
 #include <thrust/iterator/iterator_categories.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+// clang-format on
+#else
 #  include <type_traits>
 #endif
 
@@ -121,8 +125,8 @@ struct is_iterator_traversal : _THRUST_STD::is_convertible<T, incrementable_trav
 template <typename T>
 struct is_iterator_system
     : _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, any_system_tag>,
-                              _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, host_system_tag>,
-                                                      _THRUST_STD::is_convertible<T, device_system_tag>>>
+                               _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, host_system_tag>,
+                                                        _THRUST_STD::is_convertible<T, device_system_tag>>>
 {}; // end is_iterator_system
 
 } // end namespace detail

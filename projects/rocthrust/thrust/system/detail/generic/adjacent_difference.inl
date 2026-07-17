@@ -17,11 +17,19 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/detail/generic/adjacent_difference.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/adjacent_difference.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/detail/temporary_array.h>
+#include <thrust/system/detail/generic/adjacent_difference.h>
 #include <thrust/transform.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -32,12 +40,9 @@ namespace detail
 namespace generic
 {
 
-
-template<typename DerivedPolicy, typename InputIterator, typename OutputIterator>
-THRUST_HOST_DEVICE
-OutputIterator adjacent_difference(thrust::execution_policy<DerivedPolicy> &exec,
-                                   InputIterator first, InputIterator last,
-                                   OutputIterator result)
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator adjacent_difference(
+  thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
 {
   using InputType = typename thrust::iterator_traits<InputIterator>::value_type;
   thrust::minus<InputType> binary_op;
@@ -45,17 +50,17 @@ OutputIterator adjacent_difference(thrust::execution_policy<DerivedPolicy> &exec
   return thrust::adjacent_difference(exec, first, last, result, binary_op);
 } // end adjacent_difference()
 
-
-template<typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
-THRUST_HOST_DEVICE
-OutputIterator adjacent_difference(thrust::execution_policy<DerivedPolicy> &exec,
-                                   InputIterator first, InputIterator last,
-                                   OutputIterator result,
-                                   BinaryFunction binary_op)
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
+THRUST_HOST_DEVICE OutputIterator adjacent_difference(
+  thrust::execution_policy<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator result,
+  BinaryFunction binary_op)
 {
   using InputType = typename thrust::iterator_traits<InputIterator>::value_type;
 
-  if(first == last)
+  if (first == last)
   {
     // empty range, nothing to do
     return result;
@@ -73,7 +78,6 @@ OutputIterator adjacent_difference(thrust::execution_policy<DerivedPolicy> &exec
 
   return result + (last - first);
 }
-
 
 } // end namespace generic
 } // end namespace detail

@@ -40,6 +40,7 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/advance.h>
+#include <thrust/system/hip/detail/cdp_dispatch.h>
 #include <thrust/system/hip/detail/cross_system.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
@@ -108,11 +109,9 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(system, first, last, result);
-#  else
-  return workaround::seq(system, first, last, result);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(system, first, last, result);),
+                      (return workaround::seq(system, first, last, result);));
 } // end copy()
 
 THRUST_EXEC_CHECK_DISABLE
@@ -136,11 +135,9 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
-  return workaround::par(system, first, n, result);
-#  else
-  return workaround::seq(system, first, n, result);
-#  endif
+
+  THRUST_CDP_DISPATCH((return workaround::par(system, first, n, result);),
+                      (return workaround::seq(system, first, n, result);));
 } // end copy_n()
 #endif
 

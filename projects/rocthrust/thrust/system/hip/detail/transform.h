@@ -40,6 +40,7 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/detail/functional/address_stability.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/system/hip/detail/dispatch.h>
@@ -332,7 +333,7 @@ OutputIt THRUST_HIP_FUNCTION transform(
     result,
     transform_op,
     __transform::always_true_predicate());
-} // func transform
+}
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END

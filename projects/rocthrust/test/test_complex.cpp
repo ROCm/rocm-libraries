@@ -972,11 +972,11 @@ TYPED_TEST(ComplexPairsTests, TestCompoundPlusOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      using type = typename ::internal::promoted_numerical_type<T, U>::type;
+      using type = ::internal::common_type_t<T, U>;
       lhs        = std::complex<type>(lhs.real() + rhs.real(), lhs.imag() + rhs.imag());
     },
     [=](std::complex<T>& lhs, const U& rhs) {
-      using type = typename ::internal::promoted_numerical_type<T, U>::type;
+      using type = ::internal::common_type_t<T, U>;
       lhs        = std::complex<type>(lhs.real() + rhs, lhs.imag());
     },
     [=](thrust::complex<T>& lhs, const thrust::complex<U>& rhs) {
@@ -996,11 +996,11 @@ TYPED_TEST(ComplexPairsTests, TestCompoundMinusOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      using type = typename ::internal::promoted_numerical_type<T, U>::type;
+      using type = ::internal::common_type_t<T, U>;
       lhs        = std::complex<type>(lhs.real() - rhs.real(), lhs.imag() - rhs.imag());
     },
     [=](std::complex<T>& lhs, const U& rhs) {
-      using type = typename ::internal::promoted_numerical_type<T, U>::type;
+      using type = ::internal::common_type_t<T, U>;
       lhs        = std::complex<type>(lhs.real() - rhs, lhs.imag());
     },
     [=](thrust::complex<T>& lhs, const thrust::complex<U>& rhs) {
@@ -1021,7 +1021,7 @@ TYPED_TEST(ComplexPairsTests, TestCompoundMultiplyOperator)
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
       // (a + bi)(c + di) = ac + i(ad + bc) - bd
-      using type = typename ::internal::promoted_numerical_type<T, U>::type;
+      using type = ::internal::common_type_t<T, U>;
 
       type a = static_cast<type>(lhs.real());
       type b = static_cast<type>(lhs.imag());
@@ -1055,7 +1055,7 @@ TYPED_TEST(ComplexPairsTests, TestCompoundDivisionOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      using type = typename ::internal::promoted_numerical_type<T, U>::type;
+      using type = ::internal::common_type_t<T, U>;
 
       // (a + bi) / (c + di) = ((ac + bd) + (bc -ad)i) / (c^2 + d^2)
       type a = static_cast<type>(lhs.real());

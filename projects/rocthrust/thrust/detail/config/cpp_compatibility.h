@@ -28,38 +28,33 @@
 #endif // no system header
 
 #include <thrust/detail/config/cpp_dialect.h> // IWYU pragma: export
+#include <thrust/detail/config/device_system.h> // IWYU pragma: export
+#include <thrust/detail/config/execution_space.h> // IWYU pragma: export
+#include <thrust/detail/config/libcxx.h> // IWYU pragma: export
 
-#include <cstddef>
+#include _THRUST_STD_INCLUDE(cstddef)
 
-#ifdef __has_cpp_attribute
-#  define THRUST_HAS_CPP_ATTRIBUTE(__x) __has_cpp_attribute(__x)
-#else // ^^^ __has_cpp_attribute ^^^ / vvv !__has_cpp_attribute vvv
-#  define THRUST_HAS_CPP_ATTRIBUTE(__x) 0
-#endif // !__has_cpp_attribute
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 
-#if THRUST_HAS_CPP_ATTRIBUTE(nodiscard) \
-  || ((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_CPP_DIALECT >= 2017)
-#  define THRUST_NODISCARD [[nodiscard]]
-#else // ^^^ has nodiscard ^^^ / vvv no nodiscard vvv
-#  define THRUST_NODISCARD
-#endif // no nodiscard
+#  define THRUST_HAS_CPP_ATTRIBUTE(__x) _CCCL_HAS_CPP_ATTRIBUTE(__x)
+#  define THRUST_NODISCARD              _CCCL_NODISCARD
 
-// NVCC below 11.3 does not support nodiscard on friend operators
-// It always fails with clang
-#if (defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ <= 11 && __CUDACC_VER_MINOR__ < 3)) \
-  || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
-#  define THRUST_NODISCARD_FRIEND friend
-#else
-#  define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend
+#else // TODO(libhipcxx): remove the code in this path and replace THRUST_NODISCARD with _CCCL_NODISCARD in rocThrust
+      // once libhipcxx gets ready
+
+#  ifdef __has_cpp_attribute
+#    define THRUST_HAS_CPP_ATTRIBUTE(__x) __has_cpp_attribute(__x)
+#  else // ^^^ __has_cpp_attribute ^^^ / vvv !__has_cpp_attribute vvv
+#    define THRUST_HAS_CPP_ATTRIBUTE(__x) 0
+#  endif // !__has_cpp_attribute
+
+#  if THRUST_HAS_CPP_ATTRIBUTE(nodiscard) \
+    || ((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_CPP_DIALECT >= 2017)
+#    define THRUST_NODISCARD [[nodiscard]]
+#  else // ^^^ has nodiscard ^^^ / vvv no nodiscard vvv
+#    define THRUST_NODISCARD
+#  endif // no nodiscard
 #endif
-
-#if THRUST_CPP_DIALECT >= 2017 && defined(__cpp_if_constexpr)
-#  define THRUST_IF_CONSTEXPR      if constexpr
-#  define THRUST_ELSE_IF_CONSTEXPR else if constexpr
-#else // ^^^ C++17 ^^^ / vvv C++14 vvv
-#  define THRUST_IF_CONSTEXPR      if
-#  define THRUST_ELSE_IF_CONSTEXPR else if
-#endif // THRUST_CPP_DIALECT <= 2014
 
 // FIXME: Combine THRUST_INLINE_CONSTANT and
 // THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT into one macro when NVCC properly
@@ -69,7 +64,7 @@
 // #  if   THRUST_CPP_DIALECT >= 2017
 // #    define THRUST_INLINE_CONSTANT                 inline constexpr
 // #    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT inline constexpr
-#  define THRUST_INLINE_CONSTANT                 static const _CCCL_DEVICE
+#  define THRUST_INLINE_CONSTANT                 static const THRUST_DEVICE
 #  define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
 
 #else

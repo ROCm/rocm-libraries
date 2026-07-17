@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/nv_target.h>
 #include <thrust/system/detail/sequential/general_copy.h>
 
@@ -52,6 +59,7 @@ THRUST_HOST_DEVICE T* trivial_copy_n(const T* first, std::ptrdiff_t n, T* result
                (std::memmove(result, first, n * sizeof(T)); return_value = result + n;),
                ( // NV_IS_DEVICE:
                  return_value = thrust::system::detail::sequential::general_copy_n(first, n, result);));
+
   return return_value;
 } // end trivial_copy_n()
 

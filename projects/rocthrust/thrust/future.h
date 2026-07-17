@@ -22,18 +22,23 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
-#if THRUST_CPP_DIALECT >= 2017
+#if THRUST_CPP_DIALECT >= 2014
 
 #  include <thrust/detail/static_assert.h>
 #  include <thrust/execution_policy.h>
 
 #  include <utility>
 
-/*! \cond
- */
-
+#  ifndef THRUST_DOXYGEN_INVOKED
 /*
 // #include the host system's pointer.h header.
 #define __THRUST_HOST_SYSTEM_POINTER_HEADER <__THRUST_HOST_SYSTEM_ROOT/pointer.h>
@@ -42,9 +47,9 @@
 */
 
 // #include the device system's pointer.h header.
-#  define __THRUST_DEVICE_SYSTEM_POINTER_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/pointer.h>
-#  include __THRUST_DEVICE_SYSTEM_POINTER_HEADER
-#  undef __THRUST_DEVICE_SYSTEM_POINTER_HEADER
+#    define __THRUST_DEVICE_SYSTEM_POINTER_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/pointer.h>
+#    include __THRUST_DEVICE_SYSTEM_POINTER_HEADER
+#    undef __THRUST_DEVICE_SYSTEM_POINTER_HEADER
 
 /*
 // #include the host system's future.h header.
@@ -54,17 +59,12 @@
 */
 
 // #include the device system's future.h header.
-#  define __THRUST_DEVICE_SYSTEM_FUTURE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/future.h>
-#  include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
-#  undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
-
-/*! \endcond
- */
+#    define __THRUST_DEVICE_SYSTEM_FUTURE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/future.h>
+#    include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
+#    undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
+#  endif
 
 THRUST_NAMESPACE_BEGIN
-
-/*! \cond
- */
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -113,6 +113,7 @@ using select = decltype(unique_eager_future_type<T>(std::declval<System>()));
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#  ifndef THRUST_DOXYGEN_INVOKED
 template <typename System>
 using unique_eager_event = unique_eager_event_type_detail::select<System>;
 
@@ -167,15 +168,13 @@ struct new_stream_t final
 {};
 
 THRUST_INLINE_CONSTANT new_stream_t new_stream{};
+#  endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
 using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::when_all;
 
 ///////////////////////////////////////////////////////////////////////////////
-
-/*! \endcond
- */
 
 THRUST_NAMESPACE_END
 
