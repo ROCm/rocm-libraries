@@ -224,8 +224,12 @@ def _run_one(label: str, config, M: int, N: int, K: int,
     # Non-zero check (C4 / H3 smoke)
     if np.all(C_gpu == 0):
         return FAIL, f"{label}: GPU output is all-zero"
-    if not np.all(np.isfinite(C_gpu.astype(np.float32))):
-        return FAIL, f"{label}: GPU output contains NaN/Inf"
+    nan_mask = ~np.isfinite(C_gpu.astype(np.float32))
+    if np.any(nan_mask):
+        nan_frac = nan_mask.mean()
+        sample = C_gpu.astype(np.float32).flat[:8].tolist()
+        log.debug("%s: NaN/Inf fraction=%.3f, first 8 elements=%s", label, nan_frac, sample)
+        return FAIL, f"{label}: GPU output contains NaN/Inf (frac={nan_frac:.3f})"
 
     # Correctness check vs. CPU reference (always in float32)
     C_ref = _reference_gemm(A_f32, B_f32, BQ_ref, problem, np.float32)
