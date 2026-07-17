@@ -101,6 +101,13 @@ class TestCompare(unittest.TestCase):
         cur = _rec(ms=2.0)  # ms only
         self.assertEqual(selfcheck.compare(prev, cur)["verdict"], "unknown")
 
+    def test_uses_shared_wall_when_only_one_record_has_counters(self):
+        prev = _rec(busy=1000, total=1000, ms=1.0)
+        cur = _rec(ms=1.2)
+        result = selfcheck.compare(prev, cur)
+        self.assertEqual(result["metric"], "ms_median")
+        self.assertEqual(result["verdict"], "regressed")
+
     def test_fallback_to_wall_when_no_counters(self):
         prev = _rec(ms=1.0)
         cur = _rec(ms=1.2)  # +20% on ms

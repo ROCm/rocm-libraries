@@ -88,13 +88,23 @@ def format_record(record: Mapping[str, Any]) -> str:
 def diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict:
     """Structured comparison of two records (advisory - no pass/fail).
 
-    Both metrics here are lower-is-better, so `slower` = current metric exceeds
-    baseline. `pct_change` is relative to baseline. `metric_mismatch` is set when
-    the two records' primary metric sources differ (e.g. one has counters, the
-    other only wall) - a pct is still omitted in that case to avoid a bogus number.
+    Uses cycles when both records captured them, otherwise wall time when both have
+    it. Both metrics are lower-is-better, so `slower` = current exceeds baseline.
+    `metric_mismatch` is set only when the records have no metric in common.
     """
-    b_val, b_which = _schema.metric(baseline)
-    c_val, c_which = _schema.metric(current)
+    b_cycles = (baseline.get("counters") or {}).get(_schema.PRIMARY_METRIC)
+    c_cycles = (current.get("counters") or {}).get(_schema.PRIMARY_METRIC)
+    b_wall = (baseline.get("wall") or {}).get(_schema.FALLBACK_METRIC)
+    c_wall = (current.get("wall") or {}).get(_schema.FALLBACK_METRIC)
+    if b_cycles is not None and c_cycles is not None:
+        b_val, c_val = float(b_cycles), float(c_cycles)
+        b_which = c_which = _schema.PRIMARY_METRIC
+    elif b_wall is not None and c_wall is not None:
+        b_val, c_val = float(b_wall), float(c_wall)
+        b_which = c_which = _schema.FALLBACK_METRIC
+    else:
+        b_val, b_which = _schema.metric(baseline)
+        c_val, c_which = _schema.metric(current)
     out: dict = {
         "identity": {
             "arch": _schema.identity(current)[0],

@@ -124,6 +124,16 @@ class TestDiff(unittest.TestCase):
         self.assertTrue(d["metric_mismatch"])
         self.assertNotIn("pct_change", d)
 
+    def test_falls_back_to_shared_wall_when_only_one_has_cycles(self):
+        base = _rec(busy=1000, total=1000, ms=1.0)
+        cur = _rec(ms=1.2)
+        d = report.diff(base, cur)
+        self.assertFalse(d["metric_mismatch"])
+        self.assertEqual(d["metric"], "ms_median")
+        self.assertEqual(d["baseline"], 1.0)
+        self.assertEqual(d["current"], 1.2)
+        self.assertAlmostEqual(d["pct_change"], 20.0)
+
     def test_spread_surfaced_from_aggregate(self):
         cur = _rec(busy=1100, total=1000, spread={"busy_cycles_pct": 3.5})
         d = report.diff(_rec(busy=1000, total=1000), cur)
