@@ -187,6 +187,9 @@ class GemmKernelConfig:
 
     gfx_arch: str = "gfx942"
     variant: str = "standard"
+    # Stream-K reduction strategy: "atomic" (default), "linear", or "tree".
+    # Only meaningful when variant == "stream_k".
+    reduction_strategy: str = "atomic"
 
     # --- Multi-ABD only ----------------------------------------------------
     # Arrays of A/B/D tensors and per-group element-wise ops. These are
@@ -252,8 +255,12 @@ class GemmKernelConfig:
         )
         if self.variant == "preshuffle":
             name += "_preshuffle"
-        elif self.variant == "streamk":
+        elif self.variant == "stream_k":
             name += "_streamk"
+            # Atomic keeps the bare "_streamk" suffix (original parity); linear
+            # and tree are disambiguated, matching KernelNaming.generate.
+            if self.reduction_strategy != "atomic":
+                name += f"_{self.reduction_strategy}"
         elif self.variant == "multi_abd":
             # Byte-for-byte match to codegen KernelNaming.generate's multiabd
             # suffix: tensor counts then the three element-wise ops.
@@ -301,6 +308,10 @@ class GemmKernelConfig:
                 "persistent": [self.persistent],
             },
         }
+        # Pin the single reduction strategy so stream-K codegen emits exactly this
+        # kernel (the generator otherwise expands all strategies in its default).
+        if self.variant == "stream_k":
+            cfg["streamk_config"] = {"reduction_strategy": [self.reduction_strategy]}
         # Multi-ABD codegen reads its tensor counts / element-wise ops from a
         # dedicated ``multi_abd_config`` block. These are scalars (one kernel per
         # config), matching the codegen's _get_configs_for_variant reader.
@@ -1420,11 +1431,19 @@ def _tile_engine_codegen_flags() -> Tuple[str, ...]:
 def _ctypes_source_name(config: GemmKernelConfig) -> str:
     """Pick the ctypes ABI source for a config's variant.
 
-    The grouped kernel has a multi-problem launch signature, and the multi_abd
-    kernel has a divergent (array-pointer) ABI (dispatcher_run_multi_abd);
-    neither is expressible by the single-problem ``gemm_ctypes_lib.cpp``, so each
-    compiles against its own dedicated ctypes source.
+    Variants whose launch ABI differs from the single-problem
+    ``dispatcher_run_gemm`` path need their own lib:
+      * stream_k keeps the single-problem C ABI (single A/B/C, M/N/K) but its
+        lib builds a ``StreamKHostArgs`` and calls ``SelectedKernel::launch``
+        directly instead of routing through the registry.
+      * grouped has a multi-problem launch signature the single-problem
+        ``gemm_ctypes_lib.cpp`` cannot express.
+      * multi_abd has a divergent (array-pointer) ABI
+        (dispatcher_run_multi_abd) that the single-problem
+        ``gemm_ctypes_lib.cpp`` cannot express.
     """
+    if config.variant == "stream_k":
+        return "streamk_gemm_ctypes_lib.cpp"
     if config.variant == "grouped":
         return "grouped_gemm_ctypes_lib.cpp"
     if config.variant == "multi_abd":
@@ -1450,6 +1469,29 @@ def _build_compile_jobs(
     # exists so the hipcc -o path is always writable (harmless if it already is).
     lib_path.parent.mkdir(parents=True, exist_ok=True)
     obj_file = lib_path.with_suffix(".o")
+    # The Stream-K path skips the cmake build that would normally create this
+    # directory, so ensure it exists before hipcc writes the object/.so here.
+    lib_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Per-variant AMDGPU codegen flags. The regular path matches Tile Engine's
+    # gemm_universal build via _tile_engine_codegen_flags(). Stream-K must instead
+    # match TE's gemm_streamk build EXACTLY for a fair A/B: -enable-post-misched=0
+    # is applied unconditionally (not persistent-gated) and it does NOT use
+    # -enable-noalias-to-md-conversion=0.
+    is_streamk = getattr(config, "variant", "") == "stream_k"
+    variant_flags = (
+        [
+            "-std=c++20",
+            "-fno-offload-uniform-block",
+            "-mllvm", "--lsr-drop-solution=1",
+            "-mllvm", "-enable-post-misched=0",
+            "-mllvm", "-amdgpu-early-inline-all=true",
+            "-mllvm", "-amdgpu-function-calls=false",
+            "--offload-compress",
+        ]
+        if is_streamk
+        else list(_tile_engine_codegen_flags())
+    )
 
     compile_cmd = [
         _resolve_hipcc(),
@@ -1465,13 +1507,13 @@ def _build_compile_jobs(
         "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
-        # Match Tile Engine's AMDGPU codegen flags exactly (see
+        # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
         # _tile_engine_codegen_flags). Without them the kernel is compiled with
         # different inlining/register allocation, which changes occupancy;
         # persistent kernels size their grid by occupancy
         # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so a
         # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
-        *_tile_engine_codegen_flags(),
+        *variant_flags,
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),
@@ -1487,10 +1529,12 @@ def _build_compile_jobs(
         str(obj_file),
     ]
     # The regular GEMM ABI goes through the dispatcher registry and must link the
-    # dispatcher static lib. Multi-ABD is registry-bypass (it calls
-    # SelectedKernel::launch directly), so it needs only the force-included
-    # kernel -- no static lib -- keeping its .so self-contained.
-    if config.variant != "multi_abd":
+    # dispatcher static lib. Both Stream-K and Multi-ABD are registry-bypass
+    # (their ctypes libs launch the force-included kernel directly and reference
+    # no registry/dispatcher symbols), so their .so needs only the force-included
+    # kernel -- no static lib -- keeping it self-contained.
+    registry_bypass = is_streamk or config.variant == "multi_abd"
+    if not registry_bypass:
         link_cmd.append(str(static_lib))
     link_cmd += ["-o", str(lib_path)]
     job = {"compile_cmd": compile_cmd, "link_cmd": link_cmd, "lib_path": str(lib_path)}
@@ -1536,7 +1580,11 @@ def setup_multiple_gemm_dispatchers(
     # variant goes through the registry and requires the static lib too.
     needed_sources = {ctypes_dir / _ctypes_source_name(c) for c in configs}
     missing = [str(p) for p in needed_sources if not p.exists()]
-    all_registry_bypass = {c.variant for c in configs} == {"multi_abd"}
+    # Stream-K and Multi-ABD .so files are registry-bypass: they link only the
+    # force-included kernel (no registry/dispatcher symbols), so they do not need
+    # the dispatcher static lib. Only a build in which every config is one of
+    # these can skip the static lib; any other variant requires it.
+    all_registry_bypass = {c.variant for c in configs} <= {"stream_k", "multi_abd"}
     need_static_lib = not all_registry_bypass
     if (need_static_lib and not static_lib.exists()) or missing:
         parts = []
@@ -1728,6 +1776,14 @@ def expand_sweep(
     pad_ks = _expand_values(tr.get("pad_k"), [False])
     persistents = _expand_values(tr.get("persistent"), [False])
 
+    # Stream-K only: sweep reduction strategies (atomic/linear/tree). Other
+    # variants keep a single dummy value so the product is unaffected.
+    if variant == "stream_k":
+        sk = cfg.get("streamk_config", {})
+        reductions = _expand_values(sk.get("reduction_strategy"), ["atomic"])
+    else:
+        reductions = ["atomic"]
+
     la, lb, lc = layout[0], layout[1], layout[2]
     # Multi-ABD carries a 4th (D) layout char; default D to C's layout otherwise.
     ld = layout[3] if (variant == "multi_abd" and len(layout) >= 4) else lc
@@ -1801,6 +1857,7 @@ def expand_sweep(
         pn,
         pk,
         persist,
+        red,
     ) in itertools.product(
         tile_ms,
         tile_ns,
@@ -1818,6 +1875,7 @@ def expand_sweep(
         pad_ns,
         pad_ks,
         persistents,
+        reductions,
     ):
       for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:
         c = GemmKernelConfig(
@@ -1846,6 +1904,7 @@ def expand_sweep(
             persistent=bool(persist),
             gfx_arch=arch,
             variant=variant,
+            reduction_strategy=red,
             num_a_tensors=m_na,
             num_b_tensors=m_nb,
             num_d_tensors=m_nd,
