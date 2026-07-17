@@ -13,6 +13,13 @@
 
 // atol/rtol candidate grid, shared with allclose_check_general() in allclose.hpp
 // so the GPU allclose search reports the same effective (atol, rtol).
+//
+// Two limitations:
+//  (a) Serial-float accumulation diverges from the library reduction order by more
+//      than 4 ULP at large K (~71 ULP at K=16384 f32), so the exact (tol==0)
+//      unit_check is only meaningful at small K.
+//  (b) For f32/f64 outputs holding matching infinities, this near/norm path treats
+//      them as agreeing while the CPU ASSERT_NEAR(inf, inf) does not.
 inline constexpr int    GPU_REF_TOL_GRID_N = 6;
 inline constexpr double GPU_REF_TOL_GRID[GPU_REF_TOL_GRID_N]
     = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
@@ -22,8 +29,10 @@ inline constexpr double GPU_REF_TOL_GRID[GPU_REF_TOL_GRID_N]
 struct GpuRefResult
 {
     double max_abs_error = 0.0; // max |gpu - ref| over finite element pairs
-    double sum_ref_sq    = 0.0; // sum(ref^2)  -> Frobenius norm of the reference
-    double sum_diff_sq   = 0.0; // sum(diff^2) -> Frobenius norm of the difference
+    // Batched Frobenius relative error Sum_b ||diff_b||_F / ||ref_b||_F, computed
+    // per batch on the host from the device bins and summed (matches the CPU
+    // norm_check_general strided branch in norm.hpp). 0-guard applied per batch.
+    double norm_error_sum = 0.0;
     // allclose_g[k] = max over elements of (|diff| - GPU_REF_TOL_GRID[k]*|gpu|);
     // pair (atol, rtol=GPU_REF_TOL_GRID[k]) passes iff allclose_g[k] <= atol.
     double             allclose_g[GPU_REF_TOL_GRID_N] = {0, 0, 0, 0, 0, 0};
@@ -33,7 +42,8 @@ struct GpuRefResult
     unsigned long long num_nan_mismatch = 0; // nan/inf disagreement between gpu and ref
     unsigned long long ulp_count        = 0; // finite pairs contributing to sum_ulp
 
-    /// Frobenius relative error ||gpu - ref||_F / ||ref||_F; 0 when both norms are ~0.
+    /// Batched Frobenius relative error Sum_b ||diff_b||_F / ||ref_b||_F; each
+    /// batch contributes 0 when both its norms are ~0.
     double norm_error() const;
     /// Mean per-element ULP error; 0 when no finite pairs were compared.
     double avg_ulp() const;

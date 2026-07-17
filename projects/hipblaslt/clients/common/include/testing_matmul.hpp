@@ -1492,6 +1492,11 @@ inline void gpu_reference_report(hipStream_t                   stream,
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     const int ulp_mant_bits = ulp_mantissa_bits(To);
 
+    // Accumulate ULP across gemms and average once after the loop, matching the CPU
+    // check()'s ulp_sum_total/ulp_count_total handling.
+    double             ulp_sum_total   = 0.0;
+    unsigned long long ulp_count_total = 0;
+
     for(uint32_t gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
         const GpuRefResult res = compare_gemm_device(dD[gemmIdx].buf(),
@@ -1520,7 +1525,8 @@ inline void gpu_reference_report(hipStream_t                   stream,
         if(arg.ulp_check && report)
         {
             hipblaslt_max_ulp = std::max(hipblaslt_max_ulp, res.max_ulp);
-            hipblaslt_avg_ulp = res.avg_ulp();
+            ulp_sum_total += res.sum_ulp;
+            ulp_count_total += res.ulp_count;
         }
 
         if(arg.allclose_check && report)
@@ -1567,6 +1573,9 @@ inline void gpu_reference_report(hipStream_t                   stream,
         }
 #endif
     }
+
+    if(arg.ulp_check && report && ulp_count_total > 0)
+        hipblaslt_avg_ulp = ulp_sum_total / double(ulp_count_total);
 }
 
 // A function to determine the default bias_type

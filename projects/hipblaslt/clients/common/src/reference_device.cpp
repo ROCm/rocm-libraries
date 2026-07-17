@@ -72,7 +72,9 @@ namespace
             acc += a * bv;
         }
 
-        float out = alpha * acc;
+        // alpha==0 drops the A*B product entirely (BLAS convention), so 0*inf
+        // does not become nan.
+        float out = (alpha == 0.0f) ? 0.0f : alpha * acc;
         if(beta != 0.0f) // beta==0 ignores C even if it holds inf/nan
             out += beta * to_float(Cb[i + j * ldc]);
 
@@ -134,6 +136,9 @@ namespace
     }
 } // namespace
 
+// Serial-float K accumulation diverges from the library reduction order by more
+// than 4 ULP at large K (~71 ULP at K=16384 f32), so the exact (tol==0) unit_check
+// is only meaningful at small K. See also the note in gpu_compare.hpp.
 bool gpu_ref_supported(const Arguments& arg, std::string& reason)
 {
     auto fail = [&](const char* r) {
