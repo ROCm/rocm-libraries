@@ -12,6 +12,8 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include "tests/dispatcher/SdpaGraphFixture.hpp"
+
 TEST(TestRockeClientEngine, IdReturnsRegisteredRockeEngineId)
 {
     const rocke_client::RockeClientEngine engine;
@@ -21,7 +23,7 @@ TEST(TestRockeClientEngine, IdReturnsRegisteredRockeEngineId)
 
 TEST(TestRockeClientEngine, IsApplicableRejectsInvalidGraph)
 {
-    rocke_client::RockeClientEngine engine;
+    const rocke_client::RockeClientEngine engine;
     rocke_client::RockeClientHandle handle;
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper invalidGraph(nullptr, 0);
 
@@ -30,7 +32,7 @@ TEST(TestRockeClientEngine, IsApplicableRejectsInvalidGraph)
 
 TEST(TestRockeClientEngine, GetDetailsBuildsAndReleasesBuffer)
 {
-    rocke_client::RockeClientEngine engine;
+    const rocke_client::RockeClientEngine engine;
     rocke_client::RockeClientHandle handle;
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper opGraph(nullptr, 0);
 
@@ -47,8 +49,8 @@ TEST(TestRockeClientEngine, GetDetailsBuildsAndReleasesBuffer)
 
 TEST(TestRockeClientEngine, WorkspaceQueryRejectsSkeletonEngine)
 {
-    rocke_client::RockeClientEngine engine;
-    rocke_client::RockeClientHandle handle;
+    const rocke_client::RockeClientEngine engine;
+    const rocke_client::RockeClientHandle handle;
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper invalidGraph(nullptr, 0);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
                                                                                           0);
@@ -59,8 +61,8 @@ TEST(TestRockeClientEngine, WorkspaceQueryRejectsSkeletonEngine)
 
 TEST(TestRockeClientEngine, ExecutionContextCreationRejectsSkeletonEngine)
 {
-    rocke_client::RockeClientEngine engine;
-    rocke_client::RockeClientHandle handle;
+    const rocke_client::RockeClientEngine engine;
+    const rocke_client::RockeClientHandle handle;
     rocke_client::RockeClientContext context;
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper invalidGraph(nullptr, 0);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper invalidConfig(nullptr,
@@ -68,4 +70,20 @@ TEST(TestRockeClientEngine, ExecutionContextCreationRejectsSkeletonEngine)
 
     EXPECT_THROW(engine.initializeExecutionContext(handle, invalidGraph, invalidConfig, context),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestRockeClientEngine, IsApplicableRejectsValidSdpaGraphWithEmptyCatalog)
+{
+    // The default engine's AOT catalog is empty (kpack not landed), so even a
+    // structurally valid SDPA graph is declined. This exercises the real
+    // adapter + dispatcher path, not a hardcoded false.
+    const rocke_client::dispatcher::test::SdpaGraphFixture fixture
+        = rocke_client::dispatcher::test::buildSdpaGraph(
+            rocke_client::dispatcher::test::SdpaGraphConfig{});
+
+    const rocke_client::RockeClientEngine engine;
+    rocke_client::RockeClientHandle handle;
+    const auto graph = fixture.graphWrapper();
+
+    EXPECT_FALSE(engine.isApplicable(handle, graph));
 }

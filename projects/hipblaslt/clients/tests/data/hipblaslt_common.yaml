@@ -632,6 +632,7 @@ Arguments:
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
+  - ulp_check: c_int8
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -733,6 +734,7 @@ Defaults:
   norm_check: 0
   allclose_check: 0
   unit_check: 1
+  ulp_check: 0
   timing: 0
   iters: 10
   cold_iters: 2

@@ -197,7 +197,8 @@ flatbuffers::FlatBufferBuilder
                          hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
                          = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                          bool virtualInput = false,
-                         bool virtualOutput = false)
+                         bool virtualOutput = false,
+                         bool overrideShapeEnabled = false)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -252,7 +253,9 @@ flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         &tensorAttributes,
-        &nodes);
+        &nodes,
+        flatbuffers::nullopt,
+        overrideShapeEnabled);
     builder.Finish(graphOffset);
 
     return builder;
@@ -299,6 +302,19 @@ TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForValidReluFwdGraph)
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder
+        = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               /*virtualInput=*/false,
+                               /*virtualOutput=*/false,
+                               /*overrideShapeEnabled=*/true);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForUnsupportedMode)
