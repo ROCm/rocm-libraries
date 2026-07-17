@@ -31,6 +31,10 @@ inline constexpr std::string_view K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0";
 // less than this when the graph contains ragged tensors.
 inline constexpr std::string_view K_RAGGED_TENSOR_MIN_API_VERSION = "1.3.0";
 
+// Deserialize ceiling: a graph whose min_required_engine_api_version exceeds this
+// is rejected. Must equal the highest feature-gated version constant above.
+inline constexpr std::string_view K_MAX_SUPPORTED_API_VERSION = K_RAGGED_TENSOR_MIN_API_VERSION;
+
 /// @brief Computes the minimum engine plugin API version a graph requires,
 /// from the graph-level feature flags gating additive plugin ABI surface.
 ///

@@ -78,7 +78,7 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
     auto dims = entry.at("dims").get<std::vector<int64_t>>();
     auto strides = entry.at("strides").get<std::vector<int64_t>>();
     const bool isVirtual = entry.at("virtual").get<bool>();
-    const bool isRuntimePassByValue = entry.at("is_runtime_pass_by_value").get<bool>();
+    const bool isRuntimePassByValue = entry.value("is_runtime_pass_by_value", false);
     const int64_t alignment = entry.value("alignment", INT64_C(16));
     flatbuffers::Optional<int64_t> raggedOffsetTensorUid = flatbuffers::nullopt;
     if(entry.contains("ragged_offset_tensor_uid"))

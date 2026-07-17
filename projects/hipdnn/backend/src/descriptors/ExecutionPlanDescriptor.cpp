@@ -64,7 +64,10 @@ TensorIdentities collectTensorIdentities(const GraphDescriptor& graph)
     for(const auto* tensor : *tensors)
     {
         identities.uids.push_back(tensor->uid());
-        identities.alignments.push_back(tensor->alignment());
+        // Pass-by-value scalars arrive as host pointers, not device buffers; 0
+        // opts them out of device-pointer alignment enforcement.
+        identities.alignments.push_back(tensor->is_runtime_pass_by_value() ? INT64_C(0)
+                                                                           : tensor->alignment());
     }
     return identities;
 }

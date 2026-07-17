@@ -397,8 +397,8 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     const auto requiredVersion
         = hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version.get());
     THROW_IF_TRUE(
-        requiredVersion > hipdnn_data_sdk::utilities::
-                Version{hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION},
+        requiredVersion
+            > hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION},
         HIPDNN_STATUS_NOT_SUPPORTED,
         "Serialized graph requires a newer engine plugin API version than this build supports.");
 
@@ -408,8 +408,10 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
     _isOverrideShapeEnabled = graph->is_override_shape_enabled;
-    _isRuntimePassByValueEnabled = requiredVersion >= hipdnn_data_sdk::utilities::Version{
-                                       hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
+    // Scanned directly: the stamped required-version collapses to a single floor
+    // and cannot distinguish pass-by-value from a higher feature floor like ragged.
+    _isRuntimePassByValueEnabled = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+        graph->tensors, [](const auto& tensor) { return tensor.get(); });
     _name = graph->name;
 
     // Populate _operations from the deserialized graph nodes
@@ -434,10 +436,10 @@ void GraphDescriptor::buildSerializedGraph()
     THROW_IF_NULL(graph,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "GraphDescriptor::buildSerializedGraph: graph is null");
-    _isRuntimePassByValueEnabled
-        = hipdnn_plugin_sdk::fromEngineApiVersion(*graph->min_required_engine_api_version)
-          >= hipdnn_data_sdk::utilities::Version{
-              hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
+    // Scanned directly: the stamped required-version collapses to a single floor
+    // and cannot distinguish pass-by-value from a higher feature floor like ragged.
+    _isRuntimePassByValueEnabled = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+        graph->tensors, [](const auto& tensor) { return tensor.get(); });
 
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
