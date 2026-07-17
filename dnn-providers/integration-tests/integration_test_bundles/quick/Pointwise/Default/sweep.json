@@ -48,7 +48,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness/0",
         "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp16",
         "seed": 0,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_0"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_0"
       }
     },
     {
@@ -98,7 +98,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_1"
       }
     },
     {
@@ -148,7 +148,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness/2",
         "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp16",
         "seed": 2,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_2"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_2"
       }
     },
     {
@@ -198,7 +198,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/0",
         "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32",
         "seed": 0,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_0"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_0"
       }
     },
     {
@@ -248,7 +248,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/1",
         "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_1"
       }
     },
     {
@@ -298,7 +298,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/2",
         "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32",
         "seed": 2,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_2"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_2"
       }
     }
   ]

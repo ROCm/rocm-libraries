@@ -130,7 +130,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_1"
       }
     },
     {
@@ -262,7 +262,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/11",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_11"
       }
     },
     {
@@ -394,7 +394,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/13",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_13"
       }
     },
     {
@@ -526,7 +526,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/15",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_15"
       }
     },
     {
@@ -658,7 +658,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/17",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_17"
       }
     },
     {
@@ -790,7 +790,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/19",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_19"
       }
     },
     {
@@ -922,7 +922,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/21",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_21"
       }
     },
     {
@@ -1054,7 +1054,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/23",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_23"
       }
     },
     {
@@ -1186,7 +1186,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/25",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_25"
       }
     },
     {
@@ -1318,7 +1318,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/27",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_27"
       }
     },
     {
@@ -1450,7 +1450,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/29",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_29"
       }
     },
     {
@@ -1582,7 +1582,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/3",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_3"
       }
     },
     {
@@ -1714,7 +1714,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/31",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_31"
       }
     },
     {
@@ -1846,7 +1846,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/33",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_33"
       }
     },
     {
@@ -1978,7 +1978,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/35",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_35"
       }
     },
     {
@@ -2110,7 +2110,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/5",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_5"
       }
     },
     {
@@ -2242,7 +2242,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/7",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_7"
       }
     },
     {
@@ -2374,7 +2374,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness/9",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dBfp16.Correctness_9"
       }
     },
     {
@@ -2506,7 +2506,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_1"
       }
     },
     {
@@ -2638,7 +2638,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/11",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_11"
       }
     },
     {
@@ -2770,7 +2770,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/13",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_13"
       }
     },
     {
@@ -2902,7 +2902,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/15",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_15"
       }
     },
     {
@@ -3034,7 +3034,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/17",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_17"
       }
     },
     {
@@ -3166,7 +3166,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/19",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_19"
       }
     },
     {
@@ -3298,7 +3298,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/21",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_21"
       }
     },
     {
@@ -3430,7 +3430,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/23",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_23"
       }
     },
     {
@@ -3562,7 +3562,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/25",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_25"
       }
     },
     {
@@ -3694,7 +3694,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/27",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_27"
       }
     },
     {
@@ -3826,7 +3826,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/29",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_29"
       }
     },
     {
@@ -3958,7 +3958,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/3",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_3"
       }
     },
     {
@@ -4090,7 +4090,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/31",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_31"
       }
     },
     {
@@ -4222,7 +4222,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/33",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_33"
       }
     },
     {
@@ -4354,7 +4354,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/35",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_35"
       }
     },
     {
@@ -4486,7 +4486,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/5",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_5"
       }
     },
     {
@@ -4618,7 +4618,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/7",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_7"
       }
     },
     {
@@ -4750,7 +4750,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness/9",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp16.Correctness_9"
       }
     },
     {
@@ -4882,7 +4882,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/1",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_1"
       }
     },
     {
@@ -5014,7 +5014,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/11",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_11"
       }
     },
     {
@@ -5146,7 +5146,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/13",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_13"
       }
     },
     {
@@ -5278,7 +5278,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/15",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_15"
       }
     },
     {
@@ -5410,7 +5410,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/17",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_17"
       }
     },
     {
@@ -5542,7 +5542,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/19",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_19"
       }
     },
     {
@@ -5674,7 +5674,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/21",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_21"
       }
     },
     {
@@ -5806,7 +5806,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/23",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_23"
       }
     },
     {
@@ -5938,7 +5938,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/25",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_25"
       }
     },
     {
@@ -6070,7 +6070,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/27",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_27"
       }
     },
     {
@@ -6202,7 +6202,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/29",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_29"
       }
     },
     {
@@ -6334,7 +6334,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/3",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_3"
       }
     },
     {
@@ -6466,7 +6466,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/31",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_31"
       }
     },
     {
@@ -6598,7 +6598,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/33",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_33"
       }
     },
     {
@@ -6730,7 +6730,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/35",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_35"
       }
     },
     {
@@ -6862,7 +6862,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/5",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_5"
       }
     },
     {
@@ -6994,7 +6994,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/7",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_7"
       }
     },
     {
@@ -7126,7 +7126,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness/9",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv2dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv2dFp32.Correctness_9"
       }
     },
     {
@@ -7274,7 +7274,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_1"
       }
     },
     {
@@ -7422,7 +7422,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/11",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_11"
       }
     },
     {
@@ -7570,7 +7570,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/13",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_13"
       }
     },
     {
@@ -7718,7 +7718,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/15",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_15"
       }
     },
     {
@@ -7866,7 +7866,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/17",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_17"
       }
     },
     {
@@ -8014,7 +8014,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/19",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_19"
       }
     },
     {
@@ -8162,7 +8162,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/21",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_21"
       }
     },
     {
@@ -8310,7 +8310,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/23",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_23"
       }
     },
     {
@@ -8458,7 +8458,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/25",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_25"
       }
     },
     {
@@ -8606,7 +8606,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/27",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_27"
       }
     },
     {
@@ -8754,7 +8754,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/29",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_29"
       }
     },
     {
@@ -8902,7 +8902,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/3",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_3"
       }
     },
     {
@@ -9050,7 +9050,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/31",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_31"
       }
     },
     {
@@ -9198,7 +9198,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/33",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_33"
       }
     },
     {
@@ -9346,7 +9346,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/35",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_35"
       }
     },
     {
@@ -9494,7 +9494,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/5",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_5"
       }
     },
     {
@@ -9642,7 +9642,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/7",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_7"
       }
     },
     {
@@ -9790,7 +9790,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness/9",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dBfp16.Correctness_9"
       }
     },
     {
@@ -9938,7 +9938,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_1"
       }
     },
     {
@@ -10086,7 +10086,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/11",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_11"
       }
     },
     {
@@ -10234,7 +10234,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/13",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_13"
       }
     },
     {
@@ -10382,7 +10382,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/15",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_15"
       }
     },
     {
@@ -10530,7 +10530,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/17",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_17"
       }
     },
     {
@@ -10678,7 +10678,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/19",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_19"
       }
     },
     {
@@ -10826,7 +10826,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/21",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_21"
       }
     },
     {
@@ -10974,7 +10974,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/23",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_23"
       }
     },
     {
@@ -11122,7 +11122,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/25",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_25"
       }
     },
     {
@@ -11270,7 +11270,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/27",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_27"
       }
     },
     {
@@ -11418,7 +11418,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/29",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_29"
       }
     },
     {
@@ -11566,7 +11566,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/3",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_3"
       }
     },
     {
@@ -11714,7 +11714,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/31",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_31"
       }
     },
     {
@@ -11862,7 +11862,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/33",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_33"
       }
     },
     {
@@ -12010,7 +12010,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/35",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_35"
       }
     },
     {
@@ -12158,7 +12158,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/5",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_5"
       }
     },
     {
@@ -12306,7 +12306,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/7",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_7"
       }
     },
     {
@@ -12454,7 +12454,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness/9",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp16.Correctness_9"
       }
     },
     {
@@ -12602,7 +12602,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/1",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_1"
       }
     },
     {
@@ -12750,7 +12750,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/11",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_11"
       }
     },
     {
@@ -12898,7 +12898,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/13",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_13"
       }
     },
     {
@@ -13046,7 +13046,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/15",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_15"
       }
     },
     {
@@ -13194,7 +13194,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/17",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_17"
       }
     },
     {
@@ -13342,7 +13342,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/19",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_19"
       }
     },
     {
@@ -13490,7 +13490,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/21",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_21"
       }
     },
     {
@@ -13638,7 +13638,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/23",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_23"
       }
     },
     {
@@ -13786,7 +13786,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/25",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_25"
       }
     },
     {
@@ -13934,7 +13934,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/27",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_27"
       }
     },
     {
@@ -14082,7 +14082,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/29",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_29"
       }
     },
     {
@@ -14230,7 +14230,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/3",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_3"
       }
     },
     {
@@ -14378,7 +14378,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/31",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_31"
       }
     },
     {
@@ -14526,7 +14526,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/33",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_33"
       }
     },
     {
@@ -14674,7 +14674,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/35",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_35"
       }
     },
     {
@@ -14822,7 +14822,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/5",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_5"
       }
     },
     {
@@ -14970,7 +14970,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/7",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_7"
       }
     },
     {
@@ -15118,7 +15118,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness/9",
         "operation": "Smoke/IntegrationGpuConvFwdBiasActiv3dFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_9"
       }
     }
   ]

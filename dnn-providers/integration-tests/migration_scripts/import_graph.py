@@ -21,7 +21,7 @@ Dup policy: default is skip-and-report (idempotent, safe to re-run).
 Usage::
 
     import_graph.py --graph case.json --bundle-dir integration_test_bundles/ \\
-        [--tier quick] [--meta ported_from="..."] [--dry-run] [--strict] [--force]
+        [--tier quick] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
 """
 
 import argparse

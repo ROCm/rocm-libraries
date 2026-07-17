@@ -7,7 +7,7 @@
 #
 # Checks:
 #   1. Count reconciliation: census == captured == placed
-#   2. Every migrated case carries `ported_from` metadata
+#   2. Every migrated case carries `reference_source` metadata
 #   3. Migrated cases have NO golden reference data (per AC)
 #   4. Idempotency: git diff on the bundle tree is clean
 #
@@ -58,14 +58,14 @@ for sweep in root.rglob("sweep.json"):
     except Exception:
         continue
     for c in data.get("cases", []):
-        if (c.get("metadata") or {}).get("ported_from"):
+        if (c.get("metadata") or {}).get("reference_source"):
             n += 1
 for meta in root.rglob("*.meta.json"):
     try:
         m = json.load(open(meta))
     except Exception:
         continue
-    if m.get("ported_from"):
+    if m.get("reference_source"):
         n += 1
 print(n)
 PY
@@ -79,13 +79,13 @@ else
 fi
 echo ""
 
-# ── Check 2: ported_from present ─────────────────────────────────────────
-echo "--- Check 2: ported_from provenance ---"
-PORTED_FILES=$(grep -rl "ported_from" "$BUNDLE_DIR" 2>/dev/null | wc -l | tr -d ' ')
+# ── Check 2: reference_source present ─────────────────────────────────────────
+echo "--- Check 2: reference_source provenance ---"
+PORTED_FILES=$(grep -rl "reference_source" "$BUNDLE_DIR" 2>/dev/null | wc -l | tr -d ' ')
 if [ "${PORTED_FILES:-0}" -gt 0 ]; then
-    pass "$PORTED_FILES file(s) carry ported_from metadata"
+    pass "$PORTED_FILES file(s) carry reference_source metadata"
 else
-    fail "no files carry ported_from — migration output missing"
+    fail "no files carry reference_source — migration output missing"
 fi
 echo ""
 
@@ -103,7 +103,7 @@ for sweep in root.rglob("sweep.json"):
     except Exception:
         continue
     for c in data.get("cases", []):
-        if (c.get("metadata") or {}).get("ported_from") and c.get("golden"):
+        if (c.get("metadata") or {}).get("reference_source") and c.get("golden"):
             bad.append(f"{sweep}:{c.get('id')}")
 print("\n".join(bad))
 PY

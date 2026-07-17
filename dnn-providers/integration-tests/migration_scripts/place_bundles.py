@@ -241,7 +241,7 @@ def detect_and_build(bucket: Bucket):
 
         meta = dict(c.meta)
         meta.setdefault("format_version", 1)
-        meta["ported_from"] = f"c++ integration suite: {c.suite}.{c.case_name}"
+        meta["reference_source"] = f"c++ integration suite: {c.suite}.{c.case_name}"
 
         sweep_cases.append(
             {"id": None, "values": values, "metadata": meta, "_origin": c}
@@ -327,7 +327,9 @@ def write_standalone(target: Path, case: CapturedCase, reason: str, dry_run: boo
             f.write("\n")
         meta = dict(case.meta)
         meta.setdefault("format_version", 1)
-        meta["ported_from"] = f"c++ integration suite: {case.suite}.{case.case_name}"
+        meta["reference_source"] = (
+            f"c++ integration suite: {case.suite}.{case.case_name}"
+        )
         meta["standalone_reason"] = reason
         with open(out_dir / f"{bundle_name}.meta.json", "w") as f:
             json.dump(meta, f, indent=2)

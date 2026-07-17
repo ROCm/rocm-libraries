@@ -51,7 +51,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/0",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_0"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_0"
       }
     },
     {
@@ -104,7 +104,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_1"
       }
     },
     {
@@ -157,7 +157,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/10",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_10"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_10"
       }
     },
     {
@@ -210,7 +210,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/11",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_11"
       }
     },
     {
@@ -263,7 +263,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/12",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_12"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_12"
       }
     },
     {
@@ -316,7 +316,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/13",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_13"
       }
     },
     {
@@ -369,7 +369,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/14",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_14"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_14"
       }
     },
     {
@@ -422,7 +422,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/15",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_15"
       }
     },
     {
@@ -475,7 +475,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/16",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_16"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_16"
       }
     },
     {
@@ -528,7 +528,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/17",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_17"
       }
     },
     {
@@ -581,7 +581,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/18",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_18"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_18"
       }
     },
     {
@@ -634,7 +634,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/19",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_19"
       }
     },
     {
@@ -687,7 +687,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/2",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_2"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_2"
       }
     },
     {
@@ -740,7 +740,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/20",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_20"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_20"
       }
     },
     {
@@ -793,7 +793,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/21",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_21"
       }
     },
     {
@@ -846,7 +846,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/22",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_22"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_22"
       }
     },
     {
@@ -899,7 +899,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/23",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_23"
       }
     },
     {
@@ -952,7 +952,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/24",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_24"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_24"
       }
     },
     {
@@ -1005,7 +1005,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/25",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_25"
       }
     },
     {
@@ -1058,7 +1058,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/26",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_26"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_26"
       }
     },
     {
@@ -1111,7 +1111,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/27",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_27"
       }
     },
     {
@@ -1164,7 +1164,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/28",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_28"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_28"
       }
     },
     {
@@ -1217,7 +1217,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/29",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_29"
       }
     },
     {
@@ -1270,7 +1270,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/3",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_3"
       }
     },
     {
@@ -1323,7 +1323,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/30",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_30"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_30"
       }
     },
     {
@@ -1376,7 +1376,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/31",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_31"
       }
     },
     {
@@ -1429,7 +1429,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/32",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_32"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_32"
       }
     },
     {
@@ -1482,7 +1482,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/33",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_33"
       }
     },
     {
@@ -1535,7 +1535,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/34",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_34"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_34"
       }
     },
     {
@@ -1588,7 +1588,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/35",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_35"
       }
     },
     {
@@ -1641,7 +1641,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/36",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_36"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_36"
       }
     },
     {
@@ -1694,7 +1694,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/37",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_37"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_37"
       }
     },
     {
@@ -1747,7 +1747,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/4",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_4"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_4"
       }
     },
     {
@@ -1800,7 +1800,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/5",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_5"
       }
     },
     {
@@ -1853,7 +1853,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/6",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_6"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_6"
       }
     },
     {
@@ -1906,7 +1906,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/7",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_7"
       }
     },
     {
@@ -1959,7 +1959,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/8",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_8"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_8"
       }
     },
     {
@@ -2012,7 +2012,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionBfp16.Correctness/9",
         "operation": "Smoke/IntegrationGpuReductionBfp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionBfp16.Correctness_9"
       }
     },
     {
@@ -2065,7 +2065,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/0",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_0"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_0"
       }
     },
     {
@@ -2118,7 +2118,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/1",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_1"
       }
     },
     {
@@ -2171,7 +2171,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/10",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_10"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_10"
       }
     },
     {
@@ -2224,7 +2224,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/11",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_11"
       }
     },
     {
@@ -2277,7 +2277,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/12",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_12"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_12"
       }
     },
     {
@@ -2330,7 +2330,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/13",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_13"
       }
     },
     {
@@ -2383,7 +2383,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/14",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_14"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_14"
       }
     },
     {
@@ -2436,7 +2436,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/15",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_15"
       }
     },
     {
@@ -2489,7 +2489,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/16",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_16"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_16"
       }
     },
     {
@@ -2542,7 +2542,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/17",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_17"
       }
     },
     {
@@ -2595,7 +2595,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/18",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_18"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_18"
       }
     },
     {
@@ -2648,7 +2648,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/19",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_19"
       }
     },
     {
@@ -2701,7 +2701,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/2",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_2"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_2"
       }
     },
     {
@@ -2754,7 +2754,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/20",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_20"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_20"
       }
     },
     {
@@ -2807,7 +2807,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/21",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_21"
       }
     },
     {
@@ -2860,7 +2860,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/22",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_22"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_22"
       }
     },
     {
@@ -2913,7 +2913,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/23",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_23"
       }
     },
     {
@@ -2966,7 +2966,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/24",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_24"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_24"
       }
     },
     {
@@ -3019,7 +3019,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/25",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_25"
       }
     },
     {
@@ -3072,7 +3072,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/26",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_26"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_26"
       }
     },
     {
@@ -3125,7 +3125,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/27",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_27"
       }
     },
     {
@@ -3178,7 +3178,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/28",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_28"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_28"
       }
     },
     {
@@ -3231,7 +3231,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/29",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_29"
       }
     },
     {
@@ -3284,7 +3284,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/3",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_3"
       }
     },
     {
@@ -3337,7 +3337,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/30",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_30"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_30"
       }
     },
     {
@@ -3390,7 +3390,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/31",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_31"
       }
     },
     {
@@ -3443,7 +3443,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/32",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_32"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_32"
       }
     },
     {
@@ -3496,7 +3496,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/33",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_33"
       }
     },
     {
@@ -3549,7 +3549,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/34",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_34"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_34"
       }
     },
     {
@@ -3602,7 +3602,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/35",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_35"
       }
     },
     {
@@ -3655,7 +3655,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/36",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_36"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_36"
       }
     },
     {
@@ -3708,7 +3708,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/37",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_37"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_37"
       }
     },
     {
@@ -3761,7 +3761,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/4",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_4"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_4"
       }
     },
     {
@@ -3814,7 +3814,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/5",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_5"
       }
     },
     {
@@ -3867,7 +3867,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/6",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_6"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_6"
       }
     },
     {
@@ -3920,7 +3920,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/7",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_7"
       }
     },
     {
@@ -3973,7 +3973,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/8",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_8"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_8"
       }
     },
     {
@@ -4026,7 +4026,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp16.Correctness/9",
         "operation": "Smoke/IntegrationGpuReductionFp16",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp16.Correctness_9"
       }
     },
     {
@@ -4079,7 +4079,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/0",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_0"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_0"
       }
     },
     {
@@ -4132,7 +4132,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/1",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_1"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_1"
       }
     },
     {
@@ -4185,7 +4185,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/10",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_10"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_10"
       }
     },
     {
@@ -4238,7 +4238,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/11",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_11"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_11"
       }
     },
     {
@@ -4291,7 +4291,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/12",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_12"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_12"
       }
     },
     {
@@ -4344,7 +4344,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/13",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_13"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_13"
       }
     },
     {
@@ -4397,7 +4397,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/14",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_14"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_14"
       }
     },
     {
@@ -4450,7 +4450,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/15",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_15"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_15"
       }
     },
     {
@@ -4503,7 +4503,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/16",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_16"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_16"
       }
     },
     {
@@ -4556,7 +4556,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/17",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_17"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_17"
       }
     },
     {
@@ -4609,7 +4609,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/18",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_18"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_18"
       }
     },
     {
@@ -4662,7 +4662,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/19",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_19"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_19"
       }
     },
     {
@@ -4715,7 +4715,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/2",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_2"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_2"
       }
     },
     {
@@ -4768,7 +4768,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/20",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_20"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_20"
       }
     },
     {
@@ -4821,7 +4821,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/21",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_21"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_21"
       }
     },
     {
@@ -4874,7 +4874,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/22",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_22"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_22"
       }
     },
     {
@@ -4927,7 +4927,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/23",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_23"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_23"
       }
     },
     {
@@ -4980,7 +4980,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/24",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_24"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_24"
       }
     },
     {
@@ -5033,7 +5033,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/25",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_25"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_25"
       }
     },
     {
@@ -5086,7 +5086,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/26",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_26"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_26"
       }
     },
     {
@@ -5139,7 +5139,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/27",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_27"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_27"
       }
     },
     {
@@ -5192,7 +5192,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/28",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_28"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_28"
       }
     },
     {
@@ -5245,7 +5245,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/29",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_29"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_29"
       }
     },
     {
@@ -5298,7 +5298,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/3",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_3"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_3"
       }
     },
     {
@@ -5351,7 +5351,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/30",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_30"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_30"
       }
     },
     {
@@ -5404,7 +5404,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/31",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_31"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_31"
       }
     },
     {
@@ -5457,7 +5457,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/32",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_32"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_32"
       }
     },
     {
@@ -5510,7 +5510,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/33",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_33"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_33"
       }
     },
     {
@@ -5563,7 +5563,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/34",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_34"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_34"
       }
     },
     {
@@ -5616,7 +5616,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/35",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_35"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_35"
       }
     },
     {
@@ -5669,7 +5669,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/36",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_36"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_36"
       }
     },
     {
@@ -5722,7 +5722,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/37",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_37"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_37"
       }
     },
     {
@@ -5775,7 +5775,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/4",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_4"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_4"
       }
     },
     {
@@ -5828,7 +5828,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/5",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_5"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_5"
       }
     },
     {
@@ -5881,7 +5881,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/6",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_6"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_6"
       }
     },
     {
@@ -5934,7 +5934,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/7",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_7"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_7"
       }
     },
     {
@@ -5987,7 +5987,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/8",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_8"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_8"
       }
     },
     {
@@ -6040,7 +6040,7 @@
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuReductionFp32.Correctness/9",
         "operation": "Smoke/IntegrationGpuReductionFp32",
         "seed": 1,
-        "ported_from": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_9"
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuReductionFp32.Correctness_9"
       }
     }
   ]

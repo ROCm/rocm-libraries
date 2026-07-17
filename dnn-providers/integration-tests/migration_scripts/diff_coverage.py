@@ -8,7 +8,7 @@ Parses GTest JSON results from two runs:
   1. C++ integration suite  (--cpp)
   2. Bundle integration suite (--bundle)
 
-Joins on ``ported_from`` metadata, then asserts::
+Joins on ``reference_source`` metadata, then asserts::
 
     pass_set_bundle  ⊇  pass_set_cpp
 
@@ -58,8 +58,8 @@ def _parse_gtest_json(path: Path) -> dict:
     return results
 
 
-def _build_ported_from_map(bundle_dir: Path) -> dict:
-    """Return {ported_from_key: bundle_case_id} by scanning sweep.json files."""
+def _build_reference_source_map(bundle_dir: Path) -> dict:
+    """Return {reference_source_key: bundle_case_id} by scanning sweep.json files."""
     mapping = {}
     if not bundle_dir or not bundle_dir.is_dir():
         return mapping
@@ -71,7 +71,7 @@ def _build_ported_from_map(bundle_dir: Path) -> dict:
             continue
         for case in sweep.get("cases", []):
             meta = case.get("metadata", {})
-            key = meta.get("ported_from")
+            key = meta.get("reference_source")
             if key:
                 mapping[key] = case.get("id", "")
     for meta_path in sorted(bundle_dir.rglob("*.meta.json")):
@@ -80,7 +80,7 @@ def _build_ported_from_map(bundle_dir: Path) -> dict:
                 meta = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue
-        key = meta.get("ported_from")
+        key = meta.get("reference_source")
         if key and key not in mapping:
             mapping[key] = meta_path.parent.name
     return mapping
@@ -100,7 +100,7 @@ def main() -> int:
         "--bundle-dir",
         type=Path,
         default=None,
-        help="bundle tree (for ported_from lookup, optional)",
+        help="bundle tree (for reference_source lookup, optional)",
     )
     args = ap.parse_args()
 
@@ -115,10 +115,10 @@ def main() -> int:
     print(f"  bundle total: {len(bundle_results)}", file=sys.stderr)
     print(f"  bundle PASS:  {len(bundle_pass)}", file=sys.stderr)
 
-    ported_map = _build_ported_from_map(args.bundle_dir) if args.bundle_dir else {}
+    ported_map = _build_reference_source_map(args.bundle_dir) if args.bundle_dir else {}
 
     # The join key mismatch to bridge: gtest reports parametrized cases as
-    # "Suite.Correctness/0" (slash), but ported_from stores the *sanitized*
+    # "Suite.Correctness/0" (slash), but reference_source stores the *sanitized*
     # case name "...Correctness_0" (underscore, as it appears on disk). Normalize
     # both sides — strip the "c++ integration suite: " prefix and unify slashes
     # to underscores — so the reverse lookup actually connects.
@@ -126,7 +126,7 @@ def main() -> int:
         n = name.split("c++ integration suite:")[-1].strip()
         return n.replace("/", "_")
 
-    # normalized C++ name -> bundle case id (from ported_from metadata)
+    # normalized C++ name -> bundle case id (from reference_source metadata)
     ported_by_norm = {_norm(key): cid for key, cid in ported_map.items()}
 
     bundle_pass_by_case = {}

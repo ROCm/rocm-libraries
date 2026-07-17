@@ -119,7 +119,7 @@ plus per-case byte-exact comparison of graph AND metadata (seed, inputs).
 python3 migration_scripts/import_graph.py \
     --graph path/to/graph.json \
     --bundle-dir integration_test_bundles/ \
-    --meta ported_from="c++ integration suite: Suite.Case"
+    --meta reference_source="c++ integration suite: Suite.Case"
 ```
 
 Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
@@ -264,7 +264,7 @@ python3 migration_scripts/diff_coverage.py \
 | Seed | `synthesis().setGlobalSeed()` | sweep `case.metadata.seed` | Per-case metadata |
 | Distribution/range | `SynthesisConfig.fills()` | sweep `case.metadata.inputs.{uid}` | Per-case metadata |
 | Per-op defaults | `SynthesizeInputs.cpp` | **NOT stored** | Re-derived from topology |
-| Provenance | (new) | sweep `case.metadata.ported_from` | Per-case metadata |
+| Provenance | (new) | sweep `case.metadata.reference_source` | Per-case metadata |
 
 ## Scripts
 

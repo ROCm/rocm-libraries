@@ -207,7 +207,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_0"
       }
     },
     {
@@ -416,7 +416,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_1"
       }
     },
     {
@@ -625,7 +625,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_2"
       }
     },
     {
@@ -834,7 +834,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness/6",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_6"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_6"
       }
     },
     {
@@ -1043,7 +1043,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness/7",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_7"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_7"
       }
     },
     {
@@ -1252,7 +1252,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dBfp16.Correctness_8"
       }
     },
     {
@@ -1461,7 +1461,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_0"
       }
     },
     {
@@ -1670,7 +1670,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_1"
       }
     },
     {
@@ -1879,7 +1879,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_2"
       }
     },
     {
@@ -2088,7 +2088,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness/6",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_6"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_6"
       }
     },
     {
@@ -2297,7 +2297,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness/7",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_7"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_7"
       }
     },
     {
@@ -2506,7 +2506,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp16.Correctness_8"
       }
     },
     {
@@ -2715,7 +2715,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_0"
       }
     },
     {
@@ -2924,7 +2924,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_1"
       }
     },
     {
@@ -3133,7 +3133,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_2"
       }
     },
     {
@@ -3342,7 +3342,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness/6",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_6"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_6"
       }
     },
     {
@@ -3551,7 +3551,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness/7",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_7"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_7"
       }
     },
     {
@@ -3760,7 +3760,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining1dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining1dFp32.Correctness_8"
       }
     },
     {
@@ -3989,7 +3989,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_0"
       }
     },
     {
@@ -4218,7 +4218,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_1"
       }
     },
     {
@@ -4447,7 +4447,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/10",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_10"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_10"
       }
     },
     {
@@ -4676,7 +4676,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/11",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_11"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_11"
       }
     },
     {
@@ -4905,7 +4905,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_2"
       }
     },
     {
@@ -5134,7 +5134,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/3",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_3"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_3"
       }
     },
     {
@@ -5363,7 +5363,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_8"
       }
     },
     {
@@ -5592,7 +5592,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness/9",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_9"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dBfp16.Correctness_9"
       }
     },
     {
@@ -5821,7 +5821,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_0"
       }
     },
     {
@@ -6050,7 +6050,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_1"
       }
     },
     {
@@ -6279,7 +6279,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/10",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_10"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_10"
       }
     },
     {
@@ -6508,7 +6508,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/11",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_11"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_11"
       }
     },
     {
@@ -6737,7 +6737,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_2"
       }
     },
     {
@@ -6966,7 +6966,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/3",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_3"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_3"
       }
     },
     {
@@ -7195,7 +7195,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_8"
       }
     },
     {
@@ -7424,7 +7424,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness/9",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_9"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp16.Correctness_9"
       }
     },
     {
@@ -7653,7 +7653,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_0"
       }
     },
     {
@@ -7882,7 +7882,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_1"
       }
     },
     {
@@ -8111,7 +8111,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/10",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_10"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_10"
       }
     },
     {
@@ -8340,7 +8340,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/11",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_11"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_11"
       }
     },
     {
@@ -8569,7 +8569,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_2"
       }
     },
     {
@@ -8798,7 +8798,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/3",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_3"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_3"
       }
     },
     {
@@ -9027,7 +9027,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_8"
       }
     },
     {
@@ -9256,7 +9256,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness/9",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining2dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_9"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining2dFp32.Correctness_9"
       }
     },
     {
@@ -9505,7 +9505,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_0"
       }
     },
     {
@@ -9754,7 +9754,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_1"
       }
     },
     {
@@ -10003,7 +10003,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_2"
       }
     },
     {
@@ -10252,7 +10252,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness/6",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_6"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_6"
       }
     },
     {
@@ -10501,7 +10501,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness/7",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_7"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_7"
       }
     },
     {
@@ -10750,7 +10750,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dBfp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dBfp16.Correctness_8"
       }
     },
     {
@@ -10999,7 +10999,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_0"
       }
     },
     {
@@ -11248,7 +11248,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_1"
       }
     },
     {
@@ -11497,7 +11497,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_2"
       }
     },
     {
@@ -11746,7 +11746,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness/6",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_6"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_6"
       }
     },
     {
@@ -11995,7 +11995,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness/7",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_7"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_7"
       }
     },
     {
@@ -12244,7 +12244,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp16",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp16.Correctness_8"
       }
     },
     {
@@ -12493,7 +12493,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness/0",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_0"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_0"
       }
     },
     {
@@ -12742,7 +12742,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness/1",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_1"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_1"
       }
     },
     {
@@ -12991,7 +12991,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness/2",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_2"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_2"
       }
     },
     {
@@ -13240,7 +13240,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness/6",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_6"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_6"
       }
     },
     {
@@ -13489,7 +13489,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness/7",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_7"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_7"
       }
     },
     {
@@ -13738,7 +13738,7 @@
         "notes": "Captured from C++ graph test Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness/8",
         "operation": "Full/IntegrationGpuBatchnormFwdTraining3dFp32",
         "seed": 42,
-        "ported_from": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_8"
+        "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdTraining3dFp32.Correctness_8"
       }
     }
   ]

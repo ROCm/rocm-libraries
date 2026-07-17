@@ -156,7 +156,7 @@ def _load_all_cases(bundle_dir):
                     "layout": layout,
                     "inputs": input_roles,
                     "seed": meta.get("seed"),
-                    "origin": meta.get("ported_from", ""),
+                    "origin": meta.get("reference_source", ""),
                     "suite": f"{tier}_{op}_{topo}",
                     "gtest": f"{tier}_{op}_{topo}/{case.get('id', '')}",
                     "_raw_inputs": inputs,
@@ -306,7 +306,9 @@ def main() -> int:
         help="filter by input role, e.g. --input epsilon  or  --input epsilon:-1,1",
     )
     ap.add_argument("--id", help="filter by case id (substring match)")
-    ap.add_argument("--origin", help="filter by ported_from C++ suite name (substring)")
+    ap.add_argument(
+        "--origin", help="filter by reference_source C++ suite name (substring)"
+    )
     ap.add_argument(
         "--detail", action="store_true", help="show full detail for each match"
     )

@@ -37,7 +37,7 @@ from bundle_utils import canon, canonical_uid_map, expand, remap_graph
 
 
 def _load_captured(capture_dir: Path) -> dict:
-    """Return {ported_from_key: (graph, meta)} for every captured case."""
+    """Return {reference_source_key: (graph, meta)} for every captured case."""
     captured = {}
     if not capture_dir.is_dir():
         return captured
@@ -74,7 +74,7 @@ def _load_captured(capture_dir: Path) -> dict:
 
 
 def _load_placed(bundle_dir: Path) -> dict:
-    """Return {ported_from_key: (expanded_graph, metadata)} for every placed case."""
+    """Return {reference_source_key: (expanded_graph, metadata)} for every placed case."""
     placed = {}
     if not bundle_dir.is_dir():
         return placed
@@ -92,7 +92,7 @@ def _load_placed(bundle_dir: Path) -> dict:
             continue
         for case in sweep.get("cases", []):
             meta = case.get("metadata", {})
-            key = meta.get("ported_from")
+            key = meta.get("reference_source")
             if not key:
                 continue
             expanded = expand(template, case.get("values", {}))
@@ -115,7 +115,7 @@ def _load_placed(bundle_dir: Path) -> dict:
                     meta = json.load(f)
             except (json.JSONDecodeError, OSError):
                 continue
-            key = meta.get("ported_from")
+            key = meta.get("reference_source")
             if key and key not in placed:
                 placed[key] = (graph, meta)
     return placed
