@@ -192,6 +192,14 @@ class LocalReadMFMA(LocalRead):
         # half-wave boundary is the wave midpoint (halfSpan == WavefrontSize/2).
         if matrixInstT != kernel["WavefrontSize"] // 2:
             return None
+        # The wave-split partner-block layout is only produced by LraTileAssignment when the
+        # tile axis spans >1 wave (MIWaveGroup>1, the num1DWaves>1 hiOffset path). With a single
+        # wave the load is NOT wave-split, so the scale-select (matrix_*_scale:1) would read a
+        # block the load never placed in the upper half-wave -> wrong results. This MUST match
+        # LraTileAssignment.tileSpanWaveSplit exactly so the packed/scale-select layout and the
+        # wave-split load layout always agree.
+        if kernel["MIWaveGroup"][tile01] <= 1:
+            return None
         return {
             "vectorWidth": vectorWidth,
             "numGroups": miWaveTileVectors // 2,

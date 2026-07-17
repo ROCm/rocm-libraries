@@ -894,6 +894,15 @@ namespace rocisa
                 break;
             }
 
+            // MX scale-select (gfx1250): matrix_{a,b}_scale must be emitted BEFORE the
+            // matrix_{a,b}_scale_fmt modifiers. The assembler enforces the modifier order
+            // matrix_*_fmt -> matrix_*_scale -> matrix_*_scale_fmt and rejects any other
+            // ordering with "not a valid operand". 0 is the default (no modifier emitted).
+            if(mxScaleASel)
+                inputPermuteStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
+            if(mxScaleBSel)
+                inputPermuteStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
+
             switch(mxScaleAType)
             {
             case InstType::INST_E5M3:
@@ -955,10 +964,13 @@ namespace rocisa
             }
             else
             {
+                // Note: scale-select (matrix_{a,b}_scale) is emitted inside
+                // wmmaInputPermuteStr() so it precedes matrix_{a,b}_scale_fmt as the
+                // assembler requires; do not append scaleSelStr here again.
                 return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                        + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
                        + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr()
-                       + scaleSelStr + reuseStr;
+                       + reuseStr;
             }
         }
 
