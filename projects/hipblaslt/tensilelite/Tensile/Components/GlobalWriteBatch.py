@@ -1805,9 +1805,11 @@ class GlobalWriteBatchWriter:
         #                                   the TDM flush is not compatible with it
         #                                   (FFM: ~all elements wrong) -> excluded pending a
         #                                   dedicated MBSK D-store-via-TDM change.
-        #   * StreamK                     : uses the MultipleBuffer workspace accumulation
-        #                                   (GSUAMB) for its partial tiles -> excluded by the
-        #                                   'MultipleBuffer' case above.
+        #   * StreamK                     : sets _GlobalAccumulation='PartialsBuffer' (its
+        #                                   partial-tile store target is the GSU workspace, not
+        #                                   D).  'PartialsBuffer' is NOT in the exclusion set
+        #                                   below, so StreamK is rejected up-front in
+        #                                   SolutionStructs/Solution.py rather than here.
         # GSU=1 (SingleBuffer) and subtile (which itself requires GSU=1) write D directly and
         # therefore use the TDM store.
         if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):

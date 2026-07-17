@@ -1567,6 +1567,23 @@ class Solution(collections.abc.Mapping):
       state["SynchronizerSizeCheck"] = 1
     #   state["BatchSizeEqual"] = 1
 
+    # TDMStoreInst: gfx1250 tensor_store_from_lds "store-to-final-D" epilogue.  Only a narrow,
+    # validated configuration is supported, so whitelist it here and reject everything else at
+    # solution time rather than silently mis-generating a broken kernel.  StreamK MUST be
+    # rejected here: it sets _GlobalAccumulation='PartialsBuffer' (partial-tile store target is
+    # the workspace, not D), which the GlobalWriteBatch TDM store gate does NOT exclude.
+    if state["TDMStoreInst"]:
+      if tuple(state["ISA"])[:2] != (12, 5):
+        reject(state, printRejectionReason, "TDMStoreInst requires gfx1250 (tensor_store_from_lds is gfx1250-only)")
+      elif not state["ProblemType"]["DestDataType"].isBFloat16():
+        reject(state, printRejectionReason, "TDMStoreInst currently supports only bf16 DestDataType (converted+packed store path)")
+      elif state["StreamK"] != 0:
+        reject(state, printRejectionReason, "TDMStoreInst does not support StreamK (partials/workspace store is not the final D)")
+      elif state["GlobalSplitU"] != 1:
+        reject(state, printRejectionReason, "TDMStoreInst requires GlobalSplitU=1 (direct-to-D store; GSU>1 accumulates in workspace)")
+      elif state["ProblemType"]["UseBeta"]:
+        reject(state, printRejectionReason, "TDMStoreInst does not yet support UseBeta (beta-edge C load is unproven)")
+
     if state["StreamK"] == 0 and state["GlobalSplitU"] == 0:
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
       return
@@ -5151,6 +5168,15 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["UseScaleAB"] == "Vector":
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * (vecDT.scaleA.turn + vecDT.scaleB.turn))
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
+
+    # TDMStoreInst stages the whole MacroTile into M-contiguous LDS scratch
+    # (VGPR -> LDS -> tensor_store_from_lds), so the epilogue needs MT0*MT1*bpe of LDS.
+    # Fold it into LdsNumBytes so the m0 LDS clamp / occupancy are correct and tiles whose
+    # scratch would exceed MaxLDS are cleanly rejected by the check below.
+    if state["TDMStoreInst"]:
+      tdmStoreScratchBytes = state["MacroTile0"] * state["MacroTile1"] \
+                             * int(state["ProblemType"]["DestDataType"].numBytes())
+      ldsNumBytes = max(ldsNumBytes, tdmStoreScratchBytes)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
     if state["ProblemType"]["OutputAmaxD"]:
