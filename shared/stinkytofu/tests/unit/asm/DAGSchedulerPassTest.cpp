@@ -25,6 +25,7 @@
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
@@ -80,6 +81,79 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
+    // Run with the tensor_load_to_lds credit-pool throttle enabled.
+    // distributeGlobalRead routes tensor loads into globalReadQueue; depth/latency
+    // configure the in-flight credit pool.
+    void runPassWithGlobalReadThrottle(int depth, int drainLatency) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.distributeGlobalRead = true;
+        pfc.dagFeatures.globalReadQueueDepth = depth;
+        pfc.dagFeatures.globalReadDrainLatency = drainLatency;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
+    // Run with the ds_read in-flight credit-pool throttle enabled. perWmma is held
+    // generously high by default so the separate per-WMMA-window ds cap never binds,
+    // isolating queueDepth/drainLatency as the only active constraint (mirrors how
+    // runPassWithGlobalReadThrottle isolates globalReadQueueDepth/globalReadDrainLatency).
+    void runPassWithDsReadThrottle(int queueDepth, int drainLatency, int perWmma = 100) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = queueDepth;
+        pfc.dagFeatures.dsReadDrainLatency = drainLatency;
+        pfc.dagFeatures.dsReadPerWmma = perWmma;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
+    // Linearized mnemonic order of a block (skips PHIs and non-Stinky IR).
+    static std::vector<std::string> mnemonicSequence(const BasicBlock& block) {
+        std::vector<std::string> seq;
+        for (const IRBase& ir : block) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            const HwInstDesc* hw = inst->getHwInstDesc();
+            if (!hw || !hw->mnemonic) continue;
+            seq.push_back(hw->mnemonic);
+        }
+        return seq;
+    }
+
+    // Largest run of consecutive tensor_load_to_lds in a mnemonic sequence.
+    static int maxConsecutiveTensorLoads(const std::vector<std::string>& seq) {
+        int run = 0, best = 0;
+        for (const std::string& m : seq) {
+            if (m == "tensor_load_to_lds") {
+                run++;
+                best = std::max(best, run);
+            } else {
+                run = 0;
+            }
+        }
+        return best;
+    }
+
+    // Largest run of consecutive ds_load_b128 in a mnemonic sequence
+    // (gfx1250's actual mnemonic for this op; see Gfx1250Instructions.def).
+    static int maxConsecutiveDsReads(const std::vector<std::string>& seq) {
+        int run = 0, best = 0;
+        for (const std::string& m : seq) {
+            if (m == "ds_load_b128") {
+                run++;
+                best = std::max(best, run);
+            } else {
+                run = 0;
+            }
+        }
+        return best;
+    }
+
     // Build a single-BB self-loop so the scheduler uses the loop-aware CDNA5 path.
     // Returns the loop body BB with the branch already appended.
     BasicBlock* buildLoopBB(const char* label = "loop_body") {
@@ -110,12 +184,179 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return createWmmaF32_16x16x16_bf16_in(bb, destStart, src0Start);
     }
 
+    // v_wmma_scale_f32_16x16x128_f8f6f4 with F8 (FP8) input matrix formats. Its
+    // cost is {issue=1, latency=8}, so the co-issue latency window stays open
+    // right after issue, which is what exercises the co-exec hazard gate.
+    // src VGPRs: v[src0Start:src0Start+8) (src0/src1) and v[destStart:destStart+8) (acc).
+    StinkyInstruction* createWmmaScaleF8_in(BasicBlock* targetBB, int destStart, int src0Start) {
+        AsmIRBuilder builder(*targetBB, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_scale_f32_16x16x128_f8f6f4, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addDestReg(StinkyRegister("v", destStart, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", src0Start, 8));
+        inst->addSrcReg(StinkyRegister("v", destStart, 8));
+        MatrixFmtModifiers fmtMod;
+        fmtMod.fmtA = MatrixFmt::FP8;
+        fmtMod.fmtB = MatrixFmt::FP8;
+        inst->addModifier(fmtMod);
+        return inst;
+    }
+
+    StinkyInstruction* createWmmaScaleF8(int destStart, int src0Start) {
+        return createWmmaScaleF8_in(bb, destStart, src0Start);
+    }
+
     StinkyInstruction* createMovableDsLoad(int destReg, int addrReg, int ldsToken) {
         StinkyInstruction* inst = createDsReadB128InBlock(bb, arch, destReg, addrReg);
         inst->addSrcReg(StinkyRegister(RegType::LDS, ldsToken, 1));
         return inst;
     }
+
+    // A tensor_load_to_lds with an LDS pseudo dest-reg so the DAG scheduler treats
+    // it as movable (without LDS pseudo-regs hasSideEffect() makes it a region
+    // boundary and it never enters globalReadQueue). Mirrors createMovableDsLoad.
+    StinkyInstruction* createMovableTensorLoad(BasicBlock* targetBB, int src0Reg, int src1Reg,
+                                               int ldsToken) {
+        StinkyInstruction* inst = createTensorLoadInBlock(targetBB, arch, src0Reg, src1Reg);
+        inst->addDestReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+        return inst;
+    }
+
+    StinkyInstruction* createExecNarrow(int srcSgpr) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        inst->addDestReg(StinkyRegister::getEXECRegister(32));
+        inst->addSrcReg(StinkyRegister("s", srcSgpr, 1));
+        return inst;
+    }
+
+    StinkyInstruction* createExecReset() {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        inst->addDestReg(StinkyRegister::getEXECRegister(32));
+        inst->addSrcReg(StinkyRegister(-1));
+        return inst;
+    }
 };
+
+// Integration check: collapse + schedule + expand together, through the real pass.
+// See ExecMaskGroupingTest.cpp for isolated collapse/expand tests, and the
+// ExecMaskGroup_* tests below for whether the scheduler treats a group as atomic.
+TEST_F(DAGSchedulerPassTest, ExecMaskedRegion_PreservesSpanAndOrder) {
+    createVAddInBlock(bb, arch, 40, 41, 42);
+    createExecNarrow(10);
+    createVAddInBlock(bb, arch, 0, 1, 2);
+    createVAddInBlock(bb, arch, 3, 4, 5);
+    createVAddInBlock(bb, arch, 6, 7, 8);
+    createExecReset();
+    createVAddInBlock(bb, arch, 50, 51, 52);
+
+    const int n = countStinkyInstructions(*bb);
+    runPass();
+
+    EXPECT_EQ(countStinkyInstructions(*bb), n);
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        EXPECT_NE(cast<StinkyInstruction>(&ir)->getUnifiedOpcode(), GFX::EXEC_GROUP);
+    }
+
+    std::vector<int> destSeq;
+    std::vector<bool> isExecWriteSeq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst->getUnifiedOpcode() != GFX::s_mov_b32 &&
+            inst->getUnifiedOpcode() != GFX::v_add_f32)
+            continue;
+        ASSERT_FALSE(inst->getDestRegs().empty());
+        destSeq.push_back(static_cast<int>(inst->getDestReg(0).reg.idx));
+        isExecWriteSeq.push_back(inst->getDestReg(0).reg.type == RegType::EXEC_LO);
+    }
+
+    ASSERT_EQ(destSeq.size(), 7u);
+    EXPECT_EQ(destSeq[0], 40);
+    EXPECT_TRUE(isExecWriteSeq[1]);
+    EXPECT_EQ(destSeq[2], 0);
+    EXPECT_EQ(destSeq[3], 3);
+    EXPECT_EQ(destSeq[4], 6);
+    EXPECT_TRUE(isExecWriteSeq[5]);
+    EXPECT_EQ(destSeq[6], 50);
+}
+
+// Layer 2: does the scheduler treat a hand-built ExecMaskGroup (bypassing
+// collapseExecMaskedRegions() entirely) as a single atomic node?
+
+// runPass() always runs collapseExecMaskedRegions()/expandExecMaskedGroups() around
+// scheduling (see StinkyDAGSchedulerPass::run()'s scheduleBlock lambda), so any node
+// with GFX::EXEC_GROUP -- hand-built or not -- gets unzipped via its ExecGroupData at
+// the end. So a hand-built group under a real pass run needs a real (if minimal)
+// ExecGroupData child to unzip into; that child's own registers are irrelevant here
+// since ordering is driven by the group's own declared src/dest, set explicitly below.
+TEST_F(DAGSchedulerPassTest, ExecMaskGroup_TreatedAsSingleAtomicNode) {
+    createVAddInBlock(bb, arch, 20, 21, 22);
+    StinkyInstruction* consumer = createVAddInBlock(bb, arch, 40, 30, 31);
+
+    StinkyInstruction* child = createVAddInBlock(bb, arch, 60, 61, 62);
+    bb->removeIR(child);
+
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* group = builder.createExecMaskGroup(consumer);
+    group->addSrcReg(StinkyRegister("v", 20, 1));
+    group->addDestReg(StinkyRegister("v", 30, 1));
+    group->issueCycles = 4;
+    group->latencyCycles = 4;
+    group->addModifier<ExecGroupData>(ExecGroupData{{child}});
+
+    runPass();
+
+    std::vector<int> destSeq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        ASSERT_FALSE(inst->getDestRegs().empty());
+        destSeq.push_back(static_cast<int>(inst->getDestReg(0).reg.idx));
+    }
+    ASSERT_EQ(destSeq.size(), 3u);
+    EXPECT_EQ(destSeq[0], 20);  // producer
+    EXPECT_EQ(destSeq[1], 60);  // group's child, unzipped in its place
+    EXPECT_EQ(destSeq[2], 40);  // consumer
+}
+
+TEST_F(DAGSchedulerPassTest, ExecMaskGroup_NotMisclassified) {
+    StinkyInstruction* anchor = createVAddInBlock(bb, arch, 0, 1, 2);
+
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* group = builder.createExecMaskGroup(anchor);
+    group->addModifier<ExecGroupData>(ExecGroupData{{}});
+
+    EXPECT_TRUE(isExecMaskGroup(*group));
+    EXPECT_FALSE(isMatrixInstruction(*group));
+    EXPECT_FALSE(isDSRead(*group));
+    EXPECT_FALSE(isDSWrite(*group));
+    EXPECT_FALSE(isBarrier(*group));
+    EXPECT_FALSE(isVectorALU(*group));
+    EXPECT_FALSE(isTensorLoad(*group));
+    EXPECT_FALSE(hasSideEffect(*group));
+
+    runPassWithUnrollGemm();
+    // The group has no children to unzip into, so it's simply dropped; only the
+    // anchor v_add remains.
+    EXPECT_EQ(countStinkyInstructions(*bb), 1);
+}
+
+TEST_F(DAGSchedulerPassTest, ExecMaskGroup_InheritsSideEffectFromChildren) {
+    StinkyInstruction* sideEffecting = createDSWriteInBlock(bb, arch, 0, 1);  // no MemTokenData
+    bb->removeIR(sideEffecting);
+
+    StinkyInstruction* anchor = createVAddInBlock(bb, arch, 0, 1, 2);
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* group = builder.createExecMaskGroup(anchor);
+    group->addModifier<ExecGroupData>(ExecGroupData{{sideEffecting}});
+
+    EXPECT_TRUE(hasSideEffect(*group));
+}
 
 // Empty block: pass should not crash
 TEST_F(DAGSchedulerPassTest, EmptyBlock_DoesNotCrash) {
@@ -255,6 +496,150 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
 }
 
 // ---------------------------------------------------------------------------
+// Co-execution hazard (regression test for destOverlapsActiveWmmaSrc):
+// a ds_load whose dest VGPRs overlap the in-flight WMMA's src VGPRs must NOT be
+// issued inside that WMMA's latency window, because the load could clobber a
+// source register the WMMA is still reading.
+//
+// Setup: WMMA #0 reads v[50:58); the ds_load writes v[52:56) (overlap). Four
+// more independent WMMAs (disjoint registers) are available. While WMMA #0 is
+// in flight the ds_load is held back by the hazard gate, so the scheduler
+// issues the next independent WMMA (D#100) first and only then the ds_load,
+// once a WMMA whose sources it does not touch is the active one:
+//
+//   wmma D#12  ->  wmma D#100  ->  ds_load D#52  ->  wmma D#108/116/124
+//
+// Without the hazard gate the ds_load would issue right after WMMA #0
+// (wmma D#12 -> ds_load -> wmma D#100 -> ...), clobbering v[52:56) mid-read.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
+    const int addrReg = 80;
+    // F8 MX WMMA fires first (Phase B). Its src VGPRs are v[50:58) (src0/src1)
+    // and v[12:20) (acc); see createWmmaScaleF8. cost latency=8 keeps the
+    // co-issue window open so the hazard gate is exercised.
+    createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/50);
+    // ds_load dest v[52:56) overlaps the WMMA's src0 v[50:58): co-exec hazard.
+    createMovableDsLoad(/*destReg=*/52, addrReg, /*ldsToken=*/1);
+    // Independent WMMAs (registers disjoint from the hazard pair and from each
+    // other) to fill the latency window ahead of the deferred ds_load.
+    for (int i = 0; i < 4; i++)
+        createWmmaScaleF8(/*destStart=*/100 + i * 8, /*src0Start=*/200 + i * 8);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "hazard deferral must not drop instructions";
+
+    // Collect (mnemonic-kind, first-dest-vgpr) in scheduled order.
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind = mnem.find("wmma") != std::string_view::npos      ? "wmma"
+                           : mnem.find("ds_load") != std::string_view::npos ? "ds"
+                                                                            : std::string(mnem);
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"wmma", 12}, {"wmma", 100}, {"ds", 52}, {"wmma", 108}, {"wmma", 116}, {"wmma", 124},
+    };
+    EXPECT_EQ(seq, expected)
+        << "hazardous ds_load must be deferred until an independent WMMA (D#100) has "
+           "issued; it must not co-issue inside WMMA D#12's latency window";
+}
+
+// ---------------------------------------------------------------------------
+// Co-execution hazard, VALU variant (regression test for destOverlapsActiveWmmaSrc
+// on the VALU path): a VALU whose dest VGPR overlaps the in-flight WMMA's src VGPRs
+// must NOT be issued inside that WMMA's latency window, because it could clobber a
+// source register the WMMA is still reading.
+//
+// Unlike the ds_load variant, a VALU only becomes co-issue pickable at the positions
+// set in the WMMA's co-issue window (MXWMMA_SCALE = 0x00C0, i.e. positions 6/7). Right
+// after issue the position is 1, where isValuPickable() is already false, so extra
+// non-hazardous fillers are needed to advance the co-issue timeline into a pickable
+// position while WMMA #0 is still in flight. That is exactly the moment the hazard gate
+// must fire:
+//   - 3 non-hazardous ds_loads (v[300:], v[320:], v[340:]) fill the per-WMMA DS cap and
+//     advance positions 1 -> 4.
+//   - 3 independent scalar ops advance positions 4 -> 7; at position 6 the VALU becomes
+//     co-issue pickable while WMMA #0 (v[50:58)) is still the active window.
+//
+// With the gate the hazardous VALU (dst v52) is skipped at position 6 and deferred until
+// after every independent WMMA has issued; without it, the VALU would co-issue at
+// position 6, right inside WMMA #0's latency window, clobbering v52 mid-read.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
+    const int addrReg = 400;
+    auto createScalarOp = [&](int dst, int src0, int src1) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+        inst->addDestReg(StinkyRegister("s", dst, 1));
+        inst->addSrcReg(StinkyRegister("s", src0, 1));
+        inst->addSrcReg(StinkyRegister("s", src1, 1));
+        return inst;
+    };
+    // F8 MX WMMA fires first (Phase B). Its src VGPRs are v[50:58) (src0/src1) and
+    // v[12:20) (acc); latency=8 keeps the co-issue window open so the gate is exercised.
+    createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/50);
+    // Hazardous VALU: dst v52 overlaps the WMMA's src0 v[50:58): co-exec hazard.
+    createVAddInBlock(bb, arch, /*destReg=*/52, /*src0Reg=*/60, /*src1Reg=*/61);
+    // Non-hazardous fillers to advance the co-issue timeline into a VALU-pickable
+    // position (6) while WMMA #0 is still in flight.
+    createMovableDsLoad(/*destReg=*/300, addrReg, /*ldsToken=*/1);
+    createMovableDsLoad(/*destReg=*/320, addrReg, /*ldsToken=*/2);
+    createMovableDsLoad(/*destReg=*/340, addrReg, /*ldsToken=*/3);
+    createScalarOp(/*dst=*/10, 11, 12);
+    createScalarOp(/*dst=*/13, 14, 15);
+    createScalarOp(/*dst=*/16, 17, 18);
+    // Independent WMMAs (registers disjoint from the hazard pair and each other) to fill
+    // the latency windows ahead of the deferred VALU.
+    for (int i = 0; i < 4; i++)
+        createWmmaScaleF8(/*destStart=*/100 + i * 16, /*src0Start=*/200 + i * 16);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "hazard deferral must not drop instructions";
+
+    // Collect (mnemonic-kind, first-dest-reg) in scheduled order.
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind = mnem.find("wmma") != std::string_view::npos      ? "wmma"
+                           : mnem.find("ds_load") != std::string_view::npos ? "ds"
+                           : mnem.rfind("v_", 0) == 0                       ? "valu"
+                           : mnem.rfind("s_", 0) == 0                       ? "s"
+                                                                            : std::string(mnem);
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    // The hazardous VALU (dst v52) must be the last instruction: it is skipped at co-issue
+    // position 6 (inside WMMA #0's window) and only issues once every independent WMMA has.
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"wmma", 12}, {"ds", 300},   {"ds", 320},   {"ds", 340},   {"s", 10},     {"s", 13},
+        {"s", 16},    {"wmma", 100}, {"wmma", 116}, {"wmma", 132}, {"wmma", 148}, {"valu", 52},
+    };
+    EXPECT_EQ(seq, expected)
+        << "hazardous VALU (dst v52) must not co-issue inside WMMA D#12's latency window; "
+           "it must be deferred until every independent WMMA has issued";
+}
+
+// ---------------------------------------------------------------------------
 // Property: per-WMMA-window DS cap — after a WMMA fires,
 // at most floor((latency - issue) / 2) = 3 ds_loads can issue in its window
 // because back-to-back ds_load issue cost doubles.
@@ -313,4 +698,180 @@ TEST_F(DAGSchedulerPassTest, DSWindowCap_InstructionCountPreserved) {
     int afterCount = countStinkyInstructions(*bb);
 
     EXPECT_EQ(afterCount, beforeCount) << "Scheduler must preserve instruction count";
+}
+
+// ---------------------------------------------------------------------------
+// tensor_load_to_lds bounded in-flight credit pool (dagFeatures.globalReadQueueDepth
+// / globalReadDrainLatency). The throttle is loop-only (uses the CDNA5 loop path),
+// so all of these build a self-loop body with 4 movable tensor_loads + 10 VALU.
+//
+// Model: each issued tensor_load holds a credit for `drainLatency` cycles, decayed
+// once per issued instruction (~1 cycle/pick here). With depth D, at most D credits
+// may be in flight, so once D loads have issued the scheduler must interleave VALU
+// until a credit drains before issuing the next load.
+//
+// NOTE on the chosen numbers: a credit must survive long enough to still be in
+// flight when the next load wants to issue, so the throttle only engages when
+// drainLatency > depth. At 1 issue/cycle a credit that drains in <= depth cycles
+// frees before the cap is reached, so the hardware sustains D loads/cycle with no
+// stall. We therefore use drainLatency comfortably above depth and assert the
+// back-to-back run equals exactly depth (D loads, then forced interleave).
+// ---------------------------------------------------------------------------
+
+// Depth 2: exactly 2 tensor_loads issue back-to-back, then VALU must interleave.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Depth2_RespectsQueueDepth) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithGlobalReadThrottle(/*depth=*/2, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveTensorLoads(seq), 2)
+        << "depth=2: at most 2 tensor_loads in flight before an interleave is forced";
+}
+
+// Depth 3: exactly 3 tensor_loads issue back-to-back, then VALU must interleave.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Depth3_RespectsQueueDepth) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithGlobalReadThrottle(/*depth=*/3, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveTensorLoads(seq), 3)
+        << "depth=3: at most 3 tensor_loads in flight before an interleave is forced";
+}
+
+// Depth 1: degenerate cap — every tensor_load must be separated by other work.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Depth1_SeparatesEveryLoad) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithGlobalReadThrottle(/*depth=*/1, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveTensorLoads(seq), 1) << "depth=1: no two tensor_loads may be adjacent";
+}
+
+// All instructions are preserved regardless of throttle (count invariant).
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_PreservesInstructionCount) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithGlobalReadThrottle(/*depth=*/2, /*drainLatency=*/8);
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
+}
+
+// Throttle off (depth=0): feature is opt-in and does not perturb the default path.
+TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
+    // Self-loop on the entry block so it is in RPO (scheduled) AND detected as a
+    // loop (the cross-BB credit carry is loop-only). buildLoopBB makes an
+    // unreachable second block, so reuse the entry block here.
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    for (int i = 0; i < 4; i++)
+        createMovableTensorLoad(body, /*s0=*/i * 12, /*s1=*/i * 12 + 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithGlobalReadThrottle(/*depth=*/0, /*drainLatency=*/0);
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount);
+}
+
+// ---------------------------------------------------------------------------
+// dsReadQueueDepth / dsReadDrainLatency / dsReadPerWmma: same in-flight
+// credit-pool mechanism as globalReadQueueDepth/globalReadDrainLatency, but
+// gating ds_read_b128 instead of tensor_load_to_lds. Unlike global-read
+// throttling, the ds_read gate additionally requires a WMMA to have been
+// picked at least once (it seeds maxDsPerWmmaWindow_), so each test below
+// includes one WMMA read (with dest/src registers disjoint from the ds_reads,
+// so its DS-latency gate is trivially satisfied and it issues first).
+// ---------------------------------------------------------------------------
+
+// Depth 2: exactly 2 ds_reads issue back-to-back, then VALU must interleave.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth2_RespectsQueueDepth) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
+        << "depth=2: at most 2 ds_reads in flight before an interleave is forced";
+}
+
+// Depth 1: degenerate cap — every ds_read must be separated by other work.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
+}
+
+// dsReadPerWmma isolated: hold the credit pool generously large so it never
+// binds, leaving the per-WMMA-window cap (only one WMMA present) as the sole
+// active constraint.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_PerWmmaCap_RespectsCap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/100, /*drainLatency=*/8, /*perWmma=*/2);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
+        << "dsReadPerWmma=2: at most 2 ds_reads per WMMA window with only one WMMA present";
+}
+
+// All instructions are preserved regardless of throttle (count invariant).
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
 }

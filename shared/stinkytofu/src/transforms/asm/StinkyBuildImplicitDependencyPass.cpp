@@ -120,13 +120,6 @@ static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
 }
 
 void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
-    bool doLdsTokenHandling = true;
-    if (!passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier) {
-        PASS_DEBUG(std::cerr << "[BuildImplicitDep] skip LDS-token handling BB label=\""
-                             << bb.getLabel() << "\" (unrollMovableBarrier=false)\n");
-        doLdsTokenHandling = false;
-    }
-
     const uint32_t wavefrontSize = passCtx.getWavefrontSize();
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -134,8 +127,6 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
 
         // Always attach implicit special registers (SCC/VCC/EXEC) declared by HW flags
         legalizeImplicitSpecialRegisters(inst, wavefrontSize);
-
-        if (!doLdsTokenHandling) continue;
 
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
         if (!mt) continue;

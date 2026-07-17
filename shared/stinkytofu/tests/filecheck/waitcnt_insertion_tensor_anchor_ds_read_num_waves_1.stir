@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyWaitCntInsertionPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
 # StinkyWaitCntInsertionPass (gfx1250): when NumWaves == 1, DS reads are tensor-wait
 # anchors. A pending tensor_load_to_lds with overlapping MemTokenData must drain

@@ -428,7 +428,7 @@ hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
         rocsparse_create_bell_descr(spMatDescr[0]->get_spmat_descr_reference(),
                                     rows,
                                     cols,
-                                    rocsparse_direction_column,
+                                    rocsparse_direction_row,
                                     ellBlockSize,
                                     ellCols,
                                     ellColInd,
@@ -466,7 +466,7 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
         rocsparse_create_const_bell_descr(spMatDescr[0]->get_const_spmat_descr_reference(),
                                           rows,
                                           cols,
-                                          rocsparse_direction_column,
+                                          rocsparse_direction_row,
                                           ellBlockSize,
                                           ellCols,
                                           ellColInd,
@@ -1228,6 +1228,14 @@ hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
 {
     return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_coo_set_pointers(
         to_rocsparse_spmat_descr(spMatDescr), cooRowInd, cooColInd, cooValues));
+}
+
+hipsparseStatus_t hipsparseBlockedEllSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                                 void*                 ellColInd,
+                                                 void*                 ellValue)
+{
+    return hipsparse::rocSPARSEStatusToHIPStatus(
+        rocsparse_bell_set_pointers(to_rocsparse_spmat_descr(spMatDescr), ellColInd, ellValue));
 }
 
 hipsparseStatus_t hipsparseSpMatGetSize(hipsparseConstSpMatDescr_t spMatDescr,

@@ -56,20 +56,20 @@
 namespace {
 using namespace stinkytofu;
 
-/// True iff @p stinkyInst is @c s_wait_tensorcnt, the only opcode carrying
-/// @c IF_WaitTensorCnt. This flag is disjoint from @c IF_WaitCnt, so
-/// @c isWaitCnt() does not match @c s_wait_tensorcnt and a dedicated check is
+/// True iff `stinkyInst` is `s_wait_tensorcnt`, the only opcode carrying
+/// `IF_WaitTensorCnt`. This flag is disjoint from `IF_WaitCnt`, so
+/// `isWaitCnt()` does not match `s_wait_tensorcnt` and a dedicated check is
 /// required when tensor-wait removal is enabled.
 bool isTensorWaitCnt(StinkyInstruction* stinkyInst) {
     return stinkyInst != nullptr && stinkyInst->is(InstFlag::IF_WaitTensorCnt);
 }
 
-/// Erase every wait-counter instruction in @p bb that matches the disjoint
+/// Erase every wait-counter instruction in `bb` that matches the disjoint
 /// flag-bit predicate described in the file-level comment.
 ///
 /// @param bb                   Basic block to mutate in place.
 /// @param removeTensorWaitCnt  When true (the default policy), also strip
-///                             @c s_wait_tensorcnt so the downstream insertion
+///                             `s_wait_tensorcnt` so the downstream insertion
 ///                             pass starts from a fully clean slate. When
 ///                             false, leave tensor waits in place so a
 ///                             subsequent insertion pass can reuse them.
