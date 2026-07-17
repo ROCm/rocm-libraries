@@ -1,6 +1,6 @@
+#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-#!/usr/bin/env python3
 """Worker script for running Multi-D GEMM kernels in an isolated subprocess.
 
 Multi-D is a single-problem GEMM that fuses ``num_d`` extra D operands into the
