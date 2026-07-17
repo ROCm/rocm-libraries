@@ -81,7 +81,13 @@ ROCSOLVER_KERNEL void hermitianize_band_kernel(I n, I ku, T* Aband, I ldab, rocb
 
 //------------------------------------------------------------------------------
 template <typename T, typename I>
-void hermitianize_band(rocblas_handle handle, I n, I ku, T* Aband, I ldab, rocblas_stride strideAb, I batch_count)
+void hermitianize_band(rocblas_handle handle,
+                       I n,
+                       I ku,
+                       T* Aband,
+                       I ldab,
+                       rocblas_stride strideAb,
+                       I batch_count)
 {
     if(n <= 0 || ku <= 0 || batch_count <= 0)
         return;
@@ -774,7 +780,7 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     const T zero = 0;
 
     // Clear diagonals below sub-diagonal kd, where bulges will go.
-    laset( handle, 'g', kd-1, n, zero, zero, Aband, shiftA + 2*kd, ldab, strideA, batch_count );
+    laset(handle, 'g', kd - 1, n, zero, zero, Aband, shiftA + 2 * kd, ldab, strideA, batch_count);
 
     // Copy lower band to upper band.
     hermitianize_band(handle, n, kd - 1, Aband + shiftA, ldab, strideA, batch_count);
