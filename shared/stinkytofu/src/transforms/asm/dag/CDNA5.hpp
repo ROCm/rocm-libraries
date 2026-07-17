@@ -660,7 +660,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             kind = kOther;
         }
     }
-    if (isValuPickable()) {
+    if (isValuPickable() || best == nullptr) {
         if (DAGNode* t = pickFreeBest(valuQueue)) {
             if (!dsWindowOk && (!best || t->id < best->id) && !destOverlapsActiveWmmaSrc(t)) {
                 best = t;
