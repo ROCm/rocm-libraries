@@ -607,7 +607,19 @@ def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
         f"-I{_CK_ROOT}/tile_engine/ops/gemm/mx_gemm",
     ]
     cmd = [
-        _HIPCC, "-shared", "-fPIC", "-O3", "-std=c++17",
+        # C++ standard and optimization flags must match Old-TE's mx_gemm build
+        # exactly, otherwise the byte-identical device kernel runs slower under
+        # the bridge (~30% on fp8). The flags below mirror the global
+        # add_compile_options() set in projects/composablekernel/CMakeLists.txt
+        # (CK_CXX_STANDARD=20, the -mllvm tuning flags, -fno-offload-uniform-block)
+        # plus mx_gemm/CMakeLists.txt's --offload-compress.
+        _HIPCC, "-shared", "-fPIC", "-O3", "-std=c++20",
+        "-mllvm", "-amdgpu-early-inline-all=true",
+        "-mllvm", "-amdgpu-function-calls=false",
+        "-mllvm", "--lsr-drop-solution=1",
+        "-mllvm", "-enable-post-misched=0",
+        "-mllvm", "-amdgpu-coerce-illegal-types=1",
+        "-fno-offload-uniform-block", "--offload-compress",
         *inc,
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f"-include{hpp}",
         "-D__HIP_PLATFORM_AMD__", f"--offload-arch={arch}", f'-DGFX_ARCH="{arch}"',
