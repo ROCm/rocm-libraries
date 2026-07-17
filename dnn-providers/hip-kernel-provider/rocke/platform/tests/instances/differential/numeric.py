@@ -932,6 +932,15 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
 # Driver
 # ---------------------------------------------------------------------
 def _check_gpu() -> Optional[str]:
+    """Gate this in-process torch harness on torch.cuda, not the rocke HIP probe.
+
+    Unlike the test *gates* (which detect the GPU via rocke.runtime.hip_module so they
+    stay torch-free), this driver imports torch and drives torch.cuda in the SAME
+    process below. It must gate on the resource it actually uses: probing HIP first here
+    would dlopen the system HIP runtime before torch binds its own, the exact ordering
+    that makes torch.cuda miss the device. So torch.cuda.is_available() is the correct,
+    intentional check — the sudo/device-group hint is likewise torch-accurate.
+    """
     try:
         import torch
     except Exception as e:  # noqa: BLE001

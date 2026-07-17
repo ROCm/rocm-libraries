@@ -222,15 +222,21 @@ if(ROCKE_INSTALL_PYTHON_PACKAGE)
   else()
     set(_ROCKE_PKG_DEST "${ROCKE_PYTHON_INSTALL_DIR}")
   endif()
-  # Install the whole package (not just *.py): rocke ships runtime data such as
-  # core/arch/data/arch_specs.json that the engine loads at import/build time.
-  # A *.py-only filter silently drops it and breaks ArchTarget.from_gfx(). Use
-  # PATTERN + REGEX (distinct keywords) to drop only build cruft and keep
-  # cmake-lint happy (a second PATTERN would trip its duplicate-keyword check).
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke"
           DESTINATION "${_ROCKE_PKG_DEST}"
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)
+
+  # Also install pre-built wheels when available. These are not yet consumed
+  # by CI (the existing PYTHONPATH=. approach is still used), but shipping
+  # them in the artifact prepares for a future migration to pip-installed
+  # wheels and enables the library tests to run.
+  if(ROCKE_BUILD_PYENV)
+    install(FILES
+            "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl"
+            "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/wheels")
+  endif()
 endif()
 
 if(ROCKE_INSTALL_TESTS)
@@ -266,6 +272,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "*.cpp" EXCLUDE
               PATTERN "differential" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
+
     endblock()
   endif()
 
