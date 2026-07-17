@@ -71,6 +71,24 @@ spec = AttentionDenseSpec(
 kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
 ```
 
+## TODO / follow-ups
+
+1. **Q-reload (enables the inner-loop unroll)** — the QK B-operand (`q_packs`,
+   `K_STEPS × vec8` ≈ 32 VGPR) is held resident across the whole KV loop. ISA
+   probing shows the kernel is at **243/256 VGPR, 0 spill** (flyDSL fits a *2-tile*
+   pipeline in ~252 VGPR), so a depth-2 software-pipeline unroll — the lever that
+   would lift MFMA utilization ~45% → ~70% and close the flyDSL gap — is
+   register-blocked. Re-reading Q per use (L2-resident) instead of holding all
+   packs frees ~32 VGPR toward that unroll. (Pairs with a P-LDS publish for the
+   lagged relayout, another ~16 VGPR.) Standalone it is perf-neutral; it is a
+   prerequisite for the 2-tile unroll.
+2. **Improve varlen performance** — the packed `varlen` path (default builder,
+   `cu_seqlens_q/kv`) currently trails the dense/persistent path and flyDSL on
+   ragged batches. Follow-ups: extend the hkv-major L2-locality decode and the
+   persistent grid-stride mode to varlen (today persistent is uniform-batch only),
+   and improve per-sequence load balance across CTAs so short and long sequences
+   in a batch don't serialize.
+
 ## Notes
 
 - gfx950-only (uses `ds_read_b64_tr_b16` and `v_exp_f32`).
