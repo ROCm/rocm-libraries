@@ -743,17 +743,23 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         # get constant parameter
         tc               = tP["tensorChar"]
+        tile01           = tP["tile01Idx"]
         # TileSpan scale-select engages when MIWaveTile//VectorWidth is a positive even
         # multiple (ratio == 2 is the base case; ratio % 2 == 0 lets one wave-split ds_load
         # per group halve the number of MX scale ds_loads).
         _mxsRatio = (kernel["MIWaveTile%s"%tc[3]] // kernel["VectorWidth%s"%tc[3]]) if ("MXS" in tc) else 0
-        tileSpan = ("MXS" in tc) and (_mxsRatio >= 2) and (_mxsRatio % 2 == 0)
-        tile01           = tP["tile01Idx"]
-        # TileSpan wave-split: only engage when this tile axis is split across >1
-        # wave (MIWaveGroup>1). When MIWaveGroup==1 (single wave on this axis) the original
-        # tile-span path is kept untouched, so that case is not affected. Axis-neutral:
-        # applies to either MX scale tensor (tile01 selects the split axis).
-        tileSpanWaveSplit = tileSpan and (kernel["MIWaveGroup"][tile01] > 1)
+        # This condition MUST match LocalRead.getMxsTileSpanInfo exactly so the wave-split load
+        # layout produced here agrees with the packed VGPR layout / matrix_*_scale:N select the
+        # WMMA emits. Requirements: MXS tensor, ratio >= 2 and even, the tile-axis matrix-instr
+        # size is the wave midpoint (so lanes i vs i+halfSpan == lower/upper half-wave), and the
+        # tile axis spans >1 wave (MIWaveGroup>1) so the num1DWaves>1 hiOffset path below
+        # actually places the partner block into the upper half-wave. If any fails, fall back to
+        # the base (non-tile-span) layout, which is known-correct.
+        _mxsMatrixInstT = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"])
+        tileSpanWaveSplit = ("MXS" in tc) and (_mxsRatio >= 2) and (_mxsRatio % 2 == 0) \
+                            and (_mxsMatrixInstT == kernel["WavefrontSize"] // 2) \
+                            and (kernel["MIWaveGroup"][tile01] > 1)
+        tileSpan = tileSpanWaveSplit
         waveWidth        = writer.states.kernel["WavefrontSize"]
 
         noUnrollOffset = writer.states.asmCaps["HasWMMA_V1"] or ("MXS" in tc)

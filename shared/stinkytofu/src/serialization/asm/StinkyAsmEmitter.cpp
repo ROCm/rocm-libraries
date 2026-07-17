@@ -334,6 +334,12 @@ inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
     // Input formats: matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8
     if (m.fmtA != MatrixFmt::NONE) os << " matrix_a_fmt:" << matrixFmtToStr(m.fmtA);
     if (m.fmtB != MatrixFmt::NONE) os << " matrix_b_fmt:" << matrixFmtToStr(m.fmtB);
+    // MX scale-select: 0 is the default and emitted implicitly (matches rocisa).
+    // Must be emitted BEFORE matrix_*_scale_fmt: the assembler enforces the modifier
+    // order matrix_*_fmt -> matrix_*_scale -> matrix_*_scale_fmt and rejects any other
+    // ordering with "not a valid operand".
+    if (m.scaleSelA != 0) os << " matrix_a_scale:" << m.scaleSelA;
+    if (m.scaleSelB != 0) os << " matrix_b_scale:" << m.scaleSelB;
     // Scale formats: rocisa emits the raw integer (matrix_a_scale_fmt:2), so
     // match that for byte-for-byte parity in the asm output. The IR (.stir)
     // serializer keeps the symbolic name via matrixScaleFmtToStr().
@@ -341,9 +347,6 @@ inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
         os << " matrix_a_scale_fmt:" << static_cast<int>(m.scaleFmtA);
     if (m.scaleFmtB != MatrixScaleFmt::NONE)
         os << " matrix_b_scale_fmt:" << static_cast<int>(m.scaleFmtB);
-    // MX scale-select: 0 is the default and emitted implicitly (matches rocisa).
-    if (m.scaleSelA != 0) os << " matrix_a_scale:" << m.scaleSelA;
-    if (m.scaleSelB != 0) os << " matrix_b_scale:" << m.scaleSelB;
     return os;
 }
 
