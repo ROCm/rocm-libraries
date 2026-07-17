@@ -211,7 +211,8 @@ def _build_lib(tmp):
     gen.generate(__import__("pathlib").Path(disp))
     shim = os.path.join(tmp, "shim.cpp")
     with open(shim, "w") as f:
-        f.write("""
+        f.write(
+            """
 #include "dispatcher/sdpa_fwd/FmhaFeaturizer.hpp"
 #include <cstring>
 using namespace rocke_client::dispatcher;
@@ -243,7 +244,8 @@ void featurize_c(
     auto arr = fmha_featurize(p,c,hw).to_array();
     std::memcpy(out, arr.data(), arr.size()*sizeof(double));
 }
-""")
+"""
+        )
     # Platform-appropriate shared library extension
     ext = ".dll" if sys.platform == "win32" else ".so"
     so = os.path.join(tmp, "feat" + ext)
