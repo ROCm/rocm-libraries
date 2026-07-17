@@ -101,9 +101,9 @@ void testing_sy2sb_he2hb_bad_arg()
 #ifndef ROCSOLVER_ENABLE_EIG_2STAGE
     // he2hb is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
     // entry points must report rocblas_status_not_implemented instead of running.
-    EXPECT_ROCBLAS_STATUS(
-        rocsolver_sy2sb_he2hb(handle, uplo, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data()),
-        rocblas_status_not_implemented);
+    EXPECT_ROCBLAS_STATUS(rocsolver_sy2sb_he2hb(handle, uplo, n, kd, nb, dA.data(), lda,
+                                                dAband.data(), ldab, dTau.data()),
+                          rocblas_status_not_implemented);
     return;
 #endif
 
@@ -202,7 +202,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
         {
             for(int i = j + 1; i < n; ++i)
             {
-                 hA[0][i + j * lda] = sconj(hA[0][j + i * lda]);
+                hA[0][i + j * lda] = sconj(hA[0][j + i * lda]);
             }
         }
     }

@@ -100,11 +100,11 @@ const vector<vector<int64_t>> blk_range_64 = {
     {3, 9}};
 
 // for daily_lapack tests
-const vector<vector<int>> large_size_range
-    = {{256, 256, 0}, {640, 640, 0}, {640, 640, 1}, {640, 640, 2}, {1024, 1024, 0}, {2048, 2048, 0}};
+const vector<vector<int>> large_size_range = {{256, 256, 0}, {640, 640, 0},   {640, 640, 1},
+                                              {640, 640, 2}, {1024, 1024, 0}, {2048, 2048, 0}};
 
-const vector<vector<int64_t>> large_size_range_64
-    = {{256, 256, 0}, {640, 640, 0}, {640, 640, 1}, {640, 640, 2}, {1024, 1024, 0}, {2048, 2048, 0}};
+const vector<vector<int64_t>> large_size_range_64 = {
+    {256, 256, 0}, {640, 640, 0}, {640, 640, 1}, {640, 640, 2}, {1024, 1024, 0}, {2048, 2048, 0}};
 
 const vector<vector<int>> large_blk_range = {{16, 32}, {16, 64}, {32, 64}, {32, 128}};
 
@@ -208,8 +208,7 @@ TEST_P(SY2SB_HE2HB_64, __double_complex)
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SY2SB_HE2HB,
-                         Combine(ValuesIn(large_size_range),
-                                 ValuesIn(large_blk_range)));
+                         Combine(ValuesIn(large_size_range), ValuesIn(large_blk_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SY2SB_HE2HB,
@@ -217,10 +216,8 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SY2SB_HE2HB_64,
-                         Combine(ValuesIn(large_size_range_64),
-                                 ValuesIn(large_blk_range_64)));
+                         Combine(ValuesIn(large_size_range_64), ValuesIn(large_blk_range_64)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SY2SB_HE2HB_64,
-                         Combine(ValuesIn(size_range_64),
-                                 ValuesIn(blk_range_64)));
+                         Combine(ValuesIn(size_range_64), ValuesIn(blk_range_64)));
