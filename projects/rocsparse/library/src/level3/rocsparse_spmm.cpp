@@ -293,9 +293,10 @@ namespace rocsparse
             // sizes conservatively for the largest auto-selectable kernel, analysis
             // computes and caches the structural line-nnz profile and resolves the
             // default from it, and compute re-derives the same choice from the
-            // cached profile without launching a kernel. The profile is owned by
-            // the spmat descriptor and passed in by pointer so the reduction runs
-            // once, on the non-capturing analysis stage.
+            // cached profile without launching a kernel. The selection inputs (the
+            // descriptor-owned profile plus the batch flag) are bundled into one
+            // context so the reduction runs once, on the non-capturing analysis
+            // stage.
             const rocsparse::spmm_default_alg_info alg_info{
                 &mat_A->line_profile, rocsparse::spmm_is_batched(mat_C->batch_count)};
 
@@ -428,8 +429,8 @@ namespace rocsparse
             // the cscmm layer (cscmm_buffer_size / cscmm_analysis / cscmm), which
             // handles the CSC->csrmm operation flip, builds the profile from the
             // column-pointer array, and gates the upgrade on the effective csrmm
-            // operation. The profile is owned by the spmat descriptor and passed
-            // in by pointer.
+            // operation. The selection inputs are bundled into one context, as in
+            // the CSR branch.
             const rocsparse::spmm_default_alg_info alg_info{
                 &mat_A->line_profile, rocsparse::spmm_is_batched(mat_C->batch_count)};
 
