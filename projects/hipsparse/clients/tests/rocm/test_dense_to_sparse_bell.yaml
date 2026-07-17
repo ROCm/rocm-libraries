@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,43 +27,70 @@ include: hipsparse_common.yaml
 
 Tests:
 # Quick
-- name: dense_to_sparse_csr
+- name: dense_to_sparse_bell
   category: quick
-  function: dense_to_sparse_csr
-  indextype: *i32i32_i64i32_i64i64
+  function: dense_to_sparse_bell
+  indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [23, 45, 78, 100]
-  N: [10, 55, 70, 99]
+  M: [325]
+  N: [217]
+  block_dim: [2, 3, 4, 8, 15]
   orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
+
+- name: dense_to_sparse_bell
+  category: quick
+  function: dense_to_sparse_bell
+  indextype: *i64
+  precision: *single_double_precisions_complex_real
+  M: [512]
+  N: [428]
+  block_dim: [5, 7, 14, 16]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
 # Pre-checkin
-- name: dense_to_sparse_csr_bad_arg
+- name: dense_to_sparse_bell_bad_arg
   category: pre_checkin
-  function: dense_to_sparse_csr_bad_arg
-  indextype: *i32i32_i64i32_i64i64
+  function: dense_to_sparse_bell_bad_arg
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-- name: dense_to_sparse_csr
+- name: dense_to_sparse_bell
   category: pre_checkin
-  function: dense_to_sparse_csr
-  indextype: *i32i32_i64i32_i64i64
+  function: dense_to_sparse_bell
+  indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [345, 481, 587, 657]
-  N: [205, 324, 401, 463]
+  M: [1287]
+  N: [943]
+  block_dim: [4, 6, 10, 12, 13, 32]
   orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
+
+- name: dense_to_sparse_bell
+  category: pre_checkin
+  function: dense_to_sparse_bell
+  indextype: *i64
+  precision: *single_only_precisions
+  M: [2000]
+  N: [2000]
+  block_dim: [40, 45, 50, 55, 60, 65, 70, 75, 80]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
 # Nightly
-- name: dense_to_sparse_csr
+- name: dense_to_sparse_bell
   category: nightly
-  function: dense_to_sparse_csr
-  indextype: *i32i32_i64i32_i64i64
+  function: dense_to_sparse_bell
+  indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [1000, 2000]
-  N: [500, 1000]
+  M: [2576]
+  N: [3390]
+  block_dim: [9, 11, 20, 64]
   orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]

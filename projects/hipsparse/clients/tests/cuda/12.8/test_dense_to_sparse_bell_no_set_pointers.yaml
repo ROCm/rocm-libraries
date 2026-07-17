@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,14 +27,39 @@ include: hipsparse_common.yaml
 
 Tests:
 # Quick
-- name: dense_to_sparse_coo
+- name: dense_to_sparse_bell_no_set_pointers
   category: quick
-  function: dense_to_sparse_coo
-  indextype: *i32_i64
+  function: dense_to_sparse_bell_no_set_pointers
+  indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [23, 45, 78, 100]
-  N: [10, 55, 70, 99]
-  orderA: [HIPSPARSE_ORDER_ROW]
+  M: [384]
+  N: [192]
+  block_dim: [2, 3, 4, 8]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
+- name: dense_to_sparse_bell_no_set_pointers
+  category: quick
+  function: dense_to_sparse_bell_no_set_pointers
+  indextype: *i64
+  precision: *single_double_precisions_complex_real
+  M: [560]
+  N: [560]
+  block_dim: [5, 7, 16]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
+
+# Pre-checkin
+- name: dense_to_sparse_bell_no_set_pointers
+  category: pre_checkin
+  function: dense_to_sparse_bell_no_set_pointers
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M: [1664]
+  N: [1664]
+  block_dim: [4, 13, 32]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
