@@ -1443,10 +1443,15 @@ inline void sort_keys_large_sizes()
     }
 }
 
-template<class Key, size_t Size, unsigned int StartBit = 0, unsigned int EndBit = sizeof(Key) * 8>
+template<class Key,
+         class        Val,
+         size_t       Size,
+         unsigned int StartBit = 0,
+         unsigned int EndBit   = sizeof(Key) * 8>
 struct FFMParams
 {
     using key_type                          = Key;
+    using val_type                          = Val;
     static constexpr size_t       size      = Size;
     static constexpr unsigned int start_bit = StartBit;
     static constexpr unsigned int end_bit   = EndBit;
@@ -1461,103 +1466,158 @@ public:
 TYPED_TEST_SUITE_P(HipcubDeviceRadixSortFFM);
 
 template<typename TestFixture>
-inline void sort_keys_ffm_full()
+void sort_pairs_ffm()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type                     = typename TestFixture::params::key_type;
-    constexpr size_t       size        = TestFixture::params::size;
-    constexpr unsigned int start_bit   = TestFixture::params::start_bit;
-    constexpr unsigned int end_bit     = TestFixture::params::end_bit;
-    const size_t           bit_length  = end_bit - start_bit;
-    const size_t           unique_keys = std::min(500ul, 1ul << bit_length);
+    using key_type                   = typename TestFixture::params::key_type;
+    using val_type                   = typename TestFixture::params::val_type;
+    constexpr unsigned int start_bit = TestFixture::params::start_bit;
+    constexpr unsigned int end_bit   = TestFixture::params::end_bit;
+    constexpr size_t       size      = TestFixture::params::size;
 
-    hipStream_t stream = 0;
-
-    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    hipStream_t stream = 0; // default
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
 
     // Generate data
-    std::vector<key_type> keys_input;
+    const std::vector<key_type> keys_input = generate_key_input<key_type>(size, 12345);
+    std::vector<val_type>       values_input;
     try
     {
-        keys_input.resize(size);
+        values_input.resize(size);
     }
     catch(const std::bad_alloc& e)
     {
-
         GTEST_SKIP() << "insufficient memory";
     }
+    std::iota(values_input.begin(), values_input.end(), 0);
 
+    key_type* d_keys_input;
+    key_type* d_keys_output;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
+    HIP_CHECK(
+        hipMemcpy(d_keys_input, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+
+    val_type* d_values_input;
+    val_type* d_values_output;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(val_type)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, size * sizeof(val_type)));
+    HIP_CHECK(hipMemcpy(d_values_input,
+                        values_input.data(),
+                        size * sizeof(val_type),
+                        hipMemcpyHostToDevice));
+
+    using key_val = std::pair<key_type, val_type>;
+
+    // Calculate expected results on host
+    std::vector<key_val> expected;
+    try
+    {
+        expected.resize(size);
+    }
+    catch(const std::bad_alloc& e)
+    {
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_values_output));
+        GTEST_SKIP() << "insufficient memory";
+    }
     for(size_t i = 0; i < size; i++)
     {
-        keys_input[i] = i % unique_keys;
+        expected[i] = key_val(keys_input[i], values_input[i]);
     }
-
-    key_type* d_keys;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, size * sizeof(key_type)));
-    HIP_CHECK(hipMemcpy(d_keys, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+    std::stable_sort(
+        expected.begin(),
+        expected.end(),
+        test_utils::key_value_comparator<key_type, val_type, false, start_bit, end_bit>());
 
     void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(invoke_sort_keys<false>(d_temporary_storage,
-                                      temporary_storage_bytes,
-                                      d_keys,
-                                      d_keys,
-                                      size,
-                                      start_bit,
-                                      end_bit,
-                                      stream));
+    HIP_CHECK(invoke_sort_pairs<false>(d_temporary_storage,
+                                       temporary_storage_bytes,
+                                       d_keys_input,
+                                       d_keys_output,
+                                       d_values_input,
+                                       d_values_output,
+                                       size,
+                                       start_bit,
+                                       end_bit,
+                                       stream));
 
     ASSERT_GT(temporary_storage_bytes, 0U);
 
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-    HIP_CHECK(invoke_sort_keys<false>(d_temporary_storage,
-                                      temporary_storage_bytes,
-                                      d_keys,
-                                      d_keys,
-                                      size,
-                                      start_bit,
-                                      end_bit,
-                                      stream));
+    HIP_CHECK(invoke_sort_pairs<false>(d_temporary_storage,
+                                       temporary_storage_bytes,
+                                       d_keys_input,
+                                       d_keys_output,
+                                       d_values_input,
+                                       d_values_output,
+                                       size,
+                                       start_bit,
+                                       end_bit,
+                                       stream));
 
     HIP_CHECK(hipFree(d_temporary_storage));
-
-    std::vector<key_type> keys_output(size);
+    HIP_CHECK(hipFree(d_keys_input));
+    HIP_CHECK(hipFree(d_values_input));
+    std::vector<key_type> keys_output;
     try
     {
         keys_output.resize(size);
     }
     catch(const std::bad_alloc& e)
     {
-        HIP_CHECK(hipFree(d_keys));
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_values_output));
         GTEST_SKIP() << "insufficient memory";
     }
+    HIP_CHECK(hipMemcpy(keys_output.data(),
+                        d_keys_output,
+                        size * sizeof(key_type),
+                        hipMemcpyDeviceToHost));
 
-    HIP_CHECK(
-        hipMemcpy(keys_output.data(), d_keys, size * sizeof(key_type), hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_keys));
-
-    // Check if output values are as expected
-    const size_t segment_length = test_utils::ceiling_div(size, unique_keys);
-    const size_t full_segments  = size % unique_keys == 0 ? unique_keys : size % unique_keys;
-    for(size_t i = 0; i < size; i += 4321)
+    std::vector<val_type> values_output;
+    try
     {
-        key_type expected;
-        if(i / segment_length < full_segments)
-        {
-            expected = key_type(i / segment_length);
-        }
-        else
-        {
-            expected = key_type((i - full_segments * segment_length) / (segment_length - 1)
-                                + full_segments);
-        }
-        ASSERT_EQ(keys_output[i], expected) << "with index = " << i;
+        values_output.resize(size);
     }
+    catch(const std::bad_alloc& e)
+    {
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_values_output));
+        GTEST_SKIP() << "insufficient memory";
+    }
+    HIP_CHECK(hipMemcpy(values_output.data(),
+                        d_values_output,
+                        size * sizeof(val_type),
+                        hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipFree(d_keys_output));
+    HIP_CHECK(hipFree(d_values_output));
+
+    std::vector<key_type> keys_expected;
+    std::vector<val_type> values_expected;
+    try
+    {
+        keys_expected.resize(size);
+        values_expected.resize(size);
+    }
+    catch(const std::bad_alloc& e)
+    {
+        GTEST_SKIP() << "insufficient memory";
+    }
+    for(size_t i = 0; i < size; i++)
+    {
+        keys_expected[i]   = expected[i].first;
+        values_expected[i] = expected[i].second;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
 }
 
 #endif // HIPCUB_TEST_HIPCUB_DEVICE_RADIX_SORT_HPP_
