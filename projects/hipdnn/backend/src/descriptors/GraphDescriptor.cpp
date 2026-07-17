@@ -99,8 +99,11 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
         = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
             graph->tensors, [](const auto& tensor) { return tensor.get(); });
 
-    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
-        _isOverrideShapeEnabled, anyRuntimePassByValue, hasRaggedTensors());
+    const auto& requiredVersion
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(_isOverrideShapeEnabled,
+                                                                  anyRuntimePassByValue,
+                                                                  hasRaggedTensors(),
+                                                                  hasNonDefaultTensorAlignment());
     graph->min_required_engine_api_version
         = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
             hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
@@ -539,6 +542,24 @@ bool GraphDescriptor::hasRaggedTensors() const
         for(const auto& tensorDesc : op->getTensorDescriptors())
         {
             if(tensorDesc->getData().ragged_offset_tensor_uid.has_value())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool GraphDescriptor::hasNonDefaultTensorAlignment() const
+{
+    // Source of truth: tensor_attributes.fbs -> `alignment: long = 16`.
+    static constexpr int64_t K_DEFAULT_TENSOR_ALIGNMENT = 16;
+    for(const auto& desc : _operations)
+    {
+        const auto* op = desc->asGraphOperation();
+        for(const auto& tensorDesc : op->getTensorDescriptors())
+        {
+            if(tensorDesc->getData().alignment != K_DEFAULT_TENSOR_ALIGNMENT)
             {
                 return true;
             }

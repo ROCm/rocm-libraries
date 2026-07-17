@@ -131,6 +131,10 @@ public:
         ON_CALL(*this, hasRaggedTensors()).WillByDefault(::testing::Invoke([this]() {
             return this->GraphDescriptor::hasRaggedTensors();
         }));
+        // Same rationale as hasRaggedTensors above, for the tensor-alignment floor.
+        ON_CALL(*this, hasNonDefaultTensorAlignment()).WillByDefault(::testing::Invoke([this]() {
+            return this->GraphDescriptor::hasNonDefaultTensorAlignment();
+        }));
     }
 
     MOCK_METHOD(void, finalize, (), (override));
@@ -155,6 +159,7 @@ public:
     MOCK_METHOD(hipdnnPluginConstData_t, getSerializedGraph, (), (const, override));
     MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
     MOCK_METHOD(bool, hasRaggedTensors, (), (const, override));
+    MOCK_METHOD(bool, hasNonDefaultTensorAlignment, (), (const, override));
     MOCK_METHOD(bool, isRuntimePassByValueEnabled, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()

@@ -385,8 +385,9 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 // which surfaces the guard's HipdnnException as HIPDNN_STATUS_NOT_SUPPORTED.
 //
 // Complementary contract: a graph built via the backend API stamps
-// min_required_engine_api_version == "1.2.0" iff some tensor is runtime
-// pass-by-value, else "1.0.0" -- see
+// min_required_engine_api_version to the highest feature floor it triggers --
+// "1.2.0" for a runtime pass-by-value tensor, "1.3.0" for a non-default tensor
+// alignment, else "1.0.0" -- see
 // hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(), the single
 // shared graph -> required-version mapping used by both this guard and
 // EnginePluginResourceManager's plugin applicability filter.
@@ -432,8 +433,10 @@ flatbuffers::DetachedBuffer serializeReductionGraphWithUnstampedVersion()
 
 // Read back the stamped min_required_engine_api_version from a graph built and
 // serialized through the backend C API. `runtimePassByValue` toggles the
-// runtime flag on the reduction input tensor.
-hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassByValue)
+// runtime flag on the reduction input tensor; `tensorAlignment` sets the input
+// tensor's byte alignment (16 is the schema default and leaves it unstamped).
+hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassByValue,
+                                                               int64_t tensorAlignment = 16)
 {
     const std::vector<int64_t> inDims = {4, 8};
     const std::vector<int64_t> inStrides = {8, 1};
@@ -468,6 +471,9 @@ hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassB
                                             &flag),
                   HIPDNN_STATUS_SUCCESS);
     }
+    EXPECT_EQ(hipdnnBackendSetAttribute(
+                  xDesc, HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT, HIPDNN_TYPE_INT64, 1, &tensorAlignment),
+              HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendFinalize(xDesc), HIPDNN_STATUS_SUCCESS);
 
     hipdnnBackendDescriptor_t yDesc = createAndFinalizeTensorDesc(2, "output", outDims, outStrides);
@@ -608,6 +614,30 @@ TEST_F(IntegrationGraphDescriptorApi, StampsPassByValueVersionForRuntimePassByVa
 TEST_F(IntegrationGraphDescriptorApi, StampsBaselineVersionForOrdinaryGraph)
 {
     const auto stamped = buildAndReadStampedVersion(/*runtimePassByValue=*/false);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    EXPECT_EQ(stamped,
+              hipdnn_data_sdk::utilities::Version{
+                  hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE});
+}
+
+// A graph carrying a tensor with a non-default byte alignment stamps "1.3.0" so
+// that plugins predating custom-alignment support refuse it.
+TEST_F(IntegrationGraphDescriptorApi, StampsTensorAlignmentVersionForNonDefaultAlignment)
+{
+    const auto stamped
+        = buildAndReadStampedVersion(/*runtimePassByValue=*/false, /*tensorAlignment=*/32);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    EXPECT_EQ(stamped,
+              hipdnn_data_sdk::utilities::Version{
+                  hipdnn_plugin_sdk::K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION});
+}
+
+// The default byte alignment (16) must not raise the floor: such a graph stays
+// at the baseline "1.0.0" and is served by every plugin.
+TEST_F(IntegrationGraphDescriptorApi, StampsBaselineVersionForDefaultAlignment)
+{
+    const auto stamped
+        = buildAndReadStampedVersion(/*runtimePassByValue=*/false, /*tensorAlignment=*/16);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     EXPECT_EQ(stamped,
               hipdnn_data_sdk::utilities::Version{
