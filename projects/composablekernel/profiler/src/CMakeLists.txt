@@ -361,3 +361,20 @@ message(VERBOSE "ckProfiler libs: ${PROFILER_LIBS}")
 target_link_libraries(${PROFILER_EXECUTABLE} PRIVATE ${PROFILER_LIBS})
 
 rocm_install(TARGETS ${PROFILER_EXECUTABLE} COMPONENT profiler)
+
+macro(define_profiler_target NAME SOURCES LIBS)
+  add_executable(${NAME} profiler.cpp ${SOURCES})
+  target_compile_options(${NAME} PRIVATE -Wno-global-constructors)
+
+  if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
+    target_compile_options(${NAME} PRIVATE --offload-compress)
+  endif()
+
+  target_link_libraries(${NAME} PRIVATE utility getopt::getopt ${LIBS})
+  
+  rocm_install(TARGETS ${NAME} COMPONENT profiler)
+endmacro()
+
+define_profiler_target(ckProfiler_grouped_conv_vanilla_2D_NHWGC
+  "profile_grouped_conv_fwd.cpp;profile_grouped_conv_bwd_data.cpp;profile_grouped_conv_bwd_weight.cpp"
+  "device_grouped_conv2d_fwd_nhwgc_instance;device_grouped_conv2d_bwd_data_nhwgc_instance;device_grouped_conv2d_bwd_weight_nhwgc_instance;device_grouped_convnd_bwd_weight_instance")
