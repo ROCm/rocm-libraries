@@ -27,7 +27,8 @@ from rocke.heuristics.feature_engine import FmhaFeatureEngine
 NUM_FMHA_FEATURES = 69
 
 _CXX = shutil.which("g++") or shutil.which("c++") or shutil.which("clang++")
-requires_cxx = pytest.mark.skipif(_CXX is None, reason="no C++ compiler")
+if _CXX is None:
+    raise EnvironmentError("No C++ compiler found (need g++, c++, or clang++)")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -294,7 +295,6 @@ void featurize_c(
     return lib
 
 
-@requires_cxx
 @pytest.mark.parametrize("prob,cfg", _FIXTURES)
 def test_roundtrip_bit_identical(prob, cfg, tmp_path):
     tmp = str(tmp_path)
@@ -376,7 +376,7 @@ def test_committed_headers_match_generated():
     differences don't cause spurious failures.
     """
     if _CLANG_FORMAT is None:
-        pytest.skip("clang-format not found")
+        raise EnvironmentError("clang-format not found")
 
     struct_src, featurize_src = gen.emit_fmha_featurizer()
 
@@ -409,7 +409,9 @@ def test_committed_headers_match_generated():
     # Check FmhaFeatures.hpp
     features_path = os.path.join(sdpa_fwd_dir, "FmhaFeatures.hpp")
     if not os.path.exists(features_path):
-        pytest.skip(f"committed FmhaFeatures.hpp not found at {features_path}")
+        raise FileNotFoundError(
+            f"committed FmhaFeatures.hpp not found at {features_path}"
+        )
     with open(features_path) as f:
         features_content = f.read()
     assert clang_format(features_content) == clang_format(struct_src), (
@@ -420,7 +422,9 @@ def test_committed_headers_match_generated():
     # Check FmhaFeaturizer.hpp
     featurizer_path = os.path.join(sdpa_fwd_dir, "FmhaFeaturizer.hpp")
     if not os.path.exists(featurizer_path):
-        pytest.skip(f"committed FmhaFeaturizer.hpp not found at {featurizer_path}")
+        raise FileNotFoundError(
+            f"committed FmhaFeaturizer.hpp not found at {featurizer_path}"
+        )
     with open(featurizer_path) as f:
         featurizer_content = f.read()
     assert clang_format(featurizer_content) == clang_format(featurize_src), (

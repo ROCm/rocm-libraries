@@ -85,11 +85,11 @@ set_target_properties(rocke_client PROPERTIES
 # The generator lives in platform/python/rocke/heuristics; invoke it via python3 -m.
 add_custom_target(
     rocke_regenerate_fmha_featurizer
-    COMMAND ${CMAKE_COMMAND} -E echo "Regenerating FmhaFeaturizer.hpp..."
+    COMMAND ${CMAKE_COMMAND} -E echo "Regenerating FmhaFeatures.hpp + FmhaFeaturizer.hpp..."
     COMMAND python3 -m rocke.heuristics.gen_fmha_featurizer
-            --out ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd/FmhaFeaturizer.hpp
+            -o ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../platform/python
-    COMMENT "Regenerate dispatcher/sdpa_fwd/FmhaFeaturizer.hpp from gen_fmha_featurizer.py"
+    COMMENT "Regenerate dispatcher/sdpa_fwd/FmhaFeatures.hpp + FmhaFeaturizer.hpp"
     VERBATIM
 )
 
@@ -100,9 +100,8 @@ add_custom_target(
     rocke_regenerate_model_registry
     COMMAND ${CMAKE_COMMAND} -E echo "Regenerating rocke_model_registry.c/.h..."
     COMMAND python3 -m rocke.heuristics.gen_model_registry
-            --models-dir ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd
-            --out-c ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd/rocke_model_registry.c
-            --out-h ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd/rocke_model_registry.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd
+            -o ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../platform/python
     COMMENT "Regenerate rocke_model_registry.{c,h} from committed predictors"
     VERBATIM

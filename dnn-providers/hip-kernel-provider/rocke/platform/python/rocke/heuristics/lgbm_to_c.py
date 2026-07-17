@@ -54,22 +54,20 @@ def _emit_node(node: dict[str, Any], out: list[str], indent: str) -> None:
     default_left = bool(node.get("default_left", False))
     missing_type = node.get("missing_type", "NaN")
 
-    # Only missing_type="NaN" is supported. "None" and "Zero" have different
-    # semantics that would require additional codegen:
-    #   - "None": coerces NaN→0.0, then compares normally (ignores default_left)
-    #   - "Zero": treats exact 0.0 as missing, follows default_left
-    # Our current models don't use these, so fail loudly rather than emit wrong C.
-    if missing_type != "NaN":
+    # LightGBM missing_type semantics:
+    #   - "NaN": NaN is treated as missing, follows default_left
+    #   - "None": feature never had missing values in training; NaN compared normally
+    #   - "Zero": exact 0.0 treated as missing, follows default_left (unsupported)
+    if missing_type == "Zero":
         raise UnsupportedModelError(
-            f"missing_type {missing_type!r} not supported (only 'NaN'); node at "
-            f"feature {fidx} threshold {thr:.17g} requires different codegen"
+            f"missing_type 'Zero' not supported; node at feature {fidx} "
+            f"threshold {thr:.17g} requires different codegen"
         )
 
-    # LightGBM: a sample goes LEFT when (f <= threshold). Missing (NaN) goes to
-    # default_left's side. NaN comparisons are all false, so:
-    #   default_left=True  -> want NaN left  -> test !(f > thr) (true for NaN)
-    #   default_left=False -> want NaN right -> test (f <= thr) (false for NaN)
-    if default_left:
+    # For "NaN": route NaN to default_left's side via comparison trick.
+    # For "None": NaN compares false to <=, so it goes right (same as default_left=False).
+    # LightGBM: sample goes LEFT when (f <= threshold).
+    if missing_type == "NaN" and default_left:
         cond = f"!(f[{fidx}] > {thr:.17g})"
     else:
         cond = f"(f[{fidx}] <= {thr:.17g})"

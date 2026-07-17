@@ -18,6 +18,8 @@ import tempfile
 import numpy as np
 import pytest
 
+# TODO(TheRock#xxxxx): Once lightgbm is added to TheRock/requirements-test.txt,
+# change this to a direct import so missing lightgbm fails loudly.
 lgb = pytest.importorskip("lightgbm")
 
 # Make the heuristics package importable (lgbm_to_c lives alongside train.py).
@@ -32,7 +34,8 @@ import lgbm_to_c  # noqa: E402
 
 
 _CC = shutil.which("cc") or shutil.which("gcc")
-requires_cc = pytest.mark.skipif(_CC is None, reason="no C compiler")
+if _CC is None:
+    raise EnvironmentError("No C compiler found (need cc or gcc)")
 
 
 def _train_tiny_booster(n_features=8, n_rows=400, seed=0):
@@ -74,7 +77,6 @@ def _compile_and_load(c_src, func_name):
     return fn
 
 
-@requires_cc
 def test_generated_c_matches_booster():
     booster, X = _train_tiny_booster()
     n_features = X.shape[1]
@@ -96,7 +98,6 @@ def test_generated_c_matches_booster():
         assert abs(got - preds[i]) < 1e-9, (i, got, preds[i])
 
 
-@requires_cc
 def test_argmax_ranking_preserved():
     # The dispatcher only needs the argmax to match; verify ordering is identical
     # on a batch (this is what the tie-break relies on).
@@ -140,8 +141,8 @@ def test_rejects_categorical_split():
         lgbm_to_c.booster_to_c(dumped, "f", num_features=4)
 
 
-def test_rejects_missing_type_none():
-    """missing_type="None" requires different codegen (NaN->0 coercion)."""
+def test_missing_type_none_accepted():
+    """missing_type="None" (no missing values in training) uses normal comparison."""
     dumped = {
         "objective": "regression",
         "tree_info": [
@@ -152,15 +153,19 @@ def test_rejects_missing_type_none():
                     "decision_type": "<=",
                     "threshold": 0.5,
                     "default_left": True,
-                    "missing_type": "None",  # unsupported
+                    "missing_type": "None",
                     "left_child": {"leaf_value": 1.0},
                     "right_child": {"leaf_value": 2.0},
                 },
             }
         ],
     }
-    with pytest.raises(lgbm_to_c.UnsupportedModelError, match="missing_type"):
-        lgbm_to_c.booster_to_c(dumped, "f", num_features=4)
+    c_src = lgbm_to_c.booster_to_c(dumped, "test_none", num_features=1)
+    fn = _compile_and_load(c_src, "test_none")
+    left_input = (ctypes.c_double * 1)(0.3)
+    assert fn(left_input) == 1.0
+    right_input = (ctypes.c_double * 1)(0.7)
+    assert fn(right_input) == 2.0
 
 
 def test_rejects_missing_type_zero():
@@ -186,7 +191,6 @@ def test_rejects_missing_type_zero():
         lgbm_to_c.booster_to_c(dumped, "f", num_features=4)
 
 
-@requires_cc
 def test_nan_handling_default_left_true():
     """NaN inputs must follow default_left=True path (go left)."""
     dumped = {
@@ -206,7 +210,7 @@ def test_nan_handling_default_left_true():
             }
         ],
     }
-    c_src, _ = lgbm_to_c.booster_to_c(dumped, "test_nan_left", num_features=1)
+    c_src = lgbm_to_c.booster_to_c(dumped, "test_nan_left", num_features=1)
     fn = _compile_and_load(c_src, "test_nan_left")
 
     # NaN should go left (10.0)
@@ -220,7 +224,6 @@ def test_nan_handling_default_left_true():
     assert fn(right_input) == 20.0
 
 
-@requires_cc
 def test_nan_handling_default_left_false():
     """NaN inputs must follow default_left=False path (go right)."""
     dumped = {
@@ -240,7 +243,7 @@ def test_nan_handling_default_left_false():
             }
         ],
     }
-    c_src, _ = lgbm_to_c.booster_to_c(dumped, "test_nan_right", num_features=2)
+    c_src = lgbm_to_c.booster_to_c(dumped, "test_nan_right", num_features=2)
     fn = _compile_and_load(c_src, "test_nan_right")
 
     # NaN should go right (20.0)

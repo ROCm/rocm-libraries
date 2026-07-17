@@ -20,7 +20,8 @@ import pytest
 from rocke.heuristics import gen_model_registry as gmr
 
 _CC = shutil.which("cc") or shutil.which("gcc")
-requires_cc = pytest.mark.skipif(_CC is None, reason="no C compiler")
+if _CC is None:
+    raise EnvironmentError("No C compiler found (need cc or gcc)")
 
 
 def _model(dir_: Path, name: str, meta: dict):
@@ -162,7 +163,6 @@ def test_empty_registry_is_valid(tmp_path):
     assert "rocke_lookup_model" in src
 
 
-@requires_cc
 def test_generated_registry_compiles_and_looks_up(tmp_path):
     models = tmp_path / "models"
     _model(

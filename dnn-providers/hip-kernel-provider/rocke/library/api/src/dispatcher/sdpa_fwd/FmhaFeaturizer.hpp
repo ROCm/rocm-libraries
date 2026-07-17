@@ -14,19 +14,29 @@ namespace rocke_client::dispatcher
 inline double fmha_dtype_bytes(const std::string& dt)
 {
     if(dt == "fp32")
+    {
         return 4.0;
+    }
     if(dt == "fp8" || dt == "bf8")
+    {
         return 1.0;
+    }
     return 2.0;
 }
 inline double fmha_dtype_enc(const std::string& dt)
 {
     if(dt == "fp16")
+    {
         return 0.0;
+    }
     if(dt == "f16")
+    {
         return 0.0;
+    }
     if(dt == "bf16")
+    {
         return 1.0;
+    }
     return 0.0;
 }
 
@@ -90,7 +100,9 @@ inline FmhaFeatures
 
     auto eff = [](double d, double t) -> double {
         if(t <= 0.0)
+        {
             return 1.0;
+        }
         double r = std::fmod(d, t);
         return (r > 0.0) ? r / t : 1.0;
     };

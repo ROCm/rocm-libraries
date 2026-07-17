@@ -662,6 +662,7 @@ class FmhaFeatureEngine(FeatureEngine):
         num_xcd: int = 0,
         simds_per_cu: int = 4,
         wavefront_size: int = 64,
+        **kwargs,
     ):
         # Chip-config counts (CU/XCD/shader-engine/clock/LDS) carry no checked-in
         # values (policy: no CU counts in source); they are 0 unless the caller

@@ -38,9 +38,16 @@ from rocke.heuristics.feature_engine import FMHA_DTYPE_MAP, FmhaFeatureEngine
 def _dtype_bytes_cpp() -> str:
     # Mirrors _fmha_dtype_bytes: fp32->4, fp8/bf8->1, else 2.
     return """\
-inline double fmha_dtype_bytes(const std::string& dt) {
-    if (dt == "fp32") return 4.0;
-    if (dt == "fp8" || dt == "bf8") return 1.0;
+inline double fmha_dtype_bytes(const std::string& dt)
+{
+    if(dt == "fp32")
+    {
+        return 4.0;
+    }
+    if(dt == "fp8" || dt == "bf8")
+    {
+        return 1.0;
+    }
     return 2.0;
 }"""
 
@@ -48,10 +55,12 @@ inline double fmha_dtype_bytes(const std::string& dt) {
 def _dtype_enc_cpp() -> str:
     # Emitted from FMHA_DTYPE_MAP (not retyped): default 0 for unknown.
     arms = "\n".join(
-        f'    if (dt == "{k}") return {int(v)}.0;' for k, v in FMHA_DTYPE_MAP.items()
+        f'    if(dt == "{k}")\n    {{\n        return {int(v)}.0;\n    }}'
+        for k, v in FMHA_DTYPE_MAP.items()
     )
     return f"""\
-inline double fmha_dtype_enc(const std::string& dt) {{
+inline double fmha_dtype_enc(const std::string& dt)
+{{
 {arms}
     return 0.0;
 }}"""
@@ -269,7 +278,10 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double tot = batch * hq * ntm * ntk;
 
     auto eff = [](double d, double t) -> double {{
-        if (t <= 0.0) return 1.0;
+        if(t <= 0.0)
+        {{
+            return 1.0;
+        }}
         double r = std::fmod(d, t);
         return (r > 0.0) ? r / t : 1.0;
     }};
