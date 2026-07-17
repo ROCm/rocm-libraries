@@ -11,7 +11,8 @@ else()
 endif()
 
 # Dapper master switch (read by both the native/Jenkins flow and TheRock):
-#   off      : no Dapper (byte-for-byte pre-Dapper behavior)
+#   off      : Dapper disabled (no analysis / no shard-file / no dapper ctest tests;
+#              the single gtest and its shard tests still build and run)
 #   validate : native shard + dapper_diff coverage validation (Jenkins/MICI default)
 #   union    : ACTIVE -- the reduced subtractive union filter actually runs (TheRock default)
 if(MIOPEN_BUILD_IN_THEROCK)
@@ -26,10 +27,13 @@ set(MIOPEN_DAPPER_BASE_REF "origin/develop" CACHE STRING
     "Git ref to compute the Dapper impact diff against")
 message(STATUS "Dapper: MIOPEN_DAPPER_MODE=${MIOPEN_DAPPER_MODE} (TheRock=${MIOPEN_BUILD_IN_THEROCK})")
 
-if(MIOPEN_BUILD_IN_THEROCK)
-  # dapper_init() normally force-sets MIOPEN_TEST_SINGLE_GTEST / MIOPEN_TEST_DISCRETE. The
-  # native shard machinery stays inert here; restore the pre-Dapper default so the single
-  # aggregated gtest is built when discrete binaries are not.
+# Gates the native shard-file / dapper_dev_filters / dapper_add_sharded_test machinery
+# below. Only ON for a native build with Dapper enabled; OFF in TheRock and when off.
+set(MIOPEN_ENABLE_DAPPER_NATIVE OFF)
+
+# When Dapper does not run dapper_init() (TheRock, or native 'off'), restore the pre-Dapper
+# single-gtest default that dapper_init() would otherwise force.
+macro(_miopen_default_single_gtest)
   if(NOT DEFINED MIOPEN_TEST_SINGLE_GTEST)
     if(MIOPEN_TEST_DISCRETE)
       set(MIOPEN_TEST_SINGLE_GTEST OFF)
@@ -37,6 +41,10 @@ if(MIOPEN_BUILD_IN_THEROCK)
       set(MIOPEN_TEST_SINGLE_GTEST ON)
     endif()
   endif()
+endmacro()
+
+if(MIOPEN_BUILD_IN_THEROCK)
+  _miopen_default_single_gtest()
   # Produce the Dapper impact JSON on the (GPU-less) builder so the runner can compute the
   # union filter. Only the JSON-producing steps run; no native shard/ctest dapper tests.
   if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
@@ -45,13 +53,16 @@ if(MIOPEN_BUILD_IN_THEROCK)
     dapper_therock_generate_json()
   endif()
 else()
-  # Native/Jenkins build. 'off' disables Dapper entirely; 'validate'/'union' set up the
-  # native pipeline. (Full native check->union activation is a follow-up; today 'union'
-  # here is exercised via the existing `diff_check` target.)
+  # Native/Jenkins build. 'validate'/'union' set up the native pipeline; 'off' disables it.
+  # (Full native check->union activation is a follow-up; today 'union' here is exercised via
+  # the existing `diff_check` target.)
   if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
+    set(MIOPEN_ENABLE_DAPPER_NATIVE ON)
     find_package(Python 3 REQUIRED COMPONENTS Interpreter)
     include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
     dapper_init()
+  else()
+    _miopen_default_single_gtest()
   endif()
 endif()
 
@@ -312,7 +323,7 @@ function(add_gtest TEST_NAME TEST_CPP)
 
     set(MIOPEN_GTEST_SHARDS "")
 
-    if(NOT MIOPEN_BUILD_IN_THEROCK)
+    if(MIOPEN_ENABLE_DAPPER_NATIVE)
       file(REMOVE "${SHARDS_FILE}")
       file(TOUCH "${SHARDS_FILE}")
       dapper_dev_filters()
@@ -330,7 +341,7 @@ function(add_gtest TEST_NAME TEST_CPP)
           --gtest_output=xml:${MIOPEN_GTEST_SHARD_XML}
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
-      if(NOT MIOPEN_BUILD_IN_THEROCK)
+      if(MIOPEN_ENABLE_DAPPER_NATIVE)
         file(APPEND ${SHARDS_FILE} "${MIOPEN_GTEST_SHARD_XML}\n")
       endif()
       list(APPEND MIOPEN_GTEST_SHARDS ${MIOPEN_GTEST_SHARD})
@@ -356,7 +367,7 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
     endif()
 
-    if(NOT MIOPEN_BUILD_IN_THEROCK)
+    if(MIOPEN_ENABLE_DAPPER_NATIVE)
       dapper_add_sharded_test()
     endif()
 
