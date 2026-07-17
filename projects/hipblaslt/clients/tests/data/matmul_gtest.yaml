@@ -3399,4 +3399,22 @@ Tests:
   check_ref: [1, 2]
   gpu_arch: '950'
 
+# int8 in / int32 out (compute 32I). Integer accumulation is exact, so the
+# unit_check is exact equality across transpose combos and beta variety.
+- name: matmul_check_ref_i8
+  category: pre_checkin
+  function:
+    matmul:
+    - *i8_precision_dst_i32
+  M: [128]
+  N: [128]
+  K: [128]
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: rand_int
+  unit_check: 1
+  norm_check: 1
+  check_ref: [1, 2]
+  gpu_arch: '950'
+
 ...
