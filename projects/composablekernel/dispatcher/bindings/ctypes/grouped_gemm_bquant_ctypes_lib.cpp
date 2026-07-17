@@ -12,7 +12,7 @@
  *   SelectedKernel, KERNEL_NAME
  *   ADataType, BDataType, CDataType, QDataType, AccDataType, QuantGroupSize
  *
- * Design: direct launch — SelectedKernel::launch(QuantGemmHostArgs, stream_config) is
+ * Design: direct launch -- SelectedKernel::launch(QuantGemmHostArgs, stream_config) is
  * called directly. No dispatcher registry is used: BQuant kernels take QuantGemmHostArgs,
  * which is incompatible with the GeneratedTileKernelInstance::run() signature used by
  * the dispatcher's registry backend.
@@ -68,7 +68,7 @@ extern "C" {
  *
  * This library uses a single-kernel-per-.so model: SelectedKernel is
  * force-included at compile time and invoked directly via SelectedKernel::launch().
- * No dispatcher registry is involved — BQuant kernels require QuantGemmHostArgs
+ * No dispatcher registry is involved -- BQuant kernels require QuantGemmHostArgs
  * which is incompatible with the GeneratedTileKernelInstance::run() signature that
  * the dispatcher's registry backend uses.
  *
@@ -223,7 +223,7 @@ int dispatcher_run_bquant_gemm(const void* A,
         cleanup();
         return -1;
     }
-    // Apply BQ preshuffle when required — mirrors gemm_bquant_profiler.hpp:118-121.
+    // Apply BQ preshuffle when required -- mirrors gemm_bquant_profiler.hpp:118-121.
     // BPreshuffleQuant reorders BQ in host memory before the device copy so the kernel
     // finds the scale values in the interleaved layout it expects.
     if constexpr(SelectedKernel::BPreshuffleQuant)
