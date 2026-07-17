@@ -66,6 +66,9 @@ _LDS_PAD = 8
 import os as _os  # noqa: E402
 
 _LDS_PAD_V = int(_os.environ.get("ROCKE_DENSE_VPAD", "32"))
+# Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
+# every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P safely.
+_LAZY_RESCALE_THRESHOLD = 8.0
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,15 @@ class AttentionDenseSpec:
     #     (gqa>1 and gqa*NQB*B >= 2*num_persistent), else qb_major. Strictly >=
     #     qb_major (falls back where hkv_major would lose).
     persist_decode: str = "auto"
+    # lazy_rescale: adaptive online-softmax rescale. Keep the running max as a
+    #   LAZY max that only re-anchors when a tile's max exceeds it by > 8 (log2);
+    #   when every lane is within 8 (wave_all vote) skip the O/l rescale entirely
+    #   (a 0/1-trip scf.for compiles the skip to a wave-uniform scalar branch),
+    #   cutting the per-tile VALU between the QK and PV MFMA clusters (raises
+    #   MFMA utilization). P is then bounded by exp2(8)=256 (safe for fp32 accum
+    #   / bf16 P) rather than <=1, so this is a numerically APPROXIMATE lever
+    #   (still within bf16/fp16 tolerance); default off.
+    lazy_rescale: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -237,6 +249,8 @@ class AttentionDenseSpec:
             parts.append(f"swa{self.sliding_window}")
         if self.varlen:
             parts.append("varlen")
+        if self.lazy_rescale:
+            parts.append("lazyrs")
         if self.persistent:
             parts.append(f"persist{self.num_persistent}")
             if self.resolved_persist_decode == "hkv_major":
@@ -286,6 +300,7 @@ def build_attention_dense(
     W = spec.sliding_window
     Wt = W // BN  # window length in KV tiles (0 when disabled)
     varlen = spec.varlen
+    LAZY_RESCALE = spec.lazy_rescale
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -491,9 +506,20 @@ def build_attention_dense(
             for i in range(16):
                 local_max = b.fmax(local_max, s_reg[nsub][i])
         tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
-        m_new = b.fmax(m_i, tile_max)
+        if LAZY_RESCALE:
+            m_diff = b.fsub(tile_max, m_i)
+            below_i32 = b.select(
+                b.fcmp("ole", m_diff, b.const_f32(_LAZY_RESCALE_THRESHOLD)),
+                b.const_i32(1),
+                b.const_i32(0),
+            )
+            skip = b.cmp_ne(b.wave_all(below_i32), b.const_i32(0))
+            m_new = b.select(skip, m_i, b.fmax(m_i, tile_max))
+        else:
+            skip = None
+            m_new = b.fmax(m_i, tile_max)
         alpha = _exp2(b.fsub(m_i, m_new))
-        return m_new, alpha
+        return m_new, alpha, skip
 
     def relayout_p(p):
         """CK-1 half-local P feed: assemble the PV B-operand from lane-local P regs
@@ -618,7 +644,7 @@ def build_attention_dense(
         do_mask(s0, start_tile, lower=True, upper=True)
     else:
         do_mask(s0, start_tile)
-    m0, _alpha0 = softmax_max(s0, neg_inf)
+    m0, _alpha0, _skip0 = softmax_max(s0, neg_inf)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     p0_vals = [
         [_exp2(b.fsub(s0[nsub][i], m0)) for i in range(16)] for nsub in range(N_SUB)
@@ -637,6 +663,8 @@ def build_attention_dense(
         + [(f"pk{kk}", pk0[kk]) for kk in range(KK_STEPS)]
     )
 
+    _rs_ctr = [0]
+
     def emit_loop_body(j, carry, mask_lower=False, mask_upper=False):
         m_i = carry[0]
         l_i = carry[1]
@@ -653,13 +681,28 @@ def build_attention_dense(
         s = do_qk(kbuf)
         if mask_lower or mask_upper:
             do_mask(s, j, lower=mask_lower, upper=mask_upper)
-        m_new, alpha = softmax_max(s, m_i)
+        m_new, alpha, skip = softmax_max(s, m_i)
         b.sched_barrier(0)  # depth-1 fence: m_new region-live-in
         b.s_setprio(1)  # PV-only s_setprio (paired with PF ~+3.5%)
         o_acc, p_vals, l_tile = pv_fused_exp(o_acc, p_prev, vbuf_prev, s, m_new)
         b.s_setprio(0)
-        l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
-        o_acc = rescale_o(o_acc, alpha)
+        if LAZY_RESCALE:
+            _rs_ctr[0] += 1
+            tg = _rs_ctr[0]
+            trips = b.select(skip, b.const_i32(0), b.const_i32(1))
+            rs_args = [(f"ro{dt}_{tg}", o_acc[dt]) for dt in range(D_TILES)]
+            rs_args.append((f"rl_{tg}", l_i))
+            rs = b.scf_for_iter(
+                b.const_i32(0), trips, b.const_i32(1), rs_args, iv_name=f"rs{tg}"
+            )
+            with rs as (_iv, rc):
+                o_sc = rescale_o(list(rc[:D_TILES]), alpha)
+                b.scf_yield(*o_sc, b.fmul(rc[D_TILES], alpha))
+            o_acc = list(rs.results[:D_TILES])
+            l_new = b.fadd(rs.results[D_TILES], l_tile)
+        else:
+            l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
+            o_acc = rescale_o(o_acc, alpha)
         p_packs = relayout_p(p_vals)
         b.s_barrier_bare()
         load_tile(pbuf, b.add(j, b.const_i32(1)))
@@ -807,6 +850,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     W = NQB * Hq * B  # total work items
     SW = spec.sliding_window  # sliding-window length (0 = disabled)
     SWt = SW // BN  # window length in KV tiles
+    LAZY_RESCALE = spec.lazy_rescale
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -1021,12 +1065,25 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 for i in range(16):
                     local_max = b.fmax(local_max, s_reg[nsub][i])
             tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
-            m_new = b.fmax(m_i, tile_max)
+            if LAZY_RESCALE:
+                # Lazy max: only re-anchor when some lane's tile_max exceeds the
+                # running max by > threshold; else keep m_i (skip the rescale).
+                m_diff = b.fsub(tile_max, m_i)
+                below_i32 = b.select(
+                    b.fcmp("ole", m_diff, b.const_f32(_LAZY_RESCALE_THRESHOLD)),
+                    b.const_i32(1),
+                    b.const_i32(0),
+                )
+                skip = b.cmp_ne(b.wave_all(below_i32), b.const_i32(0))
+                m_new = b.select(skip, m_i, b.fmax(m_i, tile_max))
+            else:
+                skip = None
+                m_new = b.fmax(m_i, tile_max)
             alpha = _exp2(b.fsub(m_i, m_new))
-            return m_new, alpha
+            return m_new, alpha, skip
 
         def softmax_stats(s_reg, m_i):
-            m_new, alpha = softmax_max(s_reg, m_i)
+            m_new, alpha, _skip = softmax_max(s_reg, m_i)
             p = [
                 [_exp2(b.fsub(s_reg[nsub][i], m_new)) for i in range(16)]
                 for nsub in range(N_SUB)
@@ -1122,6 +1179,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
             return out, p_vals, l_tile
 
+        _rs_ctr = [0]
+
         def emit_loop_body(j, carry, mask_lower=False, mask_upper=False):
             m_i = carry[0]
             l_i = carry[1]
@@ -1139,15 +1198,34 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             s = do_qk(kbuf)
             if mask_lower or mask_upper:
                 do_mask(s, j, lower=mask_lower, upper=mask_upper)
-            m_new, alpha = softmax_max(s, m_i)
+            m_new, alpha, skip = softmax_max(s, m_i)
             b.sched_barrier(0)
             # PV-only s_setprio: the PV MFMA cluster wins issue slots; paired with
             # PF this converts to ~+3.5% (Sq=8192 causal, ~852 -> ~877 TFLOPS).
             b.s_setprio(1)
             o_acc, p_vals, l_tile = pv_fused_exp(o_acc, p_prev, vbuf_prev, s, m_new)
             b.s_setprio(0)
-            l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
-            o_acc = rescale_o(o_acc, alpha)
+            if LAZY_RESCALE:
+                # Skip the O/l rescale via a wave-uniform 0/1-trip loop when the
+                # max didn't move (>threshold): 0 trips -> pass o_acc/l_i through
+                # unscaled; 1 trip -> scale by alpha. Compiles to a scalar branch.
+                # Unique names per emit (called once per KV-loop phase).
+                _rs_ctr[0] += 1
+                tg = _rs_ctr[0]
+                trips = b.select(skip, b.const_i32(0), b.const_i32(1))
+                rs_args = [(f"ro{dt}_{tg}", o_acc[dt]) for dt in range(D_TILES)]
+                rs_args.append((f"rl_{tg}", l_i))
+                rs = b.scf_for_iter(
+                    b.const_i32(0), trips, b.const_i32(1), rs_args, iv_name=f"rs{tg}"
+                )
+                with rs as (_iv, rc):
+                    o_sc = rescale_o(list(rc[:D_TILES]), alpha)
+                    b.scf_yield(*o_sc, b.fmul(rc[D_TILES], alpha))
+                o_acc = list(rs.results[:D_TILES])
+                l_new = b.fadd(rs.results[D_TILES], l_tile)
+            else:
+                l_new = b.fadd(b.fmul(l_i, alpha), l_tile)
+                o_acc = rescale_o(o_acc, alpha)
             p_packs = relayout_p(p_vals)
             b.s_barrier_bare()
             load_tile(pbuf, b.add(j, b.const_i32(1)))
