@@ -27,15 +27,9 @@ namespace
         return true;
     }
 
-    template <typename T>
-    __device__ inline float to_float(T v)
-    {
-        return static_cast<float>(v);
-    }
-
     // googletest FloatingPoint<float>::AlmostEquals (<= 4 ULP), which ASSERT_FLOAT_EQ
-    // (and thus unit_check) applies per element; f16 outputs are promoted to float
-    // first. Drives the exact (tol==0) unit_check.
+    // (and thus unit_check) applies per element; f16/bf16 outputs are promoted to
+    // float first. Drives the exact (tol==0) unit_check.
     __device__ inline bool float_almost_equals(float a, float b)
     {
         if(isnan(a) || isnan(b))
@@ -51,6 +45,35 @@ namespace
         const unsigned int bb   = to_biased(b);
         const unsigned int dist = (ba >= bb) ? (ba - bb) : (bb - ba);
         return dist <= 4u;
+    }
+
+    // googletest FloatingPoint<double>::AlmostEquals (<= 4 ULP), which
+    // ASSERT_DOUBLE_EQ (and thus the f64 unit_check) applies per element.
+    __device__ inline bool double_almost_equals(double a, double b)
+    {
+        if(isnan(a) || isnan(b))
+            return false;
+
+        auto to_biased = [](double f) -> unsigned long long {
+            unsigned long long bits;
+            __builtin_memcpy(&bits, &f, sizeof(bits));
+            constexpr unsigned long long sign = 0x8000000000000000ull;
+            return (bits & sign) ? (~bits + 1ull) : (bits | sign);
+        };
+        const unsigned long long ba   = to_biased(a);
+        const unsigned long long bb   = to_biased(b);
+        const unsigned long long dist = (ba >= bb) ? (ba - bb) : (bb - ba);
+        return dist <= 4ull;
+    }
+
+    // 4-ULP compare in the comparison type: float for narrow outputs, double for f64.
+    __device__ inline bool almost_equals(float a, float b)
+    {
+        return float_almost_equals(a, b);
+    }
+    __device__ inline bool almost_equals(double a, double b)
+    {
+        return double_almost_equals(a, b);
     }
 
     // Per-element error in ULP of the output type, matching ulp_distance() in ulp.hpp.
@@ -154,7 +177,7 @@ namespace
     // sum_diff_sq_b), letting the host form the CPU-matching per-batch ratio. The
     // global metrics (max/ulp/allclose/counts) reduce within the block and combine
     // into `out` with one atomic per block.
-    template <typename To>
+    template <typename To, typename Tcmp>
     __global__ void compare_kernel(const To* gpu,
                                    const To* ref,
                                    int64_t   M,
@@ -194,10 +217,11 @@ namespace
             const size_t i   = t % size_t(M);
             const size_t idx = base + i + j * size_t(ldd);
 
-            const float  gf = to_float(gpu[idx]);
-            const float  rf = to_float(ref[idx]);
-            const double g  = double(gf);
-            const double r  = double(rf);
+            // f64 compares in double (no precision loss); narrow To promotes to float.
+            const Tcmp   gv = static_cast<Tcmp>(gpu[idx]);
+            const Tcmp   rv = static_cast<Tcmp>(ref[idx]);
+            const double g  = double(gv);
+            const double r  = double(rv);
 
             if(isnan(g) || isinf(g) || isnan(r) || isinf(r))
             {
@@ -214,7 +238,7 @@ namespace
             }
 
             const double d = fabs(g - r);
-            if(!float_almost_equals(gf, rf))
+            if(!almost_equals(gv, rv))
                 ++l_unit_fail;
             l_max = fmax(l_max, d);
             l_sref += r * r;
@@ -347,29 +371,29 @@ GpuRefResult compare_gemm_device(const void* dGpu,
     grid.y = uint32_t(batchCount);
     grid.z = 1;
 
+#define GPU_REF_COMPARE(TO, TCMP)                                            \
+    compare_kernel<TO, TCMP><<<grid, GPU_REF_BLOCK, 0, stream>>>(             \
+        static_cast<const TO*>(dGpu),                                        \
+        static_cast<const TO*>(dRef),                                        \
+        M,                                                                   \
+        N,                                                                   \
+        ldd,                                                                 \
+        strideD,                                                             \
+        batchCount,                                                          \
+        ulpMantBits,                                                         \
+        dAccum,                                                              \
+        dBins)
+
     if(tD == HIP_R_32F)
-        compare_kernel<float><<<grid, GPU_REF_BLOCK, 0, stream>>>(static_cast<const float*>(dGpu),
-                                                                  static_cast<const float*>(dRef),
-                                                                  M,
-                                                                  N,
-                                                                  ldd,
-                                                                  strideD,
-                                                                  batchCount,
-                                                                  ulpMantBits,
-                                                                  dAccum,
-                                                                  dBins);
+        GPU_REF_COMPARE(float, float);
+    else if(tD == HIP_R_16BF)
+        GPU_REF_COMPARE(hip_bfloat16, float);
+    else if(tD == HIP_R_64F)
+        GPU_REF_COMPARE(double, double);
     else
-        compare_kernel<hipblasLtHalf><<<grid, GPU_REF_BLOCK, 0, stream>>>(
-            static_cast<const hipblasLtHalf*>(dGpu),
-            static_cast<const hipblasLtHalf*>(dRef),
-            M,
-            N,
-            ldd,
-            strideD,
-            batchCount,
-            ulpMantBits,
-            dAccum,
-            dBins);
+        GPU_REF_COMPARE(hipblasLtHalf, float);
+
+#undef GPU_REF_COMPARE
 
     gpu_ref_hip_check(hipGetLastError(), "compare launch");
 
