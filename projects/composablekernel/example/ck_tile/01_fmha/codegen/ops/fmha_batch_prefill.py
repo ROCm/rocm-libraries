@@ -5,6 +5,7 @@ import copy
 from dataclasses import dataclass, field
 import fnmatch
 import itertools
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -31,6 +32,19 @@ CDNA3_PLUS_ARCH = ArchTrait(
     "cdna3_plus",
     preprocessor_check="defined(__gfx94__) || defined(__gfx950__)",
 )
+
+
+def _arch_host_predicate(arch_require: Optional[str]) -> str:
+    """Translate a tile's device-only F_arch_require gate (e.g.
+    'defined(__gfx942__)') into an equivalent host-side predicate over the
+    runtime device_name. Returns "true" (arch-agnostic) when no gate is set.
+    ck_tile::get_device_name() returns the normalized arch (e.g. "gfx942")."""
+    if arch_require is None:
+        return "true"
+    names = re.findall(r"__(gfx[0-9a-z]+)__", arch_require)
+    if not names:
+        return "true"
+    return " || ".join(f'device_name == "{n}"' for n in names)
 
 DTYPE_BITS = {
     "fp32": 32,
@@ -167,6 +181,7 @@ FMHA_FWD_API_FILENAME = "fmha_batch_prefill_api.cpp"
 FMHA_FWD_API = """
 #include <cstdint>
 #include <cstdio>
+#include <string>
 
 namespace {{
 bool get_num_cus(unsigned& num_cu) {{
@@ -206,6 +221,11 @@ float fmha_batch_prefill(fmha_batch_prefill_traits t, fmha_batch_prefill_args a,
         return r;
     }}
 
+    // Host-side arch identity, used to mirror device-only arch gates (e.g. tiles
+    // restricted via F_arch_require) in the host dispatch so we never select an
+    // arm whose device image was elided for this arch.
+    [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
+
     [[maybe_unused]] auto get_num_blocks = [&](unsigned kM0) {{
         return get_num_thread_blocks(a.batch, a.nhead_q, a.max_seqlen_q, kM0);
     }};
@@ -226,7 +246,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
 """
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
-                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && (fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {F_bn0}, a.num_total_pages, a.batch_stride_k, a.batch_stride_v, kElementBytes, a.k_ptr, a.v_ptr) == {F_kv_load_mode})) {{
+                        ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && (fmha_batch_prefill_select_kv_load_mode(a.page_block_size, {F_bn0}, a.num_total_pages, a.batch_stride_k, a.batch_stride_v, kElementBytes, a.k_ptr, a.v_ptr) == {F_kv_load_mode})) {{
                 using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
@@ -277,6 +297,9 @@ class FmhaFwdApiTrait:
     kv_lookup_table: str
     page_size: int = 1  # page block size
     use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
+    # Host-side arch predicate mirroring a tile's device-only F_arch_require gate.
+    # "true" means arch-agnostic (no host restriction).
+    arch_host: str = "true"
 
     @property
     def name(self) -> str:
@@ -486,6 +509,7 @@ class FmhaFwdApiPool:
                         F_dcheck=trait.dcheck,
                         F_dvcheck=trait.dvcheck,
                         F_constraint=trait.constraint,
+                        F_arch_host=trait.arch_host,
                         F_spad=BOOL_MAP[trait.spad],
                         F_skpad=BOOL_MAP[trait.skpad],
                         F_dpad=BOOL_MAP[trait.dpad],
@@ -682,6 +706,7 @@ class FmhaFwdKernel:
             kv_lookup_table=self.F_pipeline.F_kv_lookup_table,
             page_size=self.F_page_size,
             use_global_load=self.F_use_global_load,
+            arch_host=_arch_host_predicate(self.F_tile.F_arch_require),
         )
 
 
@@ -699,6 +724,13 @@ class KernelComponentFactory:
                     # yields NumIssues = 32/128 = 0 and an empty LDS descriptor
                     # (space_filling_curve static_assert). Opt new archs in only
                     # after confirming the tile does not degenerate there.
+                    # F_arch_require is a device-only #if gate. Without a matching
+                    # host predicate, a num_cus<128 gfx950 partition would select
+                    # this bn0=32 arm on the host while its gfx950 device image was
+                    # elided -> hipErrorInvalidDeviceFunction at launch. The host
+                    # dispatch therefore mirrors F_arch_require via _arch_host_
+                    # predicate() (device_name == "gfx942"), so such a partition
+                    # falls through to the arch-agnostic bn0=128 arm instead.
                     FmhaFwdTileSize(128,  32, 16, 256, 16,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16, 2, CppConstraint("num_cus < 128"), F_arch_require="defined(__gfx942__)"),
                     FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
                 ],
