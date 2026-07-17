@@ -180,6 +180,8 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseCooSetPointers`       |
 +------------------------------------------+
+|:cpp:func:`hipsparseBlockedEllSetPointers`|
++------------------------------------------+
 |:cpp:func:`hipsparseSpMatGetSize`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseSpMatGetFormat`       |
