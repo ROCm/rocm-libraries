@@ -211,12 +211,14 @@ int dispatcher_run_bquant_gemm(const void* A,
     }
 
     // Copy inputs to device
-    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) != hipSuccess)
+    if(hipMemcpy(A_dev, A_host, elements_to_bytes<ADataType>(M * K), hipMemcpyHostToDevice) !=
+       hipSuccess)
     {
         cleanup();
         return -1;
     }
-    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) != hipSuccess)
+    if(hipMemcpy(B_dev, B_host, elements_to_bytes<BDataType>(K * N), hipMemcpyHostToDevice) !=
+       hipSuccess)
     {
         cleanup();
         return -1;
@@ -235,8 +237,10 @@ int dispatcher_run_bquant_gemm(const void* A,
                                             ck_tile::bool_constant<true>{} /*row-major*/));
         std::copy(BQ_host, BQ_host + QK_B * QN_B, bq_h.begin());
         auto bq_shuffled = ck_tile::shuffle_bq(&bq_h, block_bq_k);
-        if(hipMemcpy(BQ_dev, bq_shuffled.data(),
-                     elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) != hipSuccess)
+        if(hipMemcpy(BQ_dev,
+                     bq_shuffled.data(),
+                     elements_to_bytes<QDataType>(QK_B * QN_B),
+                     hipMemcpyHostToDevice) != hipSuccess)
         {
             cleanup();
             return -1;
@@ -244,7 +248,8 @@ int dispatcher_run_bquant_gemm(const void* A,
     }
     else
     {
-        if(hipMemcpy(BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) !=
+        if(hipMemcpy(
+               BQ_dev, BQ_host, elements_to_bytes<QDataType>(QK_B * QN_B), hipMemcpyHostToDevice) !=
            hipSuccess)
         {
             cleanup();
@@ -280,14 +285,14 @@ int dispatcher_run_bquant_gemm(const void* A,
     // When timing is requested use GPU timer with warmup (cold_niters=3, nrepeat=10).
     // Otherwise run once with no overhead.
     ck_tile::stream_config stream_cfg{
-        nullptr,   // stream_id_
-        do_time,   // time_kernel_
-        0,         // log_level_
-        do_time ? 3 : 0,   // cold_niters_
-        do_time ? 10 : 1,  // nrepeat_
-        do_time,   // is_gpu_timer_
-        false,     // flush_cache_
-        1,         // rotating_count_
+        nullptr,          // stream_id_
+        do_time,          // time_kernel_
+        0,                // log_level_
+        do_time ? 3 : 0,  // cold_niters_
+        do_time ? 10 : 1, // nrepeat_
+        do_time,          // is_gpu_timer_
+        false,            // flush_cache_
+        1,                // rotating_count_
     };
 
     float exec_time = SelectedKernel::launch(args, stream_cfg);
@@ -300,7 +305,8 @@ int dispatcher_run_bquant_gemm(const void* A,
     }
 
     // Copy result back
-    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) != hipSuccess)
+    if(hipMemcpy(C_host, C_dev, elements_to_bytes<CDataType>(M * N), hipMemcpyDeviceToHost) !=
+       hipSuccess)
     {
         cleanup();
         return -1;
@@ -331,9 +337,6 @@ int dispatcher_get_kernel_count() { return 1; }
 /**
  * Release resources.
  */
-void dispatcher_cleanup()
-{
-    g_initialized = false;
-}
+void dispatcher_cleanup() { g_initialized = false; }
 
 } // extern "C"
