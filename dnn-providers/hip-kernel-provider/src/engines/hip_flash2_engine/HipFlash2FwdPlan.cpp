@@ -103,3 +103,26 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     args.o_stride_seq = checkedStride(_params.o_stride_seq, "o_stride_seq");
 
     // ── 3. Grid dimensions ───────────────────────────────�
+
+    // ── 3. Grid dimensions ────────────────────────────────────────────────────
+    // V7 uses BQ=64 tile — one CTA per (tile_q, head, batch)
+    constexpr unsigned int K_BQ = 64;
+    const unsigned int gridX = (static_cast<unsigned>(_params.seq_len_q) + K_BQ - 1u) / K_BQ;
+    const unsigned int gridY = static_cast<unsigned>(_params.num_heads_q);
+    const unsigned int gridZ = static_cast<unsigned>(_params.batch);
+
+    // Block dim: 4 warps x 64 threads/warp = 256 threads per CTA
+    constexpr unsigned int K_BLOCK_DIM = 256;
+
+    // ── 4. Dispatch ───────────────────────────────────────────────────────────
+    // I5: propagate launch failure so callers see a hard error.
+    const bool ok = launchFlash2Kernel(
+        _kernel.function(), args, gridX, gridY, gridZ, K_BLOCK_DIM, handle.getStream());
+    if(!ok)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlan::execute -- kernel launch failed");
+        throw std::runtime_error("HipFlash2FwdPlan::execute: hipModuleLaunchKernel failed");
+    }
+}
+
+} // namespace hip_flash2_engine
