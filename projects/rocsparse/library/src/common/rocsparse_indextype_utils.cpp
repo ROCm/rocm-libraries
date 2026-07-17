@@ -53,7 +53,7 @@ size_t rocsparse::indextype_sizeof(rocsparse_indextype that)
     {
         return sizeof(int64_t);
     }
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         return sizeof(uint16_t);
     }

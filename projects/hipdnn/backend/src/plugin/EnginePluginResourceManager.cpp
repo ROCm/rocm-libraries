@@ -85,31 +85,6 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
-// The minimum plugin API version required to serve a graph is the maximum of the
-// baseline version and the version required by each enabled feature. Taking a max
-// (rather than an ordered if-chain that returns the first matching feature) keeps
-// the result correct regardless of the relative ordering of the per-feature
-// version constants and composes cleanly when several features are enabled at
-// once.
-hipdnn_data_sdk::utilities::Version computeMinimumPluginApiVersion(bool isOverrideShapeEnabled,
-                                                                   bool isRaggedTensorEnabled)
-{
-    using hipdnn_data_sdk::utilities::Version;
-
-    Version version{hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-
-    if(isOverrideShapeEnabled)
-    {
-        version = std::max(version, Version{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION});
-    }
-    if(isRaggedTensorEnabled)
-    {
-        version = std::max(version, Version{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION});
-    }
-
-    return version;
-}
-
 } // namespace
 
 // Static accessor implementations for CRTP base class
@@ -362,9 +337,11 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
+    const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
     const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
-    const auto requiredVersion
-        = computeMinimumPluginApiVersion(isOverrideShapeEnabled, isRaggedTensorEnabled);
+
+    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        isOverrideShapeEnabled, isRuntimePBV, isRaggedTensorEnabled);
 
     std::vector<int64_t> engineIds;
 
@@ -745,9 +722,21 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
                        "carries override-tensor selectors.");
 
+        // Defense-in-depth recheck of the override-execute floor. Override-shape
+        // support is hipDNN-owned routing metadata carried in the execution plan
+        // envelope, so it is cheap and correct to re-verify here that the selected
+        // plugin still meets the override API floor. Pass-by-value is intentionally
+        // false: per RFC 0009, once a serialized plan resolves to an engine id the
+        // plugin owns its own payload versioning/compatibility, so hipDNN does not
+        // re-gate feature floors (like pbv) that live in the plugin payload rather
+        // than the envelope.
         const auto pluginApiVersion = plugin->parsedApiVersion();
         THROW_IF_FALSE(pluginApiVersion.has_value()
-                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true, false),
+                           && *pluginApiVersion
+                                  >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+                                      true,
+                                      /*isRuntimePassByValue=*/false,
+                                      /*isRaggedTensorEnabled=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

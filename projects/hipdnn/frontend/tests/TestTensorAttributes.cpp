@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <variant>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -264,6 +265,39 @@ TEST(TestTensorAttributes, RaggedOffsetMethodChainingReturnsThis)
     const TensorAttributes& ref2 = tensor.set_alignment(32);
     EXPECT_EQ(&ref2, &tensor);
 }
+TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeWithDefaultTensor)
+{
+    // flag true + value present; set_value seeded dims/strides/data_type.
+    TensorAttributes tensor(1.F);
+    tensor.set_is_pass_by_value(true);
+    ASSERT_TRUE(tensor.get_is_runtime_pass_by_value());
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeUserSuppliedTensor)
+{
+    // flag true + value cleared; dims/strides/data_type survive set_value seeding.
+    TensorAttributes tensor(1.F);
+    tensor.set_as_runtime_parameter();
+    ASSERT_TRUE(tensor.get_is_runtime_pass_by_value());
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(tensor.get_value_variant()));
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnVirtualRuntimePassByValueTensor)
+{
+    // virtual + runtime flag (no stored value) is the flag-exclusion case.
+    TensorAttributes tensor;
+    tensor.set_dim({1});
+    tensor.set_stride({1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_as_runtime_parameter();
+    tensor.set_is_virtual(true);
+
+    EXPECT_EQ(
+        tensor.validate(),
+        Error(ErrorCode::INVALID_VALUE, "Tensor  cannot be virtual and runtime pass by value"));
+}
 
 TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
 {
@@ -302,4 +336,14 @@ TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
 
     EXPECT_TRUE(scalarA.logicallyEquals(scalarB));
     EXPECT_FALSE(scalarA.logicallyEquals(scalarC));
+
+    // Same value, different pass-by-value mode: runtime-with-default (floors the
+    // provider at 1.2.0) vs. compile-time constant (1.0.0) are not interchangeable
+    // even though the baked value matches.
+    const TensorAttributes runtimeWithDefault(2.5f, ScalarType::RUNTIME_PARAM);
+    const TensorAttributes compileTimeConstant(2.5f, ScalarType::COMPILE_TIME_CONST);
+    EXPECT_TRUE(runtimeWithDefault.get_is_runtime_pass_by_value());
+    EXPECT_FALSE(compileTimeConstant.get_is_runtime_pass_by_value());
+    EXPECT_FALSE(runtimeWithDefault.logicallyEquals(compileTimeConstant));
+    EXPECT_FALSE(compileTimeConstant.logicallyEquals(runtimeWithDefault));
 }

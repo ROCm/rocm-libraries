@@ -4117,6 +4117,46 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_bell_set_pointers sets the sparse Blocked ELL matrix data pointers.
+ *******************************************************************************/
+rocsparse_status
+    rocsparse_bell_set_pointers(rocsparse_spmat_descr descr, void* bell_col_ind, void* bell_val)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+
+    const int64_t brows = (descr->rows + descr->block_dim - 1) / descr->block_dim;
+
+    ROCSPARSE_CHECKARG(1,
+                       bell_col_ind,
+                       brows * descr->ell_cols / descr->block_dim > 0 && bell_col_ind == nullptr,
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(2,
+                       bell_val,
+                       brows * descr->ell_cols > 0 && bell_val == nullptr,
+                       rocsparse_status_invalid_pointer);
+
+    // Sparsity structure might have changed, analysis is required before calling SpMV
+    descr->analysed = false;
+
+    descr->col_data = bell_col_ind;
+    descr->val_data = bell_val;
+
+    descr->const_col_data = bell_col_ind;
+    descr->const_val_data = bell_val;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_spmat_get_size returns the sparse matrix sizes.
  *******************************************************************************/
 rocsparse_status rocsparse_spmat_get_size(rocsparse_const_spmat_descr descr,

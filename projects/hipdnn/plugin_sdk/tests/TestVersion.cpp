@@ -45,7 +45,7 @@ TEST(TestVersion, RaggedTensorMinApiVersionParses)
     EXPECT_NO_THROW(Version{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION});
     const Version v{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION};
     EXPECT_EQ(v.major, 1);
-    EXPECT_EQ(v.minor, 2);
+    EXPECT_EQ(v.minor, 3);
     EXPECT_EQ(v.patch, 0);
 }
 

@@ -21,6 +21,7 @@ inline void to_json(nlohmann::json& tensorAttrJson,
     tensorAttrJson["name"] = flatbuffers::safeStr(tensorAttr.name());
     tensorAttrJson["virtual"] = tensorAttr.virtual_();
     tensorAttrJson["alignment"] = tensorAttr.alignment();
+    tensorAttrJson["is_runtime_pass_by_value"] = tensorAttr.is_runtime_pass_by_value();
     if(tensorAttr.ragged_offset_tensor_uid().has_value())
     {
         tensorAttrJson["ragged_offset_tensor_uid"] = tensorAttr.ragged_offset_tensor_uid().value();
@@ -77,6 +78,7 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
     auto dims = entry.at("dims").get<std::vector<int64_t>>();
     auto strides = entry.at("strides").get<std::vector<int64_t>>();
     const bool isVirtual = entry.at("virtual").get<bool>();
+    const bool isRuntimePassByValue = entry.at("is_runtime_pass_by_value").get<bool>();
     const int64_t alignment = entry.value("alignment", INT64_C(16));
     flatbuffers::Optional<int64_t> raggedOffsetTensorUid = flatbuffers::nullopt;
     if(entry.contains("ragged_offset_tensor_uid"))
@@ -163,6 +165,7 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
                                                     isVirtual,
                                                     valueType,
                                                     valueOffset,
+                                                    isRuntimePassByValue,
                                                     raggedOffsetTensorUid,
                                                     alignment);
     }
@@ -177,6 +180,7 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
                                                       isVirtual,
                                                       data_objects::TensorValue::NONE,
                                                       0,
+                                                      isRuntimePassByValue,
                                                       raggedOffsetTensorUid,
                                                       alignment);
 }

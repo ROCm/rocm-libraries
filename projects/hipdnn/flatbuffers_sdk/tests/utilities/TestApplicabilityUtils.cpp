@@ -63,6 +63,7 @@ private:
                                                    /*virtual_=*/false,
                                                    TensorValue::NONE,
                                                    /*value=*/0,
+                                                   false,
                                                    raggedOffset);
         fbb->Finish(offset);
 

@@ -401,6 +401,7 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
                                                    /*virtual*/ false,
                                                    TensorValue::NONE,
                                                    /*value*/ 0,
+                                                   false,
                                                    flatbuffers::Optional<int64_t>(raggedOffsetUid),
                                                    alignment);
     builder.Finish(attrOffset);
