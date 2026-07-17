@@ -1183,7 +1183,7 @@ private:
         {
             // separate alloc + init "Many" APIs are always allowed
             // Note: for multi-device unbatched FFT, the CREATE_*_MANY should be
-            // avoided (ambiguities about data expected distributions)
+            // avoided (ambiguities about expected data distributions)
             if(get_num_used_gpus() == 1 || batched)
             {
                 allowed_apis.push_back(CREATE_MAKE_PLAN_MANY);

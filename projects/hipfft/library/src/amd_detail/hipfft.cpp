@@ -195,7 +195,7 @@ struct hipfft_brick
     size_t data_byte_size(hipDataType data_type) const
     {
         // Not using compute_ptrdiff herein because real in-place cases
-        // require the tailing padding elements
+        // require the trailing padding elements
         size_t ret = 0;
         for(size_t dim = 0; dim < axes.size(); ++dim)
             ret = std::max(ret, axes[dim].stride * (axes[dim].upper - axes[dim].lower));
@@ -807,12 +807,6 @@ struct hipfftHandle_t
     rocfft_comm_type comm_type   = rocfft_comm_none;
     void*            comm_handle = nullptr;
 
-    enum class usage_type
-    {
-        single_proc_single_dev,
-        single_proc_multi_dev
-    };
-
     inline bool can_work_with(const hipLibXtDesc& desc, fft_io desc_io_label) const
     {
         if(!initialized())
@@ -953,7 +947,7 @@ struct hipfftHandle_t
                 if(mp_input_brick || mp_output_brick)
                 {
                     // hipfftHandle_t::possible_exec_map_key: multi-device usage with
-                    // multi-processing bricks is not supported"
+                    // multi-processing bricks is not supported
                     throw HIPFFT_NOT_SUPPORTED;
                 }
 #endif
@@ -2303,7 +2297,7 @@ try
                 return HIPFFT_NOT_SUPPORTED;
         }
     }
-    // When requesting a in-place descriptor's subformat, the key's input descriptor format
+    // When requesting an in-place descriptor's subformat, the key's input descriptor format
     // must match the requested subformat.
     const fft_io desc_io_label
         = format == HIPFFT_XT_FORMAT_OUTPUT ? fft_io::fft_io_out : fft_io::fft_io_in;

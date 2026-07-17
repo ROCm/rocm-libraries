@@ -246,7 +246,7 @@ struct hipfftxt_test_params_t
                                                       global_logical_span[split_dim] % ngpus));
             if(split_dim != global_multi_idx.size() - 1)
             {
-                // local strides behaves like default strides, only for the local data chunk's
+                // local strides behave like default strides, only for the local data chunk's
                 // (partial) lengths
                 auto partial_lengths       = transform_lengths;
                 partial_lengths[split_dim] = split_dim_local_span;
@@ -803,6 +803,9 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
     std::uniform_int_distribution<size_t> batch_rng(0, params.batch - 1);
     const auto                            global_logical_span = params.logical_spans(desc_io_label);
     std::vector<size_t>                   count_per_chunk(params.ngpus, 0);
+    // Upper bound on total random probes before bailing out, as a multiple
+    // of (min_probes_per_dev * ngpus).
+    static constexpr size_t max_probe_multiplier = 10000;
     // Per-case, per-I/O-role PRNG: sampling is reproducible independent of test order.
     auto prng = make_test_prng(params.str(), desc_io_label);
     while(std::any_of(count_per_chunk.begin(), count_per_chunk.end(), [&](const auto& count) {
@@ -811,12 +814,14 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
     {
         // sanity check to avoid infinite loop in case of a bug in the random sampling logic
         if(sum(count_per_chunk.begin(), count_per_chunk.end())
-           > 10000 * min_probes_per_dev * params.ngpus)
+           > max_probe_multiplier * min_probes_per_dev * params.ngpus)
         {
             throw std::logic_error(
                 "Possible test logic error in verify_data_distribution: some chunk of data was not "
-                "explored as often as expected despite 10,000 times the minimum number of probes "
-                "per device being drawn from the global data space.");
+                "explored as often as expected despite "
+                + std::to_string(max_probe_multiplier)
+                + " times the minimum number of probes "
+                  "per device being drawn from the global data space.");
         }
         const auto          random_global_batch_idx = batch_rng(prng);
         std::vector<size_t> random_global_multi_idx;
@@ -1087,7 +1092,7 @@ try
 
     // Create FFTW reference for comparison if full support is expected for the test parameters
     std::optional<reference_fft_data_t> reference_results;
-    // No Test-side support for unbatched 1D transforms yet, so no need to create reference
+    // No test-side support for unbatched 1D transforms yet, so no need to create reference
     // results for those.
     const auto ref_results_required = params.requires_reference_results();
     if(ref_results_required)

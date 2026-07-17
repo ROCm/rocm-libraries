@@ -60,11 +60,11 @@ struct hip_object_wrapper_t
 
     void free()
     {
-        if(obj && owned)
+        if(obj != Tinit && owned)
         {
             (void)TDestroy(obj);
-            obj = Tinit;
         }
+        obj = Tinit;
     }
 
     operator const T&() const
