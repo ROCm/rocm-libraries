@@ -21,24 +21,35 @@ namespace
         return true;
     }
 
-    // Convert an input element to the accumulate type. fp8/bf8 decode via the
-    // portable software conversion (internal::cast_from_f8), which is
-    // __device__-callable on every arch; the class operator float() is host-only
-    // where HIP_FP8_TYPE_OCP is 0 (e.g. gfx942).
+    // Decode OCP fp8/bf8 via the public HIP conversion API (fp8 -> half -> float).
+    // __hip_cvt_fp8_to_halfraw is __device__-callable on all target arches and the
+    // interpretation enum carries the format widths; OCP fp8 fits losslessly in half.
+    __device__ inline float to_f32(hipblaslt_f8 v)
+    {
+        return float(__half(__hip_cvt_fp8_to_halfraw(v.__x, __HIP_E4M3)));
+    }
+    __device__ inline float to_f32(hipblaslt_bf8 v)
+    {
+        return float(__half(__hip_cvt_fp8_to_halfraw(v.__x, __HIP_E5M2)));
+    }
+
+    // Convert an input element to the accumulate type. fp8/bf8 route through the
+    // public HIP decode above; the class operator float() is host-only where
+    // HIP_FP8_TYPE_OCP is 0 (e.g. gfx942).
     template <typename Tacc, typename Ti>
     __device__ inline Tacc to_acc(Ti v)
     {
         return static_cast<Tacc>(v);
     }
     template <typename Tacc>
-    __device__ inline Tacc to_acc(hipblaslt_f8 v) // OCP E4M3: wm=3, we=4
+    __device__ inline Tacc to_acc(hipblaslt_f8 v)
     {
-        return static_cast<Tacc>(internal::cast_from_f8<float, false>(v.__x, 3, 4));
+        return static_cast<Tacc>(to_f32(v));
     }
     template <typename Tacc>
-    __device__ inline Tacc to_acc(hipblaslt_bf8 v) // OCP E5M2: wm=2, we=5
+    __device__ inline Tacc to_acc(hipblaslt_bf8 v)
     {
-        return static_cast<Tacc>(internal::cast_from_f8<float, false>(v.__x, 2, 5));
+        return static_cast<Tacc>(to_f32(v));
     }
 
     // Naive reference GEMM: one thread per output element, accumulate in Tacc.
