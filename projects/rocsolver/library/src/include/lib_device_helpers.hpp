@@ -1445,11 +1445,19 @@ ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const 
     }
 }
 
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
 // ---------------------------------------------------------------------------
 // DPP helpers -- AMDGCN GFX8+ only (register-to-register, no crossbar)
 // ---------------------------------------------------------------------------
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
-    && !defined(__GFX7__)
+
+#ifndef ROCSOLVER_ENABLE_DPP
+#define ROCSOLVER_ENABLE_DPP 1
+#endif
 
 // Wraps __builtin_amdgcn_mov_dpp, AMD's DPP (Data-Parallel Primitives) intrinsic.
 // DPP modifiers let one VALU instruction read its operand from a different lane in the same wavefront.
@@ -1505,6 +1513,11 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
     return out;
 }
 
+#else // AMDGCN GFX8+
+
+// Override definition if DPP is unsupported.
+#define ROCSOLVER_ENABLE_DPP 0
+
 #endif // AMDGCN GFX8+
 
 // ---------------------------------------------------------------------------
@@ -1517,8 +1530,7 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 template <std::int32_t WDIM = 0, typename I>
 __device__ inline void reduce_wave_and(I& val)
 {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
-    && !defined(__GFX7__)
+#if ROCSOLVER_ENABLE_DPP
     // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
     // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
 #if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
@@ -1561,8 +1573,7 @@ __device__ inline void reduce_wave_and(I& val)
 template <std::int32_t WDIM = 0, typename S>
 __device__ inline void reduce_wave_max_nan(S& val)
 {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
-    && !defined(__GFX7__)
+#if ROCSOLVER_ENABLE_DPP
     // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
     // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
 #if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
@@ -1605,8 +1616,7 @@ __device__ inline void reduce_wave_max_nan(S& val)
 template <std::int32_t WDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val)
 {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
-    && !defined(__GFX7__)
+#if ROCSOLVER_ENABLE_DPP
     // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
     // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
 #if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
