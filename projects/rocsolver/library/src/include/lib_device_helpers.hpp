@@ -1465,7 +1465,7 @@ ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const 
 //  - `dpp_ctrl` - encodes which lane each destination lane should read from (quad permutes, row shifts/rotates, row broadcasts, etc.).
 //  - `row_mask` (4 bits) - selects which of the 4 rows of 16 lanes participate (`0xf` = all rows).
 //  - `bank_mask` (4 bits) - selects which of the 4 banks of 4 lanes participate (`0xf` = all banks).
-//  - `bound_ctrl` - when `true`, out-of-bounds reads return `0`; when `false`, the destination lane is left
+//  - `bound_ctrl` - when `true`, out-of-bounds reads return `0`; when `false`, the destination lane is left unchanged.
 template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl, typename T>
 __device__ inline T move_dpp_T(T v)
 {
@@ -1516,6 +1516,9 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 #else // AMDGCN GFX8+
 
 // Override definition if DPP is unsupported.
+#ifdef ROCSOLVER_ENABLE_DPP
+#undef ROCSOLVER_ENABLE_DPP
+#endif
 #define ROCSOLVER_ENABLE_DPP 0
 
 #endif // AMDGCN GFX8+
@@ -1527,7 +1530,7 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 // Bitwise-AND reduction across the wavefront. val receives the AND of all lanes.
 // AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
 // Fallback: __shfl_down halving loop; result lands in lane 0.
-template <std::int32_t WDIM = 0, typename I>
+template <typename I>
 __device__ inline void reduce_wave_and(I& val)
 {
 #if ROCSOLVER_ENABLE_DPP
@@ -1551,7 +1554,7 @@ __device__ inline void reduce_wave_and(I& val)
     if constexpr(is_cdna)
         val &= move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
     else
-        val &= ds_swizzle_T<0x1e0>(val); // GFX11 equivalent via ds_swizzle
+        val &= ds_swizzle_T<0x1e0>(val); // RDNA equivalent via ds_swizzle
 
     // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
     if constexpr(is_cdna)
@@ -1570,8 +1573,8 @@ __device__ inline void reduce_wave_and(I& val)
 // NaN-propagating max reduction across the wavefront. val receives the max of all lanes.
 // AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
 // Fallback: __shfl_down halving loop; result lands in lane 0.
-template <std::int32_t WDIM = 0, typename S>
-__device__ inline void reduce_wave_max_nan(S& val)
+template <typename T>
+__device__ inline void reduce_wave_max_nan(T& val)
 {
 #if ROCSOLVER_ENABLE_DPP
     // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
@@ -1594,7 +1597,7 @@ __device__ inline void reduce_wave_max_nan(S& val)
     if constexpr(is_cdna)
         val = rocblas_max_nan(val, move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val)); // row_bcast:15 (CDNA)
     else
-        val = rocblas_max_nan(val, ds_swizzle_T<0x1e0>(val)); // GFX11 equivalent via ds_swizzle
+        val = rocblas_max_nan(val, ds_swizzle_T<0x1e0>(val)); // RDNA equivalent via ds_swizzle
 
     // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
     if constexpr(is_cdna)
@@ -1613,8 +1616,8 @@ __device__ inline void reduce_wave_max_nan(S& val)
 // Sum reduction across the wavefront. val receives the sum of all lanes.
 // AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
 // Fallback: __shfl_down halving loop; result lands in lane 0.
-template <std::int32_t WDIM = 0, typename S>
-__device__ inline void reduce_wave_sum(S& val)
+template <typename T>
+__device__ inline void reduce_wave_sum(T& val)
 {
 #if ROCSOLVER_ENABLE_DPP
     // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
@@ -1637,7 +1640,7 @@ __device__ inline void reduce_wave_sum(S& val)
     if constexpr(is_cdna)
         val += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
     else
-        val += ds_swizzle_T<0x1e0>(val); // GFX11 equivalent via ds_swizzle
+        val += ds_swizzle_T<0x1e0>(val); // RDNA equivalent via ds_swizzle
 
     // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
     if constexpr(is_cdna)
