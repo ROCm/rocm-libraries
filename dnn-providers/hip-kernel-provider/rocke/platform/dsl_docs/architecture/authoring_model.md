@@ -20,8 +20,8 @@ Every shipped instance in `instances/` follows this exact shape. The shared scaf
 ## Kernel Authoring And Optimization Outputs
 
 New kernel authoring means producing a reusable builder, not just a one-off
-script. The durable output should live under `Python/rocke/instances/<arch>/` or
-`Python/rocke/instances/common/` as a spec-driven kernel builder, with any
+script. The durable output should live under `python/rocke/instances/<arch>/` or
+`python/rocke/instances/common/` as a spec-driven kernel builder, with any
 matching C++ mirror planned if it affects emitted IR.
 
 Kernel optimization means a reproducible recipe plus a chosen implementation. If
@@ -32,7 +32,7 @@ that justified it.
 Put workload-specific experiments in the example folder for that builder. Keep
 benchmark scripts, traces, shape files, summarized logs, and case-study analysis
 close to the workload, for example under
-`Python/rocke/examples/<arch>/<kernel_or_workload>/`.
+`python/rocke/examples/<arch>/<kernel_or_workload>/`.
 
 Document every accepted optimization as a case study. Add a markdown file in
 that example folder describing the workload shapes, baseline, candidate levers,

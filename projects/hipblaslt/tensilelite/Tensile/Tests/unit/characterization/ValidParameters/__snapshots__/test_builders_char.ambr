@@ -1614,7 +1614,7 @@
         2,
         4,
       ]),
-      'len': 8,
+      'len': 9,
       'type': 'list',
     }),
     'BufferLoad': dict({
@@ -2546,10 +2546,10 @@
     'StreamK': dict({
       'head': list([
         0,
-        1,
-        2,
+        3,
+        4,
       ]),
-      'len': 6,
+      'len': 4,
       'type': 'list',
     }),
     'StreamKAtomic': dict({

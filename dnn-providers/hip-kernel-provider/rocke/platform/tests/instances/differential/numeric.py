@@ -32,7 +32,7 @@
 # NOTE: launching a kernel needs GPU access. If plain python cannot see the
 # GPU, run under passwordless sudo with -E so PYTHONPATH survives, e.g.
 #     sudo -n -E "$(command -v python)" \
-#         <rocKE>/tests/instances/differential/numeric.py
+#         <rocke/platform>/tests/instances/differential/numeric.py
 # (build/compile via comgr does NOT need the GPU; only the launch does.)
 #
 # Build artifacts / dashboards go to /tmp.  No git operations.
@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
-PYROOT = ROCKE / "Python"  # holds rocke
+PYROOT = ROCKE / "python"  # holds rocke
 if str(PYROOT) not in sys.path:
     sys.path.insert(0, str(PYROOT))
 
@@ -932,6 +932,15 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
 # Driver
 # ---------------------------------------------------------------------
 def _check_gpu() -> Optional[str]:
+    """Gate this in-process torch harness on torch.cuda, not the rocke HIP probe.
+
+    Unlike the test *gates* (which detect the GPU via rocke.runtime.hip_module so they
+    stay torch-free), this driver imports torch and drives torch.cuda in the SAME
+    process below. It must gate on the resource it actually uses: probing HIP first here
+    would dlopen the system HIP runtime before torch binds its own, the exact ordering
+    that makes torch.cuda miss the device. So torch.cuda.is_available() is the correct,
+    intentional check — the sudo/device-group hint is likewise torch-accurate.
+    """
     try:
         import torch
     except Exception as e:  # noqa: BLE001

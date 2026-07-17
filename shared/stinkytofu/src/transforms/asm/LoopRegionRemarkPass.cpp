@@ -42,7 +42,7 @@ static const char* kPassName = "LoopRegionRemark";
 
 // --- Boundary classification ---
 
-enum class BoundaryKind { Wait, Store, Barrier, Branch, SideEffect, UntokenizedMem };
+enum class BoundaryKind { Wait, Store, Barrier, Branch, Call, SideEffect, UntokenizedMem };
 
 static const char* boundaryKindStr(BoundaryKind kind) {
     switch (kind) {
@@ -54,6 +54,8 @@ static const char* boundaryKindStr(BoundaryKind kind) {
             return "barrier";
         case BoundaryKind::Branch:
             return "branch";
+        case BoundaryKind::Call:
+            return "call";
         case BoundaryKind::SideEffect:
             return "side_effect";
         case BoundaryKind::UntokenizedMem:
@@ -66,6 +68,7 @@ static BoundaryKind classifyBoundary(const StinkyInstruction& inst) {
     if (isWaitCnt(inst)) return BoundaryKind::Wait;
     if (isGlobalMemStore(inst)) return BoundaryKind::Store;
     if (isBranch(inst)) return BoundaryKind::Branch;
+    if (isCall(inst)) return BoundaryKind::Call;
     if (isBarrier(inst) && !hasLdsPseudoRegs(inst)) return BoundaryKind::Barrier;
     if ((isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) && !hasLdsPseudoRegs(inst))
         return BoundaryKind::UntokenizedMem;
@@ -85,6 +88,7 @@ struct BBAnalysis {
     unsigned snopCount = 0;
     unsigned snopWastedCycles = 0;
     unsigned branchCount = 0;
+    unsigned callCount = 0;
     std::vector<BoundaryInfo> boundaries;
 };
 
@@ -114,9 +118,12 @@ static BBAnalysis analyzeBB(BasicBlock& bb) {
             result.snopWastedCycles += wastedCycles;
         }
 
-        // Branch count
+        // Branch / call counts (distinct control kinds)
         if (isBranch(inst)) {
             result.branchCount++;
+        }
+        if (isCall(inst)) {
+            result.callCount++;
         }
 
         // Region boundary detection
@@ -158,6 +165,7 @@ class LoopRegionRemarkPassImpl : public Pass {
             unsigned totalSnop = 0;
             unsigned totalSnopCycles = 0;
             unsigned totalBranches = 0;
+            unsigned totalCalls = 0;
 
             for (BasicBlock* bb : loop.bodyBBs) {
                 BBAnalysis ba = analyzeBB(*bb);
@@ -166,6 +174,7 @@ class LoopRegionRemarkPassImpl : public Pass {
                 totalSnop += ba.snopCount;
                 totalSnopCycles += ba.snopWastedCycles;
                 totalBranches += ba.branchCount;
+                totalCalls += ba.callCount;
 
                 if (!ba.boundaries.empty()) {
                     {
@@ -200,7 +209,8 @@ class LoopRegionRemarkPassImpl : public Pass {
                 std::ostringstream oss;
                 oss << "loop '" << loop.headerBB->getLabel() << "' summary: " << totalInsts
                     << " insts, " << totalRegions << " regions, " << totalSnop << " s_nop ("
-                    << totalSnopCycles << " wasted cycles), " << totalBranches << " branches";
+                    << totalSnopCycles << " wasted cycles), " << totalBranches << " branches, "
+                    << totalCalls << " calls";
                 emitRemark(passCtx, {OptimizationRemark::Kind::Analysis, kPassName, "LoopSummary",
                                      oss.str()});
             }

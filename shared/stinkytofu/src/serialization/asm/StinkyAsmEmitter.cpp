@@ -223,6 +223,9 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
     } else if (mubufMod.nt) {
         os << " nt";
     }
+    if (mubufMod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(mubufMod.nv);
+    }
     if (mubufMod.lds) {
         os << " lds";
     }
@@ -752,7 +755,7 @@ static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst) 
 
 // SMEM atomics signal return via glc, not th:, so they are excluded.
 static bool needThAtomicReturn(const StinkyInstruction& inst) {
-    if (!isFLATAtomic(inst) && !isMUBUFAtomic(inst)) return false;
+    if (!isFLATAtomic(inst) && !isMUBUFAtomic(inst) && !isGLOBALAtomic(inst)) return false;
     for (const auto& d : inst.getDestRegs()) {
         if (!isPseudoReg(d) && !isImplicitDest(d, inst)) return true;
     }

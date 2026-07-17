@@ -5,6 +5,13 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.6.0
 
+### Changed
+
+* Deprecated the `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable. It should no longer be required and is planned for removal in a future release.
+* Per-batch `alpha` (scalar vector) API support for `scal_batched`, `scal_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `symv`, `hemv`, `sbmv`, and `spmv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
+* Per-batch `alpha` support for Level 2 batched and strided-batched `syr` via `rocblas_set_batch_alpha_stride` (device pointer mode).
+
 ## rocBLAS 5.5.0 for ROCm 7.14
 
 ### Added
