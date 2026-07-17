@@ -3786,33 +3786,102 @@ namespace rocisa
     {
         using ContainerPtr    = std::shared_ptr<Container>;
         using RegContainerPtr = std::shared_ptr<RegisterContainer>;
-        TensorStoreFromLds(const RegContainerPtr& group0, const RegContainerPtr& group1,
-                        const RegContainerPtr& group2, const RegContainerPtr& group3,
-                        const std::string& comment = std::string())
+        TensorStoreFromLds(const RegContainerPtr& group0,
+                           const RegContainerPtr& group1,
+                           const RegContainerPtr& group2,
+                           const RegContainerPtr& group3,
+                           const std::string&     comment = std::string())
             : Instruction(InstType::INST_TDM, comment)
-            , group0(group0), group1(group1), group2(group2), group3(group3)
+            , group0(group0)
+            , group1(group1)
+            , group2(group2)
+            , group3(group3)
         {
-            using std::begin; using std::end; const auto& params = getParams();
+            // group2/group3 form the optional second descriptor pair: they must be supplied
+            // together (both set) or omitted together (both null); a lone group2/group3 would
+            // be silently dropped by getParams() below, so reject it explicitly.
+            if(static_cast<bool>(group2) != static_cast<bool>(group3))
+            {
+                throw std::invalid_argument(
+                    "TensorStoreFromLds requires group2 and group3 to be both set or both null");
+            }
+            using std::begin;
+            using std::end;
+            const auto& params = getParams();
             if(std::any_of(begin(params), end(params), [](const InstructionInput& in) {
-                   return std::dynamic_pointer_cast<RegisterContainer>(std::get<ContainerPtr>(in))->regType != "s"; }))
-            { throw std::invalid_argument("TensorStoreFromLds only supports sgpr as operands only"); }
+                   auto reg = std::dynamic_pointer_cast<RegisterContainer>(std::get<ContainerPtr>(in));
+                   return !reg || reg->regType != "s";
+               }))
+            {
+                throw std::invalid_argument("TensorStoreFromLds only supports sgpr as operands only");
+            }
             setInst("tensor_store_from_lds");
         }
+
         TensorStoreFromLds(const TensorStoreFromLds& other)
-            : Instruction(other), group0(other.group0), group1(other.group1), group2(other.group2), group3(other.group3) {}
-        std::shared_ptr<Item> clone() const override { return std::make_shared<TensorStoreFromLds>(*this); }
-        std::vector<InstructionInput> getParams() const override {
-            if(group2 && group3) return {group0, group1, group2, group3}; return {group0, group1}; }
-        std::vector<InstructionInput> getDstParams() const override { return {}; }
-        std::vector<InstructionInput> getSrcParams() const override {
-            if(group2 && group3) return {group0, group1, group2, group3}; return {group0, group1}; }
-        std::string getArgStr() const {
-            std::stringstream ss; const auto& params = getParams();
-            for(size_t i = 0; i < params.size(); ++i) { ss << std::get<ContainerPtr>(params.at(i))->toString();
-                if(i + 1 != params.size()) ss << ", "; } return ss.str(); }
-        std::string toString() const override { return formatWithComment(preStr() + " " + getArgStr()); }
+            : Instruction(other)
+            , group0(other.group0)
+            , group1(other.group1)
+            , group2(other.group2)
+            , group3(other.group3)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<TensorStoreFromLds>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            if(group2 && group3)
+            {
+                return {group0, group1, group2, group3};
+            }
+
+            return {group0, group1};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            if(group2 && group3)
+            {
+                return {group0, group1, group2, group3};
+            }
+
+            return {group0, group1};
+        }
+
+        std::string getArgStr() const
+        {
+            std::stringstream ss;
+            const auto&       params = getParams();
+            for(size_t i = 0; i < params.size(); ++i)
+            {
+                ss << std::get<ContainerPtr>(params.at(i))->toString();
+                if(i + 1 != params.size())
+                {
+                    ss << ", ";
+                }
+            }
+            return ss.str();
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(preStr() + " " + getArgStr());
+        }
+
     private:
-        RegContainerPtr group0; RegContainerPtr group1; RegContainerPtr group2; RegContainerPtr group3;
+        RegContainerPtr group0;
+        RegContainerPtr group1;
+        RegContainerPtr group2;
+        RegContainerPtr group3;
     };
 
     struct GlobalPrefetchB8 : public Instruction
