@@ -500,10 +500,20 @@ def _compile_bquant_kernel(
     # -- Step 1: compile to object file --------------------------------------
     obj_path = so_path.with_suffix(".o")
 
+    # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ) and native MX support.
+    # These mirror the CMakeLists.txt definitions that are normally injected by CMake
+    # but are absent in the standalone hipcc build path.
+    arch_defines = []
+    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    if "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
+
     compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
                    "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",
                    f"--offload-arch={gfx_arch}",
                    f"-DGFX_ARCH=\"{gfx_arch}\"",
+                   *arch_defines,
                    "-include", str(hpp_path),
                    str(_CTYPES_LIB_SRC),
                    "-o", str(obj_path)]
