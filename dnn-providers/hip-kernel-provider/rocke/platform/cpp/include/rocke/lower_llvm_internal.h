@@ -55,12 +55,20 @@ namespace ckc
  * LLVM20 form; new code keys on the flavor via rocke_ll_datalayout_for_flavor. */
 extern const char* const ROCKE_LL_DATALAYOUT_LLVM20;
 extern const char* const ROCKE_LL_DATALAYOUT_LLVM22;
+extern const char* const ROCKE_LL_DATALAYOUT_LLVM23; /* == LLVM22 form today */
 extern const char* const ROCKE_LL_DATALAYOUT; /* == ROCKE_LL_DATALAYOUT_LLVM20 */
 extern const char* const ROCKE_LL_TRIPLE;
 
 /* Python _datalayout_for_flavor: LLVM20 => legacy p8 layout, anything else
- * (incl. unexpected values) => the modern LLVM22 layout. */
+ * (incl. unexpected values) => the modern LLVM22/LLVM23 layout. */
 const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor);
+
+/* Python _is_modern_flavor: true for LLVM 21+ IR shapes (llvm22 / llvm23),
+ * which share the same datalayout + intrinsic declares. */
+static inline bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor)
+{
+    return flavor == ROCKE_LLVM_FLAVOR_LLVM22 || flavor == ROCKE_LLVM_FLAVOR_LLVM23;
+}
 
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */
@@ -91,6 +99,15 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
  * different decl text. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
+
+/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): identical to
+ * the LLVM22 set for the declares rocke emits today; split entries here if an
+ * LLVM 23 host proves drift. */
+extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
+extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
+
+/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
+const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
 
 /* ====================================================================== */
 /* ISA backend (the gfx-keyed LLVM details)                               */
@@ -207,6 +224,7 @@ typedef struct rocke_lower
      * finalize; the table order is canonical, this set records membership). */
     ROCKE_VEC(rocke_ll_need_t) needs;
     bool needs_fp_atomic_md; /* _needs_fp_atomic_md      */
+    bool needs_av_scope_md; /* agent-scope metadata for av.load/store.b128 */
 
     /* dynamically-registered decls (Python self._decls mutation, e.g. vector
      * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */

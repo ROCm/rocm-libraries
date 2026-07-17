@@ -17,6 +17,7 @@
  * lives in bucket 0 and is reached through rocke/lower_llvm_internal.h.
  */
 
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 
 #include <string.h>
@@ -263,12 +264,253 @@ static void _op_tile_ds_swizzle_xor(rocke_lower_t* L, const rocke_op_t* op)
     }
     offset = (xor_mask << 10) | 0x1F;
     data = op->operands[0];
-    rocke_ll_need(L, "ds.swizzle");
+    rocke_ll_need(L, "amdgcn.ds.swizzle");
     rocke_ll_emitf(L,
                    "  %s = call i32 @llvm.amdgcn.ds.swizzle(i32 %s, i32 %lld)",
                    ll_result_name(op),
                    rocke_ll_operand(L, data),
                    (long long)offset);
+}
+
+static void _op_tile_ds_swizzle(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t offset = 0;
+    const rocke_value_t* data;
+    if(!rocke_attr_get_int(&op->attrs, "offset", &offset))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.ds_swizzle: missing 'offset'");
+    }
+    data = op->operands[0];
+    rocke_ll_need(L, "amdgcn.ds.swizzle");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.ds.swizzle(i32 %s, i32 %lld)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, data),
+                   (long long)offset);
+}
+
+static void _op_tile_mov_dpp8(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t sel = 0;
+    const rocke_value_t* data = op->operands[0];
+    const char* llvm_ty;
+    const char* key;
+    if(!rocke_attr_get_int(&op->attrs, "sel", &sel))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mov_dpp8: missing 'sel'");
+    }
+    if(rocke_i_type_is(data->type, "i32"))
+    {
+        llvm_ty = "i32";
+        key = "mov.dpp8.i32";
+    }
+    else if(rocke_i_type_is(data->type, "f32"))
+    {
+        llvm_ty = "float";
+        key = "mov.dpp8.f32";
+    }
+    else
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "mov_dpp8: unsupported type %s", data->type->name);
+    }
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.mov.dpp8(%s %s, i32 %lld)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   llvm_ty,
+                   rocke_ll_operand(L, data),
+                   (long long)(sel & 0xFFFFFF));
+}
+
+static void _op_tile_wave_reduce(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const char* reduce_op = rocke_attr_get_str(&op->attrs, "reduce_op");
+    int64_t strategy = 0;
+    const char* llvm_ty;
+    const char* intrin_key;
+    const char* intrin_name;
+    if(!reduce_op)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.wave_reduce: missing 'reduce_op'");
+    }
+    if(!rocke_attr_get_int(&op->attrs, "strategy", &strategy))
+    {
+        strategy = 0;
+    }
+    llvm_ty = rocke_ll_llvm_type(L, v->type);
+    intrin_key = rocke_arena_printf(
+        &L->arena, "wave.reduce.%s.%s", reduce_op, v->type->name ? v->type->name : "");
+    intrin_name = rocke_arena_printf(
+        &L->arena, "llvm.amdgcn.wave.reduce.%s.%s", reduce_op, v->type->name ? v->type->name : "");
+    rocke_ll_need(L, intrin_key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @%s(%s %s, i32 %lld)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   intrin_name,
+                   llvm_ty,
+                   rocke_ll_operand(L, v),
+                   (long long)strategy);
+}
+
+static void _op_tile_readlane(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* lane = op->operands[1];
+    const char* llvm_ty;
+    const char* key;
+    if(rocke_i_type_is(v->type, "i32"))
+    {
+        llvm_ty = "i32";
+        key = "readlane.i32";
+    }
+    else if(rocke_i_type_is(v->type, "f32"))
+    {
+        llvm_ty = "float";
+        key = "readlane.f32";
+    }
+    else
+    {
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "readlane: unsupported type %s", v->type->name);
+    }
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.readlane.%s(%s %s, i32 %s)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   v->type->name,
+                   llvm_ty,
+                   rocke_ll_operand(L, v),
+                   rocke_ll_operand(L, lane));
+}
+
+static void _op_tile_writelane(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* uniform_val = op->operands[0];
+    const rocke_value_t* lane = op->operands[1];
+    const rocke_value_t* passthrough = op->operands[2];
+    const char* llvm_ty;
+    const char* key;
+    if(rocke_i_type_is(uniform_val->type, "i32"))
+    {
+        llvm_ty = "i32";
+        key = "writelane.i32";
+    }
+    else if(rocke_i_type_is(uniform_val->type, "f32"))
+    {
+        llvm_ty = "float";
+        key = "writelane.f32";
+    }
+    else
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_NOTIMPL, "writelane: unsupported type %s", uniform_val->type->name);
+    }
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.writelane.%s(%s %s, i32 %s, %s %s)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   uniform_val->type->name,
+                   llvm_ty,
+                   rocke_ll_operand(L, uniform_val),
+                   rocke_ll_operand(L, lane),
+                   llvm_ty,
+                   rocke_ll_operand(L, passthrough));
+}
+
+static void _op_tile_permlane16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    bool fi = rocke_attr_get_bool(&op->attrs, "fi", false);
+    bool bound_ctrl = rocke_attr_get_bool(&op->attrs, "bound_ctrl", false);
+    rocke_ll_need(L, "amdgcn.permlane16");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.permlane16("
+                   "i32 %s, i32 %s, i32 %s, i32 %s, i1 %s, i1 %s)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]),
+                   rocke_ll_operand(L, op->operands[3]),
+                   fi ? "true" : "false",
+                   bound_ctrl ? "true" : "false");
+}
+
+static void _op_tile_permlane64(rocke_lower_t* L, const rocke_op_t* op)
+{
+    rocke_ll_need(L, "amdgcn.permlane64");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.permlane64(i32 %s)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, op->operands[0]));
+}
+
+static void _op_tile_alignbyte(rocke_lower_t* L, const rocke_op_t* op)
+{
+    rocke_ll_need(L, "amdgcn.alignbyte");
+    rocke_ll_emitf(L,
+                   "  %s = call i32 @llvm.amdgcn.alignbyte(i32 %s, i32 %s, i32 %s)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]));
+}
+
+static void _op_tile_s_wqm(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* mask = op->operands[0];
+    const char* llvm_ty = rocke_ll_llvm_type(L, mask->type);
+    const char* key;
+    if(rocke_i_type_is(mask->type, "i32"))
+        key = "amdgcn.s.wqm.i32";
+    else if(rocke_i_type_is(mask->type, "i64"))
+        key = "amdgcn.s.wqm.i64";
+    else
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "s_wqm: unsupported type %s", mask->type->name);
+    rocke_ll_need(L, key);
+    rocke_ll_emitf(L,
+                   "  %s = call %s @llvm.amdgcn.s.wqm.%s(%s %s)",
+                   ll_result_name(op),
+                   llvm_ty,
+                   mask->type->name,
+                   llvm_ty,
+                   rocke_ll_operand(L, mask));
+}
+
+static void _op_tile_av_load_b128(rocke_lower_t* L, const rocke_op_t* op)
+{
+    rocke_ll_need(L, "av.load.b128");
+    L->needs_av_scope_md = true;
+    rocke_ll_emitf(L,
+                   "  %s = call <4 x i32> @llvm.amdgcn.av.load.b128(ptr %s, metadata !3)",
+                   ll_result_name(op),
+                   rocke_ll_operand(L, op->operands[0]));
+}
+
+static void _op_tile_av_store_b128(rocke_lower_t* L, const rocke_op_t* op)
+{
+    rocke_ll_need(L, "av.store.b128");
+    L->needs_av_scope_md = true;
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.av.store.b128(ptr %s, <4 x i32> %s, metadata !3)",
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
+}
+
+static void _op_tile_s_alloc_vgpr(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t count = 0;
+    const char* ok;
+    if(!rocke_attr_get_int(&op->attrs, "count", &count))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.s_alloc_vgpr: missing 'count'");
+    }
+    rocke_ll_need(L, "s.alloc.vgpr");
+    ok = rocke_ll_fresh(L, "alloc_ok");
+    rocke_ll_emitf(L, "  %s = call i1 @llvm.amdgcn.s.alloc.vgpr(i32 %lld)", ok, (long long)count);
+    rocke_ll_emitf(L, "  %s = zext i1 %s to i32", ll_result_name(op), ok);
 }
 
 /* ====================================================================== */
@@ -322,7 +564,7 @@ static void _op_tile_permlane32_swap(rocke_lower_t* L, const rocke_op_t* op)
     const char* tmp;
     const char* lo_s;
     const char* hi_s;
-    rocke_ll_need(L, "permlane32.swap");
+    rocke_ll_need(L, "amdgcn.permlane32.swap");
     tmp = rocke_ll_fresh(L, "psw.tmp");
     lo_s = rocke_ll_operand(L, lo);
     hi_s = rocke_ll_operand(L, hi);
@@ -667,6 +909,18 @@ void rocke_ll_register_crosslane(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_BPERMUTE, _op_tile_ds_bpermute);
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_BPERMUTE_B64, _op_tile_ds_bpermute_b64);
     rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE_XOR, _op_tile_ds_swizzle_xor);
+    rocke_ll_set_handler(ROCKE_OP_TILE_DS_SWIZZLE, _op_tile_ds_swizzle);
+    rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP8, _op_tile_mov_dpp8);
+    rocke_ll_set_handler(ROCKE_OP_TILE_WAVE_REDUCE, _op_tile_wave_reduce);
+    rocke_ll_set_handler(ROCKE_OP_TILE_READLANE, _op_tile_readlane);
+    rocke_ll_set_handler(ROCKE_OP_TILE_WRITELANE, _op_tile_writelane);
+    rocke_ll_set_handler(ROCKE_OP_TILE_PERMLANE16, _op_tile_permlane16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_PERMLANE64, _op_tile_permlane64);
+    rocke_ll_set_handler(ROCKE_OP_TILE_ALIGNBYTE, _op_tile_alignbyte);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WQM, _op_tile_s_wqm);
+    rocke_ll_set_handler(ROCKE_OP_TILE_AV_LOAD_B128, _op_tile_av_load_b128);
+    rocke_ll_set_handler(ROCKE_OP_TILE_AV_STORE_B128, _op_tile_av_store_b128);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_ALLOC_VGPR, _op_tile_s_alloc_vgpr);
     rocke_ll_set_handler(ROCKE_OP_TILE_MOV_DPP, _op_tile_mov_dpp);
     rocke_ll_set_handler(ROCKE_OP_TILE_PERMLANE32_SWAP, _op_tile_permlane32_swap);
     rocke_ll_set_handler(ROCKE_OP_TILE_PERM_B32, _op_tile_perm_b32);

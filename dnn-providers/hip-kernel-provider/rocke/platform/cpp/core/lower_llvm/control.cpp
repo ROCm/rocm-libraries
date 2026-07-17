@@ -974,6 +974,67 @@ static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
 }
 
+static bool ll_has_async_lds_counter(const rocke_lower_t* L)
+{
+    const char* gfx = (L && L->backend && L->backend->gfx) ? L->backend->gfx : "";
+    return strncmp(gfx, "gfx125", 6) == 0;
+}
+
+static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t n = 0;
+    if(!rocke_ll_live(L))
+        return;
+    if(!ll_has_async_lds_counter(L))
+        return;
+    if(!rocke_attr_get_int(&op->attrs, "n", &n))
+        n = 0;
+    rocke_ll_need(L, "s.wait.asynccnt");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.asynccnt(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
+{
+    (void)op;
+    if(!rocke_ll_live(L))
+        return;
+    rocke_ll_need(L, "asyncmark");
+    rocke_ll_emit(L, "  call void @llvm.amdgcn.asyncmark()");
+}
+
+static void _op_tile_wait_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t n = 0;
+    if(!rocke_ll_live(L))
+        return;
+    if(!rocke_attr_get_int(&op->attrs, "n", &n))
+        n = 0;
+    rocke_ll_need(L, "wait.asyncmark");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.wait.asyncmark(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_s_wait_event(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t imm = 0;
+    if(!rocke_ll_live(L))
+        return;
+    if(!rocke_attr_get_int(&op->attrs, "imm", &imm))
+        imm = 0;
+    rocke_ll_need(L, "s.wait.event");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.event(i16 %lld)", (long long)(imm & 0xFFFF));
+}
+
+static void _op_tile_s_prefetch_inst(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(!rocke_ll_live(L))
+        return;
+    rocke_ll_need(L, "s.prefetch.inst");
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.s.prefetch.inst(ptr %s, i32 %s)",
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
+}
+
 /* Python _op_tile_iglp_opt. */
 static void _op_tile_iglp_opt(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -1684,6 +1745,11 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SYNC_LDS_ONLY, _op_tile_sync_lds_only);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_BARE, _op_tile_s_barrier_bare);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAITCNT, _op_tile_s_waitcnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_ASYNCCNT, _op_tile_s_wait_asynccnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_ASYNCMARK, _op_tile_asyncmark);
+    rocke_ll_set_handler(ROCKE_OP_TILE_WAIT_ASYNCMARK, _op_tile_wait_asyncmark);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_EVENT, _op_tile_s_wait_event);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_PREFETCH_INST, _op_tile_s_prefetch_inst);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);

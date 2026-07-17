@@ -3269,9 +3269,10 @@ std::string lower_serialized_ir(const std::string& ir_text,
     }
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
 
-    /* flavor: "" => AUTO (resolve from env / ROCm version); "llvm20"/"llvm22"
-     * pin the intrinsic declaration shape. An unrecognised non-empty flavor is
-     * rejected so callers get the same hard error the Python lowerer raises. */
+    /* flavor: "" => AUTO (resolve from env / ROCm version);
+     * "llvm20"/"llvm22"/"llvm23" pin the intrinsic declaration shape. An
+     * unrecognised non-empty flavor is rejected so callers get the same hard
+     * error the Python lowerer raises. */
     rocke_llvm_flavor_t fl = ROCKE_LLVM_FLAVOR_AUTO;
     if(!flavor.empty())
     {
@@ -3280,7 +3281,7 @@ std::string lower_serialized_ir(const std::string& ir_text,
         {
             throw std::runtime_error(
                 std::string("rocke_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor
-                + "' (expected 'llvm20' or 'llvm22')");
+                + "' (expected 'llvm20', 'llvm22', or 'llvm23')");
         }
     }
 
@@ -3359,7 +3360,7 @@ PYBIND11_MODULE(rocke_engine, m)
           "Parse serialized ck.dsl.ir/v1 text and lower it to AMDGPU LLVM IR "
           "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "
           "the Python lowerer for the same serialized IR. flavor='' resolves "
-          "the LLVM flavor automatically; 'llvm20'/'llvm22' pin it.");
+          "the LLVM flavor automatically; 'llvm20'/'llvm22'/'llvm23' pin it.");
 
     m.def("gemm_lower_llvm",
           &gemm_lower_llvm,

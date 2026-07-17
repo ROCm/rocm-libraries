@@ -43,6 +43,8 @@ const char* rocke_llvm_flavor_name(rocke_llvm_flavor_t flavor)
         return "llvm20";
     case ROCKE_LLVM_FLAVOR_LLVM22:
         return "llvm22";
+    case ROCKE_LLVM_FLAVOR_LLVM23:
+        return "llvm23";
     case ROCKE_LLVM_FLAVOR_AUTO:
     default:
         return "";
@@ -57,6 +59,8 @@ rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name)
             return ROCKE_LLVM_FLAVOR_LLVM20;
         if(strcmp(name, "llvm22") == 0)
             return ROCKE_LLVM_FLAVOR_LLVM22;
+        if(strcmp(name, "llvm23") == 0)
+            return ROCKE_LLVM_FLAVOR_LLVM23;
     }
     return ROCKE_LLVM_FLAVOR_AUTO;
 }
@@ -66,6 +70,26 @@ rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name)
  * stay at global scope under their extern "C" header declarations. */
 namespace ckc
 {
+
+/* First ROCm release known to bundle LLVM 23.0.0 (Python _LLVM23_MIN_ROCM;
+ * confirm on an LLVM 23 host). */
+#define ROCKE_LL_LLVM23_MIN_ROCM_MAJOR 7
+#define ROCKE_LL_LLVM23_MIN_ROCM_MINOR 13
+
+/* Python _flavor_for_rocm: >= (7,13) => LLVM23, >= (7,2) => LLVM22, else LLVM20. */
+static rocke_llvm_flavor_t ll_flavor_for_rocm(int major, int minor)
+{
+    if(major > ROCKE_LL_LLVM23_MIN_ROCM_MAJOR
+       || (major == ROCKE_LL_LLVM23_MIN_ROCM_MAJOR && minor >= ROCKE_LL_LLVM23_MIN_ROCM_MINOR))
+    {
+        return ROCKE_LLVM_FLAVOR_LLVM23;
+    }
+    if(major > 7 || (major == 7 && minor >= 2))
+    {
+        return ROCKE_LLVM_FLAVOR_LLVM22;
+    }
+    return ROCKE_LLVM_FLAVOR_LLVM20;
+}
 
 /* Python _resolve_llvm_flavor: $ROCKE_LLVM_FLAVOR, then /opt/rocm version,
  * then default LLVM22. (torch.version.hip step is not portable.) */
@@ -80,7 +104,8 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
             return f;
         }
     }
-    /* Best-effort: read /opt/rocm/.info/version "M.m...". >= 7.2 => LLVM22. */
+    /* Best-effort: read /opt/rocm/.info/version "M.m..." and map through the
+     * same ROCm -> flavor thresholds as the Python resolver. */
     FILE* fp = fopen("/opt/rocm/.info/version", "r");
     if(fp)
     {
@@ -88,11 +113,7 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
         if(fscanf(fp, "%d.%d", &major, &minor) == 2)
         {
             fclose(fp);
-            if(major > 7 || (major == 7 && minor >= 2))
-            {
-                return ROCKE_LLVM_FLAVOR_LLVM22;
-            }
-            return ROCKE_LLVM_FLAVOR_LLVM20;
+            return ll_flavor_for_rocm(major, minor);
         }
         fclose(fp);
     }
@@ -405,13 +426,14 @@ static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
             return L->dyn_decls.data[i].decl;
         }
     }
-    if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM22)
     {
-        for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; i++)
+        int novr = 0;
+        const rocke_ll_decl_t* ovr = rocke_ll_flavor_overrides(L->flavor, &novr);
+        for(int i = 0; i < novr; i++)
         {
-            if(strcmp(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].key, key) == 0)
+            if(strcmp(ovr[i].key, key) == 0)
             {
-                return ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].decl;
+                return ovr[i].decl;
             }
         }
     }
@@ -1609,19 +1631,18 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
      * loop (which would float overridden keys, e.g. make.buffer.rsrc, to the
      * front of the declare block). */
     bool any_need = false;
+    int novr = 0;
+    const rocke_ll_decl_t* ovr = rocke_ll_flavor_overrides(L->flavor, &novr);
     for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
     {
         const char* k = ROCKE_LL_INTRINSIC_DECLS[i].key;
         const char* decl_text = ROCKE_LL_INTRINSIC_DECLS[i].decl;
-        if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM22)
+        for(int j = 0; j < novr; j++)
         {
-            for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; j++)
+            if(strcmp(ovr[j].key, k) == 0)
             {
-                if(strcmp(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].key, k) == 0)
-                {
-                    decl_text = ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].decl;
-                    break;
-                }
+                decl_text = ovr[j].decl;
+                break;
             }
         }
         if(ll_need_has(L, k))
@@ -1740,6 +1761,10 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     {
         rocke_strbuf_append(out, "\n!1 = !{}\n");
     }
+    if(L->needs_av_scope_md)
+    {
+        rocke_strbuf_append(out, "\n!3 = !{!\"agent\"}\n");
+    }
 }
 
 /* ====================================================================== */
@@ -1758,7 +1783,8 @@ static void ll_lower_into(rocke_lower_t* L,
 {
     /* Resolve flavor. */
     L->flavor = (flavor == ROCKE_LLVM_FLAVOR_AUTO) ? ll_resolve_flavor() : flavor;
-    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM20 && L->flavor != ROCKE_LLVM_FLAVOR_LLVM22)
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM20 && L->flavor != ROCKE_LLVM_FLAVOR_LLVM22
+       && L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "unknown LLVM flavor");
     }
@@ -1859,6 +1885,7 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     L.err = (char*)rocke_arena_calloc(&L.arena, ROCKE_ERR_MSG_CAP);
     L.unroll_elide_sync_op = NULL;
     L.needs_fp_atomic_md = false;
+    L.needs_av_scope_md = false;
     rocke_vec_init(&L.blocks);
     rocke_vec_init(&L.needs);
     rocke_vec_init(&L.dyn_decls);

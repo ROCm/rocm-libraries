@@ -667,7 +667,8 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
     """Drift guard: assert rocke's hardcoded datalayout matches the toolchain.
 
     The LLVM IR datalayout is LLVM-version-keyed (not gfx-keyed): ROCm 7.2
-    ships ``p8:128:128:128:48``, while 7.0/7.1 shipped ``p8:128:128``. The
+    ships ``p8:128:128:128:48`` (llvm22), ROCm 7.13+ ships the same layout
+    under llvm23, while 7.0/7.1 shipped ``p8:128:128`` (llvm20). The
     difference is auto-upgraded away when compiling textual IR through comgr,
     so a wrong-but-well-formed hardcoded string compiles fine — but relying
     on that parser leniency is fragile across ingestion paths.
@@ -709,6 +710,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.ir import F32, KernelDef, Param, PtrType, Region
         from rocke.core.isa.backend import wired_arches
         from rocke.core.lower_llvm import (
+            LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
             _detect_llvm_flavor,
             _flavor_for_rocm,
@@ -736,6 +738,12 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
         )
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        if detected_flavor == LLVM_FLAVOR_LLVM23:
+            self.assertEqual(
+                rocke_dl,
+                _datalayout_for_flavor("llvm22"),
+                "llvm23 datalayout must track llvm22 until drift is proven",
+            )
 
         # Test across all wired arches to confirm datalayout really is gfx-invariant
         # (the assumption the flavor split rests on).

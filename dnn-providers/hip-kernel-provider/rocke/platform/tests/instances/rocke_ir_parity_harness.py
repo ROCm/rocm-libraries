@@ -22,7 +22,8 @@ def safe(name: str) -> str:
 
 def current_flavor() -> str:
     """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
-    llvm22 otherwise). The golden stores both; the gate compares only this."""
+    llvm22 for 7.2-7.12, llvm23 for 7.13+). The golden stores all of them; the
+    gate compares only this one."""
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     return _resolve_llvm_flavor()
@@ -1019,8 +1020,9 @@ def cases():
 
 # The golden stores one sub-document per llvm flavor under this key; the gate
 # (check_golden) compares only the flavor the running host autodetects, so the
-# same committed golden is valid on both ROCm < 7.2 (llvm20) and >= 7.2 (llvm22).
-GOLDEN_FLAVORS = ("llvm20", "llvm22")
+# same committed golden is valid on ROCm < 7.2 (llvm20), 7.2-7.12 (llvm22), and
+# 7.13+ (llvm23).
+GOLDEN_FLAVORS = ("llvm20", "llvm22", "llvm23")
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 

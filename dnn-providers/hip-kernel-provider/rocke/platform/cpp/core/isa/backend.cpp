@@ -135,8 +135,8 @@ const char* rocke_isa_triple(const rocke_isa_backend_t* be)
 }
 
 /* Python backend.datalayout(llvm_flavor) -> _datalayout_for_flavor: LLVM20
- * returns the legacy p8 layout; anything else (incl. unexpected values)
- * degrades to the modern LLVM22 form. */
+ * returns the legacy p8 layout; anything else (incl. LLVM23 and unexpected
+ * values) degrades to the modern LLVM22 form (LLVM23 shares it today). */
 const char* rocke_isa_datalayout_for_flavor(const rocke_isa_backend_t* be,
                                             rocke_llvm_flavor_t flavor)
 {

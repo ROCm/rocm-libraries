@@ -685,6 +685,57 @@ class TestHelpers(unittest.TestCase):
         # The conversion uses a zext-to-i32 + lane-0 intrinsic call.
         self.assertIn("zext i8", ll)
 
+    def test_future_intrinsic_lowering(self):
+        """New cross-lane / async / reduction intrinsics lower with declares."""
+        from rocke.core.ir import (
+            F32,
+            IRBuilder,
+            PtrType,
+        )
+
+        b = IRBuilder("future_intrinsics_smoke")
+        out_p = b.param("out", PtrType(F32, "global"), align=4)
+        tid = b.thread_id_x()
+        lane = b.lane_id()
+        x = b.const_f32(1.0)
+        xi = b.const_i32(1)
+        # Reduction + DPP + swizzle relayout
+        rmax = b.wave_reduce(x, "fmax")
+        _radd = b.wave_reduce(xi, "add")
+        _dpp8 = b.mov_dpp8(xi, 0x765432)
+        _sw = b.ds_swizzle_xor(xi, 1)
+        _sw2 = b.ds_swizzle(xi, 0x041F)
+        # Lane ops + permute
+        _rl = b.readlane(xi, lane)
+        _wl = b.writelane(xi, b.const_i32(0), xi)
+        _pl = b.permlane64(xi)
+        _ab = b.alignbyte(xi, xi, b.const_i32(8))
+        _wqm = b.s_wqm(xi)
+        lo, hi = b.permlane32_swap(xi, xi)
+        # Async markers
+        b.asyncmark()
+        b.wait_asyncmark(0)
+        # Store results (use lo to keep SSA live)
+        b.global_store(out_p, tid, rmax, align=4)
+        _ = lo, hi
+        b.ret()
+        ll = lower_kernel_to_llvm(b.kernel)
+        for needle in (
+            "@llvm.amdgcn.wave.reduce.fmax.f32",
+            "@llvm.amdgcn.wave.reduce.add.i32",
+            "@llvm.amdgcn.mov.dpp8",
+            "@llvm.amdgcn.ds.swizzle",
+            "@llvm.amdgcn.readlane.i32",
+            "@llvm.amdgcn.writelane.i32",
+            "@llvm.amdgcn.permlane64",
+            "@llvm.amdgcn.alignbyte",
+            "@llvm.amdgcn.s.wqm.i32",
+            "@llvm.amdgcn.asyncmark",
+            "@llvm.amdgcn.wait.asyncmark",
+            "@llvm.amdgcn.permlane32.swap",
+        ):
+            self.assertIn(needle, ll)
+
 
 # ---------------------------------------------------------------------
 # Instances (end-to-end build smoke)
@@ -1299,6 +1350,32 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         # produce conflicting declarations in the same module.
         self.assertNotIn("@llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1)", ll)
 
+    def test_buffer_rsrc_llvm23_emits_p8_p1_with_i64_num_records(self):
+        from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
+
+        ll = lower_kernel_to_llvm(
+            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23
+        )
+        self.assertIn(
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+            "ptr addrspace(1) nocapture readnone, i16, i64, i32)",
+            ll,
+        )
+        self.assertIn("zext i32 %N_bytes to i64", ll)
+        self.assertNotIn("@llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1)", ll)
+
+    def test_buffer_rsrc_llvm23_passes_i64_num_bytes_without_zext(self):
+        from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
+
+        b = IRBuilder("flavor_buf_rsrc_i64_llvm23")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        N_bytes = b.param("N_bytes", I64)
+        b.buffer_rsrc(X, N_bytes)
+        ll = lower_kernel_to_llvm(b.kernel, llvm_flavor=LLVM_FLAVOR_LLVM23)
+        self.assertNotIn("zext", ll)
+        self.assertIn("i64 %N_bytes, i32 159744)", ll)
+
     def test_buffer_rsrc_llvm22_passes_i64_num_bytes_without_zext(self):
         """``i64`` ``num_bytes`` must reach the intrinsic directly --
         buffers larger than 4 GiB rely on it; a silent zext-then-trunc
@@ -1335,6 +1412,25 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
 
         ll = lower_kernel_to_llvm(
             self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM22
+        )
+        self.assertIn(
+            "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+            "i64, i64, <4 x float>, "
+            "i32 immarg, i32 immarg, i32 immarg)",
+            ll,
+        )
+        self.assertIn("bitcast <8 x i8>", ll)
+        self.assertIn(
+            " = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(i64 ",
+            ll,
+        )
+        self.assertNotIn("mfma.f32.16x16x32.fp8.fp8(<2 x i32>", ll)
+
+    def test_mfma_fp8_llvm23_uses_i64_operands(self):
+        from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
+
+        ll = lower_kernel_to_llvm(
+            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23
         )
         self.assertIn(
             "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("

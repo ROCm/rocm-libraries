@@ -615,9 +615,9 @@ void rocke_ll_lower_mfma_fp8_bf8(
     snprintf(key, sizeof(key), "mfma.f32.%s", intrinsic);
     rocke_ll_need(L, key);
 
-    /* LLVM 22 packs the 64-bit-per-lane A/B operand as scalar i64; LLVM 20
-     * uses <2 x i32>. Same bits, different lane packing. */
-    ab_ty = (L->flavor == ROCKE_LLVM_FLAVOR_LLVM22) ? "i64" : "<2 x i32>";
+    /* LLVM 21+ (llvm22 / llvm23) packs the 64-bit-per-lane A/B operand as scalar
+     * i64; LLVM 20 uses <2 x i32>. Same bits, different lane packing. */
+    ab_ty = rocke_ll_flavor_is_modern(L->flavor) ? "i64" : "<2 x i32>";
 
     snprintf(a_hint, sizeof(a_hint), "mfma_a_%s", dtype ? dtype : "f8");
     snprintf(b_hint, sizeof(b_hint), "mfma_b_%s", dtype ? dtype : "f8");
