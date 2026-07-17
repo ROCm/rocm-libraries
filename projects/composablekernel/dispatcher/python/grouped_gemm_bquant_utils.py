@@ -401,6 +401,21 @@ class BQuantGpuGemmRunner:
                 f"for kernel {self.kernel_name}"
             )
 
+        # permute_n epilogue writes C with N-columns riffled into r groups
+        # (r = tile_n / warp_tile_n / warp_n). Undo it so the caller gets logical C.
+        _name = self.kernel_name
+        if 'permute_n' in _name:
+            import re as _re
+            _m = _re.search(r'_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_', _name)
+            if _m:
+                _tile_n = int(_m.group(2)); _warp_n = int(_m.group(5)); _wt_n = int(_m.group(8))
+                _r = _tile_n // _wt_n // _warp_n
+                if _r > 1 and (N % _r) == 0:
+                    _half = N // _r
+                    _logical = [(c % _r) * _half + (c // _r) for c in range(N)]
+                    _Cp = np.empty_like(C)
+                    _Cp[:, _logical] = C
+                    C = _Cp
         return BQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)
 
 

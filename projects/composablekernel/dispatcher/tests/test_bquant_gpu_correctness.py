@@ -350,10 +350,15 @@ def test_h3_mx_bf16fp4(out_dir: Path, gfx_arch: str) -> tuple[str, str]:
     cfg = default_mx_bf16fp4_config(quant_group_k=gK, quant_group_n=gN, gfx_arch=gfx_arch)
     A_raw, A_dec, _, _, BQ_e8m0, BQ_f32 = _make_bf16_inputs(M, N, K, gK, gN)
     rng = np.random.default_rng(44)
-    # pk_fp4: K*N values packed 2-per-byte
-    B_raw = rng.integers(0, 256, size=(K * N // 2,), dtype=np.uint8)
-    # Reference: unpack OCP FP4 E2M1 values using the canonical lookup table.
-    B_f32_approx = _decode_fp4(B_raw, K, N)
+    # rcr kernel reads pk_fp4 B COLUMN-MAJOR: consecutive K-elements share a byte
+    # (low nibble = k even, high nibble = k odd), per reference_mx_gemm_bquant's (k&1)
+    # branch. Generate logical (K,N) fp4 codes, pack column-major, LUT-decode reference.
+    codes = rng.integers(0, 16, size=(K, N), dtype=np.uint8)
+    B_f32_approx = _FP4_E2M1_LUT[codes]                      # reference values (K,N)
+    _flat = codes.flatten(order='F').astype(np.uint8)        # col-major: idx = n*K + k
+    _lo = _flat[0::2] & 0x0F                                 # k even -> low nibble
+    _hi = _flat[1::2] & 0x0F                                 # k odd  -> high nibble
+    B_raw = (_lo | (_hi << 4)).astype(np.uint8)
     return _run_one("H3/mx_bf16fp4", cfg, M, N, K,
                     A_raw, A_dec, B_raw, B_f32_approx, BQ_e8m0,
                     out_dir, c_dtype=np.uint16, c_decode_fn=_bf16_raw_to_f32,
