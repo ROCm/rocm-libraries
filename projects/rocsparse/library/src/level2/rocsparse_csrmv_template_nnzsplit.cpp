@@ -172,25 +172,25 @@
         descr->base,                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host);
 
-#define LAUNCH_HELPER(macro_to_launch)                                                       \
-    const int nprocs = 2 * handle->properties.multiProcessorCount;                           \
-    if(nnz / (nprocs * CSRMV_BLOCKSIZE * CSRMV_NNZ_PER_THREAD_1) < CSRMV_BLOCKS_PER_CU)      \
-    {                                                                                        \
+#define LAUNCH_HELPER(macro_to_launch)                                                      \
+    const int nprocs = 2 * handle->properties.multiProcessorCount;                          \
+    if(nnz / (nprocs * CSRMV_BLOCKSIZE * CSRMV_NNZ_PER_THREAD_1) < CSRMV_BLOCKS_PER_CU)     \
+    {                                                                                       \
         /* Too little work to saturate the device: finest granularity for max occupancy. */ \
-        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_0);                            \
-    }                                                                                        \
-    else if((m > 0 ? (nnz / m) : nnz) < CSRMV_NNZSPLIT_LOW_DENSITY)                          \
-    {                                                                                        \
-        /* Sparse rows: latency-bound, so favour occupancy with 1 nnz/thread. */             \
-        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_0);                            \
-    }                                                                                        \
-    else if((m > 0 ? (nnz / m) : nnz) < CSRMV_NNZSPLIT_HIGH_DENSITY)                         \
-    {                                                                                        \
-        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_1);                            \
-    }                                                                                        \
-    else                                                                                     \
-    {                                                                                        \
-        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_2);                            \
+        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_0);                           \
+    }                                                                                       \
+    else if((m > 0 ? (nnz / m) : nnz) < CSRMV_NNZSPLIT_LOW_DENSITY)                         \
+    {                                                                                       \
+        /* Sparse rows: latency-bound, so favour occupancy with 1 nnz/thread. */            \
+        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_0);                           \
+    }                                                                                       \
+    else if((m > 0 ? (nnz / m) : nnz) < CSRMV_NNZSPLIT_HIGH_DENSITY)                        \
+    {                                                                                       \
+        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_1);                           \
+    }                                                                                       \
+    else                                                                                    \
+    {                                                                                       \
+        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_2);                           \
     }
 
 // Block size for the nnzsplit kernels. 128 (over 256) keeps each block spanning
