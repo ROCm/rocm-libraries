@@ -3813,7 +3813,7 @@ namespace rocisa
                    return !reg || reg->regType != "s";
                }))
             {
-                throw std::invalid_argument("TensorStoreFromLds only supports sgpr as operands only");
+                throw std::invalid_argument("TensorStoreFromLds only supports sgpr operands");
             }
             setInst("tensor_store_from_lds");
         }
