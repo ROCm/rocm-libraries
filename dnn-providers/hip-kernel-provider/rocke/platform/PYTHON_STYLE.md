@@ -163,7 +163,7 @@ This is a deliberate house style for a codebase full of hardware subtleties.
 - **Encode rationale and provenance.** The codebase routinely cites *why* a value is
   what it is — lane layouts, register widths, and correctness traps:
   ```python
-  """K-packed f16 atom on gfx950+ (CDNA3). K=32/atom in two halves.
+  """K-packed f16 atom on gfx950+. K=32/atom in two halves.
   A lane `c4 = lane / 16` holds K = [c4 * 8 : c4 * 8 + 8]
   (NOT the flat-concat layout ...; the wrong packing compiles, runs, and
   validates within 1e-2 but fails at 1e-3)."""
