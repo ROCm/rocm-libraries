@@ -164,7 +164,7 @@ struct generate_threefry
         size_t    index    = thread_id;
         while(index < vec_n)
         {
-            const auto             v = engine.next_leap(stride);
+            const auto                                            v = engine.next_leap(stride);
             cpp_utils::vec_wrapper<std::remove_cv_t<decltype(v)>> vs(v);
             for(unsigned int s = 0; s < output_per_thread; s++)
             {
