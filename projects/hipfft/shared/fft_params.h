@@ -1839,7 +1839,7 @@ public:
             // Hermitian interleaved data may be re-interpreted as real data internally.
             if((max_offset + compute_ptrdiff(io_length, io_stride, nbatch, io_dist))
                    * (io_array_type == fft_array_type_hermitian_interleaved ? 2 : 1)
-               > UINT32_MAX + 1)
+               > static_cast<size_t>(UINT32_MAX) + 1)
             {
                 return true;
             }
