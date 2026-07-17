@@ -49,7 +49,7 @@ try
         rocsparse::get_indextype<rocsparse_int>(),
         position));
 
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     return (rocsparse_status_success);
     // LCOV_EXCL_START

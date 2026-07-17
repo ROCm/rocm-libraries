@@ -28,7 +28,7 @@ Make sure that ROCm is correctly installed and run the following command:
 printf '=== environment\n' > environment.txt && 
 printf '\n\n=== date\n' >> environment.txt && date >> environment.txt && 
 printf '\n\n=== Linux Kernel\n' >> environment.txt && uname -a  >> environment.txt && 
-printf '\n\n=== rocm-smi' >> environment.txt && rocm-smi  >> environment.txt && 
+printf '\n\n=== amd-smi' >> environment.txt && amd-smi  >> environment.txt && 
 printf '\n\n' >> environment.txt && hipconfig  >> environment.txt && 
 printf '\n\n=== rocminfo\n' >> environment.txt && rocminfo  >> environment.txt && 
 printf '\n\n=== lspci VGA\n' >> environment.txt && lspci | grep -i vga >> environment.txt

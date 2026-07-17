@@ -63,6 +63,11 @@ class TestResolveRocmTool:
         monkeypatch.setattr(_tool_resolver.shutil, "which", lambda _name: None)
         assert _tool_resolver.resolve_rocm_tool("rocprofv3") is None
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="executable detection is the Unix +x bit; os.access(X_OK) on "
+        "Windows is not chmod-based, so a 0o644 file still reads as executable",
+    )
     def test_skips_rocm_path_when_file_is_not_executable(
         self, fake_rocm_root, monkeypatch
     ):

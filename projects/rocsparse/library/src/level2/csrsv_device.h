@@ -38,7 +38,7 @@ namespace rocsparse
                                      I* __restrict__ csr_diag_ind,
                                      int* __restrict__ done_array,
                                      I* __restrict__ max_nnz,
-                                     J* __restrict__ zero_pivot,
+                                     J*                   zero_pivot,
                                      rocsparse_index_base idx_base,
                                      rocsparse_diag_type  diag_type)
     {
@@ -166,7 +166,7 @@ namespace rocsparse
                                      I* __restrict__ csr_diag_ind,
                                      int* __restrict__ done_array,
                                      I* __restrict__ max_nnz,
-                                     J* __restrict__ zero_pivot,
+                                     J*                   zero_pivot,
                                      rocsparse_index_base idx_base,
                                      rocsparse_diag_type  diag_type)
     {
@@ -294,12 +294,12 @@ namespace rocsparse
                                            int64_t csr_val_inc,
                                            const T* __restrict__ x,
                                            int64_t x_inc,
-                                           T* __restrict__ y,
+                                           T*      y,
                                            int64_t y_inc,
                                            int* __restrict__ done_array,
                                            const J* __restrict__ map,
-                                           int offset,
-                                           J* __restrict__ zero_pivot,
+                                           int                  offset,
+                                           J*                   zero_pivot,
                                            rocsparse_index_base idx_base,
                                            rocsparse_fill_mode  fill_mode,
                                            rocsparse_diag_type  diag_type)

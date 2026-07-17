@@ -225,7 +225,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_indextype value_)
         return #C
     switch(value_)
     {
-        CASE(rocsparse_indextype_u16);
+        CASE(deprecated_rocsparse_indextype_u16);
         CASE(rocsparse_indextype_i32);
         CASE(rocsparse_indextype_i64);
 #undef CASE
@@ -473,7 +473,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_indextype value_)
 {
     switch(value_)
     {
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     case rocsparse_indextype_i32:
     case rocsparse_indextype_i64:
     {
@@ -1196,10 +1196,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->ell_col_ind, sizeof(rocsparse_int) * src->ell_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->ell_col_ind,
-                                      src->ell_col_ind,
-                                      sizeof(rocsparse_int) * src->ell_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->ell_col_ind,
+                                                src->ell_col_ind,
+                                                sizeof(rocsparse_int) * src->ell_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->ell_val != nullptr)
@@ -1208,8 +1208,8 @@ try
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->ell_val, T_size * src->ell_nnz));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_row_ind != nullptr)
@@ -1219,10 +1219,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_row_ind, sizeof(rocsparse_int) * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_row_ind,
-                                      src->coo_row_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_row_ind,
+                                                src->coo_row_ind,
+                                                sizeof(rocsparse_int) * src->coo_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_col_ind != nullptr)
@@ -1232,10 +1232,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_col_ind, sizeof(rocsparse_int) * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_col_ind,
-                                      src->coo_col_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_col_ind,
+                                                src->coo_col_ind,
+                                                sizeof(rocsparse_int) * src->coo_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_val != nullptr)
@@ -1244,8 +1244,8 @@ try
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->coo_val, T_size * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
     }
 
     dest->m           = src->m;
@@ -1280,7 +1280,7 @@ try
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+    RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up ELL part
     if(hyb->ell_col_ind != nullptr)
@@ -2587,8 +2587,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols > cols), rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -2660,8 +2662,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, ell_cols > cols, rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, rows * ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -4113,6 +4117,46 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_bell_set_pointers sets the sparse Blocked ELL matrix data pointers.
+ *******************************************************************************/
+rocsparse_status
+    rocsparse_bell_set_pointers(rocsparse_spmat_descr descr, void* bell_col_ind, void* bell_val)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+
+    const int64_t brows = (descr->rows + descr->block_dim - 1) / descr->block_dim;
+
+    ROCSPARSE_CHECKARG(1,
+                       bell_col_ind,
+                       brows * descr->ell_cols / descr->block_dim > 0 && bell_col_ind == nullptr,
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(2,
+                       bell_val,
+                       brows * descr->ell_cols > 0 && bell_val == nullptr,
+                       rocsparse_status_invalid_pointer);
+
+    // Sparsity structure might have changed, analysis is required before calling SpMV
+    descr->analysed = false;
+
+    descr->col_data = bell_col_ind;
+    descr->val_data = bell_val;
+
+    descr->const_col_data = bell_col_ind;
+    descr->const_val_data = bell_val;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_spmat_get_size returns the sparse matrix sizes.
  *******************************************************************************/
 rocsparse_status rocsparse_spmat_get_size(rocsparse_const_spmat_descr descr,
@@ -5380,7 +5424,7 @@ try
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+    RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up row pointer array
     if(descr->csr_row_ptr_C != nullptr)
