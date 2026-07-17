@@ -29,6 +29,7 @@ Data types (verified against ck_tile headers / example/ck_tile/42_mx_gemm):
 
 import concurrent.futures
 import ctypes
+import functools
 import json
 import logging
 import os
@@ -599,6 +600,63 @@ def _generate_kernel(cfg: MxGemmKernelConfig, headers_dir: Path) -> Optional[Pat
     return hpp if hpp.exists() else None
 
 
+# AMDGPU codegen / optimization flags that Old-TE compiles the mx_gemm device
+# kernel with. They MUST match Old-TE flag-for-flag: the generated device-kernel
+# header is byte-identical, so any flag difference (inlining, register
+# allocation, occupancy) shows up as a large perf gap. Compiling with only
+# "-O3 -std=c++17" made bridge fp8 kernels run ~30% slower than Old-TE.
+#
+# Source of truth: projects/composablekernel/CMakeLists.txt add_compile_options()
+# (inherited by tile_engine/ops/gemm/mx_gemm) + mx_gemm/CMakeLists.txt's
+# --offload-compress. This mirrors gemm_utils._tile_engine_codegen_flags so the
+# two bridges stay consistent.
+#
+# Unconditional set (CK CMake adds these on every supported toolchain):
+_MX_CODEGEN_FLAGS = (
+    "-mllvm", "-amdgpu-early-inline-all=true",
+    "-mllvm", "-amdgpu-function-calls=false",
+    "-mllvm", "--lsr-drop-solution=1",
+    "-mllvm", "-enable-post-misched=0",
+    "-fno-offload-uniform-block",
+    "--offload-compress",
+)
+# Probe-gated set: CK's CMake only adds these when check_cxx_compiler_flag
+# passes (newer -mllvm options some clang builds reject, e.g. ROCm 7.2 does not
+# know -amdgpu-coerce-illegal-types). Mirror that probe so the bridge matches
+# Old-TE wherever the compiler accepts it and stays buildable where it does not.
+_MX_PROBED_CODEGEN_FLAGS = (
+    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _hipcc_accepts(flag_tuple: Tuple[str, ...]) -> bool:
+    """Mirror CMake check_cxx_compiler_flag: does hipcc compile a trivial TU with
+    these flags? Cached so the probe runs at most once per distinct flag set."""
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "probe.cpp"
+            src.write_text("int main(){}\n")
+            r = subprocess.run(
+                [_HIPCC, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
+                capture_output=True, timeout=120,
+            )
+            return r.returncode == 0
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _mx_codegen_flags() -> Tuple[str, ...]:
+    """Old-TE's mx_gemm codegen flags plus any probe-gated flags the compiler
+    accepts -- the exact backend flag set the TE benchmark TU is built with."""
+    flags = list(_MX_CODEGEN_FLAGS)
+    for pair in _MX_PROBED_CODEGEN_FLAGS:
+        if _hipcc_accepts(pair):
+            flags = list(pair) + flags
+    return tuple(flags)
+
+
 def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
     inc = [
         f"-I{_CK_ROOT}/include", f"-I{_CK_ROOT}",
@@ -607,19 +665,11 @@ def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
         f"-I{_CK_ROOT}/tile_engine/ops/gemm/mx_gemm",
     ]
     cmd = [
-        # C++ standard and optimization flags must match Old-TE's mx_gemm build
-        # exactly, otherwise the byte-identical device kernel runs slower under
-        # the bridge (~30% on fp8). The flags below mirror the global
-        # add_compile_options() set in projects/composablekernel/CMakeLists.txt
-        # (CK_CXX_STANDARD=20, the -mllvm tuning flags, -fno-offload-uniform-block)
-        # plus mx_gemm/CMakeLists.txt's --offload-compress.
+        # -std=c++20 matches CK_CXX_STANDARD; codegen flags match Old-TE (see
+        # _mx_codegen_flags above). Without them the byte-identical fp8 device
+        # kernel ran ~30% slower than Old-TE.
         _HIPCC, "-shared", "-fPIC", "-O3", "-std=c++20",
-        "-mllvm", "-amdgpu-early-inline-all=true",
-        "-mllvm", "-amdgpu-function-calls=false",
-        "-mllvm", "--lsr-drop-solution=1",
-        "-mllvm", "-enable-post-misched=0",
-        "-mllvm", "-amdgpu-coerce-illegal-types=1",
-        "-fno-offload-uniform-block", "--offload-compress",
+        *_mx_codegen_flags(),
         *inc,
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f"-include{hpp}",
         "-D__HIP_PLATFORM_AMD__", f"--offload-arch={arch}", f'-DGFX_ARCH="{arch}"',
