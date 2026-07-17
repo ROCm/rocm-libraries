@@ -71,7 +71,7 @@ class TestProfileVariants(unittest.TestCase):
         self.assertEqual(len(recs), 2)
         self.assertEqual(len(store.load(cache=self.cache)), 2)  # one per variant
         # identity label = cache_key
-        ids = {schema.identity(r)[1] for r in store.load(cache=self.cache)}
+        ids = {schema.identity(r)[2] for r in store.load(cache=self.cache)}
         self.assertEqual(ids, {"ck_a", "ck_b"})
 
     def test_self_check_across_two_runs(self):

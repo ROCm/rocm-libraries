@@ -11,6 +11,7 @@ def _rec(
     kernel="k",
     shape=None,
     *,
+    op="gemm",
     busy=None,
     total=None,
     ms=None,
@@ -34,7 +35,7 @@ def _rec(
     record = {
         "schema": schema.SCHEMA_VERSION,
         "run": {"run_id": "r", "arch": arch, "timestamp": "t"},
-        "kernel": {"kernel_name": kernel, "op": "gemm", "shape": shape or {"M": 8}},
+        "kernel": {"kernel_name": kernel, "op": op, "shape": shape or {"M": 8}},
         "wall": wall,
         "profiled": profiled,
         "counters": counters,
@@ -151,6 +152,8 @@ class TestAggregate(unittest.TestCase):
             aggregate.aggregate([_rec(kernel="a"), _rec(kernel="b")])
         with self.assertRaises(ValueError):
             aggregate.aggregate([_rec(shape={"M": 8}), _rec(shape={"M": 16})])
+        with self.assertRaises(ValueError):
+            aggregate.aggregate([_rec(op="gemm"), _rec(op="conv")])
 
     def test_empty_raises(self):
         with self.assertRaises(ValueError):

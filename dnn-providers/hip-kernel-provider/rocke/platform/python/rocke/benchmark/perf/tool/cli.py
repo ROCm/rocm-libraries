@@ -5,7 +5,7 @@
 `python -m rocke.benchmark.perf.tool <cmd>` ties the primitives + store + self-check together:
 
   profile    -- measure a kernel command N times, aggregate, store, self-check
-               vs the prior stored run for that (arch, kernel, shape).   [GPU]
+               vs the prior stored run for that (arch, op, kernel, shape). [GPU]
   occupancy  -- read a compiled HSACO's ELF notes -> resources/occupancy. [no GPU]
   compare    -- load the stored history and report improve/regress per kernel.
                [no GPU]
@@ -100,8 +100,9 @@ def _cmd_profile(a: argparse.Namespace) -> int:
             "n_runs": len(prior),
             "identity": {
                 "arch": identity[0],
-                "kernel_name": identity[1],
-                "shape": identity[2],
+                "op": identity[1],
+                "kernel_name": identity[2],
+                "shape": identity[3],
             },
         }
     if not a.no_store:
@@ -137,10 +138,15 @@ def _cmd_compare(a: argparse.Namespace) -> int:
     if a.all:
         identities = sorted(_store.group_by_identity(records))
     else:
-        if not (a.arch and a.kernel_name):
-            raise SystemExit("compare: give --arch and --kernel-name, or --all")
+        if not (a.arch and a.op and a.kernel_name):
+            raise SystemExit("compare: give --arch, --op, and --kernel-name, or --all")
         identities = [
-            (a.arch, a.kernel_name, _schema.shape_signature(_shape_arg(a.shape)))
+            (
+                a.arch,
+                a.op,
+                a.kernel_name,
+                _schema.shape_signature(_shape_arg(a.shape)),
+            )
         ]
 
     results = [
@@ -229,6 +235,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "compare", parents=[common], help="improve/regress from stored history (no GPU)"
     )
     cm.add_argument("--arch", default=None)
+    cm.add_argument("--op", default=None)
     cm.add_argument("--kernel-name", dest="kernel_name", default=None)
     cm.add_argument("--shape", default=None, help="JSON object, e.g. '{\"M\":512}'")
     cm.add_argument("--all", action="store_true", help="every identity in history")

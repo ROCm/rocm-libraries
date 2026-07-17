@@ -69,7 +69,7 @@ Stdlib-only and do not persist records - they produce a record and return it.
 Import and compose them; every consumer uses these same pieces.
 
 - `schema` - the measurement-record contract + `validate`. Identity is
-  `(arch, kernel_name, shape)`; the shape signature is op-agnostic (GEMM `M,N,K`;
+  `(arch, op, kernel_name, shape)`; the shape signature is generic (GEMM `M,N,K`;
   conv/attention dims work the same). This is the seam other tools consume.
 - `counters` - probe the PMU counters the GPU actually supports
   (`rocprofv3 --list-avail`) and normalize the arch-specific raw names (RDNA

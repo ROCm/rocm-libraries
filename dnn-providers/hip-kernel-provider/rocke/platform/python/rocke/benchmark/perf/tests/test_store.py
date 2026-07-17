@@ -76,6 +76,13 @@ class TestStore(unittest.TestCase):
             f.write(json.dumps(malformed) + "\n")
         self.assertEqual(store.load(cache=self.cache), [])
 
+    def test_missing_operation_is_skipped(self):
+        malformed = _rec(busy=5)
+        del malformed["kernel"]["op"]
+        with store.history_path(self.cache).open("a") as f:
+            f.write(json.dumps(malformed) + "\n")
+        self.assertEqual(store.load(cache=self.cache), [])
+
     def test_non_object_metric_section_is_skipped(self):
         for section in ("counters", "wall", "spread"):
             malformed = _rec(busy=5)

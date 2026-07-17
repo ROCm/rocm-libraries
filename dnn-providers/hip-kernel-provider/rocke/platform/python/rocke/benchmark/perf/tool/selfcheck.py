@@ -80,7 +80,12 @@ def check_history(
     `no_baseline` verdict if fewer than two runs exist for that identity.
     """
     seq = _store.records_for(records, identity)
-    ident = {"arch": identity[0], "kernel_name": identity[1], "shape": identity[2]}
+    ident = {
+        "arch": identity[0],
+        "op": identity[1],
+        "kernel_name": identity[2],
+        "shape": identity[3],
+    }
     if len(seq) < 2:
         return {"verdict": "no_baseline", "n_runs": len(seq), "identity": ident}
     return compare(seq[-2], seq[-1], threshold=threshold, noise_k=noise_k)
@@ -102,7 +107,8 @@ def format_result(result: Mapping[str, Any]) -> str:
     if verdict == "no_baseline":
         ident = result.get("identity", {})
         return (
-            f"[{tag}] {ident.get('arch','')}  {ident.get('kernel_name','')}  "
+            f"[{tag}] {ident.get('arch','')}  {ident.get('op','')}  "
+            f"{ident.get('kernel_name','')}  "
             f"{ident.get('shape','') or '(no shape)'}  "
             f"({result.get('n_runs', 0)} run(s), need 2)"
         )
@@ -110,7 +116,8 @@ def format_result(result: Mapping[str, Any]) -> str:
     d = result.get("diff", {})
     ident = d.get("identity", {})
     lines = [
-        f"[{tag}] {ident.get('arch','')}  {ident.get('kernel_name','')}  "
+        f"[{tag}] {ident.get('arch','')}  {ident.get('op','')}  "
+        f"{ident.get('kernel_name','')}  "
         f"{ident.get('shape','') or '(no shape)'}"
     ]
     metric = result.get("metric")

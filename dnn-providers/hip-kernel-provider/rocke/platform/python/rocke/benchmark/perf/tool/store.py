@@ -10,7 +10,7 @@ never the results.
 
 Resolution order for the cache dir: explicit arg > `$ROCKE_PERF_CACHE` >
 `$XDG_CACHE_HOME/rocke-perf` > `~/.cache/rocke-perf`. Records are grouped by
-`schema.identity` (arch, kernel_name, shape) for comparison. Stdlib only.
+`schema.identity` (arch, op, kernel_name, shape) for comparison. Stdlib only.
 """
 from __future__ import annotations
 
@@ -75,6 +75,7 @@ def _is_readable_record(record: object) -> bool:
                 return False
     return (
         "arch" in run
+        and "op" in kernel
         and "kernel_name" in kernel
         and isinstance(kernel.get("shape"), Mapping)
     )
@@ -106,7 +107,7 @@ def load(*, cache: Optional[os.PathLike | str] = None) -> list[dict]:
 
 
 def group_by_identity(records: Sequence[Mapping[str, Any]]) -> dict[tuple, list[dict]]:
-    """Bucket records by `schema.identity` (arch, kernel_name, shape), append order."""
+    """Bucket records by `(arch, op, kernel_name, shape)`, in append order."""
     groups: dict[tuple, list[dict]] = {}
     for r in records:
         groups.setdefault(_schema.identity(r), []).append(dict(r))

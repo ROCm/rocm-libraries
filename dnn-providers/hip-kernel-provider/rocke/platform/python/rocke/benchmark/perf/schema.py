@@ -35,7 +35,8 @@ from urllib.parse import quote
 SCHEMA_VERSION = "rocke.bench.measurement/v1"
 
 # Comparison identity: a kernel is compared only against its own baseline on the
-# same GPU and shape. Kernel-AGNOSTIC: (arch, kernel_name, shape-signature) - the
+# same GPU, operation, and shape. Identity is
+# (arch, op, kernel_name, shape-signature) - the
 # shape signature is a generic serialization of whatever the shape dict holds
 # (GEMM: M/N/K; conv: N/H/W/C/...; attention: batch/heads/seqlen/...), so no op is
 # privileged. Callers that need configuration-specific identities should use a
@@ -111,11 +112,12 @@ def shape_signature(shape: Mapping[str, Any]) -> str:
 
 
 def identity(record: Mapping[str, Any]) -> tuple:
-    """The (arch, kernel_name, shape-signature) tuple a record is compared on."""
+    """The (arch, op, kernel_name, shape-signature) comparison tuple."""
     run = record.get("run", {})
     kern = record.get("kernel", {})
     return (
         str(run.get("arch", "")),
+        str(kern.get("op", "")),
         str(kern.get("kernel_name", "")),
         shape_signature(kern.get("shape", {})),
     )

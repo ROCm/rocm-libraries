@@ -9,13 +9,13 @@ import unittest
 from rocke.benchmark.perf import schema
 
 
-def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, ms=None):
+def _rec(arch="gfx950", kernel="k", shape=None, *, op="gemm", busy=None, ms=None):
     counters = {"busy_cycles": busy} if busy is not None else {}
     wall = {"ms_median": ms} if ms is not None else {}
     return {
         "schema": schema.SCHEMA_VERSION,
         "run": {"run_id": "r", "arch": arch, "timestamp": "t"},
-        "kernel": {"kernel_name": kernel, "op": "gemm", "shape": shape or {"M": 8}},
+        "kernel": {"kernel_name": kernel, "op": op, "shape": shape or {"M": 8}},
         "wall": wall,
         "counters": counters,
         "resources": {},
@@ -95,13 +95,18 @@ class TestIdentity(unittest.TestCase):
         rec = _rec(arch="gfx1201", kernel="mygemm", shape={"M": 8, "N": 8, "K": 8})
         self.assertEqual(
             schema.identity(rec),
-            ("gfx1201", "mygemm", "K=8,M=8,N=8"),
+            ("gfx1201", "gemm", "mygemm", "K=8,M=8,N=8"),
         )
 
     def test_differing_shape_differs(self):
         a = schema.identity(_rec(shape={"M": 8}))
         b = schema.identity(_rec(shape={"M": 16}))
         self.assertNotEqual(a, b)
+
+    def test_differing_operation_differs(self):
+        gemm = schema.identity(_rec(op="gemm"))
+        conv = schema.identity(_rec(op="conv"))
+        self.assertNotEqual(gemm, conv)
 
 
 class TestMetric(unittest.TestCase):

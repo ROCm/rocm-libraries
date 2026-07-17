@@ -61,9 +61,9 @@ def _spread_pct(record: Mapping[str, Any], which: str) -> Optional[float]:
 
 def format_record(record: Mapping[str, Any]) -> str:
     """Human-readable one-record view: identity, primary metric, panel."""
-    arch, kernel, sig = _schema.identity(record)
+    arch, op, kernel, sig = _schema.identity(record)
     val, which = _schema.metric(record)
-    lines = [f"{arch}  {kernel}  {sig or '(no shape)'}"]
+    lines = [f"{arch}  {op}  {kernel}  {sig or '(no shape)'}"]
     if val is not None:
         sp = _spread_pct(record, which)
         tail = f"  (spread {sp:.1f}%)" if sp is not None else ""
@@ -98,8 +98,9 @@ def diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict:
     out: dict = {
         "identity": {
             "arch": _schema.identity(current)[0],
-            "kernel_name": _schema.identity(current)[1],
-            "shape": _schema.identity(current)[2],
+            "op": _schema.identity(current)[1],
+            "kernel_name": _schema.identity(current)[2],
+            "shape": _schema.identity(current)[3],
         },
         "metric": c_which,
         "baseline": b_val,
