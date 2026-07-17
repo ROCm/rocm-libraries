@@ -3,12 +3,15 @@
 # SPDX-License-Identifier: MIT
 """Full Multi-D GEMM benchmark sweep driven through the Dispatcher bridge.
 
-Same 3-phase architecture as ``gemm_full_benchmark.py`` -- Multi-D is a
-single-problem GEMM (one A/B/C, one M/N/K) with the *same* C ABI, so the only
-bridge difference is ``variant="multi_d"`` threaded into ``expand_sweep`` (which
-makes the dispatcher codegen the Multi-D launch and ``gemm_utils`` select
-``multi_d_gemm_ctypes_lib.cpp``). The GPU worker uses ``MultiDGemmProblem`` /
-``GpuMultiDGemmRunner`` for the fused-D epilogue.
+Same 3-phase architecture as ``gemm_full_benchmark.py``. Multi-D keeps the
+single-problem *shape* (one A/B/C, one M/N/K) but uses a *dedicated* C ABI --
+its own entry point ``dispatcher_run_multi_d_gemm`` in
+``multi_d_gemm_ctypes_lib.cpp`` (which also takes the D-pointer array + count),
+not the regular ``dispatcher_run_gemm``. The bridge difference is
+``variant="multi_d"`` threaded into ``expand_sweep`` (which makes the dispatcher
+codegen the Multi-D launch and ``gemm_utils`` select that dedicated ctypes
+source). The GPU worker uses ``MultiDGemmProblem`` / ``GpuMultiDGemmRunner`` for
+the fused-D epilogue.
 
   Phase 1: Compile all kernels (parallel, returns .so paths only -- no GPU)
   Phase 2: Load problems (M, N, K shapes)

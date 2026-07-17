@@ -32,7 +32,9 @@
  * context).
  *
  * TODO(port): wire a real runtime.hip_module.get_device_arch() query when the
- * C runtime surface exposes one. Until then this faithfully reproduces the
+ * C runtime surface exposes one. The Python runtime now offers get_device_arch,
+ * get_device_name, and get_device_count as HIP-backed queries; mirror them under
+ * matching names when this port lands. Until then this faithfully reproduces the
  * documented fallback (the only arch the tiled MFMA path supports by default)
  * and lets a host override the resolution via the setter below. */
 static const char* g_resolved_attention_arch = NULL;

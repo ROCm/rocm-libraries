@@ -14,10 +14,14 @@ Multi-D specifics live entirely in the force-included kernel and
 - Outputs timing results as JSON to stdout (one line per kernel, flushed)
 - A GPU fault kills only this process; the parent driver can continue
 
-Input JSON format:
-    Single: {"so_path": "...", "problem": {"M":.., "N":.., "K":.., "num_d":..},
-             "kernel_name": "...", "elementwise_op": "MultiDAdd"}
+Input JSON format (only these fields are consumed):
+    Single: {"so_path": "...", "problem": {"M":.., "N":.., "K":..},
+             "kernel_name": "..."}
     Batch:  {"items": [ {single-item fields}, ... ]}
+
+The D-tensor count is read off the .so (``dispatcher_get_num_d_tensors``) and the
+element-wise op is parsed from ``kernel_name`` (``..._multid_<op>_d<num_d>``), so
+no ``num_d`` / ``elementwise_op`` need be supplied -- any such keys are ignored.
 
 Optional top-level keys ``verify`` (bool) and ``verify_tol`` (float) enable an
 fp32 numpy reference check; when set, each OK result also carries ``verified``
@@ -93,10 +97,18 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
         num_d = runner.num_d_tensors  # authoritative: baked into the kernel
         problem = MultiDGemmProblem(M=M, N=N, K=K, num_d=num_d)
 
-        np.random.seed(42)
-        A = (np.random.randn(M, K) * 0.1).astype(np.float32)
-        B = (np.random.randn(K, N) * 0.1).astype(np.float32)
-        Ds = [(np.random.randn(M, N) * 0.1).astype(np.float32) for _ in range(num_d)]
+        # Cache host matrices so batch mode doesn't regenerate huge inputs per
+        # kernel: A/B keyed by shape, Ds by (shape, num_d).
+        cache = getattr(_run_one, "_abd_cache", {})
+        key = (M, N, K, num_d)
+        if key not in cache:
+            rng = np.random.RandomState(42)
+            A = (rng.randn(M, K) * 0.1).astype(np.float32)
+            B = (rng.randn(K, N) * 0.1).astype(np.float32)
+            Ds = [(rng.randn(M, N) * 0.1).astype(np.float32) for _ in range(num_d)]
+            cache[key] = (A, B, Ds)
+            _run_one._abd_cache = cache
+        A, B, Ds = cache[key]
 
         result = runner.run(A, B, Ds, problem)
 
