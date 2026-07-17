@@ -34,6 +34,11 @@
 // impression of its public status. The forward declaration below causes a link error if the
 // signature drifts, which is the main thing a header would have provided.
 namespace miopen {
+struct Handle;
+struct AlgorithmName;
+namespace conv {
+struct ProblemDescription;
+} // namespace conv
 namespace debug {
 MIOPEN_INTERNALS_EXPORT
 void LogConvolutionExecution(const Handle& handle,
