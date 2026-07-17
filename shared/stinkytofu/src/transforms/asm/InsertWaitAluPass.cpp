@@ -201,15 +201,16 @@ inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
     return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
 }
 
-// Walk `numRegs` register operands (via getReg), skipping non-VGPR ones, and
-// invoke fn(vgprIdx, half) for each VGPR. halfFn maps an operand's position
-// (VGPR-only) to its True16 half selector, so fn may act at half-word (LOW/HIGH)
-// granularity. Shared by producer stamping and consumer probing.
-template <typename GetReg, typename HalfFn, typename Fn>
-inline void forEachVGPR(size_t numRegs, GetReg&& getReg, HalfFn&& halfFn, Fn&& fn) {
+// Walk `regs`, skipping non-VGPR ones, and invoke fn(vgprIdx, half) for each
+// VGPR. halfFn maps an operand's position (VGPR-only) to its True16 half
+// selector, so fn may act at half-word (LOW/HIGH) granularity. Callers pass a
+// single operand list (getSrcRegs or getDestRegs) — never both, since src and
+// dst use different half selectors. Shared by producer stamping and consumer
+// probing.
+template <typename HalfFn, typename Fn>
+inline void forEachVGPR(const std::vector<StinkyRegister>& regs, HalfFn&& halfFn, Fn&& fn) {
     size_t opIdx = 0;
-    for (size_t i = 0; i < numRegs; ++i) {
-        const auto& reg = getReg(i);
+    for (const auto& reg : regs) {
         if (reg.dataType != StinkyRegister::Type::Register) continue;
         if (reg.reg.type != RegType::V) continue;
         HighBitSel half = halfFn(opIdx);
@@ -334,8 +335,6 @@ class WaitcntBrackets {
 
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        auto srcReg = [&](size_t i) -> const auto& { return inst.getSrcReg(i); };
-        auto destReg = [&](size_t i) -> const auto& { return inst.getDestReg(i); };
         auto stamp = [&](unsigned idx, HighBitSel half, CounterType c) {
             RegKey k = keyer.producerKey(idx, half);
             scores[k][c] = curr;
@@ -345,15 +344,15 @@ class WaitcntBrackets {
 
         if (ct == CT_VA_VDST) {
             forEachVGPR(
-                inst.getNumSrcRegs(), srcReg, [&](size_t i) { return srcHalfSel(true16Mod, i); },
+                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
                 [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
             forEachVGPR(
-                inst.getNumDestRegs(), destReg, [&](size_t i) { return destHalfSel(true16Mod, i); },
+                inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
                 [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
         } else {
             // VM_VSRC tracks in-flight VMEM reads, which are always full DWORD.
             forEachVGPR(
-                inst.getNumSrcRegs(), srcReg, [](size_t) { return HighBitSel::NONE; },
+                inst.getSrcRegs(), [](size_t) { return HighBitSel::NONE; },
                 [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VM_VSRC); });
         }
     }
@@ -363,11 +362,8 @@ class WaitcntBrackets {
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        auto srcReg = [&](size_t i) -> const auto& { return inst.getSrcReg(i); };
-        auto destReg = [&](size_t i) -> const auto& { return inst.getDestReg(i); };
-
         forEachVGPR(
-            inst.getNumSrcRegs(), srcReg, [&](size_t i) { return srcHalfSel(true16Mod, i); },
+            inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
             [&](unsigned idx, HighBitSel half) {
                 keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
                     determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
@@ -376,7 +372,7 @@ class WaitcntBrackets {
             });
 
         forEachVGPR(
-            inst.getNumDestRegs(), destReg, [&](size_t i) { return destHalfSel(true16Mod, i); },
+            inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
             [&](unsigned idx, HighBitSel half) {
                 keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
                     determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
