@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from typing import Optional, Sequence
 
@@ -57,6 +58,13 @@ def _positive_int(text: str) -> int:
     value = int(text)
     if value <= 0:
         raise argparse.ArgumentTypeError("must be positive")
+    return value
+
+
+def _nonnegative_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError("must be a finite non-negative number")
     return value
 
 
@@ -216,9 +224,14 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also emit raw per-dispatch counter values (counter_samples)",
     )
-    pr.add_argument("--threshold", type=float, default=_selfcheck.DEFAULT_THRESHOLD)
     pr.add_argument(
-        "--noise-k", dest="noise_k", type=float, default=_selfcheck.DEFAULT_NOISE_K
+        "--threshold", type=_nonnegative_float, default=_selfcheck.DEFAULT_THRESHOLD
+    )
+    pr.add_argument(
+        "--noise-k",
+        dest="noise_k",
+        type=_nonnegative_float,
+        default=_selfcheck.DEFAULT_NOISE_K,
     )
     pr.add_argument("--no-store", dest="no_store", action="store_true")
     pr.add_argument("cmd", nargs=argparse.REMAINDER, help="-- <kernel launch argv>")
@@ -239,9 +252,14 @@ def _build_parser() -> argparse.ArgumentParser:
     cm.add_argument("--kernel-name", dest="kernel_name", default=None)
     cm.add_argument("--shape", default=None, help="JSON object, e.g. '{\"M\":512}'")
     cm.add_argument("--all", action="store_true", help="every identity in history")
-    cm.add_argument("--threshold", type=float, default=_selfcheck.DEFAULT_THRESHOLD)
     cm.add_argument(
-        "--noise-k", dest="noise_k", type=float, default=_selfcheck.DEFAULT_NOISE_K
+        "--threshold", type=_nonnegative_float, default=_selfcheck.DEFAULT_THRESHOLD
+    )
+    cm.add_argument(
+        "--noise-k",
+        dest="noise_k",
+        type=_nonnegative_float,
+        default=_selfcheck.DEFAULT_NOISE_K,
     )
     cm.set_defaults(func=_cmd_compare)
     return p

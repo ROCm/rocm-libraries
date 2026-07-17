@@ -194,7 +194,7 @@ class TestProfileCmd(unittest.TestCase):
             shape=None,
             warmup=0,
             per_dispatch=False,
-            warn=None
+            warn=None,
         ):
             self.calls.append(
                 {
@@ -343,6 +343,42 @@ class TestParser(unittest.TestCase):
                         "prog",
                     ]
                 )
+
+    def test_threshold_and_noise_k_reject_invalid_values(self):
+        parser = cli_mod._build_parser()
+        for option in ("--threshold", "--noise-k"):
+            for value in ("-1", "nan", "inf", "-inf"):
+                commands = (
+                    [
+                        "profile",
+                        "--arch",
+                        "gfx950",
+                        f"{option}={value}",
+                        "--",
+                        "prog",
+                    ],
+                    ["compare", "--all", f"{option}={value}"],
+                )
+                for command in commands:
+                    with self.subTest(option=option, value=value, command=command[0]):
+                        with self.assertRaises(SystemExit):
+                            parser.parse_args(command)
+
+    def test_threshold_and_noise_k_accept_zero_and_positive_values(self):
+        parser = cli_mod._build_parser()
+        for command in ("profile", "compare"):
+            prefix = (
+                [command, "--arch", "gfx950"]
+                if command == "profile"
+                else [command, "--all"]
+            )
+            for value in ("0", "1.5"):
+                args = parser.parse_args(
+                    [*prefix, "--threshold", value, "--noise-k", value]
+                )
+                with self.subTest(command=command, value=value):
+                    self.assertEqual(args.threshold, float(value))
+                    self.assertEqual(args.noise_k, float(value))
 
 
 if __name__ == "__main__":
