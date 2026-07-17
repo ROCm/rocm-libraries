@@ -3485,6 +3485,38 @@ TEST(auxiliary_pre_checkin, ConstBellGet)
     ASSERT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
 }
 
+TEST(auxiliary_pre_checkin, BellSetPointers)
+{
+    rocsparse_spmat_descr descr;
+    int64_t               rows           = 10;
+    int64_t               cols           = 10;
+    int64_t               ell_block_size = 2;
+    int64_t               ell_cols       = 4;
+    void*                 col_indices = reinterpret_cast<void*>(0x2000); // Non-null dummy pointer
+    void*                 values      = reinterpret_cast<void*>(0x3000); // Non-null dummy pointer
+
+    ASSERT_EQ(rocsparse_create_bell_descr(&descr,
+                                          rows,
+                                          cols,
+                                          rocsparse_direction_row,
+                                          ell_block_size,
+                                          ell_cols,
+                                          col_indices,
+                                          values,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_index_base_zero,
+                                          rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    void* new_col_indices = reinterpret_cast<void*>(0x4000);
+    void* new_values      = reinterpret_cast<void*>(0x5000);
+
+    ASSERT_EQ(rocsparse_bell_set_pointers(descr, new_col_indices, new_values),
+              rocsparse_status_success);
+
+    ASSERT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
+}
+
 // =============================================================================
 // SELL Matrix Create and Get Tests
 // =============================================================================
