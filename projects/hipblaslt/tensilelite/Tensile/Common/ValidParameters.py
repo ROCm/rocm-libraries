@@ -1085,9 +1085,12 @@ validParameters = { # we need to make sure this matches develop
     #   VGPR -> M-contiguous LDS scratch -> tensor_store_from_lds, with the descriptor
     #   tensor_dim clamped to (Size - tileStart) so partial edge tiles are handled by
     #   hardware OOB. No per-element buffer_store fallback is emitted on the store-to-D
-    #   path (buffer_store // store D == 0). Only affects the store to the final D
-    #   output; the GSU>1 / MultipleBuffer(SingleKernel) workspace-accumulation store
-    #   path is left unchanged.
+    #   path (buffer_store // store D == 0). Only affects the store to the final D output.
+    #   Supported (FFM-validated) configs: gfx1250, bf16 DestDataType, HighPrecisionAccumulate,
+    #   GlobalSplitU=1 direct-to-D, SourceSwap 0/1, UseSubtileImpl 0/1, UseBeta 0/1.  Everything
+    #   else (StreamK, GlobalSplitU>1 workspace accumulation, StoreRemapVectorWidth, UseE/UseBias/
+    #   UseScaleAlphaVec/UseScaleAB/UseScaleCD/Activation) is rejected at solution time
+    #   (SolutionStructs/Solution.py) rather than silently mis-generated.
     "TDMStoreInst": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:

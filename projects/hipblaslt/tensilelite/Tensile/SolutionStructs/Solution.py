@@ -1567,22 +1567,47 @@ class Solution(collections.abc.Mapping):
       state["SynchronizerSizeCheck"] = 1
     #   state["BatchSizeEqual"] = 1
 
-    # TDMStoreInst: gfx1250 tensor_store_from_lds "store-to-final-D" epilogue.  Only a narrow,
-    # validated configuration is supported, so whitelist it here and reject everything else at
-    # solution time rather than silently mis-generating a broken kernel.  StreamK MUST be
-    # rejected here: it sets _GlobalAccumulation='PartialsBuffer' (partial-tile store target is
-    # the workspace, not D), which the GlobalWriteBatch TDM store gate does NOT exclude.
+    # TDMStoreInst: gfx1250 tensor_store_from_lds epilogue.  Supported + FFM-validated: bf16
+    # DestDataType, HighPrecisionAccumulate (fp32->bf16 convert+pack), GlobalSplitU=1 direct-to-D,
+    # SourceSwap 0/1, UseSubtileImpl 0/1, and UseBeta 0/1 (verified numerically incl. beta!=0 at
+    # M/N edges).  Reject everything not yet supported at solution time so an unsupported config is
+    # cleanly rejected instead of silently mis-generating a broken kernel:
+    #   - non-gfx1250 / non-bf16 / non-HPA: the tensor_store_from_lds convert+pack path assumptions
+    #     do not hold.
+    #   - StreamK / GlobalSplitU>1: the partial-tile workspace store (fp32 partials -> PartialsBuffer)
+    #     + fixup reduction path is not implemented; the TDM store would write to the wrong
+    #     destination.  Tracked separately.
+    #   - StoreRemapVectorWidth: the TDM store branch is skipped, so TDMStoreInst would be silently
+    #     inactive.
+    #   - UseE / UseBias / UseScaleAlphaVec / UseScaleAB / UseScaleCD / Activation: epilogue features
+    #     that are unvalidated with the TDM store; several stage into LDS at offset 0 and would
+    #     collide with the TDM M-contiguous scratch.
     if state["TDMStoreInst"]:
+      pt = state["ProblemType"]
       if tuple(state["ISA"])[:2] != (12, 5):
         reject(state, printRejectionReason, "TDMStoreInst requires gfx1250 (tensor_store_from_lds is gfx1250-only)")
-      elif not state["ProblemType"]["DestDataType"].isBFloat16():
+      elif not pt["DestDataType"].isBFloat16():
         reject(state, printRejectionReason, "TDMStoreInst currently supports only bf16 DestDataType (converted+packed store path)")
+      elif not pt["HighPrecisionAccumulate"]:
+        reject(state, printRejectionReason, "TDMStoreInst requires HighPrecisionAccumulate (fp32->bf16 convert+pack store path)")
       elif state["StreamK"] != 0:
-        reject(state, printRejectionReason, "TDMStoreInst does not support StreamK (partials/workspace store is not the final D)")
-      elif state["GlobalSplitU"] != 1:
-        reject(state, printRejectionReason, "TDMStoreInst requires GlobalSplitU=1 (direct-to-D store; GSU>1 accumulates in workspace)")
-      elif state["ProblemType"]["UseBeta"]:
-        reject(state, printRejectionReason, "TDMStoreInst does not yet support UseBeta (beta-edge C load is unproven)")
+        reject(state, printRejectionReason, "TDMStoreInst does not yet support StreamK (partial-tile workspace store + fixup reduction unimplemented)")
+      elif state["GlobalSplitU"] > 1:
+        reject(state, printRejectionReason, "TDMStoreInst does not yet support GlobalSplitU>1 (workspace accumulation store)")
+      elif state["StoreRemapVectorWidth"]:
+        reject(state, printRejectionReason, "TDMStoreInst is incompatible with StoreRemapVectorWidth (TDM store would be silently inactive)")
+      elif pt.get("UseE", False):
+        reject(state, printRejectionReason, "TDMStoreInst does not support UseE (auxiliary output)")
+      elif pt.get("UseBias", 0):
+        reject(state, printRejectionReason, "TDMStoreInst does not support UseBias")
+      elif pt.get("UseScaleAlphaVec", 0):
+        reject(state, printRejectionReason, "TDMStoreInst does not support UseScaleAlphaVec")
+      elif pt.get("UseScaleAB", ""):
+        reject(state, printRejectionReason, "TDMStoreInst does not support UseScaleAB")
+      elif pt.get("UseScaleCD", False):
+        reject(state, printRejectionReason, "TDMStoreInst does not support UseScaleCD")
+      elif pt.get("Activation", False):
+        reject(state, printRejectionReason, "TDMStoreInst does not support fused Activation")
 
     if state["StreamK"] == 0 and state["GlobalSplitU"] == 0:
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
