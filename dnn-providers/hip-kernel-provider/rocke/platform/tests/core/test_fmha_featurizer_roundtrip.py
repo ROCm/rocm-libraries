@@ -211,16 +211,21 @@ def _build_lib(tmp):
     gen.generate(__import__("pathlib").Path(disp))
     shim = os.path.join(tmp, "shim.cpp")
     with open(shim, "w") as f:
-        f.write(
-            """
+        f.write("""
 #include "dispatcher/sdpa_fwd/FmhaFeaturizer.hpp"
 #include <cstring>
 using namespace rocke_client::dispatcher;
-extern "C" void featurize_c(
+extern "C"
+#ifdef _WIN32
+__declspec(dllexport)
+#endif
+void featurize_c(
     double batch,double sq,double sk,double hq,double hk,double dq,double dv,
     const char* dtype,
     double pip,double tm0,double tn0,double num_warps,
-    double mask,double bias,double lse,double sink,double paged,
+    double ps,double psk,double pd,double pdv,
+    double mask,double bias,double lse,double dropout,double logits,
+    double sink,double skip,double qscale,double paged,
     double num_cus,double simds_per_cu,double total_simds,double shader_engines,
     double max_clock_mhz,double wavefront_size,double lds_capacity,double num_xcd,
     double* out)
@@ -228,7 +233,9 @@ extern "C" void featurize_c(
     FmhaProblemInputs p; p.batch=batch;p.sq=sq;p.sk=sk;p.hq=hq;p.hk=hk;
     p.dq=dq;p.dv=dv;p.dtype=dtype;
     FmhaConfigInputs c; c.pip=pip;c.tm0=tm0;c.tn0=tn0;c.num_warps=num_warps;
-    c.mask=mask;c.bias=bias;c.lse=lse;c.sink=sink;c.paged=paged;
+    c.ps=ps;c.psk=psk;c.pd=pd;c.pdv=pdv;
+    c.mask=mask;c.bias=bias;c.lse=lse;c.dropout=dropout;c.logits=logits;
+    c.sink=sink;c.skip=skip;c.qscale=qscale;c.paged=paged;
     FmhaHwInputs hw; hw.num_cus=num_cus;hw.simds_per_cu=simds_per_cu;
     hw.total_simds=total_simds;hw.shader_engines=shader_engines;
     hw.max_clock_mhz=max_clock_mhz;hw.wavefront_size=wavefront_size;
@@ -236,21 +243,22 @@ extern "C" void featurize_c(
     auto arr = fmha_featurize(p,c,hw).to_array();
     std::memcpy(out, arr.data(), arr.size()*sizeof(double));
 }
-"""
-        )
-    so = os.path.join(tmp, "feat.so")
+""")
+    # Platform-appropriate shared library extension
+    ext = ".dll" if sys.platform == "win32" else ".so"
+    so = os.path.join(tmp, "feat" + ext)
     subprocess.run(
         [_CXX, "-std=c++17", "-O2", "-I", tmp, "-shared", "-fPIC", "-o", so, shim],
         check=True,
         capture_output=True,
     )
     lib = ctypes.CDLL(so)
-    # shim signature: 7 problem doubles, dtype char*, 9 config doubles,
+    # shim signature: 7 problem doubles, dtype char*, 17 config doubles,
     # 8 hw doubles, out*.
     lib.featurize_c.argtypes = (
         [ctypes.c_double] * 7
         + [ctypes.c_char_p]
-        + [ctypes.c_double] * (9 + 8)
+        + [ctypes.c_double] * (17 + 8)
         + [ctypes.POINTER(ctypes.c_double)]
     )
     return lib
@@ -282,10 +290,18 @@ def test_roundtrip_bit_identical(prob, cfg, tmp_path):
         float(cfg.get("tile_m0", 16)),
         float(cfg.get("tile_n0", 0)),
         float(cfg.get("num_warps", 1)),
+        float(cfg.get("pad_s", 0)),
+        float(cfg.get("pad_sk", 0)),
+        float(cfg.get("pad_d", 0)),
+        float(cfg.get("pad_dv", 0)),
         float(cfg.get("mask", 0)),
         float(cfg.get("bias", 0)),
         float(cfg.get("lse", 0)),
+        float(cfg.get("dropout", 0)),
+        float(cfg.get("logits", 0)),
         float(cfg.get("sink", 0)),
+        float(cfg.get("skip", 0)),
+        float(cfg.get("qscale", 0)),
         float(cfg.get("paged", 1)),
         float(_HW["num_cus"]),
         float(_HW["simds_per_cu"]),
