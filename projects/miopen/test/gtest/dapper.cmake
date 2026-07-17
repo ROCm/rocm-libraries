@@ -2,6 +2,12 @@ macro(dapper_init)
     set(MIOPEN_TEST_SINGLE_GTEST 1)
     set(MIOPEN_TEST_DISCRETE 1)
 
+    # Additive attribution bridges run during 'parse' (see dependency-parser/main.py).
+    # Empty = none (base behavior). e.g. -DMIOPEN_DAPPER_BRIDGES=stem or =symbol.
+    # 'symbol' supersedes 'stem'. The bridge module must exist on the current branch.
+    set(MIOPEN_DAPPER_BRIDGES "" CACHE STRING
+        "Comma-separated dapper attribution bridges to run during 'parse' (stem, symbol)")
+
     # TRJS
     message(STATUS "------------------------------------ CMAKE_CURRENT_LIST_DIR: ${CMAKE_CURRENT_LIST_DIR}")
     message(STATUS "------------------------------------ CMAKE_SOURCE_DIR:       ${CMAKE_SOURCE_DIR}")
@@ -40,7 +46,7 @@ macro(dapper_init)
     # mapping: file -> test-executable mapping; needs tests built so build.ninja is final.
     add_custom_target(dapper_mapping
         COMMENT "Generating ${MAPPING_JSON}"
-        COMMAND ${Python_EXECUTABLE} ${PY_MAIN} parse ${BUILD_NINJA}
+        COMMAND ${Python_EXECUTABLE} ${PY_MAIN} parse ${BUILD_NINJA} --bridges=${MIOPEN_DAPPER_BRIDGES}
         WORKING_DIRECTORY ${MIOPEN_DAPPER_OUT_DIR}
         VERBATIM
     )
@@ -171,7 +177,7 @@ macro(dapper_add_sharded_test)
         COMMAND ${Python_EXECUTABLE} -c
             "import sys, pathlib; f=pathlib.Path('${FIXTURES_JSON}'); f.exists() or (print(f'Error: {f.name} not found. Run dapper_fix_diff to regenerate it via the preprocessor, or copy a valid file into: {f.parent}'), sys.exit(1))"
         COMMAND ${Python_EXECUTABLE} ${PY_MAIN} shas
-        COMMAND ${Python_EXECUTABLE} ${PY_MAIN} parse ${BUILD_NINJA}
+        COMMAND ${Python_EXECUTABLE} ${PY_MAIN} parse ${BUILD_NINJA} --bridges=${MIOPEN_DAPPER_BRIDGES}
         COMMAND ${Python_EXECUTABLE} ${PY_MAIN} select ${MAPPING_JSON}
             --fixturemap=${FIXTURES_JSON} --shardsfile=${SHARDS_FILE}
         COMMAND ${Python_EXECUTABLE} ${MIOPEN_DAPPER_DIFF}
@@ -186,7 +192,7 @@ macro(dapper_add_sharded_test)
         COMMENT "Running full dapper pipeline, regenerating fixtures (no rebuild)..."
         COMMAND ${Python_EXECUTABLE} ${PY_MAIN} shas
         COMMAND ${Python_EXECUTABLE} ${PY_FIXTURES}
-        COMMAND ${Python_EXECUTABLE} ${PY_MAIN} parse ${BUILD_NINJA}
+        COMMAND ${Python_EXECUTABLE} ${PY_MAIN} parse ${BUILD_NINJA} --bridges=${MIOPEN_DAPPER_BRIDGES}
         COMMAND ${Python_EXECUTABLE} ${PY_MAIN} select ${MAPPING_JSON}
             --fixturemap=${FIXTURES_JSON} --shardsfile=${SHARDS_FILE}
         COMMAND ${Python_EXECUTABLE} ${MIOPEN_DAPPER_DIFF}

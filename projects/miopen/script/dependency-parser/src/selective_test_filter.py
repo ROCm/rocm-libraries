@@ -104,10 +104,9 @@ def select_tests(file_to_executables, changed_files, filter_mode):
     return sorted(affected)
 
 
-def create_gtest_filter(tests_to_run, fixturemap_json):
+def create_gtest_filter(tests_to_run, fixturemap):
     gtest_filter = ""
-    if fixturemap_json:
-        fixturemap = load_fixturemap(fixturemap_json)
+    if fixturemap:
         for file in tests_to_run:
             if file not in fixturemap:
                 if file != "bin/miopen_gtest":
@@ -121,6 +120,34 @@ def create_gtest_filter(tests_to_run, fixturemap_json):
     else:
         gtest_filter = "*"
     return gtest_filter
+
+
+def classify_fallback(
+    changed_files, file_to_executables, fixturemap, compiled_sources, gtest_filter
+):
+    """Decide how the runner should behave when attribution is incomplete.
+
+    - 'union'           : changes were attributed to fixtures -> run the subtractive
+                          union (dapper's normal, time-saving mode).
+    - 'entire_category' : >=1 changed file is part of the build graph but attributed to
+                          NO fixtures (e.g. a common .cpp body the include graph cannot
+                          reach). Run the entire category filter -- safe, never misses,
+                          and never the near-empty minimal default. Bridges move such
+                          files back to 'union'.
+    - 'minimal'         : no test-relevant change -> minimal smoke default.
+    """
+    if not changed_files:
+        return "minimal"
+    saw_attributed = bool(gtest_filter)
+    for f in changed_files:
+        exes = file_to_executables.get(f, [])
+        if any(e in fixturemap for e in exes):
+            continue  # attributed to a fixture-bearing test
+        # Unattributed. Treat as test-relevant if it is compiled anywhere in the
+        # build, or is a dependency (e.g. header) of some compiled object.
+        if f in compiled_sources or exes:
+            return "entire_category"
+    return "union" if saw_attributed else "minimal"
 
 
 def _xml_timestamp(ts):
@@ -283,22 +310,43 @@ def main():
         sys.exit(1)
 
     changed_files = get_changed_files(ref1, ref2, path_to_folder)
+
+    # Load the mapping once: file->executables plus the compiled-source set used to
+    # classify unattributed-but-compiled changes.
+    with open(depmap_json, "r") as f:
+        depmap_raw = json.load(f)
+    file_to_executables = depmap_raw.get("file_to_executables", depmap_raw)
+    compiled_sources = set(depmap_raw.get("compiled_sources", []))
+    fixturemap = load_fixturemap(fixturemap_json) if fixturemap_json else None
+
     if not changed_files:
         print("No changed files detected.")
         tests = []
         gtest_filter = ""
+        fallback_mode = "minimal"
     else:
-        file_to_executables = load_depmap(depmap_json)
         tests = select_tests(file_to_executables, changed_files, filter_mode)
-        gtest_filter = create_gtest_filter(tests, fixturemap_json)
+        gtest_filter = create_gtest_filter(tests, fixturemap)
         if shardsfile:
             gtest_shards = load_shards(shardsfile)
+        if fixturemap:
+            fallback_mode = classify_fallback(
+                changed_files,
+                file_to_executables,
+                fixturemap,
+                compiled_sources,
+                gtest_filter,
+            )
+        else:
+            # No fixture map -> gtest_filter is "*" (run all); union is the safe label.
+            fallback_mode = "union"
 
     with open(output_json, "w") as f:
         json.dump(
             {
                 "tests_to_run": tests,
                 "dapper_filter": gtest_filter,
+                "fallback_mode": fallback_mode,
                 "changed_files": sorted(changed_files),
                 "gtest_shards": gtest_shards,
             },

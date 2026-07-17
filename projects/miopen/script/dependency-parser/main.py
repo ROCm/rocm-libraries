@@ -18,15 +18,69 @@ Features:
 """
 
 import argparse
+import importlib
 import os
 import subprocess
+import time
 
 
-def run_dependency_parser(args):
-    from src.enhanced_ninja_parser import main as ninja_main
+# Bridge registry: name -> (module, callable). A "bridge" is an additive
+# attribution pass that runs after the ninja-deps mapping and only unions extra
+# edges into the parser's in-memory file->executables map (never modifying the
+# base include graph). Modules live on the gap-fix branches
+# (stem -> src/common_stem, symbol -> src/symbol_graph, future runtime -> ...)
+# and are imported lazily so the base branch works with no bridge selected.
+BRIDGE_REGISTRY = {
+    "stem": ("src.common_stem", "apply"),
+    "symbol": ("src.symbol_graph", "apply"),
+}
 
-    sys.argv = ["enhanced_ninja_parser.py"] + args
-    ninja_main()
+# Supersession: selecting the key drops the listed bridges (a superseding bridge
+# makes the superseded one redundant). The symbol bridge is correctness-dominant
+# over the stem bridge, so selecting 'symbol' disables 'stem'.
+BRIDGE_SUPERSEDES = {"symbol": ["stem"]}
+
+
+def resolve_bridges(bridges_arg):
+    """Parse the --bridges list, dropping bridges superseded by a selected one."""
+    selected = [b.strip() for b in (bridges_arg or "").split(",") if b.strip()]
+    for superseding, disabled in BRIDGE_SUPERSEDES.items():
+        if superseding in selected:
+            for name in disabled:
+                if name in selected:
+                    selected.remove(name)
+                    print(f"bridge '{name}' disabled by '{superseding}'")
+    seen = set()
+    return [b for b in selected if not (b in seen or seen.add(b))]
+
+
+def apply_bridges(parser, bridges_arg):
+    """Run each selected additive bridge over the in-memory mapping, with timing."""
+    for name in resolve_bridges(bridges_arg):
+        if name not in BRIDGE_REGISTRY:
+            sys.exit(
+                f"Unknown bridge '{name}'. Known bridges: {sorted(BRIDGE_REGISTRY)}"
+            )
+        module_name, func_name = BRIDGE_REGISTRY[name]
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as e:
+            sys.exit(
+                f"Bridge '{name}' is not available on this branch "
+                f"(module {module_name} missing): {e}"
+            )
+        print(f"[bridge:{name}] running...")
+        t0 = time.monotonic()
+        getattr(module, func_name)(parser)
+        print(f"[bridge:{name}] completed in {time.monotonic() - t0:.1f}s")
+
+
+def run_dependency_parser(build_ninja, ninja, workspace_root, bridges):
+    from src.enhanced_ninja_parser import build_mapping, export_mapping
+
+    parser = build_mapping(build_ninja, ninja, workspace_root or "..")
+    apply_bridges(parser, bridges)
+    export_mapping(parser, os.path.dirname(build_ninja))
 
 
 def run_selective_test_filter(args):
@@ -112,6 +166,13 @@ def main():
     parser_parse.add_argument(
         "--workspace-root", help="Path to workspace root", default=None
     )
+    parser_parse.add_argument(
+        "--bridges",
+        default="",
+        help="Comma-separated additive attribution bridges to run after the "
+        "ninja-deps mapping (e.g. 'stem', 'symbol'). Empty = none. If 'symbol' "
+        "is listed it supersedes 'stem'.",
+    )
 
     # Selective testing
     parser_test = subparsers.add_parser(
@@ -171,10 +232,9 @@ def main():
     elif args.command == "parse":
         if not os.path.isfile(shas_file):
             write_shas_file("MAIN PARSE: ", shas_file)
-        parse_args = [args.build_ninja, args.ninja]
-        if args.workspace_root:
-            parse_args.append(args.workspace_root)
-        run_dependency_parser(parse_args)
+        run_dependency_parser(
+            args.build_ninja, args.ninja, args.workspace_root, args.bridges
+        )
     elif args.command == "select":
         filter_args = [args.depmap_json]
         (base_sha, feature_sha) = read_shas_file("MAIN SELECT", shas_file)

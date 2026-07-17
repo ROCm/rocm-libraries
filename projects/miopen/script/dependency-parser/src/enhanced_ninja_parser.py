@@ -161,23 +161,54 @@ class EnhancedNinjaDependencyParser:
             print(f"Error getting dependencies for {object_file}: {e}")
             return []
 
+    @staticmethod
+    def _project_relative(path):
+        """Normalize a build path to a project-relative path (strip up to 'miopen/')."""
+        return (
+            path[path.find("miopen") + len("miopen/") :] if "miopen" in path else path
+        )
+
+    @staticmethod
+    def _is_gtest_source(source_path):
+        """True if a source path lives under a .../test/gtest/ directory."""
+        parts = Path(source_path).parts
+        return any(
+            parts[i] == "test" and parts[i + 1] == "gtest"
+            for i in range(len(parts) - 1)
+        )
+
+    def _attribute_object_deps(self, obj_file, key):
+        """Attribute all project-file dependencies of one object to `key`."""
+        for dep_file in self.object_to_all_deps.get(obj_file, []):
+            # Filter out system files and focus on project files
+            if self._is_project_file(dep_file):
+                self.file_to_executables[self._project_relative(dep_file)].add(key)
+
+    def _add_single_gtest_synthetic_keys(self):
+        """Attribute each test/gtest source object to a synthetic bin/test_<stem> key.
+
+        The aggregated ``miopen_gtest`` executable links every test source, so the
+        real-executable mapping collapses to ``{bin/miopen_gtest}`` and loses
+        per-test granularity in a single-gtest build. Emitting the synthetic
+        ``bin/test_<stem>`` key -- the same key ``extract_gtest_fixtures`` uses --
+        restores that granularity so selection joins the fixture map whether the
+        build is single-gtest or discrete. In discrete builds the synthetic key
+        equals the real discrete executable name, so this is idempotent.
+        """
+        for obj_file, source in self.object_to_source.items():
+            if self._is_gtest_source(source):
+                self._attribute_object_deps(obj_file, f"bin/test_{Path(source).stem}")
+
     def _build_file_to_executable_mapping(self):
         """Build the final mapping from files to executables."""
         print("Building file-to-executable mapping...")
 
         for exe, object_files in self.executable_to_objects.items():
             for obj_file in object_files:
-                # Add all dependencies of this object file
-                if obj_file in self.object_to_all_deps:
-                    for dep_file in self.object_to_all_deps[obj_file]:
-                        project_dep_file = (
-                            dep_file[dep_file.find("miopen") + len("miopen/") :]
-                            if "miopen" in dep_file
-                            else dep_file
-                        )
-                        # Filter out system files and focus on project files
-                        if self._is_project_file(dep_file):
-                            self.file_to_executables[project_dep_file].add(exe)
+                self._attribute_object_deps(obj_file, exe)
+
+        # Single-gtest support (additive; idempotent for discrete builds).
+        self._add_single_gtest_synthetic_keys()
 
         print(f"Built mapping for {len(self.file_to_executables)} files")
 
@@ -253,6 +284,12 @@ class EnhancedNinjaDependencyParser:
             "executable_to_files": {
                 exe: sorted(files) for exe, files in exe_to_files.items()
             },
+            # Every source compiled anywhere in the build (project-relative). Used by
+            # selective_test_filter to classify a changed source as compiled-in (and
+            # thus test-relevant) even when it maps to no fixtures.
+            "compiled_sources": sorted(
+                {self._project_relative(s) for s in self.object_to_source.values()}
+            ),
             "statistics": {
                 "total_files": len(self.file_to_executables),
                 "total_executables": len(self.executable_to_objects),
@@ -302,6 +339,43 @@ class EnhancedNinjaDependencyParser:
                 print(f"  {file_path}: {len(exes)} executables")
 
 
+def build_mapping(build_file, ninja_path="ninja", workspace_root=".."):
+    """Parse build.ninja into a dependency mapping and return the parser.
+
+    Kept separate from export so callers (e.g. main.py) can run additive bridge
+    passes over the in-memory maps before the JSON is written.
+    """
+    if not os.path.exists(build_file):
+        print(f"Error: Build file not found: {build_file}")
+        sys.exit(1)
+
+    try:
+        subprocess.run([ninja_path, "--version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print(f"Error: ninja executable not found: {ninja_path}")
+        sys.exit(1)
+
+    parser = EnhancedNinjaDependencyParser(build_file, ninja_path)
+    parser.workspace_root = workspace_root  # Attach for use in _get_object_dependencies
+    parser.parse_dependencies()
+    parser.print_summary()
+    return parser
+
+
+def export_mapping(parser, output_dir):
+    """Write the CSV and JSON mapping outputs; return the JSON path."""
+    csv_file = os.path.join(output_dir, "enhanced_file_executable_mapping.csv")
+    json_file = os.path.join(output_dir, "miopen_dapper_mapping.json")
+
+    parser.export_to_csv(csv_file)
+    parser.export_to_json(json_file)
+
+    print(f"\nResults exported to:")
+    print(f"  CSV: {csv_file}")
+    print(f"  JSON: {json_file}")
+    return json_file
+
+
 def main():
     # Accept: build_file, ninja_path, workspace_root
     default_workspace_root = ".."
@@ -322,32 +396,8 @@ def main():
         ninja_path = "ninja"
         workspace_root = default_workspace_root
 
-    if not os.path.exists(build_file):
-        print(f"Error: Build file not found: {build_file}")
-        sys.exit(1)
-
-    try:
-        subprocess.run([ninja_path, "--version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print(f"Error: ninja executable not found: {ninja_path}")
-        sys.exit(1)
-
-    parser = EnhancedNinjaDependencyParser(build_file, ninja_path)
-    parser.workspace_root = workspace_root  # Attach for use in _get_object_dependencies
-    parser.parse_dependencies()
-    parser.print_summary()
-
-    # Export results
-    output_dir = os.path.dirname(build_file)
-    csv_file = os.path.join(output_dir, "enhanced_file_executable_mapping.csv")
-    json_file = os.path.join(output_dir, "miopen_dapper_mapping.json")
-
-    parser.export_to_csv(csv_file)
-    parser.export_to_json(json_file)
-
-    print(f"\nResults exported to:")
-    print(f"  CSV: {csv_file}")
-    print(f"  JSON: {json_file}")
+    parser = build_mapping(build_file, ninja_path, workspace_root)
+    export_mapping(parser, os.path.dirname(build_file))
 
 
 if __name__ == "__main__":
