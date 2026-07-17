@@ -1,6 +1,9 @@
 macro(dapper_init)
     set(MIOPEN_TEST_SINGLE_GTEST 1)
-    set(MIOPEN_TEST_DISCRETE 1)
+    # Dapper no longer forces the discrete test build. The dependency mapping is now
+    # derived from the single aggregated miopen_gtest (per-source synthetic bin/test_<stem>
+    # keys in enhanced_ninja_parser), so the ~280 discrete test binaries are unnecessary.
+    # Respect whatever MIOPEN_TEST_DISCRETE the user/CI set (default off) instead of forcing it.
 
     # Additive attribution bridges run during 'parse' (see dependency-parser/main.py).
     # Empty = none (base behavior). e.g. -DMIOPEN_DAPPER_BRIDGES=stem or =symbol.
