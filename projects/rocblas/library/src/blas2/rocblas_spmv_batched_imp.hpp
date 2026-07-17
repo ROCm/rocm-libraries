@@ -90,7 +90,11 @@ namespace
                                  "--incy",
                                  incy,
                                  "--batch_count",
-                                 batch_count);
+                                 batch_count,
+                                 "--alpha_stride",
+                                 handle->get_stride_alpha(),
+                                 "--beta_stride",
+                                 handle->get_stride_beta());
 
             if(layer_mode & rocblas_layer_mode_log_profile)
                 logger.log_profile(handle,
@@ -104,11 +108,32 @@ namespace
                                    "incy",
                                    incy,
                                    "batch_count",
-                                   batch_count);
+                                   batch_count,
+                                   "stride_alpha",
+                                   handle->get_stride_alpha(),
+                                   "stride_beta",
+                                   handle->get_stride_beta());
         }
 
-        rocblas_status arg_status = rocblas_spmv_arg_check<API_INT, T>(
-            handle, uplo, n, alpha, 0, A, 0, 0, x, 0, incx, 0, beta, 0, y, 0, incy, 0, batch_count);
+        rocblas_status arg_status = rocblas_spmv_arg_check<API_INT, T>(handle,
+                                                                       uplo,
+                                                                       n,
+                                                                       alpha,
+                                                                       handle->get_stride_alpha(),
+                                                                       A,
+                                                                       0,
+                                                                       0,
+                                                                       x,
+                                                                       0,
+                                                                       incx,
+                                                                       0,
+                                                                       beta,
+                                                                       handle->get_stride_beta(),
+                                                                       y,
+                                                                       0,
+                                                                       incy,
+                                                                       0,
+                                                                       batch_count);
         if(arg_status != rocblas_status_continue)
             return arg_status;
 
@@ -137,8 +162,26 @@ namespace
                 return spmv_check_numerics_status;
         }
 
-        rocblas_status status = ROCBLAS_API(rocblas_internal_spmv_launcher)(
-            handle, uplo, n, alpha, 0, A, 0, 0, x, 0, incx, 0, beta, 0, y, 0, incy, 0, batch_count);
+        rocblas_status status
+            = ROCBLAS_API(rocblas_internal_spmv_launcher)(handle,
+                                                          uplo,
+                                                          n,
+                                                          alpha,
+                                                          handle->get_stride_alpha(),
+                                                          A,
+                                                          0,
+                                                          0,
+                                                          x,
+                                                          0,
+                                                          incx,
+                                                          0,
+                                                          beta,
+                                                          handle->get_stride_beta(),
+                                                          y,
+                                                          0,
+                                                          incy,
+                                                          0,
+                                                          batch_count);
         if(status != rocblas_status_success)
             return status;
 
