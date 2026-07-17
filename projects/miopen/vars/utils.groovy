@@ -23,6 +23,15 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+
+import org.jenkinsci.plugins.workflow.graph.FlowGraphWalker
+import org.jenkinsci.plugins.workflow.actions.ErrorAction
+import org.jenkinsci.plugins.workflow.actions.WarningAction
+import org.jenkinsci.plugins.workflow.actions.LabelAction
+import org.jenkinsci.plugins.workflow.actions.ThreadNameAction
+import org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode
+import org.jenkinsci.plugins.workflow.cps.nodes.StepEndNode
+
 def miopenCheckout()
 {
     // checkout project
@@ -403,6 +412,41 @@ def promoteTheRockDockerImage(String hashedImage, String fullHash)
 }
 
 
+// Embeds TheRock and CK git hashes as Docker image labels.
+private def embedBuildMetadata(String dockerArgs) {
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
+            def promotedHash = sh(
+                script: """
+                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                """.stripIndent(),
+                returnStdout: true
+            ).trim()
+            if (promotedHash) {
+                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
+                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
+                env.THEROCK_PROMOTED_HASH = promotedHash
+            }
+        }
+    } catch (Exception e) {
+        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
+    }
+
+    def ckHash = sh(
+        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
+        returnStdout: true
+    ).trim()
+    if (ckHash) {
+        echo "Embedding CK hash into CI image metadata: ${ckHash}"
+        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
+        env.CK_GIT_HASH = ckHash
+    }
+    return dockerArgs
+}
+
+
 def getDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
@@ -484,93 +528,107 @@ def getDockerImage(Map conf=[:])
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
-    // Carry the promoted TheRock hash forward into the CI image metadata.
-    try {
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
-            def promotedHash = sh(
-                script: """
-                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
-                """.stripIndent(),
-                returnStdout: true
-            ).trim()
-            if (promotedHash) {
-                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
-                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
-                env.THEROCK_PROMOTED_HASH = promotedHash
-            }
-        }
-    } catch (Exception e) {
-        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
-    }
-
-    // Embed the CK commit hash built into this image.
-    def ckHash = sh(
-        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
-        returnStdout: true
-    ).trim()
-    if (ckHash) {
-        echo "Embedding CK hash into CI image metadata: ${ckHash}"
-        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
-        env.CK_GIT_HASH = ckHash
-    }
-
-    echo "Docker Args: ${dockerArgs}"
+    // ensure_only: true = check registry only (manifest inspect), build if absent.
+    // ensure_only: false (default) = pull to local daemon, build if pull fails.
+    def ensure_only = conf.get("ensure_only", false)
 
     def dockerImage
-    try{
-        echo "Pulling down image: ${image}"
-        dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            dockerImage.pull()
+    if (ensure_only) {
+        def remoteExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
         }
-        def embeddedTheRockHash = sh(
-            script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
-            returnStdout: true
-        ).trim()
-        def embeddedCkHash = sh(
-            script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
-            returnStdout: true
-        ).trim()
-        echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
-    }
-    catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-        echo "The job was cancelled or aborted"
-        throw e
-    }
-    catch(Exception ex)
-    {
-        echo "Building image..."
-        def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
-                              "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
-
-        try {
-
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                sh """
-                    docker buildx rm ci-builder || true
-                    docker buildx create --name ci-builder --driver docker-container --use
-                    docker buildx use ci-builder
-                    docker buildx inspect --bootstrap
-                """.stripIndent()
-                sh """
-                    DOCKER_BUILDKIT=1 docker buildx build \
-                    --builder ci-builder \
-                    --push \
-                    --tag ${image} \
-                    ${dockerCacheArgs} \
-                    ${dockerArgs} \
-                    ${buildContext}
-                """.stripIndent()
-            }
+        if (remoteExists) {
+            echo "Image ${image} already exists in registry - skipping build."
             dockerImage = docker.image("${image}")
-        } catch (Exception bex) {
-            echo "Buildx not available or failed, falling back to docker.build"
-            dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+        } else {
+            dockerArgs = embedBuildMetadata(dockerArgs)
+            echo "Docker Args: ${dockerArgs}"
+            echo "Building image..."
+            def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+            def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                                  "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
+            try {
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    sh """
+                        docker buildx rm ci-builder || true
+                        docker buildx create --name ci-builder --driver docker-container --use
+                        docker buildx use ci-builder
+                        docker buildx inspect --bootstrap
+                    """.stripIndent()
+                    sh """
+                        DOCKER_BUILDKIT=1 docker buildx build \
+                        --builder ci-builder \
+                        --push \
+                        --tag ${image} \
+                        ${dockerCacheArgs} \
+                        ${dockerArgs} \
+                        ${buildContext}
+                    """.stripIndent()
+                }
+                dockerImage = docker.image("${image}")
+            } catch (Exception bex) {
+                echo "Buildx not available or failed, falling back to docker.build"
+                dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
+            }
+        }
+    } else {
+        try{
+            echo "Pulling down image: ${image}"
+            dockerImage = docker.image("${image}")
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
+                dockerImage.pull()
+            }
+            def embeddedTheRockHash = sh(
+                script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
+                returnStdout: true
+            ).trim()
+            def embeddedCkHash = sh(
+                script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
+                returnStdout: true
+            ).trim()
+            echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
+        }
+        catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+            echo "The job was cancelled or aborted"
+            throw e
+        }
+        catch(Exception ex)
+        {
+            dockerArgs = embedBuildMetadata(dockerArgs)
+            echo "Docker Args: ${dockerArgs}"
+            echo "Building image..."
+            def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+            def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                                  "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
+
+            try {
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    sh """
+                        docker buildx rm ci-builder || true
+                        docker buildx create --name ci-builder --driver docker-container --use
+                        docker buildx use ci-builder
+                        docker buildx inspect --bootstrap
+                    """.stripIndent()
+                    sh """
+                        DOCKER_BUILDKIT=1 docker buildx build \
+                        --builder ci-builder \
+                        --push \
+                        --tag ${image} \
+                        ${dockerCacheArgs} \
+                        ${dockerArgs} \
+                        ${buildContext}
+                    """.stripIndent()
+                }
+                dockerImage = docker.image("${image}")
+            } catch (Exception bex) {
+                echo "Buildx not available or failed, falling back to docker.build"
+                dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
             }
         }
     }
@@ -584,22 +642,37 @@ def getDockerImage(Map conf=[:])
         image = getDockerImageName(dockerArgs)
         image = image + "_perfTest"
 
-        try{
-            echo "Pulling down perf test image: ${image}"
-            dockerImage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.pull()
+        if (ensure_only) {
+            def remotePerfExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
             }
-        }
-        catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-            echo "The job was cancelled or aborted"
-            throw e
-        }
-        catch(Exception ex)
-        {
-            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
+            if (remotePerfExists) {
+                echo "Perf test image ${image} already exists in registry - skipping build."
+                dockerImage = docker.image("${image}")
+            } else {
+                dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
+            }
+        } else {
+            try{
+                echo "Pulling down perf test image: ${image}"
+                dockerImage = docker.image("${image}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.pull()
+                }
+            }
+            catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                echo "The job was cancelled or aborted"
+                throw e
+            }
+            catch(Exception ex)
+            {
+                dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
             }
         }
     }
@@ -628,6 +701,20 @@ def setGithubStatus(String context, String state, String description) {
         } catch (Exception e) {
             echo "WARNING: GitHub status POST failed after retries (context=${context}, state=${state}, code=${code})"
         }
+    }
+}
+
+def withStageStatus(Closure body) {
+    def stageName = env.STAGE_NAME
+    setGithubStatus(stageName, 'pending', 'In progress')
+    try {
+        body()
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        setGithubStatus(stageName, 'error', 'Job cancelled or aborted')
+        throw e
+    } catch (Exception e) {
+        setGithubStatus(stageName, 'failure', 'Stage failed')
+        throw e
     }
 }
 
@@ -851,6 +938,692 @@ def sendTeamsFailureNotification(Map conf=[:]) {
             )
         }
     }
+}
+
+// Selective-rerun helpers: on "Restart from Stage", reads the previous build's
+// FlowNode graph to find stages that already passed. Uses FlowNode (not wfapi)
+// because wfapi only exposes top-level stages, not parallel sub-stages.
+// Returns empty set on first run, full success, or any error (fail-open).
+
+// True if a node carries a FAILURE/ABORTED marker. catchError(stageResult:
+// 'FAILURE') records a WarningAction (not an ErrorAction) on the inner step,
+// so checking WarningAction is what catches swallowed failures.
+@NonCPS
+private def isNodeFailed(def node) {
+    if (node.getAction(ErrorAction)) return true
+
+    try {
+        def warning = node.getAction(WarningAction)
+        if (warning != null) {
+            def result = warning.result?.toString()
+            if (result && (result.contains('FAILURE') || result.contains('ABORTED'))) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+    }
+
+    return false
+}
+
+// Detects failure via node markers, getOutcome(), or ResultAction reflection.
+@NonCPS
+private def isStageMarkedFailed(def endNode) {
+    if (isNodeFailed(endNode)) return true
+
+    try {
+        def outcome = endNode.getOutcome()
+        if (outcome != null) {
+            def outcomeStr = outcome.toString()
+            if (outcomeStr.contains('FAILURE') || outcomeStr.contains('ABORTED')) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+    }
+
+    // Fallback: ResultAction via reflection
+    try {
+        def actions = endNode.getActions()
+        def resultAction = actions.find { action ->
+            action.getClass().getSimpleName() == 'ResultAction'
+        }
+        if (resultAction != null) {
+            def result = resultAction.result?.toString()
+            if (result && (result.contains('FAILURE') || result.contains('ABORTED'))) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+    }
+
+    return false
+}
+
+// Reads declarative's STAGE_STATUS tag off a node, or null. Declarative sets
+// this on the stage StepStartNode: 'SKIPPED_FOR_CONDITIONAL' (when{} false),
+// 'SKIPPED_FOR_FAILURE'/'SKIPPED_FOR_RESTART' (never ran), 'FAILED_AND_CONTINUED'
+// (catchError swallowed a failure). Read via reflection -- no import needed.
+@NonCPS
+private def getStageStatusTag(def node) {
+    if (node == null) return null
+    try {
+        def tagsAction = node.getActions().find { a ->
+            a.getClass().getSimpleName() == 'TagsAction'
+        }
+        if (tagsAction != null) {
+            def tags = tagsAction.getTags()
+            if (tags != null) return tags['STAGE_STATUS']
+        }
+    } catch (Exception e) {
+    }
+    return null
+}
+
+// Positive confirmation the stage's end node completed without error.
+// Uses getError() (documented FlowNode API: null == no error) rather than
+// getOutcome().toString(), whose form is 'normal[...]'/'abnormal[...]' and does
+// NOT contain the word 'SUCCESS'. Any exception -> treat as not-confirmed (re-run).
+@NonCPS
+private def isStageSucceeded(def endNode) {
+    if (endNode == null) return false
+    try {
+        return endNode.getError() == null
+    } catch (Exception e) {
+    }
+    return false
+}
+
+// Classifies every stage in a build as 'SUCCESS', 'FAILED', or 'NOTRUN'.
+// Inverted model: SUCCESS requires positive confirmation. Anything skipped,
+// interrupted before completion, or not positively-successful is NOTRUN (no
+// signal -> must re-run). FAILED stages are locked out so a newer failure
+// cannot be overridden by an older pass in the restart chain.
+@NonCPS
+def getStageOutcomesFromBuild(def rawBuild) {
+    def outcomes = [:]   // stageName -> 'SUCCESS' | 'FAILED' | 'NOTRUN'
+    def execution = rawBuild?.execution
+    if (!execution) return outcomes
+
+    def startObjs      = [:]    // startId -> StepStartNode
+    def startNames     = [:]    // startId -> stageName
+    def endNodes       = [:]    // startId -> StepEndNode
+    // Stage start ids that enclose a failed node. A catchError failure marks an
+    // inner step, not the stage end node, so propagate it up every enclosing block.
+    def failedStageIds = [] as Set
+
+    def walker = new FlowGraphWalker(execution)
+    def walkerIter = walker.iterator()
+    while (walkerIter.hasNext()) {
+        def flowNode = walkerIter.next()
+        if (isNodeFailed(flowNode)) {
+            failedStageIds << flowNode.id
+            try {
+                failedStageIds.addAll(flowNode.getAllEnclosingIds())
+            } catch (Exception e) {
+            }
+        }
+        if (flowNode instanceof StepStartNode) {
+            def label  = flowNode.getAction(LabelAction)
+            def thread = flowNode.getAction(ThreadNameAction)
+            if (label && !thread) {
+                startNames[flowNode.id] = label.displayName
+                startObjs[flowNode.id]  = flowNode
+            }
+        } else if (flowNode instanceof StepEndNode) {
+            endNodes[flowNode.startNode?.id] = flowNode
+        }
+    }
+
+    for (def entry : startNames.entrySet()) {
+        def startId   = entry.key
+        def stageName = entry.value
+        def startNode = startObjs[startId]
+        def endNode   = endNodes[startId]
+
+        def statusTag = getStageStatusTag(startNode)
+        statusTag = statusTag != null ? statusTag.toString() : null
+
+        // Skipped via when{}, prior failure, or restart -> never ran.
+        if (statusTag != null && statusTag.startsWith('SKIPPED')) {
+            outcomes[stageName] = 'NOTRUN'
+            continue
+        }
+        // Failure markers: catchError tag, ErrorAction/WarningAction on the
+        // stage or any descendant, or a non-SUCCESS end-node outcome.
+        if ((statusTag != null && statusTag.contains('FAILED')) ||
+            failedStageIds.contains(startId) ||
+            (endNode != null && isStageMarkedFailed(endNode))) {
+            outcomes[stageName] = 'FAILED'
+            continue
+        }
+        // Started (has a start node) but never completed (no end node). We only
+        // analyze finished builds, so this means the stage was interrupted by a
+        // whole-build abort. Lock it as must-re-run so an older build's pass
+        // cannot resurrect it.
+        if (endNode == null) {
+            outcomes[stageName] = 'FAILED'
+            continue
+        }
+        // Require positive confirmation of SUCCESS; otherwise re-run.
+        outcomes[stageName] = isStageSucceeded(endNode) ? 'SUCCESS' : 'NOTRUN'
+    }
+    return outcomes
+}
+
+// Consolidates outcomes across a chain of restarts (same commit), newest build
+// first. The most recent build with a definite SUCCESS or FAILED outcome for a
+// stage wins, so a newer failure/abort can never be overridden by an older
+// pass. Returns [passed: Set<String>, failed: Set<String>] where 'passed' are
+// stages safe to skip and 'failed' are reported for debugging.
+@NonCPS
+def getPassedStagesAcrossRestartChain(def startBuild) {
+    def decided = [:]    // stageName -> 'SUCCESS' | 'FAILED' (newest decision wins)
+    def visited = [] as Set
+    def currentBuild = startBuild
+
+    while (currentBuild != null && !visited.contains(currentBuild.number)) {
+        visited << currentBuild.number
+
+        def outcomes = getStageOutcomesFromBuild(currentBuild)
+        for (def entry : outcomes.entrySet()) {
+            def name    = entry.key
+            def outcome = entry.value
+            if (decided.containsKey(name)) continue       // a newer build already decided
+            if (outcome == 'SUCCESS' || outcome == 'FAILED') {
+                decided[name] = outcome
+            }
+            // NOTRUN carries no signal -> leave undecided for an older build
+        }
+
+        def restartCause = currentBuild?.getCauses()?.find { cause ->
+            cause.getClass().getName().contains('RestartDeclarativePipeline')
+        }
+        if (restartCause) {
+            currentBuild = restartCause.getOriginal()
+        } else {
+            break
+        }
+    }
+
+    def passed = [] as Set
+    def failed = [] as Set
+    for (def entry : decided.entrySet()) {
+        if (entry.value == 'SUCCESS') passed << entry.key
+        else if (entry.value == 'FAILED') failed << entry.key
+    }
+    return [passed: passed, failed: failed]
+}
+
+// Returns [passedStages: Set<String>, debugMsg: String]. Consolidates passed
+// stages across restart chains. Empty set on non-restart or error (fail-open:
+// when in doubt, run everything).
+@NonCPS
+def getPassedStagesFromPreviousBuild() {
+    def passed = [] as Set
+    def debugMsg = ""
+    try {
+        def restartCause = currentBuild.rawBuild?.getCauses()?.find { cause ->
+            cause.getClass().getName().contains('RestartDeclarativePipeline')
+        }
+        if (!restartCause) {
+            debugMsg = "not a restart build, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
+
+        def prevRun = restartCause.getOriginal()
+        if (!prevRun) {
+            debugMsg = "could not resolve restarted build, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
+        if (prevRun.result?.toString() == 'SUCCESS') {
+            debugMsg = "previous build was SUCCESS, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
+
+        def chain = getPassedStagesAcrossRestartChain(prevRun)
+        passed = chain.passed
+        debugMsg = "restarting from build #${prevRun.number}; " +
+                   "will re-run failed/aborted: ${chain.failed}"
+    } catch (Exception e) {
+        debugMsg = "error (${e.message}), running all stages"
+        return [passedStages: [] as Set, debugMsg: debugMsg]
+    }
+    return [passedStages: passed, debugMsg: debugMsg]
+}
+
+// Stage factory methods -- return Map<String,Closure> for parallel().
+// Moved here to keep the Jenkinsfile under the 64 KB bytecode limit.
+def addStageIf(Map stagesMap, boolean condition, String name, Closure body) {
+    if (condition) stagesMap[name] = { stage(name) { body() } }
+}
+
+def packageAndStaticCheckStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
+    def result = getPassedStagesFromPreviousBuild()
+    def passedStages = result.passedStages
+    echo "Selective rerun: ${result.debugMsg}"
+    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
+    def stages = [:]
+
+    def hipPackage = 'HIP Package'
+    addStageIf(stages, !passedStages.contains(hipPackage), hipPackage) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(package_build: true, needs_gpu: false, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def hipNoGpuDebug = 'HipNoGPU Debug Build Test'
+    addStageIf(stages, pipelineParams.TARGET_NOGPU && !passedStages.contains(hipNoGpuDebug), hipNoGpuDebug) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        def hipNoGpuFlags = "-DMIOPEN_BACKEND=HIPNOGPU -DMIOPEN_INSTALL_CXX_HEADERS=On"
+                        def buildCmd = "ninja -j\$(nproc)"
+                        buildHipClangJob(build_type: 'debug', setup_flags: hipNoGpuFlags, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def tunaFinBuild = 'Tuna Fin Build Test'
+    addStageIf(stages, !passedStages.contains(tunaFinBuild), tunaFinBuild) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: "-DMIOPEN_BACKEND=HIPNOGPU", make_targets: "all", build_fin: "ON", needs_gpu: false, build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32NockBuild = 'Fp32 Hip Debug NOCK Build-Only'
+    addStageIf(stages, !passedStages.contains(fp32NockBuild), fp32NockBuild) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off", make_targets: "", build_install: true, needs_gpu: false, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    return stages
+}
+
+def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
+    def result = getPassedStagesFromPreviousBuild()
+    def passedStages = result.passedStages
+    echo "Selective rerun: ${result.debugMsg}"
+    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
+    def stages = [:]
+
+    def Full_test    = pipelineEnv.Full_test
+    def Bf16_flags   = pipelineEnv.Bf16_flags
+    def Fp16_flags   = pipelineEnv.Fp16_flags
+    def Tf32_flags   = pipelineEnv.Tf32_flags
+    def gfx90a_flags = pipelineEnv.gfx90a_flags
+    def gfx942_flags = pipelineEnv.gfx942_flags
+    def gfx1101_flags = pipelineEnv.gfx1101_flags
+    def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
+
+    def hipTidy = 'Hip Tidy'
+    addStageIf(stages, pipelineParams.RUN_HIP_TIDY && !passedStages.contains(hipTidy), hipTidy) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
+                        def buildCmd = "ninja -j\$(nproc) -k 0 analyze"
+                        buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX90A Tests
+    def dbsyncGfx90a = 'Dbsync gfx90a'
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX90A && !passedStages.contains(dbsyncGfx90a), dbsyncGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runDbSyncJobFn(gfx90a_flags, "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def bf16Gfx90a = 'Bf16 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx90a), bf16Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp16Gfx90a = 'Fp16 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx90a), fp16Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx90a = 'Fp32 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx90a), fp32Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX942 Tests
+    def dbsyncGfx942 = 'Dbsync gfx942'
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX942 && !passedStages.contains(dbsyncGfx942), dbsyncGfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runDbSyncJobFn(gfx942_flags, "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def bf16Gfx942 = 'Bf16 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx942), bf16Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp16Gfx942 = 'Fp16 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx942), fp16Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx942 = 'Fp32 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx942), fp32Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def tf32Gfx942 = 'TF32 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_TF32 && !passedStages.contains(tf32Gfx942), tf32Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Tf32_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX1101 Tests
+    def fp16Gfx1101 = 'Fp16 Hip Install All gfx1101'
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx1101), fp16Gfx1101) {
+        node(rocmnodeFn("navi32")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx1101 = 'Fp32 Hip Install All gfx1101'
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx1101), fp32Gfx1101) {
+        node(rocmnodeFn("navi32")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    return stages
+}
+
+def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
+    def stages = [:]
+
+    def gfx90a_flags  = pipelineEnv.gfx90a_flags
+    def gfx942_flags  = pipelineEnv.gfx942_flags
+    def NOMLIR_flags  = pipelineEnv.NOMLIR_flags
+    def Smoke_targets = pipelineEnv.Smoke_targets
+
+    addStageIf(stages, true, 'Mark Build As Nightly') {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn { currentBuild.description = "Nightly Build" }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32NomlirGfx90a = 'Fp32 Hip Debug NOMLIR gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32NomlirGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        def nomlirBuildCmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 ninja -j\$(nproc) check"
+                        buildHipClangJob(build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: nomlirBuildCmd, test_flags: ' --verbose ', build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32StaticGfx90a = 'Fp32 Hip Static gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32StaticGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32NormalFindGfx90a = 'Fp32 Hip Normal-Find gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32NormalFindGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "bin/test_conv2d --disable-verification-cache", find_mode: "Normal", build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32FastFindGfx90a = 'Fp32 Hip Fast-Find gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32FastFindGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: gfx90a_flags, make_targets: "test_conv2d", execute_cmd: "MIOPEN_FIND_MODE=2 CTEST_PARALLEL_LEVEL=4 bin/test_conv2d --disable-verification-cache", build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32SqlitePerfdbGfx90a = 'Fp32 Hip SqlitePerfdb gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32SqlitePerfdbGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On" + gfx90a_flags, build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32FinInterfaceGfx90a = 'Fp32 Hip Fin Interface gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32FinInterfaceGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On" + gfx90a_flags, make_targets: "test_unit_FinInterface", execute_cmd: "bin/test_unit_FinInterface", gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32DebugGfx90a = 'Fp32 Hip Debug gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32DebugGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: gfx90a_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32DebugGfx942 = 'Fp32 Hip Debug gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942, fp32DebugGfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: gfx942_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    return stages
+}
+
+def nonCriticalHWNightlyStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
+    def result = getPassedStagesFromPreviousBuild()
+    def passedStages = result.passedStages
+    echo "Selective rerun: ${result.debugMsg}"
+    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
+    def stages = [:]
+
+    def Full_test       = pipelineEnv.Full_test
+    def Bf16_flags      = pipelineEnv.Bf16_flags
+    def Fp16_flags      = pipelineEnv.Fp16_flags
+    def gfx908_flags    = pipelineEnv.gfx908_flags
+    def gfx1151_flags   = pipelineEnv.gfx1151_flags
+    def Smoke_targets   = pipelineEnv.Smoke_targets
+    def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
+
+    addStageIf(stages, true, 'Mark Build As Nightly') {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn { currentBuild.description = "Non-Critical HW Nightly Build" }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX908 Tests
+    def dbsyncGfx908 = 'Dbsync gfx908'
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX908 && !passedStages.contains(dbsyncGfx908), dbsyncGfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try {
+                withStageStatus { runDbSyncJobFn(gfx908_flags, "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def bf16Gfx908 = 'Bf16 Hip Install All gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx908), bf16Gfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp16Gfx908 = 'Fp16 Hip Install All gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx908), fp16Gfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx908 = 'Fp32 Hip Install All gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx908), fp32Gfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx908_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32DebugGfx908 = 'Fp32 Hip Debug gfx908'
+    addStageIf(stages, pipelineParams.TARGET_GFX908 && !passedStages.contains(fp32DebugGfx908), fp32DebugGfx908) {
+        node(rocmnodeFn("gfx908")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: gfx908_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX115X Strix Halo Tests
+    def bf16Gfx115X = 'Bf16 Hip Install All gfx115X'
+    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx115X), bf16Gfx115X) {
+        node(rocmnodeFn("strix")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Bf16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp16Gfx115X = 'Fp16 Hip Install All gfx115X'
+    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx115X), fp16Gfx115X) {
+        node(rocmnodeFn("strix")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + Fp16_flags + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx115X = 'Fp32 Hip Install All gfx115X'
+    addStageIf(stages, pipelineParams.TARGET_NAVI35 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx115X), fp32Gfx115X) {
+        node(rocmnodeFn("strix")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: " -DMIOPEN_TEST_GFX115X=On " + Full_test + gfx1151_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    return stages
 }
 
 return this

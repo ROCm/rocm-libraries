@@ -26,6 +26,7 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
+#include "rocsparse_dense2bell.hpp"
 #include "rocsparse_dense2coo.hpp"
 #include "rocsparse_dense2csx_impl.hpp"
 #include "rocsparse_nnz_impl.hpp"
@@ -88,6 +89,12 @@ namespace rocsparse
             {
                 *buffer_size = sizeof(I) * mat_A->cols;
             }
+            else if(mat_B->format == rocsparse_format_bell)
+            {
+                const int64_t mb = (mat_B->rows + mat_B->block_dim - 1) / mat_B->block_dim;
+
+                *buffer_size = sizeof(int64_t) * mb;
+            }
             return rocsparse_status_success;
         }
 
@@ -135,6 +142,21 @@ namespace rocsparse
                                                               mat_A->ld,
                                                               (I*)temp_buffer,
                                                               (I*)&mat_B->nnz));
+                return rocsparse_status_success;
+            }
+            else if(mat_B->format == rocsparse_format_bell)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::dense2bell_nnz_template(handle,
+                                                       mat_A->order,
+                                                       mat_A->rows,
+                                                       mat_A->cols,
+                                                       mat_B->descr,
+                                                       (const T*)mat_A->const_values,
+                                                       mat_A->ld,
+                                                       mat_B->block_dim,
+                                                       (int64_t*)temp_buffer,
+                                                       &mat_B->ell_cols));
                 return rocsparse_status_success;
             }
         }
@@ -189,6 +211,23 @@ namespace rocsparse
                                                                       (T*)mat_B->val_data,
                                                                       (I*)mat_B->col_data,
                                                                       (J*)mat_B->row_data));
+            return rocsparse_status_success;
+        }
+
+        // BELL
+        if(mat_B->format == rocsparse_format_bell)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense2bell_template(handle,
+                                                                     mat_A->order,
+                                                                     mat_A->rows,
+                                                                     mat_A->cols,
+                                                                     mat_B->descr,
+                                                                     (const T*)mat_A->const_values,
+                                                                     mat_A->ld,
+                                                                     mat_B->block_dim,
+                                                                     mat_B->ell_cols,
+                                                                     (T*)mat_B->val_data,
+                                                                     (I*)mat_B->col_data));
             return rocsparse_status_success;
         }
 

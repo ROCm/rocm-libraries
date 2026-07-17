@@ -122,7 +122,7 @@ foreach( bench ${bench_list})
     )
 
   target_link_libraries( ${bench} PUBLIC
-    ${ROCFFT_CLIENTS_HOST_LINK_LIBS}
+    hip::host
   )
 
   if( ROCFFT_MPI_ENABLE )

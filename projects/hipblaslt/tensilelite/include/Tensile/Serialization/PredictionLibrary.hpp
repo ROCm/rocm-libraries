@@ -31,10 +31,8 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <iostream>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -123,6 +121,7 @@ namespace TensileLite
                                 .hand_optimized_main_loop
                                 = (solution->sizeMapping.customMainLoopScheduling > 0) ? true
                                                                                        : false,
+                                .subtile                   = solution->sizeMapping.useSubtileImpl,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
@@ -143,4 +142,3 @@ namespace TensileLite
     } // namespace Serialization
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

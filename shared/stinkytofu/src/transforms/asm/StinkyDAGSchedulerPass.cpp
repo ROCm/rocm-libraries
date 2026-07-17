@@ -22,15 +22,19 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
+#include <climits>
+
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
 #include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
@@ -54,6 +58,9 @@ static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGra
     }
     std::cerr << "\n\n";
 }
+
+// collapseExecMaskedRegions()/expandExecMaskedGroups(): see ExecMaskGrouping.hpp and
+// docs/developer/exec-mask-grouping.md.
 
 // --- Region scheduler (does NOT move fences) ---
 //
@@ -460,6 +467,18 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
             for (BasicBlock* bb : loop.bodyBBs) bbToLoop[bb] = &loop;
         }
 
+        const GfxArchID archId =
+            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
+                         passCtx.getGemmTileConfig().arch[2]);
+        const uint32_t wavefrontSize = passCtx.getWavefrontSize();
+
+        auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq) {
+            AsmIRBuilder builder(*bb, archId);
+            collapseExecMaskedRegions(*bb, builder, wavefrontSize);
+            scheduleInDAG(*bb, rq, wmmaIndex);
+            expandExecMaskedGroups(*bb);
+        };
+
         for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) continue;
 
@@ -472,11 +491,11 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                     rq->setLoopContext(loop);
                 }
                 rq->setAnalysisCache(&analysisCache);
-                scheduleInDAG(*bb, *rq, wmmaIndex);
+                scheduleBlock(bb, *rq);
             } else {
                 auto rq = chooseReadyQueue(passCtx);
                 rq->setAnalysisCache(&analysisCache);
-                scheduleInDAG(*bb, *rq, wmmaIndex);
+                scheduleBlock(bb, *rq);
             }
         }
         return preserveCFGAnalyses();

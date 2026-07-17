@@ -29,15 +29,13 @@
 #include <cstdlib>
 #include <set>
 #include <string>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>
 #endif
 
 #include <Tensile/Singleton.hpp>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -46,7 +44,7 @@ namespace TensileLite
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
     {
     public:
         bool printPropertyEvaluation() const;
@@ -62,15 +60,37 @@ namespace TensileLite
         bool printLookupEfficiency() const;
         bool printWinningKernelName() const;
 
+        // Re-reads TENSILE_DB, TENSILE_DB2, and TENSILE_STREAMK5_FORCE_MODE from
+        // the environment and updates cached state.  Only these three fields are
+        // refreshed; all other env-driven settings remain at their initial values.
+        // Intended for tests that call setenv() in-process after the singleton has
+        // already been constructed.
+        //
+        // Thread safety: must only be called when no concurrent TensileLite
+        // operations are in flight (e.g., between GEMM calls in a serial test).
+        void reloadDebugBitsForTest();
+
         bool usePredictionLibrary() const;
 
         bool printLibraryLogicIndex() const;
+
+        // Reports the effective Stream-K (SK5 hybrid) scheduling mode selected at
+        // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
+        bool printStreamKModeSelection() const;
 
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;
 
         bool useStreamKDataParrallel() const;
+
+        // SK5 hybrid mode debug override.
+        // Return value semantics:
+        //   -1 -> respect the API attribute / GemmPreference setting
+        //    0 -> force the static (SK3) path
+        //    1 -> force the dynamic (SK4) path
+        // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
+        int streamK5ForceMode() const;
 
         int useExperimentalSelection() const;
 
@@ -145,10 +165,11 @@ namespace TensileLite
         bool        m_gridbasedBatchExp   = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
+        // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
+        int         m_streamK5ForceMode   = -1;
         StringSet   m_excludedFromGetAll;
 
         Debug();
     };
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END
