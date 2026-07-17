@@ -24,6 +24,7 @@ function(add_ctypes_library TARGET_NAME SOURCE_FILE)
     
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     
@@ -66,6 +67,7 @@ else()
     add_library(dispatcher_gemm_lib SHARED gemm_ctypes_lib.cpp)
     target_include_directories(dispatcher_gemm_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_gemm_lib PRIVATE hip::device)
@@ -129,6 +131,7 @@ if(CONV_BWDW_KERNEL_HEADERS)
     add_library(dispatcher_conv_bwdw_lib SHARED conv_bwdw_ctypes_lib.cpp)
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
@@ -145,6 +148,7 @@ else()
     add_library(dispatcher_conv_bwdw_lib SHARED conv_bwdw_ctypes_lib.cpp)
     target_include_directories(dispatcher_conv_bwdw_lib PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
@@ -163,6 +167,7 @@ if(GEMM_KERNEL_HEADERS)
     
     target_include_directories(gpu_helper PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/../include  # CK-tile core headers (ck_tile/core.hpp)
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     
