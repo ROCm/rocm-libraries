@@ -86,6 +86,25 @@ class TestWall(unittest.TestCase):
             {"max_abs_diff": 0.0, "bad_count": 0, "total": 64, "ok": True},
         )
 
+    def test_success_without_valid_timing_is_rejected(self):
+        original = harness.subprocess.run
+        outputs = (
+            "completed without structured output\n",
+            "PerfJSON: {not-json}\n",
+            'PerfJSON: {"tflops": 12.0}\n',
+            'PerfJSON: {"ms": "nan"}\n',
+        )
+        try:
+            for stdout in outputs:
+                with self.subTest(stdout=stdout):
+                    harness.subprocess.run = lambda *args, **kwargs: SimpleNamespace(
+                        returncode=0, stdout=stdout, stderr=""
+                    )
+                    with self.assertRaisesRegex(RuntimeError, "valid PerfJSON timing"):
+                        harness._wall(["kernel"], {}, 1)
+        finally:
+            harness.subprocess.run = original
+
 
 class TestCountPasses(unittest.TestCase):
     def test_counts_pmc_dirs(self):

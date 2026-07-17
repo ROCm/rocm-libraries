@@ -256,9 +256,12 @@ def _wall(cmd: Sequence[str], env: dict, timeout: int) -> tuple[dict, dict]:
             f"kernel command exited with status {proc.returncode}{suffix}"
         )
     stdout = proc.stdout or ""
-    return _perf_from_stdout(stdout), _verification_from_stdout(
-        stdout, verified="--verify" in cmd
-    )
+    wall = _perf_from_stdout(stdout)
+    if "ms_median" not in wall:
+        raise RuntimeError(
+            "kernel command did not emit valid PerfJSON timing (finite ms)"
+        )
+    return wall, _verification_from_stdout(stdout, verified="--verify" in cmd)
 
 
 def profile(

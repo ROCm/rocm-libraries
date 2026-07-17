@@ -282,6 +282,27 @@ class TestProfileCmd(unittest.TestCase):
         self.assertEqual(len(store.load(cache=self.cache)), 1)
         self.assertEqual(json.loads(out)["selfcheck"]["verdict"], "no_baseline")
 
+    def test_profile_without_timing_is_not_stored(self):
+        def fail_profile(*args, **kwargs):
+            raise RuntimeError(
+                "kernel command did not emit valid PerfJSON timing (finite ms)"
+            )
+
+        cli_mod._harness.profile = fail_profile
+        with self.assertRaisesRegex(SystemExit, "valid PerfJSON timing"):
+            _run(
+                [
+                    "--cache",
+                    self.cache,
+                    "profile",
+                    "--arch",
+                    "gfx950",
+                    "--",
+                    "prog",
+                ]
+            )
+        self.assertEqual(store.load(cache=self.cache), [])
+
 
 class TestParser(unittest.TestCase):
     def test_missing_subcommand_errors(self):
