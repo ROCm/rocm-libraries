@@ -1050,10 +1050,9 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                     const BGridDesc_BK0_N_K1& b_grid_desc_bk0_n_bk1,
                                     const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                         c_grid_desc_mblock_mperblock_nblock_nperblock,
-                                    const index_t k_id             = 0,
-                                    const index_t k_batch          = 1,
-                                    const index_t block_idx_x      = static_cast<index_t>(blockIdx.x),
-                                    const IndexType c_physical_size = 0)
+                                    const index_t k_id        = 0,
+                                    const index_t k_batch     = 1,
+                                    const index_t block_idx_x = static_cast<index_t>(blockIdx.x))
     {
         const long_index_t a_space_size_divisor = k_batch;
         const long_index_t b_space_size_divisor = k_batch;
