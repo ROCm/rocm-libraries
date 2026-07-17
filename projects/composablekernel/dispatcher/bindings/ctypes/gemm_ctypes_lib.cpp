@@ -15,6 +15,7 @@
 
 #include <hip/hip_runtime.h>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -90,7 +91,18 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
     // K-contiguous) -- the exact physical order shuffle_b / shuffle_b_permuteN
     // expect and that the runner supplies for a 'c' B operand.
     constexpr bool kBRowMajor = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
-    const auto stride_b       = ck_tile::get_default_stride(static_cast<ck_tile::index_t>(K),
+    // Byte-identity correctness contract: the whole shuffle argument (the runner
+    // hands B for a 'c'/column-major operand and we fill the {K,N} tensor's flat
+    // storage directly to reproduce Old-TE's b_k_n byte-for-byte) is only valid
+    // when BLayout is column-major. If a future layout expansion force-includes a
+    // row-major-B kernel here, the copy order would be transposed and B silently
+    // mis-shuffled. Fail loudly at compile time instead of producing wrong
+    // results. (Preshuffle scope is pinned rcr today, so this always holds.)
+    static_assert(!kBRowMajor,
+                  "preshuffle_host_b requires a column-major BLayout for byte-identity "
+                  "with the preshuffle kernel; a row-major B would be silently "
+                  "mis-shuffled. Extend this path before enabling a row-major-B layout.");
+    const auto stride_b = ck_tile::get_default_stride(static_cast<ck_tile::index_t>(K),
                                                       static_cast<ck_tile::index_t>(N),
                                                       0,
                                                       ck_tile::bool_constant<kBRowMajor>{});
@@ -117,6 +129,23 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
 // would (a) add non-kernel host work between iterations and (b) make the sweep
 // apples-to-oranges. The kernel-timed region (g_dispatcher->run) never contained
 // the shuffle, but hoisting it keeps the per-iteration host path launch-only.
+//
+// IMMUTABILITY CONTRACT (correctness foot-gun -- read before reusing this API):
+//   The cache is keyed on (b_host pointer, K, N). It CANNOT detect that the
+//   BYTES behind an unchanged pointer were mutated in place between calls. If a
+//   caller reuses the same host buffer but rewrites its contents, this returns
+//   the STALE shuffle and the kernel computes on the wrong weights.
+//   Contract: for a fixed (b_host, K, N) the contents of *b_host must be
+//   immutable for the process lifetime (the benchmark sweep honours this -- it
+//   allocates B once and never mutates it). A correctness caller that mutates B
+//   under a reused pointer MUST opt into recompute (see below) or pass a fresh
+//   buffer.
+//
+// OPT-IN RECOMPUTE: set the environment variable
+//   CK_DISPATCHER_PRESHUFFLE_NO_CACHE=1
+// to force the shuffle to be recomputed on every call, bypassing the cache
+// entirely. This trades the per-call host reorder cost for guaranteed-fresh
+// bytes -- the safe choice for any caller that mutates B in place.
 struct ShuffledBCache
 {
     const void* b_host = nullptr;
@@ -129,16 +158,34 @@ struct ShuffledBCache
 };
 static ShuffledBCache g_shuffled_b_cache;
 
+// Whether the (pointer,K,N)-keyed cache is disabled. Resolved once from the
+// environment. When true, every call recomputes the shuffle, so a caller that
+// mutates B in place under a reused pointer can never be served stale bytes.
+static bool preshuffle_cache_disabled()
+{
+    static const bool disabled = []() {
+        const char* v = std::getenv("CK_DISPATCHER_PRESHUFFLE_NO_CACHE");
+        return v != nullptr && v[0] != '\0' && v[0] != '0';
+    }();
+    return disabled;
+}
+
 // Return a pointer to the shuffled bytes for this B, reusing the cache when the
 // (pointer, K, N) matches the last call. Not thread-safe (bridge is single-
-// threaded), which matches the rest of this translation unit.
+// threaded), which matches the rest of this translation unit. See the
+// IMMUTABILITY CONTRACT above: a reused pointer with mutated contents is served
+// stale unless CK_DISPATCHER_PRESHUFFLE_NO_CACHE is set.
 static const BDataType* get_shuffled_b(const BDataType* b_host, int64_t K, int64_t N)
 {
-    if(!(g_shuffled_b_cache.data && g_shuffled_b_cache.b_host == b_host &&
-         g_shuffled_b_cache.K == K && g_shuffled_b_cache.N == N))
+    const bool no_cache = preshuffle_cache_disabled();
+    if(no_cache || !(g_shuffled_b_cache.data && g_shuffled_b_cache.b_host == b_host &&
+                     g_shuffled_b_cache.K == K && g_shuffled_b_cache.N == N))
     {
         g_shuffled_b_cache.data = std::make_shared<ck_tile::HostTensor<BDataType>>(
             preshuffle_host_b<BDataType>(b_host, K, N));
+        // When the cache is disabled leave the key fields as-is (they are only
+        // consulted on the cached path, which no_cache always skips); the fresh
+        // shuffle above is returned directly below.
         g_shuffled_b_cache.b_host = b_host;
         g_shuffled_b_cache.K      = K;
         g_shuffled_b_cache.N      = N;
@@ -379,6 +426,14 @@ int dispatcher_is_supported(int64_t M, int64_t N, int64_t K)
 
 /**
  * Run GEMM on GPU via dispatcher
+ *
+ * PRESHUFFLE IMMUTABILITY CONTRACT (weight-preshuffled kernels only):
+ *   The host B-shuffle is cached keyed on (B pointer, K, N) and CANNOT detect
+ *   in-place mutation of the bytes behind an unchanged pointer. Callers MUST
+ *   treat B as immutable for a fixed (B, K, N) across calls, OR set the env var
+ *   CK_DISPATCHER_PRESHUFFLE_NO_CACHE=1 to force a fresh shuffle every call.
+ *   Reusing the same pointer with mutated contents (without the env opt-out)
+ *   silently computes on stale weights. Non-preshuffle kernels are unaffected.
  */
 int dispatcher_run_gemm(
     const void* A, const void* B, void* C, int64_t M, int64_t N, int64_t K, float* time_ms)
