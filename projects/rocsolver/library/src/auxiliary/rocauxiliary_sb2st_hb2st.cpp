@@ -41,8 +41,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 //  kd          Matrix bandwidth. kd >= 1.
 //  Aband       n-by-n band matrix, with space for kd - 1 super-diagonals and
 //              2*kd - 1 sub-diagonals. On input, diagonal and kd sub-diagonals
-//              must be set; other entries must be 0.
-//              todo: verify what must be set/zero.
+//              must be set.
 //  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
 //  D           Vector of length n. On output, diagonal of tridiagonal A_tri.
 //  E           Vector of length n-1. On output, sub-diagonal of tridiagonal A_tri.
