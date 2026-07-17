@@ -521,7 +521,10 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
             kind = kOther;
         }
     }
-    if (!valuQueue.empty() && isValuPickable() && !destOverlapsActiveWmmaSrc(valuQueue.top())) {
+    // Relax co-issue gate when nothing else is pickable (best == nullptr) so WMMAs
+    // don't starve VALU; the overlap hazard stays a hard gate.
+    if (!valuQueue.empty() && !destOverlapsActiveWmmaSrc(valuQueue.top()) &&
+        (isValuPickable() || best == nullptr)) {
         DAGNode* t = valuQueue.top();
         if (!dsWindowOk && (!best || t->id < best->id)) {
             best = t;
