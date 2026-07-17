@@ -597,8 +597,8 @@ TEST(DataGeneratorDecoupledScale, BoundedDataWithOnesScale)
     EXPECT_GT(meaningful, 0);
 }
 
-// generateMXInput pads misaligned K to the next mxBlock multiple internally.
-TEST(MxDataGeneratorMisalignedK, BoundedMxfp6PaddedK160DoesNotThrow)
+// When K is not a multiple of mxBlock, the tail elements share one scale value.
+TEST(MxDataGeneratorMisalignedK, BoundedMxfp6PartialTailK136DoesNotThrow)
 {
     DataGeneratorOptions opts;
     opts.blockScaling = 32;
@@ -606,12 +606,42 @@ TEST(MxDataGeneratorMisalignedK, BoundedMxfp6PaddedK160DoesNotThrow)
     opts.min          = -1.0;
     opts.max          = 1.0;
 
-    constexpr index_t kRows = 160; // padded form of stinky_sia4 K=136
+    constexpr index_t kRows = 136; // stinky_sia4 K (mxBlock=32 -> 4 full + 1 tail of 8)
     constexpr index_t kCols = 128;
     std::vector<index_t> sizes{kRows, kCols};
     std::vector<index_t> strides{1, kRows};
 
     DataGenerator<ocp_e2m3_mxfp6> dgen;
     EXPECT_NO_THROW(dgen.generate(sizes, strides, opts));
+
+    const index_t blocksPerRow = (kRows + opts.blockScaling - 1) / opts.blockScaling;
+    EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(kCols * blocksPerRow));
+
+    auto const scaleBytes = dgen.getScaleBytes();
+    for(index_t col = 0; col < kCols; ++col)
+    {
+        const index_t scaleIdx128 = col * blocksPerRow + 128 / opts.blockScaling;
+        const index_t scaleIdx135 = col * blocksPerRow + 135 / opts.blockScaling;
+        EXPECT_EQ(scaleIdx128, scaleIdx135);
+        EXPECT_EQ(scaleBytes[scaleIdx128], scaleBytes[scaleIdx135]);
+    }
+}
+
+TEST(MxDataGeneratorMisalignedK, BoundedMxfp6AlignedK128Unchanged)
+{
+    DataGeneratorOptions opts;
+    opts.blockScaling = 32;
+    opts.initMode     = Bounded{};
+    opts.min          = -1.0;
+    opts.max          = 1.0;
+
+    constexpr index_t kRows = 128;
+    constexpr index_t kCols = 64;
+    std::vector<index_t> sizes{kRows, kCols};
+    std::vector<index_t> strides{1, kRows};
+
+    DataGenerator<ocp_e2m3_mxfp6> dgen;
+    EXPECT_NO_THROW(dgen.generate(sizes, strides, opts));
     EXPECT_EQ(dgen.getScaleBytes().size(), static_cast<size_t>(kCols * (kRows / opts.blockScaling)));
+    EXPECT_EQ(dgen.getReferenceFloat().size(), static_cast<size_t>(kRows * kCols));
 }

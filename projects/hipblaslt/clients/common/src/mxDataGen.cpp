@@ -249,54 +249,6 @@ void packData(std::vector<uint8_t> const& dataBytes, uint8_t* packedData)
     }
 }
 
-template <typename DT>
-std::vector<uint8_t> stripContiguousPackedData(std::vector<uint8_t> const& paddedPacked,
-                                               size_t                        origContig,
-                                               size_t                        paddedContig,
-                                               size_t                        slowDim)
-{
-    if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8> || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
-    {
-        std::vector<uint8_t> stripped(origContig * slowDim);
-        for(size_t row = 0; row < slowDim; ++row)
-        {
-            std::memcpy(stripped.data() + row * origContig,
-                        paddedPacked.data() + row * paddedContig,
-                        origContig);
-        }
-        return stripped;
-    }
-    else if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6> || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>
-                      || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4> || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
-                      || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e4m3>)
-    {
-        auto const paddedUnpacked = unpackData<DT>(paddedPacked, paddedContig * slowDim);
-        std::vector<uint8_t> strippedUnpacked(origContig * slowDim);
-        for(size_t row = 0; row < slowDim; ++row)
-        {
-            std::memcpy(strippedUnpacked.data() + row * origContig,
-                        paddedUnpacked.data() + row * paddedContig,
-                        origContig);
-        }
-        if constexpr(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4> || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
-                     || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e4m3>)
-        {
-            size_t const         fp4PackedSize = (strippedUnpacked.size() + 1) / 2;
-            std::vector<uint8_t> strippedPacked(fp4PackedSize, 0);
-            packData<DT>(strippedUnpacked, strippedPacked.data());
-            return strippedPacked;
-        }
-        size_t const         packedSize = (strippedUnpacked.size() * 6 + 7) / 8;
-        std::vector<uint8_t> strippedPacked(packedSize, 0);
-        packData<DT>(strippedUnpacked, strippedPacked.data());
-        return strippedPacked;
-    }
-    else
-    {
-        return paddedPacked;
-    }
-}
-
 /**
  * @brief Align data with scale and return reference floats
  *
@@ -404,28 +356,11 @@ std::vector<float> generateData(T                           dgen,
 {
     using namespace DGen;
 
-    std::vector<DGen::index_t> genSizes = sizes;
-    bool const                 stripTail
-        = opt.blockScaling > 1 && (sizes[0] % opt.blockScaling != 0);
-    if(stripTail)
-    {
-        genSizes[0]
-            = ((sizes[0] + opt.blockScaling - 1) / opt.blockScaling) * opt.blockScaling;
-    }
-
     dgen.setSeed(seed);
-    dgen.generate(genSizes, strides, opt);
+    dgen.generate(sizes, strides, opt);
 
     std::vector<uint8_t> dataBytes = dgen.getDataBytes();
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
-    if(stripTail)
-    {
-        dataBytes = stripContiguousPackedData<DT>(
-            dataBytes,
-            static_cast<size_t>(sizes[0]),
-            static_cast<size_t>(genSizes[0]),
-            static_cast<size_t>(sizes[1]));
-    }
 
     std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
@@ -461,7 +396,7 @@ std::vector<float> generateData(T                           dgen,
 
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
 
-    if(((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose)) && !stripTail)
+    if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
     {
         // For (1) transposed matrixA and (2) non-transposed matrixB,
         // return the reference float directly since they are aligned already.

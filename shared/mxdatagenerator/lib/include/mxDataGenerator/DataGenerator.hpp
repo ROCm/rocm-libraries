@@ -357,6 +357,48 @@ namespace DGen
         std::vector<uint8_t> m_dataBytes;
         std::vector<uint8_t> m_scaleBytes;
 
+        // Contiguous dimension (sorted_size[0], stride 1) for partial tail scale blocks.
+        index_t m_contiguousDim = 0;
+
+        index_t scaleBlocksPerRow(index_t block_size) const
+        {
+            return (m_contiguousDim + block_size - 1) / block_size;
+        }
+
+        index_t numScaleBlocks(index_t block_size) const
+        {
+            if(m_contiguousDim <= 0)
+                return m_dataDesc.array_size / block_size;
+            const index_t numRows = m_dataDesc.array_size / m_contiguousDim;
+            return scaleBlocksPerRow(block_size) * numRows;
+        }
+
+        index_t blockWidth(index_t scale_i, index_t block_size) const
+        {
+            const index_t blocksPerRow = scaleBlocksPerRow(block_size);
+            const index_t blockInRow   = scale_i % blocksPerRow;
+            const index_t tail         = m_contiguousDim - blockInRow * block_size;
+            return std::min(block_size, tail);
+        }
+
+        index_t dataIndex(index_t scale_i, index_t block_i, index_t block_size) const
+        {
+            const index_t blocksPerRow = scaleBlocksPerRow(block_size);
+            const index_t row          = scale_i / blocksPerRow;
+            const index_t blockInRow   = scale_i % blocksPerRow;
+            return row * m_contiguousDim + blockInRow * block_size + block_i;
+        }
+
+        index_t scaleIndexForData(index_t data_i, index_t block_size) const
+        {
+            if(m_contiguousDim <= 0)
+                return data_i / block_size;
+            const index_t row          = data_i / m_contiguousDim;
+            const index_t k            = data_i % m_contiguousDim;
+            const index_t blocksPerRow = scaleBlocksPerRow(block_size);
+            return row * blocksPerRow + k / block_size;
+        }
+
         static std::vector<uint8_t> packArray(BufferDesc in_desc, const std::vector<uint8_t>& src);
 
         void dispatch_generate_data(const std::vector<index_t>& size,
@@ -545,8 +587,7 @@ namespace DGen
         if(sorted_stride[0] != 1)
             throw std::invalid_argument("Invalid dimensions: the smallest stride must be 1.");
 
-        // Misaligned contiguous dimensions (K not a multiple of mxBlock) are padded
-        // internally by generateMXInput callers; generation proceeds on padded sizes.
+        m_contiguousDim = sorted_size[0];
 
         // find array sizes (unpacked)
         m_dataDesc.array_size = sorted_stride[n_size - 1] * sorted_size[n_size - 1];
@@ -564,7 +605,7 @@ namespace DGen
                 throw std::invalid_argument("Invalid block scaling: block size must be greater "
                                             "than 0 for this data type.");
             }
-            m_scaleDesc.array_size = m_dataDesc.array_size / options.blockScaling;
+            m_scaleDesc.array_size = numScaleBlocks(options.blockScaling);
             m_scaleDesc.bit_size   = getScaleSignBits<DTYPE>() + getScaleExponentBits<DTYPE>()
                                    + getScaleMantissaBits<DTYPE>();
             m_scaleDesc.byte_size   = (m_scaleDesc.bit_size + 7) / 8;
@@ -692,9 +733,9 @@ namespace DGen
                         s_template.data(),
                         m_scaleDesc.byte_size);
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
             {
-                const index_t data_i = scale_i * block_size + block_i;
+                const index_t data_i = dataIndex(scale_i, block_i, block_size);
                 const float   ref    = refFloats[static_cast<size_t>(data_i)];
 
                 if(scaleIsNan || std::isnan(ref))
@@ -747,7 +788,7 @@ namespace DGen
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t i = 0; i < m_dataDesc.array_size; i++)
         {
-            const auto scale_idx = i / block_size;
+            const auto scale_idx = scaleIndexForData(i, block_size);
             ret[i] = toDouble<DTYPE>(m_scaleBytes.data(), m_dataBytes.data(), scale_idx, i);
         }
 
@@ -764,7 +805,7 @@ namespace DGen
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t i = 0; i < m_dataDesc.array_size; i++)
         {
-            const auto scale_idx = i / block_size;
+            const auto scale_idx = scaleIndexForData(i, block_size);
             ret[i] = toFloat<DTYPE>(m_scaleBytes.data(), m_dataBytes.data(), scale_idx, i);
         }
 
@@ -975,7 +1016,7 @@ namespace DGen
                                             "represent the requested range.");
             }
 
-            const auto numBlocks = m_dataDesc.array_size / block_size;
+            const auto numBlocks = numScaleBlocks(block_size);
 #pragma omp parallel for num_threads(m_num_threads)
             for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
             {
@@ -989,9 +1030,9 @@ namespace DGen
 
                 const auto& candidates = data_candidates[stored_scale];
                 std::uniform_int_distribution<size_t> data_dist(0, candidates.size() - 1);
-                for(index_t block_i = 0; block_i < block_size; block_i++)
+                for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
                 {
-                    const auto data_i = scale_i * block_size + block_i;
+                    const auto data_i = dataIndex(scale_i, block_i, block_size);
                     const auto result = candidates[data_dist(m_gen[tid])];
                     std::memcpy(&m_dataBytes[data_i * m_dataDesc.byte_size],
                                 &result,
@@ -1019,7 +1060,7 @@ namespace DGen
 
         int32_t dtype_max_norm_biased_exp = static_cast<int32_t>(dtype_max_norm_exp) - dataBias;
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
@@ -1035,12 +1076,12 @@ namespace DGen
                 std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
                 //
-                const auto data_i = scale_i * block_size + block_i;
+                const auto data_i = dataIndex(scale_i, block_i, block_size);
 
                 // generate sign
                 bool    sign;
@@ -1194,7 +1235,7 @@ namespace DGen
                 return;
             }
 
-            const auto numBlocks = m_dataDesc.array_size / block_size;
+            const auto numBlocks = numScaleBlocks(block_size);
 #pragma omp parallel for num_threads(m_num_threads)
             for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
             {
@@ -1206,9 +1247,9 @@ namespace DGen
                             &stored_scale,
                             m_scaleDesc.byte_size);
 
-                for(index_t block_i = 0; block_i < block_size; block_i++)
+                for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
                 {
-                    const auto data_i     = scale_i * block_size + block_i;
+                    const auto data_i     = dataIndex(scale_i, block_i, block_size);
                     const bool negative   = static_cast<bool>(data_i % 2);
                     const auto& candidates = negative ? neg_data_candidates[stored_scale]
                                                       : pos_data_candidates[stored_scale];
@@ -1240,7 +1281,7 @@ namespace DGen
 
         int32_t dtype_max_norm_biased_exp = static_cast<int32_t>(dtype_max_norm_exp) - dataBias;
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
@@ -1260,12 +1301,12 @@ namespace DGen
                 std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
                 //
-                auto data_i = scale_i * block_size + block_i;
+                auto data_i = dataIndex(scale_i, block_i, block_size);
 
                 // generate sign
                 bool sign = static_cast<bool>(data_i % 2);
@@ -1338,7 +1379,7 @@ namespace DGen
 
         const int32_t  subnorm_min_exp = dataUnbiasedEMin - dataMantissaBits;
         const uint64_t max             = (ONE << m_dataDesc.bit_size) - 1;
-        const auto     numBlocks       = m_dataDesc.array_size / block_size;
+        const auto     numBlocks       = numScaleBlocks(block_size);
 
         if constexpr(hasFullRangeScale<DTYPE>())
         {
@@ -1357,9 +1398,9 @@ namespace DGen
                             m_scaleDesc.byte_size);
 
                 std::uniform_int_distribution<uint64_t> data_dist(0, max);
-                for(index_t block_i = 0; block_i < block_size; block_i++)
+                for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
                 {
-                    const auto data_i = scale_i * block_size + block_i;
+                    const auto data_i = dataIndex(scale_i, block_i, block_size);
 
                     uint64_t d;
                     do
@@ -1395,12 +1436,12 @@ namespace DGen
 
             int32_t max_exp = std::numeric_limits<int32_t>::min();
             int32_t min_exp = std::numeric_limits<int32_t>::max();
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < blockWidth(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
                 //
-                index_t data_i = scale_i * block_size + block_i;
+                index_t data_i = dataIndex(scale_i, block_i, block_size);
 
                 //
                 // generate random block
@@ -1438,7 +1479,7 @@ namespace DGen
                 //
                 // Generate scale
                 //
-                if(isScaled<DTYPE>() && block_i == block_size - 1)
+                if(isScaled<DTYPE>() && block_i == blockWidth(scale_i, block_size) - 1)
                 {
                     int32_t scaleMax = scaleBiasedEMax;
                     int32_t scaleMin = scaleBiasedEMin;
@@ -1909,21 +1950,22 @@ namespace DGen
 
         std::uniform_real_distribution<> angle_dist(0.0, 2.0 * M_PI);
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
         {
             const auto            tid = omp_get_thread_num();
+            const index_t         width = blockWidth(scale_i, block_size);
             std::vector<uint64_t> temp_data((isScaled<DTYPE>() ? block_size : 0), 0);
             std::vector<uint32_t> temp_scale((isScaled<DTYPE>() ? block_size : 0), 0);
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < width; block_i++)
             {
                 //
                 // compute index
                 //
-                index_t data_i = scale_i * block_size + block_i;
+                index_t data_i = dataIndex(scale_i, block_i, block_size);
 
                 //
                 // generate random block
@@ -2031,16 +2073,16 @@ namespace DGen
                 //
                 if constexpr(isScaled<DTYPE>())
                 {
-                    if(block_i == block_size - 1)
+                    if(block_i == width - 1)
                     {
                         const uint32_t block_scale
-                            = dispatch_scale_block(temp_scale, temp_data, block_size);
+                            = dispatch_scale_block(temp_scale, temp_data, width);
 
                         // Write to array
-                        for(index_t i = 0; i < block_size; i++)
+                        for(index_t i = 0; i < width; i++)
                         {
                             std::memcpy(
-                                &m_dataBytes[(scale_i * block_size + i) * m_dataDesc.byte_size],
+                                &m_dataBytes[dataIndex(scale_i, i, block_size) * m_dataDesc.byte_size],
                                 &temp_data[i],
                                 m_dataDesc.byte_size);
                         }
@@ -2068,21 +2110,22 @@ namespace DGen
         // Prepare a normal distribution with the requested mean and standard deviation
         std::normal_distribution<> normal_dist{mean, std_dev};
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
         {
             const auto            tid = omp_get_thread_num();
+            const index_t         width = blockWidth(scale_i, block_size);
             std::vector<uint64_t> temp_data((isScaled<DTYPE>() ? block_size : 0), 0);
             std::vector<uint32_t> temp_scale((isScaled<DTYPE>() ? block_size : 0), 0);
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < width; block_i++)
             {
                 //
                 // compute index
                 //
-                index_t data_i = scale_i * block_size + block_i;
+                index_t data_i = dataIndex(scale_i, block_i, block_size);
 
                 //
                 // generate random block
@@ -2115,16 +2158,16 @@ namespace DGen
                 //
                 if constexpr(isScaled<DTYPE>())
                 {
-                    if(block_i == block_size - 1)
+                    if(block_i == width - 1)
                     {
                         const uint32_t block_scale
-                            = dispatch_scale_block(temp_scale, temp_data, block_size);
+                            = dispatch_scale_block(temp_scale, temp_data, width);
 
                         // Write to array
-                        for(index_t i = 0; i < block_size; i++)
+                        for(index_t i = 0; i < width; i++)
                         {
                             std::memcpy(
-                                &m_dataBytes[(scale_i * block_size + i) * m_dataDesc.byte_size],
+                                &m_dataBytes[dataIndex(scale_i, i, block_size) * m_dataDesc.byte_size],
                                 &temp_data[i],
                                 m_dataDesc.byte_size);
                         }
@@ -2412,7 +2455,7 @@ namespace DGen
             for(index_t clmp_block_i = 0; clmp_block_i < clmp_block_size; clmp_block_i++)
             {
                 const auto data_i  = clmp_i * clmp_block_size + clmp_block_i;
-                index_t    scale_i = (data_i / block_size);
+                index_t    scale_i = scaleIndexForData(data_i, block_size);
 
                 // reset
                 if(clmp_block_i == 0)
@@ -2493,7 +2536,7 @@ namespace DGen
                         while(marked[target])
                             target = (target + 1) % clmp_block_size;
                         const auto target_data_i  = block_data_i + target;
-                        const auto target_scale_i = target_data_i / block_size;
+                        const auto target_scale_i = scaleIndexForData(target_data_i, block_size);
 
                         // get scale
                         uint32_t stored_scale = 0;
