@@ -59,6 +59,88 @@ def _cap(flag: bool) -> str:
     return "True" if flag else "False"
 
 
+# ---------------------------------------------------------------------------
+# Dtype codecs: map a bridge dtype token -> numpy dtype for host operands.
+#
+# fp16 maps to plain numpy; bf16/fp8/bf8 need ml_dtypes. fp8/bf8 use the FNUZ
+# encodings (E4M3FNUZ / E5M2FNUZ) that the gfx942 MFMA path expects -- matching
+# the regular bridge's fp8/bf8 codec (PR #8887). ml_dtypes is imported lazily so
+# the fp16-only path keeps working where ml_dtypes is unavailable.
+# ---------------------------------------------------------------------------
+
+# Canonicalize common spellings to a single token.
+_DTYPE_ALIASES = {
+    "fp16": "fp16",
+    "f16": "fp16",
+    "half": "fp16",
+    "float16": "fp16",
+    "bf16": "bf16",
+    "bfloat16": "bf16",
+    "fp8": "fp8",
+    "fp8_e4m3": "fp8",
+    "e4m3": "fp8",
+    "bf8": "bf8",
+    "fp8_e5m2": "bf8",
+    "e5m2": "bf8",
+}
+
+
+def numpy_dtype_for(dtype: str):
+    """Return the numpy dtype object used for host operands of ``dtype``.
+
+    fp16 -> np.float16; bf16/fp8/bf8 require the ``ml_dtypes`` package (imported
+    lazily) and use FNUZ fp8 encodings for gfx942 parity.
+    """
+    token = _DTYPE_ALIASES.get(str(dtype).lower())
+    if token is None:
+        raise ValueError(f"Unsupported grouped GEMM dtype: {dtype!r}")
+    if token == "fp16":
+        return np.float16
+    try:
+        import ml_dtypes  # noqa: WPS433 (lazy: optional dep)
+    except ImportError as exc:  # pragma: no cover - env-dependent
+        raise RuntimeError(
+            f"dtype {dtype!r} requires the 'ml_dtypes' package (pip install ml_dtypes)"
+        ) from exc
+    if token == "bf16":
+        return np.dtype(ml_dtypes.bfloat16)
+    if token == "fp8":
+        return np.dtype(ml_dtypes.float8_e4m3fnuz)
+    if token == "bf8":
+        return np.dtype(ml_dtypes.float8_e5m2fnuz)
+    raise ValueError(f"Unsupported grouped GEMM dtype: {dtype!r}")  # pragma: no cover
+
+
+def output_dtype_for(dtype: str) -> str:
+    """Return the bridge dtype token of a kernel's OUTPUT for input ``dtype``.
+
+    Mirrors ``codegen_common.CommonTypeMappings.get_output_dtype`` (fp8/bf8 ->
+    fp16, else identity): the generated grouped kernel emits an fp16 ``CDataType``
+    for fp8/bf8 inputs, so the host C buffer must be sized/typed by the OUTPUT
+    dtype, not the INPUT dtype. ``codegen_common`` lives on the dispatcher
+    ``codegen`` dir which ctypes_utils already puts on ``sys.path``; import it
+    lazily so the fp16-only path has no extra dependency.
+    """
+    token = _DTYPE_ALIASES.get(str(dtype).lower())
+    if token is None:
+        raise ValueError(f"Unsupported grouped GEMM dtype: {dtype!r}")
+    try:
+        from codegen_common import CommonTypeMappings  # noqa: WPS433 (lazy)
+    except ImportError:  # pragma: no cover - fall back to the documented mapping
+        return "fp16" if token in ("fp8", "bf8") else token
+    return CommonTypeMappings.get_output_dtype(token)
+
+
+def output_numpy_dtype_for(dtype: str):
+    """Numpy dtype of a kernel's OUTPUT buffer for input ``dtype``.
+
+    Composition of :func:`output_dtype_for` + :func:`numpy_dtype_for`. For
+    fp8/bf8 this resolves to ``np.float16`` (2 bytes) because the kernel's
+    ``CDataType`` is fp16; for fp16/bf16 it equals the input dtype.
+    """
+    return numpy_dtype_for(output_dtype_for(dtype))
+
+
 # ============================================================================
 # The shared contract: GemmKernelConfig
 # ============================================================================
@@ -181,6 +263,8 @@ class GemmKernelConfig:
                 f"_{self.a_elementwise_op}_{self.b_elementwise_op}"
                 f"_{self.cde_elementwise_op}"
             )
+        elif self.variant == "grouped":
+            name += "_grouped"
         return name
 
     # ------------------------------------------------------------------ #
@@ -308,6 +392,39 @@ class GemmProblem:
 
 
 @dataclass
+class GroupedGemmProblem:
+    """A grouped GEMM problem: a list of independent (M, N, K) sub-problems
+    all run by a single grouped kernel launch.
+
+    Each group g computes C_g[M_g x N_g] = A_g[M_g x K_g] @ B_g[K_g x N_g].
+    """
+
+    groups: List[Tuple[int, int, int]]
+
+    @classmethod
+    def uniform(
+        cls, group_count: int, M: int, N: int, K: int
+    ) -> "GroupedGemmProblem":
+        """All groups share the same (M, N, K) shape."""
+        return cls(groups=[(int(M), int(N), int(K)) for _ in range(int(group_count))])
+
+    @property
+    def group_count(self) -> int:
+        return len(self.groups)
+
+    @property
+    def flops(self) -> float:
+        return sum(2.0 * m * n * k for (m, n, k) in self.groups)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"groups": [[int(m), int(n), int(k)] for (m, n, k) in self.groups]}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "GroupedGemmProblem":
+        return cls(groups=[(int(m), int(n), int(k)) for (m, n, k) in d["groups"]])
+
+
+@dataclass
 class GemmResult:
     output: np.ndarray
     time_ms: float
@@ -319,6 +436,22 @@ class GemmResult:
     # did not compute a reference. Multi-ABD populates this in-runner because it
     # generates its own A/B/D operands internally (see GpuMultiABDRunner.run).
     max_rel: Optional[float] = None
+
+    @property
+    def success(self) -> bool:
+        return self.status == 0
+
+
+@dataclass
+class GroupedGemmResult:
+    """Result of a grouped GEMM launch: one output per group plus aggregate
+    timing/throughput across the whole batch."""
+
+    outputs: List[np.ndarray]
+    time_ms: float
+    status: int
+    tflops: float
+    kernel_name: str
 
     @property
     def success(self) -> bool:
@@ -342,6 +475,8 @@ class GemmDispatcherLib:
         self._path = Path(so_path)
         self._lib = ctypes.CDLL(str(self._path))
         self._has_indexed = hasattr(self._lib, "dispatcher_get_kernel_name_at")
+        self._has_grouped = hasattr(self._lib, "dispatcher_run_grouped_gemm")
+        self._has_single = hasattr(self._lib, "dispatcher_run_gemm")
         self._setup_functions()
 
     def _setup_functions(self) -> None:
@@ -364,16 +499,32 @@ class GemmDispatcherLib:
             ]
             lib.dispatcher_get_kernel_name_at.restype = ctypes.c_int
 
-        lib.dispatcher_run_gemm.argtypes = [
-            ctypes.c_void_p,  # A (host)
-            ctypes.c_void_p,  # B (host)
-            ctypes.c_void_p,  # C (host)
-            ctypes.c_int64,  # M
-            ctypes.c_int64,  # N
-            ctypes.c_int64,  # K
-            ctypes.POINTER(ctypes.c_float),  # time_ms
-        ]
-        lib.dispatcher_run_gemm.restype = ctypes.c_int
+        # Single-problem ABI (regular GEMM .so). Absent on grouped libs.
+        if self._has_single:
+            lib.dispatcher_run_gemm.argtypes = [
+                ctypes.c_void_p,  # A (host)
+                ctypes.c_void_p,  # B (host)
+                ctypes.c_void_p,  # C (host)
+                ctypes.c_int64,  # M
+                ctypes.c_int64,  # N
+                ctypes.c_int64,  # K
+                ctypes.POINTER(ctypes.c_float),  # time_ms
+            ]
+            lib.dispatcher_run_gemm.restype = ctypes.c_int
+
+        # Multi-problem ABI (grouped GEMM .so). Absent on regular libs.
+        if self._has_grouped:
+            lib.dispatcher_run_grouped_gemm.argtypes = [
+                ctypes.c_int,  # group_count
+                ctypes.POINTER(ctypes.c_int64),  # Ms[]
+                ctypes.POINTER(ctypes.c_int64),  # Ns[]
+                ctypes.POINTER(ctypes.c_int64),  # Ks[]
+                ctypes.POINTER(ctypes.c_void_p),  # A_ptrs[]
+                ctypes.POINTER(ctypes.c_void_p),  # B_ptrs[]
+                ctypes.POINTER(ctypes.c_void_p),  # C_ptrs[]
+                ctypes.POINTER(ctypes.c_float),  # time_ms
+            ]
+            lib.dispatcher_run_grouped_gemm.restype = ctypes.c_int
 
         lib.dispatcher_cleanup.argtypes = []
         lib.dispatcher_cleanup.restype = None
@@ -415,6 +566,52 @@ class GemmDispatcherLib:
             M,
             N,
             K,
+            ctypes.byref(time_ms),
+        )
+        return status, time_ms.value
+
+    def run_grouped(
+        self,
+        A_list: List[np.ndarray],
+        B_list: List[np.ndarray],
+        C_list: List[np.ndarray],
+        Ms: List[int],
+        Ns: List[int],
+        Ks: List[int],
+    ) -> Tuple[int, float]:
+        """Launch the grouped kernel over a batch of (M, N, K) sub-problems.
+
+        Each A/B/C entry is a host numpy array already laid out (dtype + row/col
+        transpose) as the kernel expects for its compile-time layout; the caller
+        (GpuGroupedGemmRunner) does that per-dtype/per-layout packing. Pointers
+        are marshalled into ctypes pointer arrays.
+        """
+        if not self._has_grouped:
+            raise RuntimeError(
+                f"{self._path} does not expose dispatcher_run_grouped_gemm"
+            )
+
+        g = len(A_list)
+        c_int64_arr = (ctypes.c_int64 * g)
+        c_void_arr = (ctypes.c_void_p * g)
+
+        ms = c_int64_arr(*[int(m) for m in Ms])
+        ns = c_int64_arr(*[int(n) for n in Ns])
+        ks = c_int64_arr(*[int(k) for k in Ks])
+
+        a_ptrs = c_void_arr(*[A.ctypes.data_as(ctypes.c_void_p) for A in A_list])
+        b_ptrs = c_void_arr(*[B.ctypes.data_as(ctypes.c_void_p) for B in B_list])
+        c_ptrs = c_void_arr(*[C.ctypes.data_as(ctypes.c_void_p) for C in C_list])
+
+        time_ms = ctypes.c_float(0.0)
+        status = self._lib.dispatcher_run_grouped_gemm(
+            g,
+            ms,
+            ns,
+            ks,
+            a_ptrs,
+            b_ptrs,
+            c_ptrs,
             ctypes.byref(time_ms),
         )
         return status, time_ms.value
@@ -660,6 +857,94 @@ class GpuGemmRunner:
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
         return GemmResult(
             output=C_out,
+            time_ms=time_ms,
+            status=status,
+            tflops=tflops,
+            kernel_name=self._kernel_name,
+        )
+
+
+class GpuGroupedGemmRunner:
+    """High-level runner for the GROUPED variant: construct from a grouped .so
+    path, call run(A_list, B_list, problem).
+
+    Like GpuGemmRunner, the ctypes ABI takes HOST pointers and manages GPU
+    memory internally (per group), so this runner only marshals the host operand
+    arrays. The runner is parameterized by ``(dtype, layout)`` (mirroring
+    ``GpuGemmRunner``/``GemmProblem``): the A/B operands are cast to the per-dtype
+    INPUT numpy codec (fp16/bf16/fp8-E4M3FNUZ/bf8-E5M2FNUZ) and transposed per the
+    A/B/C layout so the contiguous host buffer matches the layout the kernel was
+    generated with (the ctypes lib derives strides from the same layouts).
+
+    The C/output buffer is sized/typed by the kernel's OUTPUT dtype, not the input
+    dtype: for fp8/bf8 inputs the generated kernel's ``CDataType`` is fp16, so the
+    host C buffer is fp16 (2 bytes) even though A/B are 1-byte fp8/bf8. Sizing C by
+    the input dtype would under-allocate by 2x and the ctypes copy-back would
+    overrun the host buffer (heap corruption). See :func:`output_numpy_dtype_for`.
+    """
+
+    def __init__(self, lib_path: Path, dtype: str = "fp16", layout: str = "rcr"):
+        self.lib = GemmDispatcherLib(lib_path)
+        if not self.lib.initialize():
+            raise RuntimeError(
+                f"Failed to initialize grouped dispatcher .so: {lib_path}"
+            )
+        names = self.lib.kernel_names
+        self._kernel_name = names[0] if names else "unknown"
+        self._dtype = dtype
+        # A/B (input) codec vs C (output) codec: they differ for fp8/bf8
+        # (output is fp16), so keep them distinct to size the C buffer correctly.
+        self._np_dtype = numpy_dtype_for(dtype)
+        self._c_np_dtype = output_numpy_dtype_for(dtype)
+        if len(layout) != 3 or any(ch not in ("r", "c") for ch in layout):
+            raise ValueError(f"layout must be a 3-char r/c string, got {layout!r}")
+        self._layout = layout
+
+    @property
+    def kernel_name(self) -> str:
+        return self._kernel_name
+
+    def run(
+        self,
+        A_list: List[np.ndarray],
+        B_list: List[np.ndarray],
+        problem: GroupedGemmProblem,
+    ) -> GroupedGemmResult:
+        groups = problem.groups
+        if len(A_list) != len(groups) or len(B_list) != len(groups):
+            raise ValueError(
+                "A_list/B_list length must match the number of groups "
+                f"({len(A_list)}/{len(B_list)} vs {len(groups)})"
+            )
+
+        Ms = [g[0] for g in groups]
+        Ns = [g[1] for g in groups]
+        Ks = [g[2] for g in groups]
+
+        la, lb, _lc = self._layout[0], self._layout[1], self._layout[2]
+        nd = self._np_dtype
+        c_nd = self._c_np_dtype  # OUTPUT dtype (fp16 for fp8/bf8); see __init__.
+
+        A_h: List[np.ndarray] = []
+        B_h: List[np.ndarray] = []
+        C_h: List[np.ndarray] = []
+        for A, B, (M, N, _K) in zip(A_list, B_list, groups):
+            # A logically MxK, B logically KxN, C row-major MxN (CLayout is always
+            # RowMajor for grouped). Store each operand so its contiguous buffer
+            # matches its layout: row-major -> as-is, col-major -> transpose.
+            A_buf = A if la == "r" else A.T
+            B_buf = B if lb == "r" else B.T
+            A_h.append(np.ascontiguousarray(A_buf, dtype=nd))
+            B_h.append(np.ascontiguousarray(B_buf, dtype=nd))
+            # Size C by the kernel's CDataType (output dtype), NOT the input dtype:
+            # fp8/bf8 inputs produce fp16 output, so a 1-byte C would be overrun.
+            C_h.append(np.zeros((M, N), dtype=c_nd))
+
+        status, time_ms = self.lib.run_grouped(A_h, B_h, C_h, Ms, Ns, Ks)
+
+        tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
+        return GroupedGemmResult(
+            outputs=C_h,
             time_ms=time_ms,
             status=status,
             tflops=tflops,
@@ -964,6 +1249,11 @@ class GpuMultiABDRunner:
     ) -> GemmResult:
         M, N, K = problem.M, problem.N, problem.K
         dtype = _dtype_from_kernel_name(self._kernel_name)
+        if dtype != "fp16":
+            raise ValueError(
+                f"multi_abd runner supports fp16 only, got {dtype!r} "
+                f"(kernel {self._kernel_name!r})"
+            )
         layout4 = self._layout4
         la, lb = layout4[0], layout4[1]
         ld = layout4[3] if len(layout4) >= 4 else "r"
@@ -1127,6 +1417,21 @@ def _tile_engine_codegen_flags() -> Tuple[str, ...]:
     return tuple(flags)
 
 
+def _ctypes_source_name(config: GemmKernelConfig) -> str:
+    """Pick the ctypes ABI source for a config's variant.
+
+    The grouped kernel has a multi-problem launch signature, and the multi_abd
+    kernel has a divergent (array-pointer) ABI (dispatcher_run_multi_abd);
+    neither is expressible by the single-problem ``gemm_ctypes_lib.cpp``, so each
+    compiles against its own dedicated ctypes source.
+    """
+    if config.variant == "grouped":
+        return "grouped_gemm_ctypes_lib.cpp"
+    if config.variant == "multi_abd":
+        return "gemm_multi_abd_ctypes_lib.cpp"
+    return "gemm_ctypes_lib.cpp"
+
+
 def _build_compile_jobs(
     config: GemmKernelConfig, header: Path
 ) -> Tuple[Dict[str, Any], Path]:
@@ -1135,13 +1440,7 @@ def _build_compile_jobs(
     ck_root = root.parent
     build_dir = _cu.get_build_dir()
     output_dir = _cu.get_generated_kernels_dir()
-    # Multi-ABD has a divergent (array-pointer) ABI and is registry-bypass, so it
-    # is compiled against its own ctypes lib (dispatcher_run_multi_abd) instead of
-    # the regular single-pointer gemm_ctypes_lib.cpp.
-    if config.variant == "multi_abd":
-        ctypes_source = root / "bindings" / "ctypes" / "gemm_multi_abd_ctypes_lib.cpp"
-    else:
-        ctypes_source = root / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    ctypes_source = root / "bindings" / "ctypes" / _ctypes_source_name(config)
     static_lib = build_dir / "libck_tile_dispatcher.a"
 
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
@@ -1234,21 +1533,20 @@ def setup_multiple_gemm_dispatchers(
     ctypes_dir = _cu.get_dispatcher_root() / "bindings" / "ctypes"
     # Multi-ABD is registry-bypass: it links only the force-included kernel, so it
     # needs its own ctypes source but NOT the dispatcher static lib. Every other
-    # variant goes through the registry and requires both.
-    variants = {c.variant for c in configs}
-    all_multi_abd = variants == {"multi_abd"}
-    ctypes_source = ctypes_dir / (
-        "gemm_multi_abd_ctypes_lib.cpp" if all_multi_abd else "gemm_ctypes_lib.cpp"
-    )
-    if not ctypes_source.exists():
+    # variant goes through the registry and requires the static lib too.
+    needed_sources = {ctypes_dir / _ctypes_source_name(c) for c in configs}
+    missing = [str(p) for p in needed_sources if not p.exists()]
+    all_registry_bypass = {c.variant for c in configs} == {"multi_abd"}
+    need_static_lib = not all_registry_bypass
+    if (need_static_lib and not static_lib.exists()) or missing:
+        parts = []
+        if need_static_lib and not static_lib.exists():
+            parts.append(str(static_lib))
+        parts.extend(missing)
         raise FileNotFoundError(
-            f"Missing ctypes source required for compilation:\n  {ctypes_source}\n"
-            "Build the dispatcher first (cmake + make)."
-        )
-    if not all_multi_abd and not static_lib.exists():
-        raise FileNotFoundError(
-            "Missing dispatcher static lib required for compilation:\n"
-            f"  {static_lib}\n"
+            "Missing static lib or ctypes source required for compilation:\n  "
+            + "\n  ".join(parts)
+            + "\n"
             "Build the dispatcher first (cmake + make)."
         )
 
@@ -1390,13 +1688,22 @@ def expand_sweep(
     one GemmKernelConfig. Invalid combinations are dropped via the dispatcher's
     own validator, and duplicates (by .name) are collapsed.
 
-    The signature is controlled by the `dtype` and `layout` arguments (defaults
-    to fp16 / rcr).
+    The operand signature (``dtype``, ``layout``) is applied to every emitted
+    GemmKernelConfig, so the same sweep expands across any supported dtype/layout.
 
     For ``variant='multi_abd'`` the ``layout`` is the 4-char (A,B,E,D) code
     (e.g. ``rcrr``); the tensor counts and per-group element-wise ops are carried
     onto every produced config so they participate in the kernel name.
     """
+    # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
+    # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
+    # callers get a clear error instead of a runtime failure after kernels compile.
+    if variant == "multi_abd" and dtype != "fp16":
+        raise ValueError(
+            f"multi_abd bridge supports fp16 only, got {dtype!r}; "
+            "codegen, ctypes lib and the runner are all fp16-only for this variant"
+        )
+
     with open(config_path) as f:
         cfg = json.load(f)
 

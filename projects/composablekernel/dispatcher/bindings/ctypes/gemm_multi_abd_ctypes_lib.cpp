@@ -138,13 +138,20 @@ int dispatcher_get_kernel_count() { return 1; }
  * e_host                         : output host pointer (M*N * sizeof(EDataType)).
  * elem_a/b/d/e                   : element size in bytes for each group's dtype
  *                                  (so this shim need not know the CK dtype).
- * stride_*                       : per-operand leading stride; a value <= 0 lets
- *                                  the kernel derive the default from M,N,K and
- *                                  the compiled layout.
+ * stride_*                       : per-operand leading stride. These are forwarded
+ *                                  verbatim into GemmMultiABDHostArgs; ck_tile's
+ *                                  UniversalGemmKernel uses them AS-IS and does NOT
+ *                                  treat 0 as a "derive the default" sentinel (a 0
+ *                                  or negative stride collapses the tensor
+ *                                  descriptor and corrupts addressing). They MUST
+ *                                  therefore be non-null and strictly positive;
+ *                                  the caller computes them from M,N,K and the
+ *                                  compiled layout (see GpuMultiABDRunner).
  * time_ms                        : filled with the average kernel time (ms).
  *
  * Returns 0 on success, negative on error. num_a/num_b/num_d MUST equal the
- * kernel's compiled tensor counts or the call is rejected (-3).
+ * kernel's compiled tensor counts or the call is rejected (-3). Missing or
+ * non-positive strides are rejected (-1).
  */
 int dispatcher_run_multi_abd(const void** as_hosts,
                              const void** bs_hosts,
@@ -184,6 +191,34 @@ int dispatcher_run_multi_abd(const void** as_hosts,
     if(kNumD > 0 && (!ds_hosts || elem_d <= 0))
     {
         return -1;
+    }
+    // Strides are forwarded verbatim to the kernel (no default derivation), so a
+    // null array or any non-positive value would silently corrupt addressing.
+    // Require explicit, strictly-positive strides for every operand.
+    if(!stride_as || !stride_bs || stride_e <= 0 || (kNumD > 0 && !stride_ds))
+    {
+        return -1;
+    }
+    for(int i = 0; i < num_a; ++i)
+    {
+        if(stride_as[i] <= 0)
+        {
+            return -1;
+        }
+    }
+    for(int i = 0; i < num_b; ++i)
+    {
+        if(stride_bs[i] <= 0)
+        {
+            return -1;
+        }
+    }
+    for(int i = 0; i < num_d; ++i)
+    {
+        if(stride_ds[i] <= 0)
+        {
+            return -1;
+        }
     }
 
     const size_t a_bytes = static_cast<size_t>(M) * K * elem_a;
@@ -268,20 +303,21 @@ int dispatcher_run_multi_abd(const void** as_hosts,
     std::array<ck_tile::index_t, kNumB> str_bs{};
     std::array<ck_tile::index_t, kNumD> str_ds{};
 
+    // Strides validated non-null and strictly positive above, so pack directly.
     for(ck_tile::index_t i = 0; i < kNumA; ++i)
     {
         as[i]     = a_dev[i];
-        str_as[i] = stride_as ? static_cast<ck_tile::index_t>(stride_as[i]) : 0;
+        str_as[i] = static_cast<ck_tile::index_t>(stride_as[i]);
     }
     for(ck_tile::index_t i = 0; i < kNumB; ++i)
     {
         bs[i]     = b_dev[i];
-        str_bs[i] = stride_bs ? static_cast<ck_tile::index_t>(stride_bs[i]) : 0;
+        str_bs[i] = static_cast<ck_tile::index_t>(stride_bs[i]);
     }
     for(ck_tile::index_t i = 0; i < kNumD; ++i)
     {
         ds[i]     = d_dev[i];
-        str_ds[i] = stride_ds ? static_cast<ck_tile::index_t>(stride_ds[i]) : 0;
+        str_ds[i] = static_cast<ck_tile::index_t>(stride_ds[i]);
     }
 
     // Multi-ABD supports only k_batch = 1.

@@ -94,13 +94,14 @@ if(GEMM_MULTI_ABD_KERNEL_HEADERS)
     target_compile_definitions(dispatcher_gemm_multi_abd_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE)
 else()
-    message(STATUS "No GEMM Multi-ABD kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_gemm_multi_abd_lib SHARED gemm_multi_abd_ctypes_lib.cpp)
-    target_include_directories(dispatcher_gemm_multi_abd_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_gemm_multi_abd_lib PRIVATE hip::device)
+    # Skip the target entirely: gemm_multi_abd_ctypes_lib.cpp is registry-bypass
+    # and unconditionally references the force-included kernel symbols
+    # (SelectedKernel / KERNEL_NAME / NumATensors...), so a "without kernel" build
+    # cannot compile. The Python bridge builds this .so at runtime via hipcc once a
+    # multi_abd kernel header has been generated; there is no useful no-kernel stub.
+    message(STATUS
+        "No GEMM Multi-ABD kernel found for ctypes lib - skipping dispatcher_gemm_multi_abd_lib "
+        "(built at runtime by the Python bridge once a kernel header exists)")
 endif()
 
 # =============================================================================

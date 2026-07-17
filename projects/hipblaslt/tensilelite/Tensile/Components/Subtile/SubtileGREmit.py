@@ -42,7 +42,7 @@ from .SubtileScaleEmit import emitScaleGRLDSSwap
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
-from ...Common import INDEX_CHARS
+from ...Common import INDEX_CHARS, clusterEnabled
 from ...Common.DataType import DataType
 
 
@@ -1109,8 +1109,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   # OR the per-tensor broadcast mask into the descriptor for TDM multicast.
   # Subtile loads both A and B on every wave, so it uses split masks
   # (MulticastMask{tc}), not the non-subtile single parity mask.
-  enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
-  if kernel["Multicast"] and enableCluster:
+  if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
     mod.add(comp.setMulticastMask(descSgprName(1), f"MulticastMask{tc}", writer))
 
   with writer.allocTmpSgpr(1) as tmpSgprRes:
