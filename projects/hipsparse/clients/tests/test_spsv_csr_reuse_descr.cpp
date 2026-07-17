@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,26 +21,14 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-version.h provides the configured version and settings
- */
+#include "test.hpp"
+#include "testing_spsv_csr_reuse_descr.hpp"
 
-#ifndef ROCSPARSE_VERSION_H
-#define ROCSPARSE_VERSION_H
-
-/* clang-format off */
-#define ROCSPARSE_VERSION_MAJOR     @rocsparse_VERSION_MAJOR@
-#define ROCSPARSE_VERSION_MINOR     @rocsparse_VERSION_MINOR@
-#define ROCSPARSE_VERSION_PATCH     @rocsparse_VERSION_PATCH@
-#define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
-/* clang-format on */
-
-#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
-/* Feature flags baked in at build time. */
-#cmakedefine ROCSPARSE_WITH_HANDLE_CREATE
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-/* When defined, the deprecated rocsparse_indextype_u16 index type is removed
-   from the public API, so consumer code referencing it fails to compile. */
-#cmakedefine ROCSPARSE_WITH_U16_REMOVED
-
-#endif /* ROCSPARSE_VERSION_H */
+TEST_ROUTINE_WITH_CONFIG(spsv_csr_reuse_descr,
+                         generic,
+                         hipsparse_test_config_ijt,
+                         arg.M,
+                         arg.N,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.baseA);
