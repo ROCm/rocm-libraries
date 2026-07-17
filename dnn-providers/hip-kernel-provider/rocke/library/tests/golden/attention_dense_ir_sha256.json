@@ -11,8 +11,8 @@
           "sha256": "1dc714eeaa2e69c3198eeadc725956f2c5257db2f6263f524dc3930ed707651d"
         },
         "attention_dense/fp16_h64_sq512": {
-          "bytes": 230977,
-          "sha256": "e30bb63f718f6437eaac14bc49b347174b398c2fcc225dd1ca9d46959ddf2fa1"
+          "bytes": 210000,
+          "sha256": "4c7f461c2e10edd51ce0386ba4cf2a8ac4a798656c7ac93b730dc2effb6eb85e"
         },
         "attention_dense/lazy_off_sq512": {
           "bytes": 337008,
@@ -21,6 +21,10 @@
         "attention_dense/noncausal_sq512": {
           "bytes": 217781,
           "sha256": "db33f2ff07c424d2b3e759aed66e4b0d29056e7e4780ce11fdcc8d199da99334"
+        },
+        "attention_dense/persist_h64_sq512": {
+          "bytes": 214702,
+          "sha256": "b4daea7ca97abd002b6a50d217a43b0a443263d8cb11c5192193b329caf7e51c"
         },
         "attention_dense/persist_hkvmaj_sq512": {
           "bytes": 327546,
@@ -38,6 +42,10 @@
           "bytes": 326109,
           "sha256": "b3dd90bf381adf2dffac99288b78de56ae3137dddf8f6349418338ae4df6baed"
         },
+        "attention_dense/persist_ragged_sq500": {
+          "bytes": 328078,
+          "sha256": "0291e1ac1a08bb6bb05274285754b15137b9ad855cf02e43c856a040e111a8aa"
+        },
         "attention_dense/persist_swa_w128_sq512": {
           "bytes": 444213,
           "sha256": "3a2039ebb82f66fbf375f8ff9b636ce5cda48702a914541b854d5997ce2de222"
@@ -45,6 +53,18 @@
         "attention_dense/persistent_causal_sq512": {
           "bytes": 326109,
           "sha256": "b3dd90bf381adf2dffac99288b78de56ae3137dddf8f6349418338ae4df6baed"
+        },
+        "attention_dense/ragged_causal_sq500": {
+          "bytes": 343927,
+          "sha256": "616a5fa62b3dbe3d66a21d84029874d93773a517ad69575230afdf46ca5fa8a4"
+        },
+        "attention_dense/ragged_full_sq500": {
+          "bytes": 248062,
+          "sha256": "411b18f74bf637dfce4b19e8972163cd9fb202da9943112e9ecd8ddc0b2306e3"
+        },
+        "attention_dense/ragged_h64_sq500": {
+          "bytes": 214541,
+          "sha256": "97c05c4bdd44b4b5c46c4e0e16272fdb35a1f68c81f4537fcf61a3faf4290593"
         },
         "attention_dense/swa_w128_sq512": {
           "bytes": 464090,
@@ -67,8 +87,8 @@
           "sha256": "0698cf388935622a76524c20f300b383a946ecbdb512e93c662db29ad574a1f0"
         },
         "attention_dense/fp16_h64_sq512": {
-          "bytes": 231077,
-          "sha256": "aeced7d0a10933d2eb2143fd127d7fdbc08ae86ac8c7f8e40fe30dca6dbcf2f3"
+          "bytes": 210100,
+          "sha256": "b920ada5e3c48c8083a8c8d8c904fb685ac49eac66a7d4fbb67329a0cbb4f014"
         },
         "attention_dense/lazy_off_sq512": {
           "bytes": 337112,
@@ -77,6 +97,10 @@
         "attention_dense/noncausal_sq512": {
           "bytes": 217881,
           "sha256": "83333cfcfd4d2e3c26ba2cf6e61faffc8dce46ad43cc1216d7efd68ad0653e54"
+        },
+        "attention_dense/persist_h64_sq512": {
+          "bytes": 214802,
+          "sha256": "7d4c6fce84a638779797c53d6b57f60e2619076aaeb0ec9e557180be8bc902a0"
         },
         "attention_dense/persist_hkvmaj_sq512": {
           "bytes": 327650,
@@ -94,6 +118,10 @@
           "bytes": 326213,
           "sha256": "0574a132367b90ef4a980afa9d482746c973556545032a61f1e9b66c891aa7e1"
         },
+        "attention_dense/persist_ragged_sq500": {
+          "bytes": 328227,
+          "sha256": "5ce0e47b2f540e77344c8439293ac8b2041e242001ef5017d71cdb423bf22230"
+        },
         "attention_dense/persist_swa_w128_sq512": {
           "bytes": 444317,
           "sha256": "6fe644368ff3c588edfcf80eb74e6ae9264458a9032b40ca78fdfb93e6f6c403"
@@ -101,6 +129,18 @@
         "attention_dense/persistent_causal_sq512": {
           "bytes": 326213,
           "sha256": "0574a132367b90ef4a980afa9d482746c973556545032a61f1e9b66c891aa7e1"
+        },
+        "attention_dense/ragged_causal_sq500": {
+          "bytes": 344076,
+          "sha256": "24245154a81457eef7ea50f91a5f75e362cd3ef8fee69ca827449efbd8e6ff90"
+        },
+        "attention_dense/ragged_full_sq500": {
+          "bytes": 248205,
+          "sha256": "653696a9ad4e05b199b22c126434ac7391cfa09f4e320d84563d6083b523218f"
+        },
+        "attention_dense/ragged_h64_sq500": {
+          "bytes": 214684,
+          "sha256": "8b37f349d2fbdf2e01ed3005b12b96690ba8fc3883e1aa0da01c1831ec863e52"
         },
         "attention_dense/swa_w128_sq512": {
           "bytes": 464194,

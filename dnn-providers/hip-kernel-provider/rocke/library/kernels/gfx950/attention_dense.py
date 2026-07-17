@@ -35,11 +35,30 @@ within 8 log2 of the running max) is ALWAYS-ON by default (``lazy_rescale=True``
 parity-identical (1.46e-3) and ~+2% (bf16, Sq=8192, GQA -> ~970 TFLOPS with the
 hkv-major decode + V-pad).
 
+Head-size / seqlen coverage:
+  * ``head_size`` is 64 or 128 (bf16/fp16, MHA + GQA incl. non-power-of-2 NQK).
+    D=128 uses the padded LDS fast path (1 K/V row per async-DMA instr); D=64
+    packs 2 rows per instr into an UNPADDED contiguous tile (64 lanes x 2 bf16 =
+    128 elems = 2 D=64 rows), so its reads take some LDS bank conflict (V-pad is
+    a future D=64 perf lever). D=128 codegen is byte-identical to before this
+    change (same IR hash -> same TFLOPS).
+  * ``seqlen_q``/``seqlen_kv`` must be a multiple of 256 / ``block_n`` on the
+    default (aligned) kernel. Non-multiple lengths are handled by a SEPARATE
+    ``ragged=True`` kernel path (its own kernel_name) that pads the boundary
+    tiles ON-CHIP: OOB query rows load as 0 via a bounds-checked buffer load
+    (register pad), OOB keys load as 0 into LDS (LDS pad), the grid/work-item
+    count is ceil'd to cover the partial last query block, and the partial O rows
+    are dropped by a guarded store. Causal needs no key mask (padded ktok >=
+    seqlen_kv > every real query, so causal drops them); non-causal adds a
+    ktok<seqlen_kv key mask. Self-attention only. The aligned path is emitted
+    byte-identically when ``ragged=False`` (no TFLOPS impact).
+
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
 staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
 the experiment's ``plan.md`` for their measured results.
 """
 
+from contextlib import nullcontext as _nullcontext
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -102,6 +121,18 @@ class AttentionDenseSpec:
     #   to ~(W/block_n + block_m/block_n) tiles instead of the full causal
     #   triangle. Requires causal=True and W % block_n == 0.
     sliding_window: int = 0
+    # ragged: separate kernel path for sequence lengths that are NOT a multiple
+    #   of the tile geometry (seqlen_q % 256 != 0 and/or seqlen_kv % block_n != 0).
+    #   Instead of host-side zero-padding (which we cannot do), the boundary tiles
+    #   are padded ON-CHIP: OOB query rows load as 0 via a bounds-checked buffer
+    #   load (register pad), OOB key rows load as 0 into LDS (LDS pad), the ceil'd
+    #   grid covers the partial last query block, and the partial O rows are
+    #   dropped by a guarded store. Causal masking already excludes the padded
+    #   keys (their token index >= seqlen_kv > every real query), so causal needs
+    #   NO extra key mask; non-causal adds a ktok<seqlen_kv key mask. Self-
+    #   attention only (seqlen_q == seqlen_kv). 0-cost when False: the aligned
+    #   kernel is emitted unchanged (byte-identical IR).
+    ragged: bool = False
     # varlen: packed variable-length batch. Q/K/V/O are packed [total_tok, H, D]
     #   and per-sequence boundaries come from cu_seqlens_q/cu_seqlens_kv (int32
     #   [batch+1]) at runtime. seqlen_q/seqlen_kv are the MAX lengths (grid
@@ -164,20 +195,34 @@ class AttentionDenseSpec:
             raise ValueError(
                 f"dtype must be one of {sorted(_DTYPE_IR)}, got {self.dtype}"
             )
-        if self.head_size % 32 != 0:
-            raise ValueError(
-                f"head_size must be a multiple of 32, got {self.head_size}"
-            )
+        # head_size must be 64 or 128: the QK/PV MFMA tiling needs a multiple of
+        # 32, and the async K/V DMA (64 lanes x 2 bf16 = 128 elems/instr) needs
+        # 128 % head_size == 0 so it packs a whole number of rows per instr.
+        if self.head_size not in (64, 128):
+            raise ValueError(f"head_size must be 64 or 128, got {self.head_size}")
         if self.block_n % 32 != 0:
             raise ValueError(f"block_n must be a multiple of 32, got {self.block_n}")
-        if self.seqlen_q % _BLOCK_M != 0:
-            raise ValueError(
-                f"seqlen_q must be a multiple of {_BLOCK_M}, got {self.seqlen_q}"
-            )
-        if self.seqlen_kv % self.block_n != 0:
-            raise ValueError(
-                f"seqlen_kv must be a multiple of block_n={self.block_n}, got {self.seqlen_kv}"
-            )
+        if self.ragged:
+            if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
+                raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
+            if self.seqlen_q != self.seqlen_kv:
+                raise ValueError(
+                    "ragged is self-attention only (seqlen_q == seqlen_kv), got "
+                    f"{self.seqlen_q} != {self.seqlen_kv}"
+                )
+            if self.varlen:
+                raise ValueError("ragged is not supported with varlen")
+            if self.sliding_window > 0:
+                raise ValueError("ragged is not supported with sliding_window")
+        else:
+            if self.seqlen_q % _BLOCK_M != 0:
+                raise ValueError(
+                    f"seqlen_q must be a multiple of {_BLOCK_M}, got {self.seqlen_q}"
+                )
+            if self.seqlen_kv % self.block_n != 0:
+                raise ValueError(
+                    f"seqlen_kv must be a multiple of block_n={self.block_n}, got {self.seqlen_kv}"
+                )
         if self.num_kv_heads == 0 or self.num_query_heads % self.num_kv_heads != 0:
             raise ValueError(
                 f"num_query_heads ({self.num_query_heads}) must be a positive multiple "
@@ -233,7 +278,7 @@ class AttentionDenseSpec:
         if self.persist_decode != "auto":
             return self.persist_decode
         gqa = self.num_query_heads // self.num_kv_heads
-        nqb = self.seqlen_q // _BLOCK_M
+        nqb = (self.seqlen_q + _BLOCK_M - 1) // _BLOCK_M  # ceil (ragged partial)
         per_hkv = gqa * nqb * self.batch
         if gqa > 1 and per_hkv >= 2 * self.num_persistent:
             return "hkv_major"
@@ -251,6 +296,8 @@ class AttentionDenseSpec:
             f"sk{self.seqlen_kv}",
             "causal" if self.causal else "full",
         ]
+        if self.ragged:
+            parts.append("ragged")
         if self.sliding_window > 0:
             parts.append(f"swa{self.sliding_window}")
         if self.varlen:
@@ -306,6 +353,7 @@ def build_attention_dense(
     W = spec.sliding_window
     Wt = W // BN  # window length in KV tiles (0 when disabled)
     varlen = spec.varlen
+    RAGGED = spec.ragged
     LAZY_RESCALE = spec.lazy_rescale
 
     K_STEPS = D // 16
@@ -315,6 +363,11 @@ def build_attention_dense(
     gqa = Hq // Hkv
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
+    # DMA row packing: one async_buffer_load_lds instr moves 64 lanes x 2 bf16 =
+    # 128 elems. D==128 => 1 row/instr (the padded fast path, byte-identical).
+    # D<128 => pack 128//D rows/instr into an UNPADDED contiguous LDS tile (the
+    # transpose/K reads still get correct pitch from the [BN, LDROW] tensor).
+    ROWS_PER_INSTR = 128 // D
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = WAVES * 64
@@ -390,26 +443,39 @@ def build_attention_dense(
         )
 
     # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
-    #     PV read bank-conflict pad) ---
-    LDROW = D + PAD
-    VROW = D + _LDS_PAD_V
+    #     PV read bank-conflict pad). Row padding requires 1 row/instr (a padded
+    #     row is not contiguous with the next); the packed D<128 loader must use
+    #     an unpadded pitch (LDROW==D) so its multi-row DMA lands row-aligned. ---
+    LDROW = D + PAD if ROWS_PER_INSTR == 1 else D
+    VROW = D + _LDS_PAD_V if ROWS_PER_INSTR == 1 else D
     K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
 
     # Q packs (B operand), scaled once by qk_scale = softmax_scale * log2(e).
+    # ragged: a bounds-checked buffer load returns 0 for OOB query rows (the
+    # partial last block), so padded rows are register-zero (their output is
+    # dropped by the guarded store). Aligned: direct global load (unchanged IR).
+    q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2)) if RAGGED else None
     q_tok = b.add(q_tok0, lane_m)
     q_packs = []
     for ks in range(K_STEPS):
         col = b.add(b.const_i32(ks * 16), d_base)
         addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
-        raw = b.global_load_vN(q, addr, dtype, 8, align=16)
+        if RAGGED:
+            raw = b.buffer_load_vN(
+                q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
+            )
+        else:
+            raw = b.global_load_vN(q, addr, dtype, 8, align=16)
         elems = [
             b.cast_f32_to(b.fmul(b.cast_to_f32(b.vec_extract(raw, j)), qk_scale), dtype)
             for j in range(8)
         ]
         q_packs.append(b.vec_pack(elems, dtype))
 
-    n_ktiles = Skv // BN
+    # ragged: ceil so the partial last KV tile is visited (its OOB keys load 0
+    # into LDS and are masked out); aligned: exact.
+    n_ktiles = ((Skv + BN - 1) // BN) if RAGGED else (Skv // BN)
     n_per = BLOCK_M // BN
 
     K_BYTES_PER_BUF = BN * LDROW * 2
@@ -426,38 +492,57 @@ def build_attention_dense(
     v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
 
+    def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
+        """Async DMA one K/V tile into the [BN, LDROW] LDS layout.
+
+        ROWS_PER_INSTR==1 (D==128): one instr per padded row -- 64 lanes x 2 bf16
+        fill exactly one D-wide row (the original byte-identical fast path).
+        ROWS_PER_INSTR>1 (D<128): pack ROWS_PER_INSTR rows per instr into the
+        unpadded contiguous tile (lane l -> row l//(D/2), col 2*(l%(D/2)))."""
+        buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
+        if ROWS_PER_INSTR == 1:
+            for r in range(ROWS_PER_WAVE):
+                row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
+                row_lds_off = b.add(
+                    buf_off, b.zext(b.mul(row, b.const_i32(ldrow_bytes)), I64)
+                )
+                row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                gkey = b.add(tile_key0, row)
+                gcol = b.mul(lane, b.const_i32(2))
+                voff = b.add(
+                    b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol
+                )
+                b.async_buffer_load_lds_addr(
+                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                )
+        else:
+            lanes_per_row = D // 2
+            sub_row = b.div(lane, b.const_i32(lanes_per_row))
+            col = b.mul(b.mod(lane, b.const_i32(lanes_per_row)), b.const_i32(2))
+            for it in range(ROWS_PER_WAVE // ROWS_PER_INSTR):
+                row0 = b.add(
+                    b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
+                    b.const_i32(it * ROWS_PER_INSTR),
+                )
+                row_lds_off = b.add(
+                    buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                )
+                row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                gkey = b.add(b.add(tile_key0, row0), sub_row)
+                voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col)
+                b.async_buffer_load_lds_addr(
+                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                )
+
     def async_load_k(lds_base, buf_val, tile_key0):
-        """Row-by-row async DMA into padded [BN, LDROW] K_lds layout."""
-        buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(K_BYTES_PER_BUF))
-        for r in range(ROWS_PER_WAVE):
-            row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
-            row_lds_off = b.add(
-                buf_off, b.zext(b.mul(row, b.const_i32(K_LDROW_BYTES)), I64)
-            )
-            row_base = b.smem_ptr_add(lds_base, row_lds_off)
-            gkey = b.add(tile_key0, row)
-            gcol = b.mul(lane, b.const_i32(2))
-            voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol)
-            b.async_buffer_load_lds_addr(
-                k_rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
-            )
+        _async_load(
+            k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
+        )
 
     def async_load_v(lds_base, buf_val, tile_key0):
-        """Row-by-row async DMA into [BN, VROW] V_lds (row-strided so V can carry
-        the +PAD_V transposed-PV bank pad); 64 lanes x 2 bf16 = D per row."""
-        buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(V_BYTES_PER_BUF))
-        for r in range(ROWS_PER_WAVE):
-            row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
-            row_lds_off = b.add(
-                buf_off, b.zext(b.mul(row, b.const_i32(V_LDROW_BYTES)), I64)
-            )
-            row_base = b.smem_ptr_add(lds_base, row_lds_off)
-            gkey = b.add(tile_key0, row)
-            gcol = b.mul(lane, b.const_i32(2))
-            voff = b.add(b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol)
-            b.async_buffer_load_lds_addr(
-                v_rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
-            )
+        _async_load(
+            v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
+        )
 
     def load_tile(buf_val, tile_idx):
         tk0 = b.mul(tile_idx, b.const_i32(BN))
@@ -505,6 +590,20 @@ def build_attention_dense(
                     s_reg[nsub][i] = b.select(
                         b.cmp_gt(ktok, win_lo), s_reg[nsub][i], neg_inf
                     )
+
+    def do_kbound_mask(s_reg, tile_idx):
+        """ragged non-causal: force scores of padded keys (ktok >= seqlen_kv, the
+        OOB rows of the partial last KV tile) to -inf. Causal doesn't need this
+        (padded ktok >= seqlen_kv > every real query, so causal already drops
+        them). seqlen_kv is compile-time -> the bound folds to an immediate."""
+        tile_key0 = b.mul(tile_idx, b.const_i32(BN))
+        for nsub in range(N_SUB):
+            sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
+            for i in range(16):
+                ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                s_reg[nsub][i] = b.select(
+                    b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
+                )
 
     def softmax_max(s_reg, m_i):
         local_max = neg_inf
@@ -645,11 +744,16 @@ def build_attention_dense(
     load_tile(start_buf1, b.add(start_tile, b.const_i32(1)))
     b.s_waitcnt(vmcnt=0)
     b.s_barrier_bare()
+    # ragged non-causal needs the key-pad mask (ktok<seqlen_kv) on any tile that
+    # can hold padded keys; causal drops them for free (see do_kbound_mask).
+    RAG_KBOUND = RAGGED and (not causal) and (Skv % BN != 0)
     s0 = do_qk(start_buf)
     if causal and W > 0:
         do_mask(s0, start_tile, lower=True, upper=True)
     else:
         do_mask(s0, start_tile)
+    if RAG_KBOUND:
+        do_kbound_mask(s0, start_tile)
     m0, _alpha0, _skip0 = softmax_max(s0, neg_inf)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     p0_vals = [
@@ -671,7 +775,7 @@ def build_attention_dense(
 
     _rs_ctr = [0]
 
-    def emit_loop_body(j, carry, mask_lower=False, mask_upper=False):
+    def emit_loop_body(j, carry, mask_lower=False, mask_upper=False, mask_kbound=False):
         m_i = carry[0]
         l_i = carry[1]
         o_acc = list(carry[2 : 2 + D_TILES])
@@ -687,6 +791,8 @@ def build_attention_dense(
         s = do_qk(kbuf)
         if mask_lower or mask_upper:
             do_mask(s, j, lower=mask_lower, upper=mask_upper)
+        if mask_kbound:
+            do_kbound_mask(s, j)
         m_new, alpha, skip = softmax_max(s, m_i)
         b.sched_barrier(0)  # depth-1 fence: m_new region-live-in
         b.s_setprio(1)  # PV-only s_setprio (paired with PF ~+3.5%)
@@ -771,7 +877,7 @@ def build_attention_dense(
             b.const_i32(1), n_upper, b.const_i32(1), iter_args, iv_name="nkt"
         )
         with loop as (j, carry):
-            emit_loop_body(j, carry)
+            emit_loop_body(j, carry, mask_kbound=RAG_KBOUND)
 
     res = loop.results
     l_i = res[1]
@@ -798,17 +904,25 @@ def build_attention_dense(
     qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
     q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
     d_half = b.mul(lane_h, b.const_i32(4))
-    for dt in range(D_TILES):
-        for g in range(4):
-            d0 = b.add(b.const_i32(dt * 32 + g * 8), d_half)
-            addr = b.add(q_row_byte, d0)
-            vals = [
-                b.cast_f32_to(
-                    b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
-                )
-                for kk in range(4)
-            ]
-            b.global_store_vN(o, addr, b.vec_pack(vals, dtype), 4, align=8)
+    # ragged: drop padded query rows (qtok >= seqlen_q) via a per-lane guard so
+    # they never write (and never clobber a neighbouring batch's real rows). A
+    # buffer store's OOB-drop only protects the last batch's overflow, so use an
+    # explicit predicate that is correct for any batch.
+    o_store_ctx = (
+        b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
+    )
+    with o_store_ctx:
+        for dt in range(D_TILES):
+            for g in range(4):
+                d0 = b.add(b.const_i32(dt * 32 + g * 8), d_half)
+                addr = b.add(q_row_byte, d0)
+                vals = [
+                    b.cast_f32_to(
+                        b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
+                    )
+                    for kk in range(4)
+                ]
+                b.global_store_vN(o, addr, b.vec_pack(vals, dtype), 4, align=8)
     b.ret()
     return b.kernel
 
@@ -850,9 +964,15 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     gqa = Hq // Hkv
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
-    n_ktiles = Skv // BN
+    # DMA row packing (see default builder): 1 row/instr for D==128 (padded fast
+    # path), else pack 128//D rows/instr into an unpadded contiguous LDS tile.
+    ROWS_PER_INSTR = 128 // D
+    RAGGED = spec.ragged
+    # ragged: ceil both the KV tiles and the query-block count so the partial
+    # last block/tile is covered (padded rows/keys are handled on-chip).
+    n_ktiles = ((Skv + BN - 1) // BN) if RAGGED else (Skv // BN)
     n_per = BLOCK_M // BN
-    NQB = Sq // BLOCK_M
+    NQB = ((Sq + BLOCK_M - 1) // BLOCK_M) if RAGGED else (Sq // BLOCK_M)
     W = NQB * Hq * B  # total work items
     SW = spec.sliding_window  # sliding-window length (0 = disabled)
     SWt = SW // BN  # window length in KV tiles
@@ -887,8 +1007,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
 
-    LDROW = D + PAD
-    VROW = D + _LDS_PAD_V  # V-row pitch (padded for the transposed PV read)
+    # 1 row/instr => padded pitch (bank-conflict fix); packed D<128 => unpadded.
+    LDROW = D + PAD if ROWS_PER_INSTR == 1 else D
+    VROW = (D + _LDS_PAD_V) if ROWS_PER_INSTR == 1 else D
     K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
 
@@ -904,6 +1025,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     V_lds_addr = b.smem_addr_of(V_lds)
     k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
     v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
+    # ragged: bounds-checked Q load (OOB partial-block rows -> 0 register pad).
+    q_rsrc = b.buffer_rsrc(q, b.const_i32(B * Sq * Hq * D * 2)) if RAGGED else None
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
 
     # ----- persistent grid-stride loop over the flattened work-item space -----
@@ -971,7 +1094,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         for ks in range(K_STEPS):
             col = b.add(b.const_i32(ks * 16), d_base)
             addr = b.add(b.add(q_base, b.mul(q_tok, b.const_i32(stride_q_tok))), col)
-            raw = b.global_load_vN(q, addr, dtype, 8, align=16)
+            if RAGGED:
+                raw = b.buffer_load_vN(
+                    q_rsrc, b.mul(addr, b.const_i32(2)), b.const_i32(0), dtype, 8
+                )
+            else:
+                raw = b.global_load_vN(q, addr, dtype, 8, align=16)
             elems = [
                 b.cast_f32_to(
                     b.fmul(b.cast_to_f32(b.vec_extract(raw, j)), qk_scale), dtype
@@ -980,54 +1108,63 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             ]
             q_packs.append(b.vec_pack(elems, dtype))
 
-        def async_load_k(lds_base, buf_val, tile_key0):
-            buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(K_BYTES_PER_BUF))
-            row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
-            row_lds_off = b.add(
-                buf_off, b.zext(b.mul(row0, b.const_i32(K_LDROW_BYTES)), I64)
-            )
-            gcol = b.mul(lane, b.const_i32(2))
-            voff = b.add(
-                b.add(
-                    k_base,
-                    b.mul(b.add(tile_key0, row0), b.const_i32(stride_k_tok)),
-                ),
-                gcol,
-            )
-            for r in range(ROWS_PER_WAVE):
-                row_base = b.smem_ptr_add(lds_base, row_lds_off)
-                b.async_buffer_load_lds_addr(
-                    k_rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+        def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
+            """Async DMA one K/V tile (see default builder ``_async_load``).
+            ROWS_PER_INSTR==1 (D==128): incremental one-instr-per-padded-row fast
+            path (byte-identical). ROWS_PER_INSTR>1 (D<128): pack rows per instr
+            into the unpadded contiguous tile."""
+            buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
+            if ROWS_PER_INSTR == 1:
+                row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
+                row_lds_off = b.add(
+                    buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
                 )
-                if r + 1 < ROWS_PER_WAVE:
-                    row_lds_off = b.add(row_lds_off, b.const_i64(K_LDROW_BYTES))
-                    voff = b.add(voff, b.const_i32(stride_k_tok))
+                gcol = b.mul(lane, b.const_i32(2))
+                voff = b.add(
+                    b.add(
+                        k_base,
+                        b.mul(b.add(tile_key0, row0), b.const_i32(stride_k_tok)),
+                    ),
+                    gcol,
+                )
+                for r in range(ROWS_PER_WAVE):
+                    row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                    b.async_buffer_load_lds_addr(
+                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                    )
+                    if r + 1 < ROWS_PER_WAVE:
+                        row_lds_off = b.add(row_lds_off, b.const_i64(ldrow_bytes))
+                        voff = b.add(voff, b.const_i32(stride_k_tok))
+            else:
+                lanes_per_row = D // 2
+                sub_row = b.div(lane, b.const_i32(lanes_per_row))
+                col = b.mul(b.mod(lane, b.const_i32(lanes_per_row)), b.const_i32(2))
+                for it in range(ROWS_PER_WAVE // ROWS_PER_INSTR):
+                    row0 = b.add(
+                        b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
+                        b.const_i32(it * ROWS_PER_INSTR),
+                    )
+                    row_lds_off = b.add(
+                        buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                    )
+                    row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                    gkey = b.add(b.add(tile_key0, row0), sub_row)
+                    voff = b.add(
+                        b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), col
+                    )
+                    b.async_buffer_load_lds_addr(
+                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                    )
+
+        def async_load_k(lds_base, buf_val, tile_key0):
+            _async_load(
+                k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
+            )
 
         def async_load_v(lds_base, buf_val, tile_key0):
-            """Row-by-row async DMA into [BN, VROW] V_lds. Row-strided (like K)
-            so V can carry the +PAD_V bank-conflict pad for the transposed PV
-            read; each row's 64 lanes load 2 bf16 each (= D) contiguously."""
-            buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(V_BYTES_PER_BUF))
-            row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
-            row_lds_off = b.add(
-                buf_off, b.zext(b.mul(row0, b.const_i32(V_LDROW_BYTES)), I64)
+            _async_load(
+                v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
             )
-            gcol = b.mul(lane, b.const_i32(2))
-            voff = b.add(
-                b.add(
-                    k_base,
-                    b.mul(b.add(tile_key0, row0), b.const_i32(stride_k_tok)),
-                ),
-                gcol,
-            )
-            for r in range(ROWS_PER_WAVE):
-                row_base = b.smem_ptr_add(lds_base, row_lds_off)
-                b.async_buffer_load_lds_addr(
-                    v_rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
-                )
-                if r + 1 < ROWS_PER_WAVE:
-                    row_lds_off = b.add(row_lds_off, b.const_i64(V_LDROW_BYTES))
-                    voff = b.add(voff, b.const_i32(stride_k_tok))
 
         def load_tile(buf_val, tile_idx):
             tk0 = b.mul(tile_idx, b.const_i32(BN))
@@ -1064,6 +1201,20 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         s_reg[nsub][i] = b.select(
                             b.cmp_gt(ktok, win_lo), s_reg[nsub][i], neg_inf
                         )
+
+        def do_kbound_mask(s_reg, tile_idx):
+            """ragged non-causal: -inf the padded keys (ktok >= seqlen_kv) of the
+            partial last KV tile. Causal drops them for free."""
+            tile_key0 = b.mul(tile_idx, b.const_i32(BN))
+            for nsub in range(N_SUB):
+                sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
+                for i in range(16):
+                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    s_reg[nsub][i] = b.select(
+                        b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
+                    )
+
+        RAG_KBOUND = RAGGED and (not causal) and (Skv % BN != 0)
 
         def softmax_max(s_reg, m_i):
             local_max = neg_inf
@@ -1187,7 +1338,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
         _rs_ctr = [0]
 
-        def emit_loop_body(j, carry, mask_lower=False, mask_upper=False):
+        def emit_loop_body(
+            j, carry, mask_lower=False, mask_upper=False, mask_kbound=False
+        ):
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
@@ -1204,6 +1357,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             s = do_qk(kbuf)
             if mask_lower or mask_upper:
                 do_mask(s, j, lower=mask_lower, upper=mask_upper)
+            if mask_kbound:
+                do_kbound_mask(s, j)
             m_new, alpha, skip = softmax_max(s, m_i)
             b.sched_barrier(0)
             # PV-only s_setprio: the PV MFMA cluster wins issue slots; paired with
@@ -1268,6 +1423,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             do_mask(s0, start_tile, lower=True, upper=True)
         else:
             do_mask(s0, start_tile)
+        if RAG_KBOUND:
+            do_kbound_mask(s0, start_tile)
         m0, _alpha0, p0, l0 = softmax_stats(s0, neg_inf)
         o0 = [b.zero_vec_f32(16) for _ in range(D_TILES)]
         pk0 = relayout_p(p0)
@@ -1335,7 +1492,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 b.const_i32(1), n_upper, b.const_i32(1), iter_args, iv_name="nkt"
             )
             with loop as (j, carry):
-                emit_loop_body(j, carry)
+                emit_loop_body(j, carry, mask_kbound=RAG_KBOUND)
 
         res = loop.results
         l_i = res[1]
@@ -1367,17 +1524,22 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, b.const_i32(stride_q_tok)))
         d_half = b.mul(lane_h, b.const_i32(4))
-        for dt in range(D_TILES):
-            for g in range(4):
-                d0 = b.add(b.const_i32(dt * 32 + g * 8), d_half)
-                addr = b.add(q_row_byte, d0)
-                vals = [
-                    b.cast_f32_to(
-                        b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
-                    )
-                    for kk in range(4)
-                ]
-                b.global_store_vN(o, addr, b.vec_pack(vals, dtype), 4, align=8)
+        # ragged: guard padded query rows (qtok >= seqlen_q) so they never write.
+        o_store_ctx = (
+            b.scf_if(b.cmp_lt(qtok, b.const_i32(Sq))) if RAGGED else _nullcontext()
+        )
+        with o_store_ctx:
+            for dt in range(D_TILES):
+                for g in range(4):
+                    d0 = b.add(b.const_i32(dt * 32 + g * 8), d_half)
+                    addr = b.add(q_row_byte, d0)
+                    vals = [
+                        b.cast_f32_to(
+                            b.fmul(b.vec_extract(o_acc[dt], g * 4 + kk), rcp_l), dtype
+                        )
+                        for kk in range(4)
+                    ]
+                    b.global_store_vN(o, addr, b.vec_pack(vals, dtype), 4, align=8)
 
     b.ret()
     return b.kernel
@@ -1394,7 +1556,8 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     default = one CTA per (query-block, query-head, batch)."""
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
-    return (spec.seqlen_q // _BLOCK_M, spec.num_query_heads, spec.batch)
+    nqb = (spec.seqlen_q + _BLOCK_M - 1) // _BLOCK_M  # ceil: ragged partial block
+    return (nqb, spec.num_query_heads, spec.batch)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
@@ -1420,6 +1583,11 @@ def attention_dense_signature(spec: AttentionDenseSpec):
 _DENSE_LAUNCHER_CACHE: dict = {}
 
 
+def align_up(n: int, mult: int) -> int:
+    """Round ``n`` up to the next multiple of ``mult`` (kernel tile alignment)."""
+    return ((int(n) + mult - 1) // mult) * mult
+
+
 def run_attention_dense_torch(
     *,
     spec: AttentionDenseSpec,
@@ -1435,7 +1603,15 @@ def run_attention_dense_torch(
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
     tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
     softmax scale (1/sqrt(D)). Returns ``out``. torch is imported lazily by the
-    launcher — this module stays torch-free at import time."""
+    launcher — this module stays torch-free at import time.
+
+    Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
+    padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
+    and the TRUE (un-rounded) ``seqlen_q``/``seqlen_kv`` and pass the true-length
+    q/k/v/out tensors. The kernel pads the boundary tiles on-chip (register-zero
+    OOB query rows, LDS-zero OOB keys) and drops the partial O rows; the grid is
+    ceil-sized automatically. See the ``ragged`` spec field.
+    """
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")

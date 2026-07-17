@@ -82,6 +82,31 @@ def _cases():
         "attention_dense/persist_swa_w128_sq512": mk(
             persistent=True, num_persistent=256, sliding_window=128
         ),
+        # D=64 packed-row DMA loader (2 rows/instr, unpadded LDS) on the
+        # persistent builder -- locks the head_size=64 fix (fp16_h64 above only
+        # exercises the default builder).
+        "attention_dense/persist_h64_sq512": mk(
+            persistent=True, num_persistent=256, head_size=64
+        ),
+        # ragged (non-256 seqlen) in-kernel path: on-chip boundary padding.
+        # causal (no key mask), non-causal (ktok<seqlen_kv key mask), D=64, and
+        # the persistent variant -- lock all four ragged codegen shapes.
+        "attention_dense/ragged_causal_sq500": mk(
+            seqlen_q=500, seqlen_kv=500, ragged=True
+        ),
+        "attention_dense/ragged_full_sq500": mk(
+            seqlen_q=500, seqlen_kv=500, ragged=True, causal=False
+        ),
+        "attention_dense/ragged_h64_sq500": mk(
+            seqlen_q=500, seqlen_kv=500, ragged=True, head_size=64
+        ),
+        "attention_dense/persist_ragged_sq500": mk(
+            seqlen_q=500,
+            seqlen_kv=500,
+            ragged=True,
+            persistent=True,
+            num_persistent=256,
+        ),
     }
 
 
