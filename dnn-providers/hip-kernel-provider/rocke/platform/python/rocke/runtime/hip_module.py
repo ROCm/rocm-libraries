@@ -87,6 +87,7 @@ _hipGetErrorString = _b("hipGetErrorString", ctypes.c_int, restype=ctypes.c_char
 _hipInit = _b("hipInit", ctypes.c_uint)
 _hipSetDevice = _b("hipSetDevice", ctypes.c_int)
 _hipGetDevice = _b("hipGetDevice", ctypes.POINTER(ctypes.c_int))
+_hipGetDeviceCount = _b("hipGetDeviceCount", ctypes.POINTER(ctypes.c_int))
 _hipModuleLoadData = _b(
     "hipModuleLoadData", ctypes.POINTER(_HipModuleHandle), ctypes.c_void_p
 )
@@ -145,7 +146,11 @@ def _check(s: int, where: str) -> None:
 
 
 _hip_inited = False
-_device_arch_cache: Dict[int, Optional[str]] = {}
+# Raw hipDeviceProp_t buffers, cached per device. The struct layout churns across
+# ROCm releases (and the props symbol was versioned to ``...R0600`` in ROCm 6.x), so
+# we keep the raw bytes and let each query read the field it needs rather than mirror
+# the struct. See get_device_arch (gcnArchName) / get_device_name (name).
+_device_props_cache: Dict[int, Optional[bytes]] = {}
 
 
 def _ensure_hip_init() -> None:
@@ -171,27 +176,25 @@ def _ensure_hip_init() -> None:
     _hip_inited = True
 
 
-def get_device_arch(device: int = 0) -> Optional[str]:
-    """Best-effort gfx string of a HIP device (e.g. ``"gfx942"``).
+def _device_props(device: int = 0) -> Optional[bytes]:
+    """Raw ``hipDeviceProp_t`` bytes for a HIP device, or None if unavailable.
 
-    Returns ``None`` when it can't be determined (no GPU present, or the
-    properties symbol is unavailable). Launch paths use this to compile for
-    the device they will actually run on instead of defaulting to a fixed
-    arch — building a gfx950 code object and launching it on gfx942 yields
-    ``hipError(209) no kernel image``.
+    Best-effort and **side-effect-free**: this is a *query*, not a context bind, so
+    it deliberately does not call ``_ensure_hip_init()`` (which would ``hipSetDevice``
+    and create a primary context). ``hipGetDeviceProperties*`` lazily inits the runtime
+    internally and needs no bound context, so a pure ctypes process — no torch, no
+    prior HIP call — still gets valid properties. Keeping it context-free means a probe
+    can run before a later ``import torch`` without perturbing torch's device discovery.
 
-    The ``hipDeviceProp_t`` struct layout changes across ROCm releases (and
-    the symbol was versioned to ``...R0600`` in ROCm 6.x), so rather than
-    mirroring the struct we allocate a generous zeroed buffer, fill it via
-    ``hipGetDeviceProperties*``, and scan it for the ``gfx<...>`` token that
-    ``gcnArchName`` carries. ``name`` (the marketing string) contains no
-    ``gfx`` token, so the first match is the architecture name.
+    The struct layout changes across ROCm releases (the symbol was versioned to
+    ``...R0600`` in ROCm 6.x), so we fill a generous zeroed buffer and let callers read
+    the field they need rather than mirror the struct. The first properties symbol that
+    returns success wins and its buffer is cached; we do not retry the legacy symbol once
+    one has succeeded.
     """
-    import re
-
     device = int(device)
-    if device in _device_arch_cache:
-        return _device_arch_cache[device]
+    if device in _device_props_cache:
+        return _device_props_cache[device]
 
     buf = ctypes.create_string_buffer(4096)
     for sym in ("hipGetDevicePropertiesR0600", "hipGetDeviceProperties"):
@@ -200,15 +203,66 @@ def get_device_arch(device: int = 0) -> Optional[str]:
             rc = fn(buf, device)
         except (AttributeError, OSError):
             continue
-        if rc != 0:
-            continue
-        m = re.search(rb"gfx[0-9a-z]+", buf.raw)
-        if m:
-            arch = m.group(0).decode("ascii")
-            _device_arch_cache[device] = arch
-            return arch
-    _device_arch_cache[device] = None
+        if rc == 0:
+            _device_props_cache[device] = buf.raw
+            return buf.raw
+    _device_props_cache[device] = None
     return None
+
+
+def get_device_arch(device: int = 0) -> Optional[str]:
+    """Best-effort gfx string of a HIP device (e.g. ``"gfx942"``).
+
+    Mirrors the ``Name`` field ``rocminfo`` prints for a GPU agent. Returns ``None``
+    when it can't be determined (no GPU present, or the properties symbol is
+    unavailable). Launch paths use this to compile for the device they will actually
+    run on instead of defaulting to a fixed arch — building a gfx950 code object and
+    launching it on gfx942 yields ``hipError(209) no kernel image``.
+
+    ``gcnArchName`` carries the gfx token; the marketing ``name`` field (offset 0)
+    contains no ``gfx`` token, so the first match in the raw buffer is the architecture
+    name. The ``[0-9a-z]+`` class stops at the ``:`` feature-flag delimiter and the NUL
+    terminator, yielding e.g. ``"gfx942"`` from ``"gfx942:sramecc+:xnack-"``.
+    """
+    import re
+
+    raw = _device_props(device)
+    if raw is None:
+        return None
+    m = re.search(rb"gfx[0-9a-z]+", raw)
+    return m.group(0).decode("ascii") if m else None
+
+
+def get_device_name(device: int = 0) -> Optional[str]:
+    """Marketing name of a HIP device — the string ``rocminfo`` labels "Marketing Name".
+
+    Reads ``hipDeviceProp_t.name`` — the ``char name[256]`` at struct offset 0, which
+    is stable across ROCm releases (unlike the churny ``gcnArchName`` offset). This is
+    the same string ``rocminfo`` prints as "Marketing Name" and torch surfaces via
+    ``torch.cuda.get_device_name``; reading it straight from HIP lets detection report
+    the device without a torch dependency. Returns ``None`` when unavailable.
+    """
+    raw = _device_props(device)
+    if raw is None:
+        return None
+    name = raw[:256].split(b"\0", 1)[0].decode("ascii", "replace")
+    return name or None
+
+
+def get_device_count() -> int:
+    """Number of HIP devices visible to this process (respects ``HIP_VISIBLE_DEVICES``).
+
+    Returns ``0`` when no device is visible or the runtime can't be queried — the count
+    twin of ``get_device_arch`` returning ``None``. Best-effort and side-effect-free (no
+    ``_ensure_hip_init``); ``hipGetDeviceCount`` lazily inits the runtime internally.
+    A foundational HIP query, first consumed by the multi-GPU GEMM sweep test.
+    """
+    n = ctypes.c_int(0)
+    try:
+        rc = _hipGetDeviceCount(ctypes.byref(n))
+    except (AttributeError, OSError):
+        return 0
+    return int(n.value) if rc == 0 else 0
 
 
 @dataclass

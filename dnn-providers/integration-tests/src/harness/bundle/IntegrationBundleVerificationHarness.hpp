@@ -23,7 +23,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
-#include "harness/input_init/SynthesisConfig.hpp"
+#include "harness/input-init/SynthesisConfig.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {

@@ -83,21 +83,6 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
-const hipdnn_data_sdk::utilities::Version&
-    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled)
-{
-    static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
-        hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    static const hipdnn_data_sdk::utilities::Version s_overrideExecuteMinVersion{
-        hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
-
-    if(isOverrideShapeEnabled)
-    {
-        return s_overrideExecuteMinVersion;
-    }
-    return s_baselineVersion;
-}
-
 } // namespace
 
 // Static accessor implementations for CRTP base class
@@ -350,7 +335,9 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const auto& requiredVersion = computeMinimumPluginApiVersion(isOverrideShapeEnabled);
+    const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
+    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        isOverrideShapeEnabled, isRuntimePBV);
 
     std::vector<int64_t> engineIds;
 
@@ -693,9 +680,19 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides although the variant pack "
                        "carries override-tensor selectors.");
 
+        // Defense-in-depth recheck of the override-execute floor. Override-shape
+        // support is hipDNN-owned routing metadata carried in the execution plan
+        // envelope, so it is cheap and correct to re-verify here that the selected
+        // plugin still meets the override API floor. Pass-by-value is intentionally
+        // false: per RFC 0009, once a serialized plan resolves to an engine id the
+        // plugin owns its own payload versioning/compatibility, so hipDNN does not
+        // re-gate feature floors (like pbv) that live in the plugin payload rather
+        // than the envelope.
         const auto pluginApiVersion = plugin->parsedApiVersion();
         THROW_IF_FALSE(pluginApiVersion.has_value()
-                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true),
+                           && *pluginApiVersion
+                                  >= hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+                                      true, /*isRuntimePassByValue=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");
