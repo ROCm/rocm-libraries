@@ -229,7 +229,7 @@ class TestGfx1250SubtileCodegen:
         from types import SimpleNamespace
         from Tensile.Components.Subtile.Kernel import TileInfo, selectDGeometry
         from Tensile.Components.Subtile.LogicalScheduler import (
-            LogicalScheduler, SchedulerConfig, ReadGranularity,
+            LogicalScheduler, SchedulerConfig, ReadGranularity, Pass,
         )
 
         kernel = _create_gfx1250_kernel(32, 32)
@@ -251,7 +251,7 @@ class TestGfx1250SubtileCodegen:
             pgr=2,
         )
         sched = LogicalScheduler(cfg)
-        sched.emit()
+        sched.build(stop_after=Pass.EMIT)
         preloop = sched.build_preloop()
 
         initd_ops = [em.source for partition in preloop for group in partition

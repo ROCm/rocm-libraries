@@ -24,8 +24,11 @@ coverage:
       hipBLASLt:
         flags: [hipBLASLt]
         target: 80%
-      TensileLite:
-        flags: [TensileLite]
+      TensileLite-Unit:
+        flags: [TensileLite-Unit]
+        target: 80%
+      TensileLite-CPP:
+        flags: [TensileLite-CPP]
         target: 80%
       hipCUB:
         flags: [hipCUB]
