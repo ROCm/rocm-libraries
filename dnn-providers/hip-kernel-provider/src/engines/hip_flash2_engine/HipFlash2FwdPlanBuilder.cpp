@@ -14,7 +14,8 @@
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
 #include "HipFlash2KernelUtils.hpp"
 
-namespace hip_flash2_engine {
+namespace hip_flash2_engine
+{
 
 using namespace hip_kernel_provider_common;
 using namespace hipdnn_flatbuffers_sdk;
@@ -23,7 +24,8 @@ using namespace hipdnn_flatbuffers_sdk;
 // isApplicable
 // ---------------------------------------------------------------------------
 bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
-                                           const flatbuffer_utilities::IGraph& opGraph) const {
+                                           const flatbuffer_utilities::IGraph& opGraph) const
+{
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* LOG_PREFIX = "[HipFlash2FwdPlanBuilder::isApplicable] ";
 
@@ -40,11 +42,14 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
 
     // ── Device check ─────────────────────────────────────────────────────────
     std::string archId;
-    try {
+    try
+    {
         archId = getDeviceString(handle.getStream());
         HIP_KERNEL_RETURN_FALSE_IF(archId != "gfx942" && archId != "gfx950",
                                    "Device not gfx942/gfx950 (actual: " + archId + ")");
-    } catch (const std::exception& e) {
+    }
+    catch(const std::exception& e)
+    {
         HIPDNN_PLUGIN_LOG_ERROR(LOG_PREFIX << "getDeviceString failed: " << e.what());
         return false;
     }
@@ -52,16 +57,16 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // ── Single SDPA node ─────────────────────────────────────────────────────
     auto& nodeWrappers = opGraph.nodeWrappers();
     HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.size() != 1, "Graph must have exactly one node");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        nodeWrappers.front()->attributesType() != data_objects::NodeAttributes::SdpaAttributes,
-        "Node must be SdpaAttributes");
+    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->attributesType()
+                                   != data_objects::NodeAttributes::SdpaAttributes,
+                               "Node must be SdpaAttributes");
 
     const auto& attrs = nodeWrappers.front()->attributesAs<data_objects::SdpaAttributes>();
 
     // ── Unsupported optional features ────────────────────────────────────────
-    HIP_KERNEL_RETURN_FALSE_IF(
-        attrs.dropout_probability().has_value() && attrs.dropout_probability().value() != 0.f,
-        "dropout not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
+                                   && attrs.dropout_probability().value() != 0.f,
+                               "dropout not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
@@ -69,9 +74,9 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "LSE stats output not supported");
     // Variable-length (grouped) batches not yet supported
-    HIP_KERNEL_RETURN_FALSE_IF(
-        attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value(),
-        "variable-length (group) batch mode not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
+                                   || attrs.seq_len_kv_tensor_uid().has_value(),
+                               "variable-length (group) batch mode not supported");
 
     // ── Tensor shapes ─────────────────────────────────────────────────────────
     const auto& tensorMap = opGraph.getTensorMap();
@@ -90,17 +95,17 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     const auto kType = kTensor->data_type();
     const auto vType = vTensor->data_type();
     const auto oType = oTensor->data_type();
-    const bool fp16 =
-        (qType == data_objects::DataType::HALF) && (kType == data_objects::DataType::HALF) &&
-        (vType == data_objects::DataType::HALF) && (oType == data_objects::DataType::HALF);
+    const bool fp16
+        = (qType == data_objects::DataType::HALF) && (kType == data_objects::DataType::HALF)
+          && (vType == data_objects::DataType::HALF) && (oType == data_objects::DataType::HALF);
     HIP_KERNEL_RETURN_FALSE_IF(!fp16, "only FP16 Q/K/V/O is supported");
 
     // ── head_dim: {64, 128} ───────────────────────────────────────────────────
     // Q layout: [B, H_q, S_q, D_qk]
     const int headDim = static_cast<int>(qTensor->dims()->Get(3));
-    HIP_KERNEL_RETURN_FALSE_IF(
-        headDim != 64 && headDim != 128,
-        "head_dim must be 64 or 128 (actual: " + std::to_string(headDim) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(headDim != 64 && headDim != 128,
+                               "head_dim must be 64 or 128 (actual: " + std::to_string(headDim)
+                                   + ")");
 
     // head_dim_v must equal head_dim_qk (V7 kernel assumes D_v == D_qk)
     const int headDimV = static_cast<int>(vTensor->dims()->Get(3));
@@ -112,18 +117,18 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     // produce silently wrong output.
     const int numHeadsQ = static_cast<int>(qTensor->dims()->Get(1));
     const int numHeadsKv = static_cast<int>(kTensor->dims()->Get(1));
-    HIP_KERNEL_RETURN_FALSE_IF(
-        numHeadsKv <= 0 || numHeadsQ % numHeadsKv != 0,
-        "num_heads_q must be divisible by num_heads_kv for GQA (q=" +
-            std::to_string(numHeadsQ) + " kv=" + std::to_string(numHeadsKv) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv <= 0 || numHeadsQ % numHeadsKv != 0,
+                               "num_heads_q must be divisible by num_heads_kv for GQA (q="
+                                   + std::to_string(numHeadsQ) + " kv=" + std::to_string(numHeadsKv)
+                                   + ")");
 
     // ── Flash2 crossover heuristic ────────────────────────────────────────────
     const int seqLenQ = static_cast<int>(qTensor->dims()->Get(2));
     const int seqLenKv = static_cast<int>(kTensor->dims()->Get(2));
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !useFlash2ForShape(seqLenQ, seqLenKv),
-        "shape below Flash2 crossover threshold (seq_q=" + std::to_string(seqLenQ) +
-            " seq_kv=" + std::to_string(seqLenKv) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(!useFlash2ForShape(seqLenQ, seqLenKv),
+                               "shape below Flash2 crossover threshold (seq_q="
+                                   + std::to_string(seqLenQ) + " seq_kv=" + std::to_string(seqLenKv)
+                                   + ")");
 
     return true;
 }
@@ -133,7 +138,8 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
 // ---------------------------------------------------------------------------
 size_t HipFlash2FwdPlanBuilder::getMaxWorkspaceSize(const Handle& /*handle*/,
                                                     const flatbuffer_utilities::IGraph& /*opGraph*/,
-                                                    const Settings& /*executionSettings*/) const {
+                                                    const Settings& /*executionSettings*/) const
+{
     // Flash-Attention 2 V7 uses only registers and LDS — no external workspace.
     return 0;
 }
@@ -142,9 +148,11 @@ size_t HipFlash2FwdPlanBuilder::getMaxWorkspaceSize(const Handle& /*handle*/,
 // initializeExecutionSettings
 // ---------------------------------------------------------------------------
 void HipFlash2FwdPlanBuilder::initializeExecutionSettings(
-    const Handle& /*handle*/, const flatbuffer_utilities::IGraph& /*opGraph*/,
+    const Handle& /*handle*/,
+    const flatbuffer_utilities::IGraph& /*opGraph*/,
     const flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
-    Settings& /*executionSettings*/) const {
+    Settings& /*executionSettings*/) const
+{
     // No per-execution settings needed for Flash2 V7 (all state captured at
     // buildPlan)
     HIPDNN_PLUGIN_LOG_INFO("HipFlash2FwdPlanBuilder::initializeExecutionSettings — no-op");
@@ -156,16 +164,20 @@ void HipFlash2FwdPlanBuilder::initializeExecutionSettings(
 void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
                                         const flatbuffer_utilities::IGraph& opGraph,
                                         const flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
-                                        Context& executionContext) const {
+                                        Context& executionContext) const
+{
     // ── 1. Device string ─────────────────────────────────────────────────────
     // I6: fail-closed — throw on any error so the framework sees a hard failure
     // rather than leaving the execution context without a plan.
     std::string archId;
-    try {
+    try
+    {
         archId = getDeviceString(handle.getStream());
-    } catch (const std::exception& e) {
-        const std::string msg =
-            std::string("HipFlash2FwdPlanBuilder::buildPlan — getDeviceString: ") + e.what();
+    }
+    catch(const std::exception& e)
+    {
+        const std::string msg
+            = std::string("HipFlash2FwdPlanBuilder::buildPlan — getDeviceString: ") + e.what();
         HIPDNN_PLUGIN_LOG_ERROR(msg);
         throw std::runtime_error(msg);
     }
@@ -177,10 +189,10 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     // ── 3. Load .co and get kernel function ──────────────────────────────────
     const std::string coPath = flash2CoPath(archId);
     const char* funcName = flash2KernelName(params.head_dim);
-    if (funcName == nullptr) {
-        const std::string msg =
-            "HipFlash2FwdPlanBuilder::buildPlan — unsupported head_dim=" +
-            std::to_string(params.head_dim);
+    if(funcName == nullptr)
+    {
+        const std::string msg = "HipFlash2FwdPlanBuilder::buildPlan — unsupported head_dim="
+                                + std::to_string(params.head_dim);
         HIPDNN_PLUGIN_LOG_ERROR(msg);
         throw std::runtime_error(msg);
     }
@@ -189,9 +201,10 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
                                                                            << " fn=" << funcName);
 
     auto kernelOpt = loadKernelModule(coPath, funcName);
-    if (!kernelOpt) {
-        const std::string msg =
-            "HipFlash2FwdPlanBuilder::buildPlan — failed to load kernel from: " + coPath;
+    if(!kernelOpt)
+    {
+        const std::string msg
+            = "HipFlash2FwdPlanBuilder::buildPlan — failed to load kernel from: " + coPath;
         HIPDNN_PLUGIN_LOG_ERROR(msg);
         throw std::runtime_error(msg);
     }
@@ -204,8 +217,10 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
 // ---------------------------------------------------------------------------
 // getCustomKnobs
 // ---------------------------------------------------------------------------
-std::vector<data_objects::KnobT> HipFlash2FwdPlanBuilder::getCustomKnobs(
-    const Handle& /*handle*/, const flatbuffer_utilities::IGraph& /*opGraph*/) const {
+std::vector<data_objects::KnobT>
+    HipFlash2FwdPlanBuilder::getCustomKnobs(const Handle& /*handle*/,
+                                            const flatbuffer_utilities::IGraph& /*opGraph*/) const
+{
     // V7 kernel has no tunable knobs exposed to the hipDNN planner
     return {};
 }
@@ -213,6 +228,7 @@ std::vector<data_objects::KnobT> HipFlash2FwdPlanBuilder::getCustomKnobs(
 // ---------------------------------------------------------------------------
 // extractParams (private helper)
 // ---------------------------------------------------------------------------
-Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(
-    const Handle& /*handle*/, const flatbuffer_utilities::IGraph& opGraph) const {
-    
+Flash2FwdParams
+    HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
+                                           const flatbuffer_utilities::IGraph& opGraph) const
+{
