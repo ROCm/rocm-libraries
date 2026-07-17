@@ -13,15 +13,20 @@
 // override when the process is privileged while leaving the documented,
 // sanctioned HIPBLASLT_TENSILE_LIBPATH workflow untouched for normal use.
 //
-// This is a GPU-free, deterministic, host-only unit test. It pins the two
-// halves of that contract that CAN be checked in an ordinary (non-privileged)
-// CI process:
+// This is a GPU-free, deterministic, host-only unit test that pins the full
+// suppression contract in an ordinary (non-privileged) CI process:
 //   * A normal process still sees the override (the workflow is not broken).
 //   * The process is correctly classified as non-privileged, so nothing is
 //     suppressed.
-// The complementary half -- that a genuinely set-uid/set-gid process has the
-// override suppressed -- cannot be exercised without a set-uid test harness and
-// is validated manually (see the PR test plan); it is not run in CI.
+//   * When privileged, the override IS suppressed. The suppression policy is
+//     factored into rocblaslt_secure_getenv_impl / _suppressed_for_security_impl
+//     (rocblaslt_secure_env.hpp), which take the privilege state as a parameter,
+//     so the privileged branch is exercised directly by passing is_privileged
+//     =true -- no set-uid/set-gid harness required.
+// The only piece that cannot be exercised without real privilege is the OS
+// probe itself (rocblaslt_process_is_privileged -> getauxval(AT_SECURE) /
+// real-vs-effective ID compare); that is kernel/glibc behavior rather than our
+// logic, and is validated manually (see the PR test plan).
 //
 // Smoke tier: PR CI runs hipBLASLt with TEST_TYPE=quick, which selects
 // `--gtest_filter=*smoke*` (test/therock/test_hipblaslt.py). The test names
@@ -108,4 +113,44 @@ TEST(SecureEnv, smoke_ReturnsNullWhenUnsetOrNullName)
 
     EXPECT_EQ(rocblaslt_secure_getenv(nullptr), nullptr);
     EXPECT_FALSE(rocblaslt_env_suppressed_for_security(nullptr));
+}
+
+// Core security guarantee: a privileged process must NOT see the override, even
+// when the variable is set in the environment. The suppression policy is tested
+// directly via the _impl entry points by forcing is_privileged=true, which is
+// the exact branch a genuine set-uid/set-gid process would take -- so the
+// escalation vector from ROCM-26729 is covered without a set-uid test harness.
+TEST(SecureEnv, smoke_SuppressesEnvForPrivilegedProcess)
+{
+    setTestEnv("/tmp/hipblaslt-secure-env-test");
+
+    // Privileged: the set variable is refused ...
+    EXPECT_EQ(rocblaslt_secure_getenv_impl(kTestVar, /*is_privileged=*/true), nullptr)
+        << "ROCM-26729: a privileged process was allowed to honor "
+           "HIPBLASLT_TENSILE_LIBPATH-style overrides, which is the untrusted "
+           "search-path escalation this fix must block.";
+    // ... and reported as suppressed-for-security (for the diagnostic log).
+    EXPECT_TRUE(rocblaslt_env_suppressed_for_security_impl(kTestVar, /*is_privileged=*/true));
+
+    // Non-privileged: the same set variable is honored, confirming the two
+    // branches diverge on privilege state alone (not on some other condition).
+    EXPECT_STREQ(rocblaslt_secure_getenv_impl(kTestVar, /*is_privileged=*/false),
+                 "/tmp/hipblaslt-secure-env-test");
+    EXPECT_FALSE(rocblaslt_env_suppressed_for_security_impl(kTestVar, /*is_privileged=*/false));
+
+    unsetTestEnv();
+}
+
+// A privileged process with the variable UNSET has nothing to suppress: the
+// getenv result is nullptr and _suppressed_for_security must stay false so the
+// diagnostic log does not fire spuriously. A nullptr name is handled safely.
+TEST(SecureEnv, smoke_PrivilegedProcessHandlesUnsetAndNullName)
+{
+    unsetTestEnv();
+
+    EXPECT_EQ(rocblaslt_secure_getenv_impl(kTestVar, /*is_privileged=*/true), nullptr);
+    EXPECT_FALSE(rocblaslt_env_suppressed_for_security_impl(kTestVar, /*is_privileged=*/true));
+
+    EXPECT_EQ(rocblaslt_secure_getenv_impl(nullptr, /*is_privileged=*/true), nullptr);
+    EXPECT_FALSE(rocblaslt_env_suppressed_for_security_impl(nullptr, /*is_privileged=*/true));
 }

@@ -57,16 +57,40 @@ inline bool rocblaslt_process_is_privileged()
 #endif
 }
 
+// Pure decision helpers, parameterized on the privilege state.
+//
+// The suppression policy ("refuse the override when privileged") is separated
+// from the live OS privilege probe (rocblaslt_process_is_privileged) so the
+// policy can be unit-tested for both privilege states in an ordinary,
+// non-privileged CI process -- passing is_privileged=true exercises the
+// security branch without needing an actual set-uid/set-gid harness. The
+// production entry points below bind is_privileged to the real probe; only the
+// probe itself (a thin getauxval/getuid call) then remains untestable without
+// real privilege, and that is OS behavior rather than our logic.
+inline const char* rocblaslt_secure_getenv_impl(const char* name, bool is_privileged)
+{
+    if(name == nullptr)
+        return nullptr;
+    if(is_privileged)
+        return nullptr;
+    return std::getenv(name);
+}
+
+inline bool rocblaslt_env_suppressed_for_security_impl(const char* name, bool is_privileged)
+{
+    if(name == nullptr)
+        return false;
+    if(!is_privileged)
+        return false;
+    return std::getenv(name) != nullptr;
+}
+
 // Like std::getenv, but returns nullptr when the process is privileged (see
 // rocblaslt_process_is_privileged). Use this for any environment variable that
 // selects a filesystem path from which code objects or libraries are loaded.
 inline const char* rocblaslt_secure_getenv(const char* name)
 {
-    if(name == nullptr)
-        return nullptr;
-    if(rocblaslt_process_is_privileged())
-        return nullptr;
-    return std::getenv(name);
+    return rocblaslt_secure_getenv_impl(name, rocblaslt_process_is_privileged());
 }
 
 // True when `name` is present in the environment but rocblaslt_secure_getenv is
@@ -75,9 +99,5 @@ inline const char* rocblaslt_secure_getenv(const char* name)
 // discoverable; callers must not use it to actually honor the override.
 inline bool rocblaslt_env_suppressed_for_security(const char* name)
 {
-    if(name == nullptr)
-        return false;
-    if(!rocblaslt_process_is_privileged())
-        return false;
-    return std::getenv(name) != nullptr;
+    return rocblaslt_env_suppressed_for_security_impl(name, rocblaslt_process_is_privileged());
 }
