@@ -163,14 +163,21 @@ def _verify_profile(
     )
     out = np.zeros((batch, seqlen_q, num_query_heads, head_size), dtype=np.float16)
 
-    # Paged-KV launch inputs reproducing the contiguous dense KV: each sequence's
-    # blocks map to consecutive physical blocks, so block_tables is an identity
-    # map and query_start_len is the cumulative query offset (cu_seqlens_q).
-    block_tables = np.arange(batch * blocks_per_seq, dtype=np.int32).reshape(
-        batch, blocks_per_seq
-    )
-    seq_lens = np.full((batch,), seqlen_k, dtype=np.int32)
-    query_start_len = (np.arange(batch + 1, dtype=np.int32) * seqlen_q).astype(np.int32)
+    # The unified attention kernel is inherently causal, but this verifier checks
+    # dense non-causal (mask_mode='none') parity. Realize non-causal attention by
+    # presenting each of the batch*seqlen_q query tokens as its own length-1
+    # pseudo-sequence whose KV context is the full seqlen_k keys of its parent
+    # batch: context_len = seqlen_k - 1, so the single query attends to every key.
+    num_seqs = batch * seqlen_q
+    # block_tables[p, tile] maps pseudo-sequence p (query token p, batch
+    # p // seqlen_q) onto its parent batch's contiguous KV blocks.
+    batch_of_seq = np.arange(num_seqs, dtype=np.int32) // seqlen_q
+    block_tables = (
+        batch_of_seq[:, None] * blocks_per_seq + np.arange(blocks_per_seq, dtype=np.int32)
+    ).astype(np.int32)
+    seq_lens = np.full((num_seqs,), seqlen_k, dtype=np.int32)
+    # One query token per pseudo-sequence: cu_seqlens_q = [0, 1, 2, ..., num_seqs].
+    query_start_len = np.arange(num_seqs + 1, dtype=np.int32)
     # The kernel applies its own log2 conversion, so pass the linear softmax scale.
     scale = float(1.0 / math.sqrt(head_size))
 
@@ -181,7 +188,7 @@ def _verify_profile(
         "seqlen_q": seqlen_q,
         "seqlen_k": seqlen_k,
         "total_q": batch * seqlen_q,
-        "num_seqs": batch,
+        "num_seqs": num_seqs,
         "block_q": 16 // num_queries_per_kv,
         "batch": batch,
     }
@@ -237,7 +244,7 @@ def _verify_profile(
             "v_scale": 1.0,
             "out_scale": 1.0,
             "softcap": 0.0,
-            "num_seqs": batch,
+            "num_seqs": num_seqs,
             "block_table_stride": blocks_per_seq,
             "qq_bias_stride_0": 0,
         }

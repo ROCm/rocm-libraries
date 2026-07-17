@@ -379,12 +379,22 @@ std::optional<SdpaLaunchInputs> buildSdpaLaunchInputs(const fb::IGraph& graph)
     b.scalars.emplace("scale",
                       static_cast<float>(1.0 / std::sqrt(static_cast<double>(problem->headSize))));
     // Dense fp16 has no KV/output requantization; the paging is unfused so no
-    // softcap. num_seqs is the runtime batch the batch-agnostic binary search walks.
+    // softcap.
     b.scalars.emplace("k_scale", 1.0F);
     b.scalars.emplace("v_scale", 1.0F);
     b.scalars.emplace("out_scale", 1.0F);
     b.scalars.emplace("softcap", 0.0F);
-    b.scalars.emplace("num_seqs", static_cast<std::int64_t>(problem->batch));
+    // The unified attention kernel is inherently causal: a query at local
+    // position p attends only to keys [0, context_len + p] (context_len =
+    // seq_len - query_len). The hipDNN graph requests dense, non-causal
+    // attention (mask_mode=none), so every query must see all S keys. Realize
+    // that by presenting each of the batch*seqlen_q query tokens as its own
+    // length-1 sequence whose KV context is the full S keys: context_len = S-1,
+    // the single query sits at absolute position S-1, and its causal window
+    // [0, S-1] spans every key. num_seqs is therefore the pseudo-sequence count
+    // (one per query token) that the kernel's binary search walks; the plan
+    // synthesizes the matching block_tables/seq_lens/query_start_len.
+    b.scalars.emplace("num_seqs", static_cast<std::int64_t>(problem->batch * problem->seqlenQ));
     b.scalars.emplace("qq_bias_stride_0", static_cast<std::int64_t>(0));
 
     inputs.batch = problem->batch;
@@ -412,7 +422,9 @@ std::unordered_map<std::string, std::int64_t> sdpaGridSymbols(const CompileSpec&
             {"num_kv_heads", spec.numKvHeads},
             {"head_size", spec.headSize},
             {"total_q", batch * spec.seqlenQ},
-            {"num_seqs", batch},
+            // One length-1 pseudo-sequence per query token (see buildSdpaLaunchInputs):
+            // the non-causal dense problem is realized as batch*seqlen_q causal decodes.
+            {"num_seqs", batch * spec.seqlenQ},
             {"block_m", blockM},
             {"block_q", blockQ}};
 }

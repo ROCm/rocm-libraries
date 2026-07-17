@@ -512,7 +512,9 @@ TEST(TestSdpaGraphAdapter, BuildsLaunchInputsFromAcceptedGraph)
     EXPECT_FLOAT_EQ(std::get<float>(scalars.at("v_scale")), 1.0F);
     EXPECT_FLOAT_EQ(std::get<float>(scalars.at("out_scale")), 1.0F);
     EXPECT_FLOAT_EQ(std::get<float>(scalars.at("softcap")), 0.0F);
-    EXPECT_EQ(std::get<std::int64_t>(scalars.at("num_seqs")), 2);
+    // One length-1 pseudo-sequence per query token: num_seqs = batch * seqlen_q =
+    // 2 * 64 = 128 (realizes non-causal attention on the causal kernel).
+    EXPECT_EQ(std::get<std::int64_t>(scalars.at("num_seqs")), 2 * 64);
     EXPECT_EQ(std::get<std::int64_t>(scalars.at("qq_bias_stride_0")), 0);
 
     // The paged-cache index buffers and their stride are synthesized by the plan
@@ -549,7 +551,7 @@ TEST(TestSdpaGraphAdapter, GridSymbolsExposeCompileSpecAndBatch)
     EXPECT_EQ(symbols.at("num_kv_heads"), 2);
     EXPECT_EQ(symbols.at("head_size"), 128);
     EXPECT_EQ(symbols.at("total_q"), 5 * 65); // batch * seqlen_q
-    EXPECT_EQ(symbols.at("num_seqs"), 5); // batch
+    EXPECT_EQ(symbols.at("num_seqs"), 5 * 65); // one pseudo-seq per query token
     EXPECT_EQ(symbols.at("block_m"), 16); // num_warps=1 * block_m_per_warp=16
     // block_q = block_m / (num_query_heads / num_kv_heads) = 16 / (8 / 2) = 4.
     EXPECT_EQ(symbols.at("block_q"), 4);

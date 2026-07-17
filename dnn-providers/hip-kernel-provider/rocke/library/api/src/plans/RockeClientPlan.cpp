@@ -178,33 +178,44 @@ void RockeClientPlan::buildPagedKvBuffers(std::int64_t batch)
                          "rocke-client compile_spec.block_size must be positive");
     }
 
+    // The unified attention kernel is inherently causal, but hipDNN requested a
+    // dense non-causal (mask_mode=none) problem. It is realized by presenting each
+    // of the batch*seqlen_q query tokens as its own length-1 pseudo-sequence whose
+    // KV context is the full seqlen_k keys of its parent batch: with context_len =
+    // seqlen_k - 1 the single query sits at absolute position seqlen_k-1 and its
+    // causal window [0, seqlen_k-1] covers every key (see SdpaGraphAdapter). The
+    // synthesized index buffers below therefore describe `numSeqs` such sequences.
+    const std::int64_t numSeqs = batch * spec.seqlenQ;
+
     // Number of paged blocks per sequence: ceil(seqlen_k / block_size). For the
     // shipped instances seqlen_k is a multiple of block_size, so the identity
     // paging below reproduces contiguous BSHD KV addressing exactly.
     const std::int64_t btStride = (spec.seqlenK + spec.blockSize - 1) / spec.blockSize;
 
-    // seq_lens[b] = seqlen_k: every sequence's KV context length.
-    std::vector<std::int32_t> seqLens(static_cast<std::size_t>(batch),
+    // seq_lens[p] = seqlen_k: every pseudo-sequence sees the full KV context.
+    std::vector<std::int32_t> seqLens(static_cast<std::size_t>(numSeqs),
                                       static_cast<std::int32_t>(spec.seqlenK));
 
-    // query_start_len[b] = cumulative query tokens (cu_seqlens_q): [0, Sq, 2Sq, ...].
-    std::vector<std::int32_t> queryStartLen(static_cast<std::size_t>(batch) + 1);
-    for(std::int64_t b = 0; b <= batch; ++b)
+    // query_start_len[p] = cumulative query tokens (cu_seqlens_q). One query token
+    // per pseudo-sequence gives the identity prefix sum [0, 1, 2, ..., numSeqs].
+    std::vector<std::int32_t> queryStartLen(static_cast<std::size_t>(numSeqs) + 1);
+    for(std::int64_t p = 0; p <= numSeqs; ++p)
     {
-        queryStartLen[static_cast<std::size_t>(b)] = static_cast<std::int32_t>(b * spec.seqlenQ);
+        queryStartLen[static_cast<std::size_t>(p)] = static_cast<std::int32_t>(p);
     }
 
-    // block_tables[b, tile] = b*btStride + tile: identity map into a contiguous KV
-    // cache so physical_block = block_tables[seq*btStride + tile] addresses the same
-    // bytes as a dense [B, S, Hkv, D] layout (block `b*btStride+tile` holds tokens
-    // [tile*block_size, (tile+1)*block_size) of sequence b).
-    std::vector<std::int32_t> blockTables(static_cast<std::size_t>(batch * btStride));
-    for(std::int64_t b = 0; b < batch; ++b)
+    // block_tables[p, tile] maps pseudo-sequence p (query token p, belonging to
+    // batch p/seqlen_q) onto its parent batch's contiguous KV blocks. Batch b owns
+    // physical blocks [b*btStride, (b+1)*btStride); block b*btStride+tile holds KV
+    // tokens [tile*block_size, (tile+1)*block_size) of a dense [B, S, Hkv, D] cache.
+    std::vector<std::int32_t> blockTables(static_cast<std::size_t>(numSeqs * btStride));
+    for(std::int64_t p = 0; p < numSeqs; ++p)
     {
+        const std::int64_t batchIdx = p / spec.seqlenQ;
         for(std::int64_t tile = 0; tile < btStride; ++tile)
         {
-            blockTables[static_cast<std::size_t>(b * btStride + tile)]
-                = static_cast<std::int32_t>(b * btStride + tile);
+            blockTables[static_cast<std::size_t>(p * btStride + tile)]
+                = static_cast<std::int32_t>(batchIdx * btStride + tile);
         }
     }
 

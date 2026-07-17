@@ -1146,7 +1146,9 @@ class _FakeRuntime:
 
     def launch(self, function, grid, block, packed, *, shared_bytes):
         assert function is not None
-        assert grid == (1, 3, 1)
+        # grid.y = total_q // block_q + num_seqs = 16 // 8 + 16 = 18, where
+        # num_seqs is one length-1 pseudo-sequence per query token (batch*seqlen_q).
+        assert grid == (1, 18, 1)
         assert block == (64, 1, 1)
         assert packed
         assert shared_bytes == 0
