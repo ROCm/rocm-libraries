@@ -477,7 +477,7 @@ struct device_segmented_topk_air_impl : BaseType
             digit_t digits[num_iterations];
             bool    is_candidate_in_prev_iteration = true;
             // It's actually faster to just directly extract all digits, instead of using runtime variable
-            // last_iteration to determin how many iterations needs to be loaded
+            // last_iteration to determine how many iterations needs to be loaded
             rocprim::detail::constexpr_for_lt<0, num_iterations, 1>(
                 [&](const auto i)
                 { digits[i] = BaseType::template  extract_digit_of_cur_iteration<i>(key, decomposer); });
@@ -512,9 +512,9 @@ struct device_segmented_topk_air_impl : BaseType
                && less_last_n_bits(digits[last_iteration], last_chosed_bin, cur_bits))
             { // Is candidate of last iteration
                 // This can be also done with thread counter, but in practice, this is super slow
-                // becasue there are a lot of threads even do not have a candidate to store, but if
+                // because there are a lot of threads even do not have a candidate to store, but if
                 // we use thread counter for it, we need to create a buffer to store the counter, which
-                // increases the use of register, so here we use atomicAdd once we have a cadidate to
+                // increases the use of register, so here we use atomicAdd once we have a candidate to
                 // output
                 write();
             }
