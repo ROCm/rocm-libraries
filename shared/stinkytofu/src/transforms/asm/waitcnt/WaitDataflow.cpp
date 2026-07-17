@@ -795,7 +795,7 @@ bool WaitDataflow::solve() {
         if (!changed) {
             // Fixed point reached: surface any counter that overflowed its
             // hardware in-flight window (issued past the cap without draining).
-            reportCounterOverflow();
+            PASS_DEBUG(reportCounterOverflow());
             PASS_DEBUG({ std::cerr << "[WaitDataflow] converged in " << iter << " iterations\n"; });
             return true;
         }
