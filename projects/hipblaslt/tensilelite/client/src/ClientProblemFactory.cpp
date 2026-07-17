@@ -71,7 +71,7 @@ namespace TensileLite
             {
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
-                hipGetDeviceProperties(&prop, deviceIdx);
+                HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
                 std::string archName(prop.gcnArchName);
                 m_padMXScaleTensorFreeDim = (archName.find("gfx950") != std::string::npos);
             }
