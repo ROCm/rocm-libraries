@@ -15517,6 +15517,38 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleA not null -> not one"))
         module.add(SCmpEQU64(src0=sgpr(ptrB, 2), src1=0, comment="AddressScaleB == null (=> scaleB==1) ?"))
         module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="scaleB not null -> not one"))
+
+    # PLSIN guard-hoist: fold the loop-invariant SCALAR fused-store sub-guards into this
+    # same persistent flag so the NLL front guard / post-loop dedup collapse to a single
+    # flag compare+branch instead of a serial no-tail + numIter compare/branch chain on
+    # the NLL prologue critical path. Both conditions are loop-invariant and their only
+    # input (SizesSum) is live here, so computing them BEFORE the main loop lets the
+    # scalar work overlap the prefetch/MFMA shadow. The flag stays "==1 => fuse-eligible":
+    # flag==1 still implies effective alpha==1 (AND semantics), so the compile-time
+    # applyAlpha=False fast path (gated by _plsinAlphaSkipEligible + this runtime flag)
+    # remains correct; any WG with flag==0 branches to the PLAIN NLL before the fused
+    # store. emitFusedStoreGuard drops its transient no-tail/numIter/alpha checks on this
+    # path and reads only this flag.
+    depthU = kernel["DepthU"]
+    if (depthU & (depthU - 1)) == 0:
+      module.addComment1("PLSIN guard-hoist: fold no-tail into PostLoopAlphaIsOne (pre-loop shadow)")
+      with self.allocTmpSgpr(1, tag="plsinFused_tail") as tTmp:
+        module.add(SAndB32(dst=sgpr(tTmp.idx),
+                           src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                           src1=depthU - 1,
+                           comment="tail = SizesSum %% DepthU (0 => NLL terminal, no tail)"))
+        module.add(SCmpEQU32(src0=sgpr(tTmp.idx), src1=0, comment="no tail (NLL terminal)?"))
+        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="has tail -> not fused"))
+      pgr = kernel["PrefetchGlobalRead"]
+      if pgr >= 2:
+        module.addComment1("PLSIN guard-hoist: fold numIter>=PGR into PostLoopAlphaIsOne (pre-loop shadow)")
+        with self.allocTmpSgpr(1, tag="plsinFused_numIter") as nTmp:
+          module.add(SLShiftRightB32(dst=sgpr(nTmp.idx),
+                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                                     shiftHex=hex(log2(depthU)),
+                                     comment="numIter = SizesSum / DepthU"))
+          module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=pgr, comment="numIter >= PGR (real NLL drain)?"))
+          module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="too few K-iters -> not fused"))
     return module
 
   ##############################################################################
@@ -15552,47 +15584,60 @@ class KernelWriterAssembly(KernelWriter):
     depthU = kernel["DepthU"]
     assert (depthU & (depthU - 1)) == 0, \
       "PostLoopStoreInNll assumes DepthU is a power of two"
-    module.addComment1("Fused-store guard: FUSED iff (no tail) && beta==0 && full-tile(M,N), else -> %s" % targetLabel.getLabelName())
-    with self.allocTmpSgpr(1, tag="fusedStoreGuard_tail") as tmpSgprInfo:
-      module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx),
-                         src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                         src1=depthU - 1,
-                         comment="tail = SizesSum %% DepthU (0 => NLL terminal, no tail)"))
-      module.add(SCmpEQU32(src0=sgpr(tmpSgprInfo.idx), src1=0,
-                           comment="fused guard: NLL terminal (no tail)?"))
+    # PLSIN guard-hoist: when the pre-loop scalar-eligibility flag exists (fp32 path,
+    # computePostLoopAlphaIsOne) it already folds (no-tail) && (numIter>=PGR) &&
+    # (effective alpha==1) -- all loop-invariant, computed BEFORE the main loop so the
+    # scalar work overlaps the prefetch/MFMA shadow instead of sitting on this NLL
+    # prologue critical path. Collapse those three sub-guards to one flag compare+branch.
+    # Otherwise (non-fp32 PLSIN: no alpha-skip flag) emit the transient no-tail + numIter
+    # checks inline as before. The alpha check that used to live here is folded into the
+    # flag, so no separate alpha branch is emitted on the eligible path.
+    if self._plsinAlphaSkipEligible(kernel):
+      module.addComment1("Fused-store guard: scalar eligibility hoisted (no-tail && numIter>=PGR && eff-alpha==1) -> PostLoopAlphaIsOne, else -> %s" % targetLabel.getLabelName())
+      module.add(SCmpEQU32(src0=sgpr("PostLoopAlphaIsOne"), src1=1,
+                           comment="fused guard: hoisted scalar eligibility == 1?"))
       if longBranch:
         module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                       comment="has tail -> not fused (long)"))
+                                       comment="scalar not eligible -> not fused (long)"))
       else:
         module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                comment="has tail -> not fused"))
-    # Degenerate short-K guard: the fused NLL store consumes the coord / write-index
-    # state produced by a genuine no-load-loop drain of the PGR-prefetched iterations.
-    # When numIter (= SizesSum / DepthU; the no-tail case was just verified above) is
-    # fewer than PrefetchGlobalRead, the NGLL/NLL pipeline has no real iteration to
-    # drain: the hoisted write-index coords (coord0/1/coutRowPtrD) are never validly
-    # computed, so the paired-store byte offset is garbage and the branch-free full-tile
-    # D store faults (observed as an illegal memory access at K == DepthU, e.g. the
-    # K=256 / MT256x256x256 repro). Require numIter >= PGR; otherwise fall through to
-    # the PLAIN NLL + the normal post-loop store (which recomputes coords correctly).
-    # Emitting it here (the single source of truth) keeps the NGLL hoist arm, the NLL
-    # front guard, and the post-loop dedup consistent.
-    pgr = kernel["PrefetchGlobalRead"]
-    if pgr >= 2:
-      module.addComment1("Fused-store guard: enough K-iters for NLL drain (numIter=SizesSum/DepthU >= PGR=%u) else -> %s" % (pgr, targetLabel.getLabelName()))
-      with self.allocTmpSgpr(1, tag="fusedStoreGuard_numIter") as tmpSgprInfo:
-        module.add(SLShiftRightB32(dst=sgpr(tmpSgprInfo.idx),
-                                   src=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                                   shiftHex=hex(log2(depthU)),
-                                   comment="numIter = SizesSum / DepthU (no tail here)"))
-        module.add(SCmpGeU32(src0=sgpr(tmpSgprInfo.idx), src1=pgr,
-                             comment="fused guard: numIter >= PGR (real NLL drain)?"))
+                                comment="scalar not eligible -> not fused"))
+    else:
+      module.addComment1("Fused-store guard: FUSED iff (no tail) && beta==0 && full-tile(M,N), else -> %s" % targetLabel.getLabelName())
+      with self.allocTmpSgpr(1, tag="fusedStoreGuard_tail") as tmpSgprInfo:
+        module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx),
+                           src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                           src1=depthU - 1,
+                           comment="tail = SizesSum %% DepthU (0 => NLL terminal, no tail)"))
+        module.add(SCmpEQU32(src0=sgpr(tmpSgprInfo.idx), src1=0,
+                             comment="fused guard: NLL terminal (no tail)?"))
         if longBranch:
           module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                         comment="too few K-iters -> not fused (long)"))
+                                         comment="has tail -> not fused (long)"))
         else:
           module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                  comment="too few K-iters -> not fused"))
+                                  comment="has tail -> not fused"))
+      # Degenerate short-K guard: require numIter (= SizesSum/DepthU) >= PGR so the NLL
+      # pipeline has a real iteration to drain; otherwise the hoisted write-index coords
+      # are never validly computed and the branch-free full-tile D store faults (illegal
+      # memory access at K == DepthU, e.g. the K=256 / MT256x256x256 repro). The fp32
+      # path folds this into PostLoopAlphaIsOne above; this inline copy covers the rest.
+      pgr = kernel["PrefetchGlobalRead"]
+      if pgr >= 2:
+        module.addComment1("Fused-store guard: enough K-iters for NLL drain (numIter=SizesSum/DepthU >= PGR=%u) else -> %s" % (pgr, targetLabel.getLabelName()))
+        with self.allocTmpSgpr(1, tag="fusedStoreGuard_numIter") as tmpSgprInfo:
+          module.add(SLShiftRightB32(dst=sgpr(tmpSgprInfo.idx),
+                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                                     shiftHex=hex(log2(depthU)),
+                                     comment="numIter = SizesSum / DepthU (no tail here)"))
+          module.add(SCmpGeU32(src0=sgpr(tmpSgprInfo.idx), src1=pgr,
+                               comment="fused guard: numIter >= PGR (real NLL drain)?"))
+          if longBranch:
+            module.add(self.longBranchScc0(targetLabel, posNeg=1,
+                                           comment="too few K-iters -> not fused (long)"))
+          else:
+            module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
+                                    comment="too few K-iters -> not fused"))
     # Small/medium-K ceiling (B4): PLSIN's win is hiding the FIXED-size epilogue
     # store behind the terminal MFMAs. That store cost is K-independent, so as a
     # share of runtime it vanishes as K grows, while the fused path's cost (extra
@@ -15602,9 +15647,13 @@ class KernelWriterAssembly(KernelWriter):
     # PLAIN NLL + normal post-loop store for large-K problems at RUNTIME so a single
     # kernel stays correct and optimal across the whole K range. maxK is the largest
     # summation size (in elements) that still fuses; <= 0 disables the ceiling. The
-    # default is the production value; the env var is a TEST-ONLY tuning override
-    # (see plsinDebugEnv) and does not change the shipped kernel when unset.
-    maxK = int(plsinDebugEnv("TENSILE_PLSIN_MAX_K", "4096"))
+    # default is 0 (ceiling DISABLED) so very-large-K problems still take the fused
+    # path: with the scalar front-guard hoisted off the serial NLL prologue into the
+    # pre-loop shadow (computePostLoopAlphaIsOne fold) the fixed guard overhead that
+    # motivated the old K>=4k ceiling is absorbed by the compute-bound loop, so
+    # capping large K is no longer a net win. The env var remains a TEST-ONLY tuning
+    # override (see plsinDebugEnv) to re-impose a ceiling for A/B measurement.
+    maxK = int(plsinDebugEnv("TENSILE_PLSIN_MAX_K", "0"))
     if maxK > 0:
       module.addComment1("Fused-store guard: small/medium-K only (SizesSum <= %u) else -> %s" % (maxK, targetLabel.getLabelName()))
       # Use a plain s_cmp_gt_u32 with a 32-bit literal rather than the s_cmpk_gt_u32
@@ -15618,21 +15667,8 @@ class KernelWriterAssembly(KernelWriter):
       else:
         module.add(SCBranchSCC1(labelName=targetLabel.getLabelName(),
                                 comment="large K -> not fused"))
-    # effective alpha == 1 (Alpha*scaleA*scaleB). Precomputed into PostLoopAlphaIsOne
-    # before the main loop (computePostLoopAlphaIsOne). When it does not hold, the fused
-    # store's applyAlpha=False fast path would drop a real scale -> take the PLAIN NLL +
-    # normal (applyAlpha=True) post-loop store instead. Gated on the same eligibility as
-    # the applyAlpha=False fused path, so the two decisions never diverge.
-    if self._plsinAlphaSkipEligible(kernel):
-      module.addComment1("Fused-store guard: effective alpha (Alpha*scaleA*scaleB) == 1 else -> %s" % targetLabel.getLabelName())
-      module.add(SCmpEQU32(src0=sgpr("PostLoopAlphaIsOne"), src1=1,
-                           comment="fused guard: effective alpha == 1?"))
-      if longBranch:
-        module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                       comment="effective alpha != 1 -> not fused (long)"))
-      else:
-        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                comment="effective alpha != 1 -> not fused"))
+    # (effective alpha == 1 is folded into PostLoopAlphaIsOne along with no-tail /
+    # numIter>=PGR on the eligible fp32 path above -- no separate alpha branch here.)
     # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
     # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
     with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:

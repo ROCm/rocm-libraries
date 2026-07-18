@@ -54,6 +54,8 @@ from ..KernelWriterModules import hasSequentialValuC
 
 from math import ceil, log2
 
+import os
+
 
 def _scmpGtU32(writer, src, imm, comment=""):
     """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
@@ -1907,8 +1909,10 @@ class GlobalWriteBatchWriter:
                                                     labelPrefix="subtile_skip_store")
               # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
               # When only the lower block is valid, fall through to a scalar fallback.
+              # Under requireFullTile (fused store) both blocks are always valid, so the
+              # check + scalar fallback are dead — always emit the paired store directly.
               guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
-              if guardMSgpr is not None:
+              if guardMSgpr is not None and not self._fusedSkipOobGuard():
                 afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
                                         f"after paired/fallback store tt0={tt0}")
                 fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
@@ -2148,6 +2152,18 @@ class GlobalWriteBatchWriter:
 
     return module
 
+  def _fusedSkipOobGuard(self):
+    """True when the per-store OOB quick-exit guards can be elided.
+
+    The PostLoopStoreInNll fused store runs only behind the front guard, which proves
+    requireFullTile — every wave-block is fully interior, so the per-store M/N OOB
+    branches can never fire. The load-bearing align8 exec mask (which consumes the same
+    guard SGPRs) is kept intact; only the dead skip branches are removed.
+    TENSILE_PLSIN_FULLTILE_NOGUARD=0 restores the guards (test-only).
+    """
+    return (self.parentWriter.states.subtileFusedFullTileStore
+            and os.environ.get("TENSILE_PLSIN_FULLTILE_NOGUARD", "1") != "0")
+
   def _emitSubtileOobGuard(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
     """Emit M/N OOB guard branches for UseSubtileImpl NonEdge stores.
 
@@ -2179,6 +2195,16 @@ class GlobalWriteBatchWriter:
     Returns a per-element skip Label only when there is no N guard (M-only case); the
     caller must add it after the store.  Returns None in all other cases.
     """
+    # B5 full-tile guard elision: the PostLoopStoreInNll fused store is only reached
+    # through the front guard (emitFusedStoreGuard), which already proved requireFullTile
+    # (this workgroup covers a complete MacroTile: SizeI%MT0==0 && SizeJ%MT1==0 for its
+    # tile). The OOB quick-exit compare+branch pairs below only ever fire when a wave-group
+    # inside the MacroTile is out-of-bounds, which cannot happen under requireFullTile ->
+    # they are provably dead. When skipping (skipOob), we still run all the N-group label /
+    # deferred-SrdD-increment bookkeeping (so D addressing is byte-identical) and only elide
+    # the s_cmpk_gt_u32 + s_cbranch instructions. The load-bearing align8 exec mask (built
+    # elsewhere from the still-live guard SGPRs) is unaffected. Env opt-out restores guards.
+    skipOob = self._fusedSkipOobGuard()
     guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
     guardNSgpr = self.parentWriter.states.subtileN16ValidBlocksSgpr
     # No guard SGPRs means the store is always in-bounds for this path; nothing to emit.
@@ -2206,10 +2232,11 @@ class GlobalWriteBatchWriter:
       nGroupEndLabel = Label(nGroupEndLabelName,
                              f"end of N group blockIdxN={blockIdxN} (M cbranch target)")
       nGuardCmp = blockIdxN * 16 if self.parentWriter.states.storeAlign8 else blockIdxN
-      targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nGuardCmp,
-                                   comment=f"quick-exit: clamped > {nGuardCmp}? (OOB -> skip all stores)"))
-      targetModule.add(SCBranchSCC0(labelName=self._subtileAllStoresEndLabel.getLabelName(),
-                                     comment=f"quick-exit: N OOB at blockIdxN={blockIdxN}, skip all remaining stores"))
+      if not skipOob:
+        targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nGuardCmp,
+                                     comment=f"quick-exit: clamped > {nGuardCmp}? (OOB -> skip all stores)"))
+        targetModule.add(SCBranchSCC0(labelName=self._subtileAllStoresEndLabel.getLabelName(),
+                                       comment=f"quick-exit: N OOB at blockIdxN={blockIdxN}, skip all remaining stores"))
       self._subtileNGroupSkipLabel = nGroupEndLabel
       self._subtilePrevBlockIdxN = blockIdxN
 
@@ -2218,6 +2245,10 @@ class GlobalWriteBatchWriter:
     # Because M is monotone (blockIdxM increases within the N group), if this element
     # is OOB then all subsequent M elements in this N group are also OOB.
     if guardMSgpr is None:
+      return None
+    # requireFullTile: the per-element M OOB branch is provably never taken (see top).
+    # N-group bookkeeping above already ran, so deferred SrdD increments still land.
+    if skipOob:
       return None
     targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), blockIdxM,
                                  comment=f"quick-exit: numValidMBlocks > {blockIdxM}? (OOB -> skip N group)"))

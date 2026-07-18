@@ -4232,10 +4232,11 @@ class Solution(collections.abc.Mapping):
     _disableUnsupportedRuntimeStaggerU(state)
 
     # PostLoopStoreInNll optimization check (self-contained gate).
-    # OPT-IN: the global default is now False (see GlobalParameters.py); a solution
-    # must explicitly request PostLoopStoreInNll: True to reach this gate. B4 flipped
-    # the default from opt-out to opt-in so configs the gate does not anticipate are
-    # unaffected by the feature.
+    # OPT-OUT: the global default is True (see GlobalParameters.py); a solution
+    # must explicitly request PostLoopStoreInNll: False to skip this gate. The
+    # preconditions below auto-disable the feature (rather than reject) whenever
+    # a config the gate does not anticipate is ineligible, so unrelated configs
+    # are unaffected.
     # Scope: fp4-input (MXFP4) + UseSubtileImpl only. Fuses the 16bit paired
     # buffer_store_dwordx4 (sba=0 + sba=1) into the NLL. Auto-disable (do NOT
     # reject) whenever any precondition fails so unrelated configs are unaffected.
@@ -4328,6 +4329,20 @@ class Solution(collections.abc.Mapping):
       # PLSIN is safe on non-256x256 StreamK non-atomic tiles. (The separate arch-
       # VGPR spillFree guard below still fences off the truly-large spill tiles.)
       streamKFixupSafe = True
+      # MX-block-scaled fp4 (MXBlockA/MXBlockB, e.g. MXAE8B32/MXBE8B32) is supported,
+      # but the extra MX stride/address kernargs (AddressMXSA/B, StridesMXSA/B) plus
+      # the fused store's transient epilogue SRDs (SrdBias/SrdScaleAlphaVec/SrdScaleA/B,
+      # allocated on top of the still-live main-loop bookkeeping) can push the SGPR
+      # high-water past the 102-SGPR gfx9 ceiling for extreme-aspect-ratio tiles.
+      # Validated on the shipped gfx950 fp4 (16x16x1 MI) MXA32/MXB32 + Bias + vector-
+      # ScaleAB + ScaleAlphaVec + StreamK logic (52 solutions): only MIWaveTile
+      # [2,16]/[16,2] overflow (sgprs=104 > 102); every other tested skew, including
+      # [4,18]/[18,4], [4,10]/[10,4], [2,8]/[8,2] and [2,6]/[6,2], fits. Auto-disable
+      # (do NOT reject) just this narrow shape so MXBlockA/MXBlockB fp4 gets PLSIN
+      # everywhere else.
+      mxBlockScaled = bool(state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+      mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
+                                  min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
       # Bias / ScaleAlphaVec / vector-ScaleAB epilogues are now supported under the
       # weave: their store SRDs (SrdBias, SrdScaleAlphaVec, SrdScaleA/B) and the
       # backing Address* kernargs are defined+loaded up front by
@@ -4347,7 +4362,8 @@ class Solution(collections.abc.Mapping):
          (not barrierFreeStore) or \
          (not spillFree) or \
          (not storeFitsVgpr) or \
-         (not streamKFixupSafe):
+         (not streamKFixupSafe) or \
+         (not mxBlockScaleSgprFits):
         state["PostLoopStoreInNll"] = False
 
     # Determine if we can load directly-to-Vgpr
