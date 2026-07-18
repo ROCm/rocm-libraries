@@ -4977,7 +4977,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Initialize stream-k loop
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.preLoop(self, kernel))
-    if kernel.get("PrefetchAcrossPersistent"):
+    if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
     # Should check for is swizzled instead of usesubtileimpl
@@ -4989,6 +4989,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
+
+    # Snapshot the tensor base so each persistent iteration can re-base
+    # Address{A,B} (advanced in place per iteration). PAP-off: PAP prefetches
+    # next-tile addresses ahead, which a top-of-loop re-base would clobber.
+    subtileTdmRebase = (kernel["enableTDMA"] and kernel["enableTDMB"]
+                        and kernel["UseSubtileImpl"]
+                        and not kernel["PrefetchAcrossPersistent"])
+    if subtileTdmRebase:
+      module.add(SMovB64(dst=sgpr("AddressABase", 2), src=sgpr("AddressA", 2),
+                         comment="snapshot tensor base A"))
+      module.add(SMovB64(dst=sgpr("AddressBBase", 2), src=sgpr("AddressB", 2),
+                         comment="snapshot tensor base B"))
 
     module.add(loopComponent.openPersistentLoop(self, kernel))
 
@@ -5071,6 +5083,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment("Allocating v%s for %s LR"%(str(tileInfo.sharedVgprLROffset), tileInfo.tc))
       module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
 
+    # Re-base Address{A,B} before this iteration's in-place offset adds (tile
+    # offset + StreamK K-offset + main-loop advance).
+    if subtileTdmRebase:
+      module.add(SMovB64(dst=sgpr("AddressA", 2), src=sgpr("AddressABase", 2),
+                         comment="re-base A to tensor base"))
+      module.add(SMovB64(dst=sgpr("AddressB", 2), src=sgpr("AddressBBase", 2),
+                         comment="re-base B to tensor base"))
     if hasTDM:
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
@@ -5098,8 +5117,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if dtileInfo.vgprTiles:
       self._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
-
-    module.add(initVgprTilesToZero(self, kernel, dtileInfo))
 
     for vtiles in dtileInfo.vgprTiles:
       regStr = "Vgpr" if vtiles.regList.pool == self.vgprPool else "Agpr"
@@ -5332,6 +5349,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   # Kernel Body
   ##############################################################################
   def kernelBody( self, kernel, tensorParametersA, tensorParametersB ):
+    # Store tensor params so emitters (e.g. multi-wave TDMSplit increment
+    # recompute) can access both A and B outside their own call context.
+    self.tPA = tensorParametersA
+    self.tPB = tensorParametersB
     expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
 
@@ -5358,7 +5379,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Initialize stream-k loop
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.preLoop(self, kernel))
-    if kernel.get("PrefetchAcrossPersistent"):
+    if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
     # MFMA F32XEmulation negative identity matrix
@@ -9433,9 +9454,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       ]
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
-      if kernel.get("PrefetchAcrossPersistent"):
+      if self.isPrefetchAcrossPersistentEnabled(kernel):
         requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-        self.states.numSgprStreamK += 1
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
 
@@ -9456,6 +9476,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           requiredUnalignedSgprVar.append("SwapMXSB")
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")
+
+    # Base snapshots for the subtile TDM persistent-loop re-base. Defined before
+    # the nonPostLoopSgpr population so they survive the loop, like AddressA/B.
+    if kernel["UseSubtileImpl"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
+      self.defineSgpr("AddressABase", numSgprAddressA, 2)
+      self.defineSgpr("AddressBBase", numSgprAddressB, 2)
 
     # Actual allocation: prioritise 4-aligned SGPRs whenever the pool is
     # already on a 4-aligned boundary, otherwise consume unaligned ones.
@@ -9488,7 +9514,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # With PrefetchAcrossPersistent, loop counters must survive the
     # post-loop store phase so setupNewTile can use them in the
     # prefetch tail.
-    keepLoopCounters = kernel["StreamK"] and kernel.get("PrefetchAcrossPersistent")
+    keepLoopCounters = kernel["StreamK"] and self.isPrefetchAcrossPersistentEnabled(kernel)
     if not keepLoopCounters:
       for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
         self.states.nonPostLoopSgpr.remove(self.loopCounterName(kernel,i))
