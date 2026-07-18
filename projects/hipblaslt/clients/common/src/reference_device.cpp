@@ -22,7 +22,8 @@ namespace
     }
 
     // Decode OCP fp8/bf8 via the public HIP conversion API (fp8 -> half -> float).
-    // __hip_cvt_fp8_to_halfraw is __device__-callable on all target arches and the
+    // __hip_cvt_fp8_to_halfraw builds as device code on every target arch; the OCP
+    // interpretation decodes correctly where OCP fp8 is supported (gfx950+). The
     // interpretation enum carries the format widths; OCP fp8 fits losslessly in half.
     __device__ inline float to_f32(hipblaslt_f8 v)
     {

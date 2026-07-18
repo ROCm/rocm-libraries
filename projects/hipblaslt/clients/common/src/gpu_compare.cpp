@@ -407,7 +407,7 @@ GpuRefResult compare_gemm_device(const void* dGpu,
 
     if(!gpu_ref_hip_check(hipGetLastError(), "compare launch"))
     {
-        hipStreamSynchronize(stream); // drain the failed launch before returning
+        gpu_ref_hip_check(hipStreamSynchronize(stream), "compare drain"); // drain before returning
         return result; // invalid
     }
 
