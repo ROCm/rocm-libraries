@@ -986,11 +986,18 @@ void hipblaslt_init_device(ABC_dims                 abc,
             });
             break;
         case hipblaslt_initialization::integer_exact:
-            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]
+            // A and C: [0,1,2] (C with beta); B: checkerboard ±[0,1,2]. For complex,
+            // the imaginary part also gets a distinct small integer so complex
+            // multiply and conjugate-transpose (op == HIPBLAS_OP_C) are exercised;
+            // small integers keep the result exact against the library at bounded K.
             if(abc == ABC_dims::A || abc == ABC_dims::C)
             {
-                fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
-                    return small_int_positive<T>(idx);
+                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex] __host__ __device__ (size_t idx) -> T {
+                    if constexpr(is_std_complex<T>::value)
+                        return make_std_complex(small_int_positive<T_real>(idx),
+                                                small_int_positive<T_real>(idx + 500009));
+                    else
+                        return small_int_positive<T>(idx);
                 });
             }
             else if(abc == ABC_dims::B)
@@ -1002,12 +1009,17 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 // correlate via pseudo_random_device).
                 constexpr size_t kBSeedOffset = 1000003; // large prime
                 size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
-                fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda] __host__ __device__ (size_t idx) -> T {
+                fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda, make_std_complex] __host__ __device__ (size_t idx) -> T {
                     auto b        = idx / effective_stride;
                     auto in_batch = idx - b * effective_stride;
                     auto j        = in_batch / lda;
                     auto i        = in_batch - j * lda;
-                    auto value    = small_int_positive<T>(idx + kBSeedOffset);
+                    T    value;
+                    if constexpr(is_std_complex<T>::value)
+                        value = make_std_complex(small_int_positive<T_real>(idx + kBSeedOffset),
+                                                 small_int_positive<T_real>(idx + kBSeedOffset + 500009));
+                    else
+                        value = small_int_positive<T>(idx + kBSeedOffset);
                     return (i ^ j) & 1 ? value : negate(value);
                 });
             }

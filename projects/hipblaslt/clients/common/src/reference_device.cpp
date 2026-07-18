@@ -35,6 +35,96 @@ namespace
         return float(__half(__hip_cvt_fp8_to_halfraw(v.__x, __HIP_E5M2)));
     }
 
+    // Device complex used for the complex GEMM path. Bit-compatible with
+    // std::complex<R> ({real, imag}), so device buffers written/read as
+    // std::complex<R> reinterpret directly. Supplies the +, *, ==0 the reference
+    // kernel needs; complex float accumulates in complex<float>, complex double in
+    // complex<double>, matching cblas_cgemm/cblas_zgemm.
+    template <typename R>
+    struct gpu_ref_complex
+    {
+        using value_type = R;
+        R re;
+        R im;
+        __host__ __device__ gpu_ref_complex()
+            : re(R(0))
+            , im(R(0))
+        {
+        }
+        __host__ __device__ gpu_ref_complex(R r)
+            : re(r)
+            , im(R(0))
+        {
+        }
+        __host__ __device__ gpu_ref_complex(R r, R i)
+            : re(r)
+            , im(i)
+        {
+        }
+    };
+
+    template <typename R>
+    __device__ inline gpu_ref_complex<R> operator+(gpu_ref_complex<R> a, gpu_ref_complex<R> b)
+    {
+        return {a.re + b.re, a.im + b.im};
+    }
+    template <typename R>
+    __device__ inline gpu_ref_complex<R>& operator+=(gpu_ref_complex<R>& a, gpu_ref_complex<R> b)
+    {
+        a.re += b.re;
+        a.im += b.im;
+        return a;
+    }
+    template <typename R>
+    __device__ inline gpu_ref_complex<R> operator*(gpu_ref_complex<R> a, gpu_ref_complex<R> b)
+    {
+        return {a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re};
+    }
+    template <typename R>
+    __device__ inline bool operator==(gpu_ref_complex<R> a, gpu_ref_complex<R> b)
+    {
+        return a.re == b.re && a.im == b.im;
+    }
+    template <typename R>
+    __device__ inline bool operator!=(gpu_ref_complex<R> a, gpu_ref_complex<R> b)
+    {
+        return !(a == b);
+    }
+
+    template <typename T>
+    struct is_gpu_ref_complex : std::false_type
+    {
+    };
+    template <typename R>
+    struct is_gpu_ref_complex<gpu_ref_complex<R>> : std::true_type
+    {
+    };
+
+    // op(): conjugate is a no-op for real elements and negates the imaginary part
+    // for complex, so transA/transB == HIPBLAS_OP_C applies conjugate-transpose.
+    template <typename T>
+    __device__ inline T ref_conj(T v)
+    {
+        return v;
+    }
+    template <typename R>
+    __device__ inline gpu_ref_complex<R> ref_conj(gpu_ref_complex<R> v)
+    {
+        return {v.re, -v.im};
+    }
+
+    // Build the accumulate-type scalar (alpha/beta) from real+imag doubles. The
+    // imaginary part is ignored for real Tacc (always 0 there) and carried for
+    // complex Tacc.
+    template <typename Tacc>
+    inline Tacc make_acc(double re, double im)
+    {
+        if constexpr(is_gpu_ref_complex<Tacc>::value)
+            return Tacc(typename Tacc::value_type(re), typename Tacc::value_type(im));
+        else
+            return static_cast<Tacc>(re);
+    }
+
     // Convert an input element to the accumulate type. fp8/bf8 route through the
     // public HIP decode above; the class operator float() is host-only where
     // HIP_FP8_TYPE_OCP is 0 (e.g. gfx942).
@@ -76,11 +166,14 @@ namespace
 
     // Naive reference GEMM: one thread per output element, accumulate in Tacc.
     // Column-major with the same transpose/leading-dim/batch-stride conventions
-    // as cblas_gemm(). Correctness and independence from the library kernel are
-    // the only goals; not tuned for performance.
+    // as cblas_gemm(). conjA/conjB apply conjugation (HIPBLAS_OP_C) on top of the
+    // transpose; they are false on the real paths. Correctness and independence
+    // from the library kernel are the only goals; not tuned for performance.
     template <typename Ti, typename Tacc, typename Tc, typename To>
     __global__ void reference_gemm_kernel(bool      transA_is_n,
                                           bool      transB_is_n,
+                                          bool      conjA,
+                                          bool      conjB,
                                           int64_t   M,
                                           int64_t   N,
                                           int64_t   K,
@@ -115,10 +208,14 @@ namespace
         Tacc acc = Tacc(0);
         for(int64_t l = 0; l < K; ++l)
         {
-            const Tacc a  = transA_is_n ? to_acc<Tacc>(Ab[i + l * lda])
-                                        : to_acc<Tacc>(Ab[l + i * lda]);
-            const Tacc bv = transB_is_n ? to_acc<Tacc>(Bb[l + j * ldb])
-                                        : to_acc<Tacc>(Bb[j + l * ldb]);
+            Tacc a  = transA_is_n ? to_acc<Tacc>(Ab[i + l * lda])
+                                  : to_acc<Tacc>(Ab[l + i * lda]);
+            Tacc bv = transB_is_n ? to_acc<Tacc>(Bb[l + j * ldb])
+                                  : to_acc<Tacc>(Bb[j + l * ldb]);
+            if(conjA)
+                a = ref_conj(a);
+            if(conjB)
+                bv = ref_conj(bv);
             acc += a * bv;
         }
 
@@ -134,11 +231,15 @@ namespace
     template <typename Ti, typename Tacc, typename Tc, typename To>
     void launch_reference_gemm(bool        transA_is_n,
                                bool        transB_is_n,
+                               bool        conjA,
+                               bool        conjB,
                                int64_t     M,
                                int64_t     N,
                                int64_t     K,
                                double      alpha,
+                               double      alphai,
                                double      beta,
+                               double      betai,
                                const void* dA,
                                int64_t     lda,
                                int64_t     strideA,
@@ -161,11 +262,13 @@ namespace
         reference_gemm_kernel<Ti, Tacc, Tc, To><<<grid, block, 0, stream>>>(
             transA_is_n,
             transB_is_n,
+            conjA,
+            conjB,
             M,
             N,
             K,
-            static_cast<Tacc>(alpha),
-            static_cast<Tacc>(beta),
+            make_acc<Tacc>(alpha, alphai),
+            make_acc<Tacc>(beta, betai),
             static_cast<const Ti*>(dA),
             lda,
             strideA,
@@ -183,19 +286,21 @@ namespace
 
     // Input types accepted by the reference path (a_type/b_type). OCP fp8/bf8 only;
     // f64 is only valid on the compute-64F path and int8 only on the compute-32I
-    // path (both enforced by the compute gate).
+    // path; complex float/double are all-complex only (all enforced by the gate).
     bool is_supported_input(hipDataType t)
     {
         return t == HIP_R_32F || t == HIP_R_16F || t == HIP_R_16BF || t == HIP_R_8F_E4M3
-               || t == HIP_R_8F_E5M2 || t == HIP_R_64F || t == HIP_R_8I;
+               || t == HIP_R_8F_E5M2 || t == HIP_R_64F || t == HIP_R_8I || t == HIP_C_32F
+               || t == HIP_C_64F;
     }
 
     // C/D types accepted by the reference path (the compare kernel handles these).
-    // int8 output is only valid on the compute-32I path (enforced by the compute gate).
+    // int8 output is only valid on the compute-32I path; complex float/double are
+    // all-complex only (both enforced by the gate).
     bool is_supported_output(hipDataType t)
     {
         return t == HIP_R_32F || t == HIP_R_16F || t == HIP_R_16BF || t == HIP_R_64F
-               || t == HIP_R_32I || t == HIP_R_8I;
+               || t == HIP_R_32I || t == HIP_R_8I || t == HIP_C_32F || t == HIP_C_64F;
     }
 } // namespace
 
@@ -219,13 +324,28 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
        || arg.b_type == HIP_R_8F_E4M3_FNUZ || arg.b_type == HIP_R_8F_E5M2_FNUZ)
         return fail("FNUZ fp8/bf8 input (only OCP fp8/bf8 supported)");
     if(!is_supported_input(arg.a_type) || !is_supported_input(arg.b_type))
-        return fail("input type other than f32/f16/bf16/fp8/bf8/int8");
+        return fail("input type other than f32/f16/bf16/fp8/bf8/f64/int8/complex");
     if(!is_supported_output(arg.c_type) || !is_supported_output(arg.d_type))
-        return fail("C/D type other than f32/f16/bf16/f64/int32/int8");
+        return fail("C/D type other than f32/f16/bf16/f64/int32/int8/complex");
+    // Complex (HIP_C_32F/HIP_C_64F): require all four A/B/C/D the same complex type
+    // (no real/complex mixing), complex float on compute 32F and complex double on
+    // compute 64F. The complex path replaces the real compute-type checks below.
+    auto is_complex = [](hipDataType t) { return t == HIP_C_32F || t == HIP_C_64F; };
+    const bool any_complex = is_complex(arg.a_type) || is_complex(arg.b_type)
+                             || is_complex(arg.c_type) || is_complex(arg.d_type);
+    if(any_complex)
+    {
+        if(arg.a_type != arg.b_type || arg.b_type != arg.c_type || arg.c_type != arg.d_type)
+            return fail("complex GEMM requires matching complex A/B/C/D (no real/complex mix)");
+        if(arg.a_type == HIP_C_32F && arg.compute_type != HIPBLAS_COMPUTE_32F)
+            return fail("complex float requires compute 32F");
+        if(arg.a_type == HIP_C_64F && arg.compute_type != HIPBLAS_COMPUTE_64F)
+            return fail("complex double requires compute 64F");
+    }
     // compute 64F requires all f64; compute 32I requires int8 in with int32 or int8
     // out; the f32-class computes (32F and the 16F/fast-16F/fast-16BF/fast-TF32
     // variants, all f32-accumulate in the reference) require no f64, no int8/int32.
-    if(arg.compute_type == HIPBLAS_COMPUTE_64F)
+    else if(arg.compute_type == HIPBLAS_COMPUTE_64F)
     {
         if(arg.a_type != HIP_R_64F || arg.b_type != HIP_R_64F || arg.c_type != HIP_R_64F
            || arg.d_type != HIP_R_64F)
@@ -290,11 +410,15 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
 
 void run_reference_gemm_device(bool        transA_is_n,
                                bool        transB_is_n,
+                               bool        conjA,
+                               bool        conjB,
                                int64_t     M,
                                int64_t     N,
                                int64_t     K,
                                double      alpha,
+                               double      alphai,
                                double      beta,
+                               double      betai,
                                const void* dA,
                                hipDataType tA,
                                int64_t     lda,
@@ -322,30 +446,38 @@ void run_reference_gemm_device(bool        transA_is_n,
         return;
     }
 
+    // Shared trailing arguments (dA..stream) for every launch below.
+#define GPU_REF_ARGS                                                                       \
+    transA_is_n, transB_is_n, conjA, conjB, M, N, K, alpha, alphai, beta, betai, dA, lda,  \
+        strideA, dB, ldb, strideB, dC, ldc, strideC, dDgold, ldd, strideD, batchCount,     \
+        stream
+
+    // Complex is a single all-complex instantiation per width (the gate guarantees
+    // matching complex A/B/C/D). complex float accumulates in complex<float>,
+    // complex double in complex<double>, matching cblas_cgemm/cblas_zgemm.
+    if(tD == HIP_C_32F)
+    {
+        launch_reference_gemm<gpu_ref_complex<float>,
+                              gpu_ref_complex<float>,
+                              gpu_ref_complex<float>,
+                              gpu_ref_complex<float>>(GPU_REF_ARGS);
+        gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
+        return;
+    }
+    if(tD == HIP_C_64F)
+    {
+        launch_reference_gemm<gpu_ref_complex<double>,
+                              gpu_ref_complex<double>,
+                              gpu_ref_complex<double>,
+                              gpu_ref_complex<double>>(GPU_REF_ARGS);
+        gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
+        return;
+    }
+
     // f64 is a single all-double instantiation (compute 64F guarantees f64 A/B/C/D).
     if(tD == HIP_R_64F)
     {
-        launch_reference_gemm<double, double, double, double>(transA_is_n,
-                                                             transB_is_n,
-                                                             M,
-                                                             N,
-                                                             K,
-                                                             alpha,
-                                                             beta,
-                                                             dA,
-                                                             lda,
-                                                             strideA,
-                                                             dB,
-                                                             ldb,
-                                                             strideB,
-                                                             dC,
-                                                             ldc,
-                                                             strideC,
-                                                             dDgold,
-                                                             ldd,
-                                                             strideD,
-                                                             batchCount,
-                                                             stream);
+        launch_reference_gemm<double, double, double, double>(GPU_REF_ARGS);
         gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
         return;
     }
@@ -355,27 +487,7 @@ void run_reference_gemm_device(bool        transA_is_n,
     // accumulator, including overflow wrap.
     if(tD == HIP_R_32I)
     {
-        launch_reference_gemm<hipblasLtInt8, int32_t, int32_t, int32_t>(transA_is_n,
-                                                                        transB_is_n,
-                                                                        M,
-                                                                        N,
-                                                                        K,
-                                                                        alpha,
-                                                                        beta,
-                                                                        dA,
-                                                                        lda,
-                                                                        strideA,
-                                                                        dB,
-                                                                        ldb,
-                                                                        strideB,
-                                                                        dC,
-                                                                        ldc,
-                                                                        strideC,
-                                                                        dDgold,
-                                                                        ldd,
-                                                                        strideD,
-                                                                        batchCount,
-                                                                        stream);
+        launch_reference_gemm<hipblasLtInt8, int32_t, int32_t, int32_t>(GPU_REF_ARGS);
         gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
         return;
     }
@@ -385,54 +497,13 @@ void run_reference_gemm_device(bool        transA_is_n,
     // result to [-128, 127] on the int8 store, matching cblas saturate_cast.
     if(tD == HIP_R_8I)
     {
-        launch_reference_gemm<hipblasLtInt8, int32_t, hipblasLtInt8, hipblasLtInt8>(transA_is_n,
-                                                                                   transB_is_n,
-                                                                                   M,
-                                                                                   N,
-                                                                                   K,
-                                                                                   alpha,
-                                                                                   beta,
-                                                                                   dA,
-                                                                                   lda,
-                                                                                   strideA,
-                                                                                   dB,
-                                                                                   ldb,
-                                                                                   strideB,
-                                                                                   dC,
-                                                                                   ldc,
-                                                                                   strideC,
-                                                                                   dDgold,
-                                                                                   ldd,
-                                                                                   strideD,
-                                                                                   batchCount,
-                                                                                   stream);
+        launch_reference_gemm<hipblasLtInt8, int32_t, hipblasLtInt8, hipblasLtInt8>(GPU_REF_ARGS);
         gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
         return;
     }
 
     // Non-f64: float accumulate. Dispatch on (input type, C type, D type).
-#define GPU_REF_LAUNCH(TI, TC, TO)                       \
-    launch_reference_gemm<TI, float, TC, TO>(transA_is_n, \
-                                             transB_is_n, \
-                                             M,           \
-                                             N,           \
-                                             K,           \
-                                             alpha,       \
-                                             beta,        \
-                                             dA,          \
-                                             lda,         \
-                                             strideA,     \
-                                             dB,          \
-                                             ldb,         \
-                                             strideB,     \
-                                             dC,          \
-                                             ldc,         \
-                                             strideC,     \
-                                             dDgold,      \
-                                             ldd,         \
-                                             strideD,     \
-                                             batchCount,  \
-                                             stream)
+#define GPU_REF_LAUNCH(TI, TC, TO) launch_reference_gemm<TI, float, TC, TO>(GPU_REF_ARGS)
 
 #define GPU_REF_DISPATCH_TO(TI, TC)                \
     do                                             \
@@ -470,6 +541,7 @@ void run_reference_gemm_device(bool        transA_is_n,
 #undef GPU_REF_DISPATCH_TC
 #undef GPU_REF_DISPATCH_TO
 #undef GPU_REF_LAUNCH
+#undef GPU_REF_ARGS
 
     gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
 }

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 // Compiled through hipcc/clang (the client common library links hip::device,
@@ -79,6 +80,36 @@ namespace
     __device__ inline bool almost_equals(int32_t a, int32_t b)
     {
         return a == b;
+    }
+
+    // Device complex mirroring the reference output layout ({real, imag}), so a
+    // std::complex<R> device buffer reinterprets directly. Only field access is
+    // needed here; the reference kernel owns the arithmetic.
+    template <typename R>
+    struct gpu_ref_complex
+    {
+        using value_type = R;
+        R re;
+        R im;
+    };
+    template <typename T>
+    struct is_gpu_ref_complex : std::false_type
+    {
+    };
+    template <typename R>
+    struct is_gpu_ref_complex<gpu_ref_complex<R>> : std::true_type
+    {
+    };
+
+    // Per-component 4-ULP compare in the component type, matching the per-part
+    // ASSERT_FLOAT_EQ/ASSERT_DOUBLE_EQ of ASSERT_{FLOAT,DOUBLE}_COMPLEX_EQ in unit.hpp.
+    template <typename R>
+    __device__ inline bool component_almost_equals(R a, R b)
+    {
+        if constexpr(std::is_same<R, double>::value)
+            return double_almost_equals(a, b);
+        else
+            return float_almost_equals(a, b);
     }
 
     // Per-element error in ULP of the output type, matching ulp_distance() in ulp.hpp.
@@ -222,41 +253,82 @@ namespace
             const size_t i   = t % size_t(M);
             const size_t idx = base + i + j * size_t(ldd);
 
-            // f64 compares in double (no precision loss); narrow To promotes to float.
-            const Tcmp   gv = static_cast<Tcmp>(gpu[idx]);
-            const Tcmp   rv = static_cast<Tcmp>(ref[idx]);
-            const double g  = double(gv);
-            const double r  = double(rv);
-
-            if(isnan(g) || isinf(g) || isnan(r) || isinf(r))
+            if constexpr(is_gpu_ref_complex<To>::value)
             {
-                // Matching same-signed infinities agree; any nan or inf disagreement
-                // is a failure that also poisons the allclose grid. Non-finite values
-                // stay out of the norm/ulp sums so they do not become nan.
-                if(!(isinf(g) && isinf(r) && g == r))
+                // Complex: magnitudes for max/allclose, |element|^2 for the
+                // Frobenius sums (clange/zlange), per-component 4-ULP unit compare;
+                // ULP is n/a (ulp_check_general has no complex case). Mirrors
+                // cblas_cgemm/cblas_zgemm verification in norm.hpp/unit.hpp.
+                const To     gc  = gpu[idx];
+                const To     rc  = ref[idx];
+                const double gre = double(gc.re), gim = double(gc.im);
+                const double rre = double(rc.re), rim = double(rc.im);
+
+                if(isnan(gre) || isinf(gre) || isnan(gim) || isinf(gim) || isnan(rre)
+                   || isinf(rre) || isnan(rim) || isinf(rim))
                 {
-                    ++l_nan;
-                    for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
-                        l_g[k] = INFINITY;
+                    // Exact component-wise equality lets matching infinities agree;
+                    // any other non-finite disagreement fails and poisons allclose.
+                    if(!(gre == rre && gim == rim))
+                    {
+                        ++l_nan;
+                        for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
+                            l_g[k] = INFINITY;
+                    }
+                    continue;
                 }
+
+                const double dre = gre - rre, dim = gim - rim;
+                const double d  = sqrt(dre * dre + dim * dim);
+                const double ag = sqrt(gre * gre + gim * gim);
+                if(!(component_almost_equals(gc.re, rc.re)
+                     && component_almost_equals(gc.im, rc.im)))
+                    ++l_unit_fail;
+                l_max = fmax(l_max, d);
+                l_sref += rre * rre + rim * rim;
+                l_sdiff += d * d;
+                for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
+                    l_g[k] = fmax(l_g[k], d - rtol[k] * ag);
                 continue;
             }
+            else
+            {
+                // f64 compares in double (no precision loss); narrow To promotes to float.
+                const Tcmp   gv = static_cast<Tcmp>(gpu[idx]);
+                const Tcmp   rv = static_cast<Tcmp>(ref[idx]);
+                const double g  = double(gv);
+                const double r  = double(rv);
 
-            const double d = fabs(g - r);
-            if(!almost_equals(gv, rv))
-                ++l_unit_fail;
-            l_max = fmax(l_max, d);
-            l_sref += r * r;
-            l_sdiff += d * d;
-            // allclose tolerance is atol + rtol*|gpu| (allclose() scales by the actual operand).
-            const double ag = fabs(g);
-            for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
-                l_g[k] = fmax(l_g[k], d - rtol[k] * ag);
+                if(isnan(g) || isinf(g) || isnan(r) || isinf(r))
+                {
+                    // Matching same-signed infinities agree; any nan or inf disagreement
+                    // is a failure that also poisons the allclose grid. Non-finite values
+                    // stay out of the norm/ulp sums so they do not become nan.
+                    if(!(isinf(g) && isinf(r) && g == r))
+                    {
+                        ++l_nan;
+                        for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
+                            l_g[k] = INFINITY;
+                    }
+                    continue;
+                }
 
-            const double u = ulp_distance(r, g, mant_bits);
-            l_max_ulp      = fmax(l_max_ulp, u);
-            l_sum_ulp += u;
-            ++l_ulp_cnt;
+                const double d = fabs(g - r);
+                if(!almost_equals(gv, rv))
+                    ++l_unit_fail;
+                l_max = fmax(l_max, d);
+                l_sref += r * r;
+                l_sdiff += d * d;
+                // allclose tolerance is atol + rtol*|gpu| (allclose() scales by the actual operand).
+                const double ag = fabs(g);
+                for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
+                    l_g[k] = fmax(l_g[k], d - rtol[k] * ag);
+
+                const double u = ulp_distance(r, g, mant_bits);
+                l_max_ulp      = fmax(l_max_ulp, u);
+                l_sum_ulp += u;
+                ++l_ulp_cnt;
+            }
         }
 
         // Per-batch Frobenius partials: reduce within the block, one atomic per batch.
@@ -402,6 +474,10 @@ GpuRefResult compare_gemm_device(const void* dGpu,
         GPU_REF_COMPARE(int32_t, int32_t);
     else if(tD == HIP_R_8I)
         GPU_REF_COMPARE(int8_t, int32_t);
+    else if(tD == HIP_C_32F)
+        GPU_REF_COMPARE(gpu_ref_complex<float>, float);
+    else if(tD == HIP_C_64F)
+        GPU_REF_COMPARE(gpu_ref_complex<double>, double);
     else
         GPU_REF_COMPARE(hipblasLtHalf, float);
 

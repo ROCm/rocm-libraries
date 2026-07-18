@@ -5008,14 +5008,41 @@ void testing_matmul_with_bias(const Arguments& arg,
             dD_gold.emplace_back(To, size_D[gemmIdx] * block_count, HMM);
             CHECK_DEVICE_ALLOCATION(dD_gold.back().memcheck());
 
+            // Complex alpha/beta carry real+imag; get_computeInterface() collapses
+            // them to a magnitude, so pull the components straight from the union.
+            double alpha_r = 0.0, alpha_i = 0.0, beta_r = 0.0, beta_i = 0.0;
+            if(Talpha == HIP_C_32F)
+            {
+                alpha_r = h_alpha[gemmIdx].cf.real();
+                alpha_i = h_alpha[gemmIdx].cf.imag();
+                beta_r  = h_beta[gemmIdx].cf.real();
+                beta_i  = h_beta[gemmIdx].cf.imag();
+            }
+            else if(Talpha == HIP_C_64F)
+            {
+                alpha_r = h_alpha[gemmIdx].cd.real();
+                alpha_i = h_alpha[gemmIdx].cd.imag();
+                beta_r  = h_beta[gemmIdx].cd.real();
+                beta_i  = h_beta[gemmIdx].cd.imag();
+            }
+            else
+            {
+                alpha_r = get_computeInterface(h_alpha[gemmIdx], Tc);
+                beta_r  = get_computeInterface(h_beta[gemmIdx], Tc);
+            }
+
             run_reference_gemm_device(
                 transA == HIPBLAS_OP_N,
                 transB == HIPBLAS_OP_N,
+                transA == HIPBLAS_OP_C,
+                transB == HIPBLAS_OP_C,
                 M[gemmIdx],
                 N[gemmIdx],
                 K[gemmIdx],
-                get_computeInterface(h_alpha[gemmIdx], Tc),
-                get_computeInterface(h_beta[gemmIdx], Tc),
+                alpha_r,
+                alpha_i,
+                beta_r,
+                beta_i,
                 dA[gemmIdx].buf(),
                 arg.a_type,
                 lda[gemmIdx],
