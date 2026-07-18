@@ -1463,8 +1463,7 @@ __host__ __device__ I get_v_block_index(I nt, I i, I j)
 template <typename I>
 __host__ __device__ void get_v_index(I n, I kd, I sweep, I task, I& vi, I& vj)
 {
-    // todo: compute nt once & pass?
-    I nt = ceildiv(n - 1, kd); // number of block-cols in conceptual triangular V.
+    I nt = (n > 0) ? ceildiv(n - 1, kd) : 0; // number of block-cols in conceptual triangular V.
     I j = sweep / kd; // block-col j
     I i = j + task; // block-row i
     I r = get_v_block_index(nt, i, j);
