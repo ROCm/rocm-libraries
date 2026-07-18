@@ -18,14 +18,20 @@ GlobalParameters:
   CpuThreads: 1
   RotatingBufferSize: 0
 
-# TDMStoreInst TDM store, bf16 TN, MT256x256x64, GSU=1, StreamK=0.
-# A single group forks SourceSwap x UseSubtileImpl x TDMStoreInst so one problem set
-# covers TDM on/off, SS0/SS1 and subtile on/off (invalid subtile+SourceSwap combos are
-# pruned by solution generation).  ProblemSizes exercise the tensor_dim edge clamp on
-# both M (edgeM) and N (edgeN).
+# TDMStoreInst TDM store (tensor_store_from_lds epilogue), bf16 TN, MT256x256x64.
+# All TDMStoreInst coverage lives in this one file as separate BenchmarkProblems groups; each
+# group forks SourceSwap x (UseSubtileImpl) x TDMStoreInst so TDM on/off is compared against the
+# buffer_store reference within the same run.  ProblemSizes exercise the tensor_dim edge clamp on
+# M (edgeM) and N (edgeN); invalid subtile+SourceSwap combos are pruned by solution generation.
+#   Group 1: GlobalSplitU=1, UseBeta=False -- alpha-only store-to-D path (SS0/SS1, subtile on/off).
+#   Group 2: GlobalSplitU=1, UseBeta=True  -- beta store-to-D path incl. subtile (subtile+TDM packs
+#            the fp32 accumulator to bf16 before staging; verifies no unpacked-fp32 store).
+#   Group 3: StreamK=3, UseBeta=True -- narrow StreamK support: fp32 partials stay on buffer_store,
+#            only the fixup-owner's final bf16->D store uses TDM.
+#   Group 4: GlobalSplitU=-1 (auto-GSU -> SingleBuffer direct-D), UseBeta=True.
 BenchmarkProblems:
   -
-    - # ProblemType
+    - # Group 1: GSU=1, alpha-only (UseBeta=False)
       OperationType: GEMM
       DataType: b
       DestDataType: b
@@ -70,3 +76,136 @@ BenchmarkProblems:
           - Exact: [256, 255, 1, 128]  # edgeN
           - Exact: [256, 248, 1, 128]  # edgeN
           - Exact: [255, 255, 1, 128]  # edgeM + edgeN
+  -
+    - # Group 2: GSU=1, beta (UseBeta=True), incl. subtile+TDM
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - SourceSwap: [False, True]
+        - UseSubtileImpl: [False, True]
+        - TDMStoreInst: [False, True]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128]  # non-edge
+          - Exact: [248, 256, 1, 128]  # edgeM
+          - Exact: [232, 256, 1, 128]  # edgeM
+          - Exact: [256, 248, 1, 128]  # edgeN
+          - Exact: [255, 255, 1, 128]  # edgeM + edgeN
+  -
+    - # Group 3: StreamK=3 narrow (UseBeta=True); partials on buffer_store, fixup->D via TDM
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - SourceSwap: [False, True]
+        - UseSubtileImpl: [False]
+        - TDMStoreInst: [False, True]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 512, 1, 256]  # single M-tile, K split across WGs
+          - Exact: [248, 512, 1, 256]  # edgeM
+          - Exact: [216, 512, 1, 256]  # edgeM
+          - Exact: [512, 512, 1, 256]  # two M-tiles
+          - Exact: [504, 512, 1, 256]  # edgeM (partial 2nd M-tile)
+  -
+    - # Group 4: GSU=-1 (auto-GSU), UseBeta=True
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - SourceSwap: [False]
+        - UseSubtileImpl: [False]
+        - TDMStoreInst: [False, True]
+        - StreamK: [0]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [-1]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 512, 1, 256]  # non-edge
+          - Exact: [248, 512, 1, 256]  # edgeM
+          - Exact: [504, 512, 1, 256]  # edgeM

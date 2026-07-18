@@ -444,9 +444,11 @@ validParameters = { # we need to make sure this matches develop
     # Requires DirectToLds on the dense side (B if Sparse==2 else A),
     # and GlobalReadVectorWidthMetadata ∈ {4, 16} (16 needs HasDirectToLdsx4).
     "DirectToLdsMetadata": [0, 1],
-    # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
-    # When True, uses a subtile scheduling strategy with DTL global reads and
-    # an optimized storeD path. Automatically forced False on non-gfx950.
+    # Enable the subtile-based kernel implementation: a subtile scheduling strategy with
+    # DTL global reads and an optimized storeD path.  Used by gfx950 MX FP4 and by gfx1250
+    # (including alongside the TDMStoreInst tensor_store_from_lds epilogue, which packs the
+    # accumulator to bf16 before staging).  Automatically forced False on ISAs other than
+    # gfx950 / gfx1250 (see SolutionStructs/Solution.py).
     "UseSubtileImpl": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
@@ -1086,11 +1088,13 @@ validParameters = { # we need to make sure this matches develop
     #   tensor_dim clamped to (Size - tileStart) so partial edge tiles are handled by
     #   hardware OOB. No per-element buffer_store fallback is emitted on the store-to-D
     #   path (buffer_store // store D == 0). Only affects the store to the final D output.
-    #   Supported (FFM-validated) configs: gfx1250, bf16 DestDataType, HighPrecisionAccumulate,
-    #   GlobalSplitU=1 direct-to-D, SourceSwap 0/1, UseSubtileImpl 0/1, UseBeta 0/1.  Everything
-    #   else (StreamK, GlobalSplitU>1 workspace accumulation, StoreRemapVectorWidth, UseE/UseBias/
-    #   UseScaleAlphaVec/UseScaleAB/UseScaleCD/Activation) is rejected at solution time
-    #   (SolutionStructs/Solution.py) rather than silently mis-generated.
+    #   Supported (FFM-validated) configs: gfx1250, bf16 DestDataType, single ComputeDataType,
+    #   HighPrecisionAccumulate, SourceSwap 0/1, UseSubtileImpl 0/1; GlobalSplitU=1 (and GSU=-1
+    #   resolving to SingleBuffer) direct-to-D with UseBeta 0/1; and StreamK non-atomic
+    #   (PartialsBuffer) with UseBeta=True.  Everything else (StreamK atomic or UseBeta=False,
+    #   GlobalSplitU>1 workspace accumulation, StoreRemapVectorWidth, UseE/UseBias/UseScaleAlphaVec/
+    #   UseScaleAB/UseScaleCD/Activation) is rejected at solution time (SolutionStructs/Solution.py)
+    #   rather than silently mis-generated.
     "TDMStoreInst": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
