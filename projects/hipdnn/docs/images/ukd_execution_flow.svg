@@ -1,0 +1,48 @@
+<svg viewBox="0 0 820 600" width="820" height="600" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrow11" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- header -->
+  <rect x="220" y="16" width="380" height="40" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="410" y="41" text-anchor="middle" font-size="12" font-weight="600">Graph arrives (hipDNN core, unchanged)</text>
+  <line x1="410" y1="56" x2="410" y2="76" stroke="#444" stroke-width="1.5" marker-end="url(#arrow11)"/>
+
+  <!-- applicable engines -->
+  <rect x="60" y="76" width="700" height="74" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="78" y="100" font-size="12" font-weight="600">Applicable engines</text>
+  <text x="78" y="120" font-size="12">match each kernel's graph_criteria; a match binds its named variables ($q, $k, dims, ...)</text>
+  <text x="78" y="140" font-size="12">an engine is applicable if any of its kernels match</text>
+  <line x1="410" y1="150" x2="410" y2="170" stroke="#444" stroke-width="1.5" marker-end="url(#arrow11)"/>
+
+  <!-- engine-level selection -->
+  <rect x="60" y="170" width="700" height="58" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="78" y="194" font-size="12" font-weight="600">Engine-level selection (existing heuristics)</text>
+  <text x="78" y="214" font-size="12">rank engines and pick one (unchanged by this proposal)</text>
+  <line x1="410" y1="228" x2="410" y2="248" stroke="#444" stroke-width="1.5" marker-end="url(#arrow11)"/>
+
+  <!-- kernel-level selection -->
+  <rect x="60" y="248" width="700" height="72" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="78" y="272" font-size="12" font-weight="600">Kernel-level selection: the chosen engine's UHD</text>
+  <text x="78" y="292" font-size="12">score matching kernels from graph + device features; pick one</text>
+  <text x="78" y="310" font-size="11" fill="#555">(falls back to priority / specificity when no UHD is decisive)</text>
+  <line x1="410" y1="320" x2="410" y2="340" stroke="#444" stroke-width="1.5" marker-end="url(#arrow11)"/>
+
+  <!-- configure -->
+  <rect x="60" y="340" width="700" height="58" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="78" y="364" font-size="12" font-weight="600">Configure</text>
+  <text x="78" y="384" font-size="12">engine + chosen knob values; size workspace from the launch formula</text>
+  <line x1="410" y1="398" x2="410" y2="418" stroke="#444" stroke-width="1.5" marker-end="url(#arrow11)"/>
+
+  <!-- generic launch -->
+  <rect x="60" y="418" width="700" height="164" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
+  <text x="78" y="442" font-size="12" font-weight="600">Generic launch: no per-kernel code</text>
+  <text x="96" y="466" font-size="12">build symbol table (constants + bound dims/attrs)</text>
+  <text x="96" y="488" font-size="12">resolve argument sources against the bound variables</text>
+  <text x="96" y="510" font-size="12">load code object → kernel handle (cached)</text>
+  <text x="96" y="532" font-size="12">evaluate grid / block / shared / workspace formulas</text>
+  <text x="96" y="554" font-family="Consolas, monospace" font-size="11">pack arguments → launch kernel</text>
+</svg>
