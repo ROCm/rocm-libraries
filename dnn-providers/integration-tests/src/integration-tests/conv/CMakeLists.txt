@@ -3,15 +3,8 @@
 
 target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
-        IntegrationConvForwardSerializeRoundTrip.cpp
+        IntegrationGpuConvForward.cpp
+        IntegrationGpuConvBackwardData.cpp
+        IntegrationGpuConvBackwardWeights.cpp
+        IntegrationGpuConvFwdBiasActiv.cpp
 )
-
-if(BUILD_CPP_GRAPH_TESTS)
-    target_sources(${INTEGRATION_TESTS_EXE}
-        PRIVATE
-            IntegrationGpuConvForward.cpp
-            IntegrationGpuConvBackwardData.cpp
-            IntegrationGpuConvBackwardWeights.cpp
-            IntegrationGpuConvFwdBiasActiv.cpp
-    )
-endif()
