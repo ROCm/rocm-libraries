@@ -437,7 +437,7 @@ public:
                 ovr_rec.SetValues(vals.at(0), vals.at(1));
             }
             if(success)
-                return {ovr_rec};
+                return ovr_rec;
         }
         std::string clause;
         std::vector<std::string> values;
@@ -472,7 +472,7 @@ public:
         if(rec.GetSize() == 0)
             return {};
         else
-            return {rec};
+            return rec;
     }
 
     /// Removes ID with associated VALUES from record with key PROBLEM_CONFIG from db.

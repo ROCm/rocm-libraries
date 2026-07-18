@@ -159,7 +159,7 @@ std::optional<std::vector<solver::Id>> GetEnvFindOnlySolverImpl()
     if(res.empty())
         return {};
     else
-        return {res};
+        return res;
 }
 
 } // namespace
