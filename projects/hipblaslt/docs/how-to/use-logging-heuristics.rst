@@ -48,7 +48,7 @@ You can enable the hipBLASLt logging mechanism by setting the following environm
    which is replaced with the process ID, for example, ``<file_name>_%i.log``.
    If ``HIPBLASLT_LOG_FILE`` is not defined, the log messages are printed to stdout.
 
-*  ``HIPBLASLT_ENABLE_MARKER=1``: Setting ``HIPBLASLT_ENABLE_MARKER`` to ``1`` enables marker trace for :doc:`ROCProfiler <rocprofiler:index>` profiling.
+*  ``HIPBLASLT_ENABLE_MARKER=1``: Setting ``HIPBLASLT_ENABLE_MARKER`` to ``1`` enables marker trace for `ROCProfiler <https://rocm.docs.amd.com/projects/rocprofiler/en/docs-7.2.4/index.html>`__ profiling.
 
 Heuristics cache
 ==================

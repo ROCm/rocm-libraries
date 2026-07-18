@@ -9,7 +9,7 @@ Install rocPRIM
 ***************
 
 Before you begin, verify that your system is supported. For more information,
-see :ref:`ROCm Core SDK components <rocm:release-components>`.
+see `ROCm Core SDK components <https://rocm.docs.amd.com/en/latest/components/core.html>`__.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`./build`.
@@ -23,7 +23,7 @@ rocPRIM is included with the ROCm Core SDK on Linux and Windows. For the most
 complete installation on Linux, we recommend that developers use the
 ``amdrocm-core-sdk`` meta package.
 
-For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+For instructions, see `Install AMD ROCm <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=instinct&os=ubuntu&ubuntu-ver=26.04&i=pkgman&gpu=mi355x&gfx=gfx950&w=compute>`__. Use the
 selector panel on that page to view instructions appropriate for your system
 environment.
 
@@ -37,7 +37,7 @@ CCL package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
 additional ROCm libraries and tools, install the ``amdrocm-ccl`` package.
 This includes rocPRIM, hipCUB, and rocThrust.
 
-1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+1. Complete the `ROCm installation prerequisites <https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=instinct&os=ubuntu&ubuntu-ver=26.04&i=pkgman&gpu=mi355x&gfx=gfx950&w=compute>`__ to
    install dependencies and configure GPU access permissions.
 
 2. Install the ROCm CCL package that matches your desired ROCm version,
