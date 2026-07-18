@@ -319,7 +319,7 @@
     algorithm (he2hb + hb2st) instead of the 1-stage algorithm (hetrd) when
     executing SYEVD/HEEVD. */
 #ifndef SYEVD_2STAGE_SWITCHSIZE
-#define SYEVD_2STAGE_SWITCHSIZE 512
+#define SYEVD_2STAGE_SWITCHSIZE 8000
 #endif
 
 /*! \brief Bandwidth kd used by the 2-stage algorithm in SYEVD/HEEVD. */
