@@ -202,6 +202,59 @@ namespace rocsparse
         }
     }
 
+    // RDNA4 (gfx1201, wave32) launch helper for the non-transposed small-slice
+    // kernel. THREADS_PER_ROW (the number of threads cooperating on one row and
+    // thus the block's y-dimension / shared-memory depth) is selected at launch
+    // from the average nnz-per-row signal. The shared-memory size and block
+    // geometry follow THREADS_PER_ROW so numerical results are unchanged.
+    template <uint32_t THREADS_PER_ROW,
+              typename I,
+              typename J,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
+    rocsparse_status sellmvn_launch(rocsparse_handle    handle,
+                                    hipStream_t         stream,
+                                    int32_t             blocks_x,
+                                    int32_t             blocks_y,
+                                    J                   m,
+                                    J                   n,
+                                    I                   nnz,
+                                    J                   sell_slice_size,
+                                    I                   sell_colval_size,
+                                    const T*            alpha_device_host,
+                                    const I*            sell_slice_offsets,
+                                    const J*            sell_col_ind,
+                                    const A*            sell_val,
+                                    const X*            x,
+                                    const T*            beta_device_host,
+                                    Y*                  y,
+                                    rocsparse_index_base base)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::sellmvn_kernel<THREADS_PER_ROW>),
+            dim3(blocks_x, blocks_y, 1),
+            dim3(sell_slice_size, THREADS_PER_ROW),
+            sell_slice_size * THREADS_PER_ROW * sizeof(T),
+            stream,
+            m,
+            n,
+            nnz,
+            sell_slice_size,
+            sell_colval_size,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            sell_slice_offsets,
+            sell_col_ind,
+            sell_val,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+        return rocsparse_status_success;
+    }
+
     template <typename I, typename J, typename A, typename X, typename Y, typename T>
     rocsparse_status sellmv_dispatch(rocsparse_handle          handle,
                                      rocsparse_operation       trans,
@@ -233,26 +286,74 @@ namespace rocsparse
         {
             if(sell_slice_size <= 128)
             {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::sellmvn_kernel<8>),
-                    dim3(blocks_x, blocks_y, 1),
-                    dim3(sell_slice_size, 8),
-                    sell_slice_size * 8 * sizeof(T),
-                    stream,
-                    m,
-                    n,
-                    nnz,
-                    sell_slice_size,
-                    sell_colval_size,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                    sell_slice_offsets,
-                    sell_col_ind,
-                    sell_val,
-                    x,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                    y,
-                    descr->base,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                // RDNA4/wave32 tuning: the original code fixed THREADS_PER_ROW=8
+                // (a wave64-era 8-rows/warp geometry). On wave32 hardware, short
+                // rows leave most of the 8 cooperating threads idle and pay for a
+                // full 3-step shared-memory reduction. Pick THREADS_PER_ROW from
+                // the average nnz-per-row so sparse rows use a shallower reduction
+                // while dense rows keep the original width (no regression there).
+                const int64_t avg_nnz_per_row = (m > 0) ? (static_cast<int64_t>(nnz) / m) : 0;
+
+                if(avg_nnz_per_row <= 4)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<2>(handle,
+                                                                            stream,
+                                                                            blocks_x,
+                                                                            blocks_y,
+                                                                            m,
+                                                                            n,
+                                                                            nnz,
+                                                                            sell_slice_size,
+                                                                            sell_colval_size,
+                                                                            alpha_device_host,
+                                                                            sell_slice_offsets,
+                                                                            sell_col_ind,
+                                                                            sell_val,
+                                                                            x,
+                                                                            beta_device_host,
+                                                                            y,
+                                                                            descr->base)));
+                }
+                else if(avg_nnz_per_row <= 12)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<4>(handle,
+                                                                            stream,
+                                                                            blocks_x,
+                                                                            blocks_y,
+                                                                            m,
+                                                                            n,
+                                                                            nnz,
+                                                                            sell_slice_size,
+                                                                            sell_colval_size,
+                                                                            alpha_device_host,
+                                                                            sell_slice_offsets,
+                                                                            sell_col_ind,
+                                                                            sell_val,
+                                                                            x,
+                                                                            beta_device_host,
+                                                                            y,
+                                                                            descr->base)));
+                }
+                else
+                {
+                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<8>(handle,
+                                                                            stream,
+                                                                            blocks_x,
+                                                                            blocks_y,
+                                                                            m,
+                                                                            n,
+                                                                            nnz,
+                                                                            sell_slice_size,
+                                                                            sell_colval_size,
+                                                                            alpha_device_host,
+                                                                            sell_slice_offsets,
+                                                                            sell_col_ind,
+                                                                            sell_val,
+                                                                            x,
+                                                                            beta_device_host,
+                                                                            y,
+                                                                            descr->base)));
+                }
             }
             else
             {

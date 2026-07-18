@@ -80,7 +80,10 @@ namespace rocsparse
         shared[idx] = sum;
         __syncthreads();
 
-        for(int32_t level = 4; level > 0; level /= 2)
+        // Tree reduction across the THREADS_PER_ROW partial sums of each row.
+        // Starting at THREADS_PER_ROW/2 keeps this correct for any power-of-two
+        // value of THREADS_PER_ROW (RDNA4/wave32 tuning selects it at launch).
+        for(int32_t level = THREADS_PER_ROW / 2; level > 0; level /= 2)
         {
             if(tidy < level && tidy + level < THREADS_PER_ROW)
             {
