@@ -37,6 +37,7 @@
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -148,6 +149,23 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
                                                     std::move(innerPM)));
     }
 
+    // Epilogue store-sink (gfx1250 experiment): sink each global-write buffer_store
+    // as late as legal within the epilogue so the later InsertWaitAluPass emits a
+    // graduated va_vdst(N) instead of a full va_vdst(0) drain. Runs here — while the
+    // module is still a single flat BB (before the outer CFGBuilderPass) — because
+    // the single-region ScopeAdaptor requires a flat module. Movement only; it must
+    // precede InsertVgprMsbPass + InsertWaitAluPass so both regenerate for the new
+    // order. Scoped to "globalWriteEpilogue" so no store crosses the region boundary.
+    if (moduleOptions.EnableEpilogueSink) {
+        PassManager epiloguePM;
+        registerAllAnalyses(epiloguePM.getAnalysisManager());
+        configureStandardInstrumentations(epiloguePM, moduleOptions, "globalWriteEpilogue",
+                                          debugStreams);
+        epiloguePM.addPass(createEpilogueStoreSinkPass(/*targetValu=*/10));
+        pm.addPass(
+            createKernelToRegionPassAdaptor(module, "globalWriteEpilogue", std::move(epiloguePM)));
+    }
+
     PB.applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm, module);
 
     // -- kernel --
@@ -217,7 +235,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 struct Gfx1250Registrar {
     Gfx1250Registrar() {
         BackendRegistry::setArchPipeline(
-            GFX1250_ARCH, {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody"}});
+            GFX1250_ARCH,
+            {buildGfx1250Pipeline, {"loopWithPrefetch", "noLoadLoopBody", "globalWriteEpilogue"}});
     }
 };
 static Gfx1250Registrar s_gfx1250Registrar;

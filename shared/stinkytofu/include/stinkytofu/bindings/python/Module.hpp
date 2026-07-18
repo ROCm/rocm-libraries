@@ -84,7 +84,8 @@
     X(DsReadPerWmma, int)                \
     X(GlobalReadQueueDepth, int)         \
     X(GlobalReadDrainLatency, int)       \
-    X(DsReadOrder, int)
+    X(DsReadOrder, int)                  \
+    X(EnableEpilogueSink, bool)
 
 namespace stinkytofu {
 /**
