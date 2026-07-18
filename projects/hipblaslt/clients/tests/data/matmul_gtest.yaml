@@ -3417,4 +3417,30 @@ Tests:
   check_ref: [1, 2]
   gpu_arch: '950'
 
+# f32-class "fast/reduced" computes (fast-TF32, fast-16BF, compute-16F). The
+# library computes these in reduced precision but the GPU reference accumulates
+# in plain f32 (matching the CPU cblas reference); integer_exact init keeps the
+# library output bit-exact so the exact unit_check holds against both references.
+# (fast-16F is gate-accepted too but has no plain-f32 solution on gfx950.)
+- name: matmul_check_ref_fast_compute
+  category: pre_checkin
+  function:
+    matmul:
+    - *xf32_precision
+    - *single_precision_bf16computeIn_precision
+    - *hpa_half_fp16dst_compute_fp16_precision
+    - *hpa_half_fp32dst_compute_fp16_precision
+  M: [128]
+  N: [128]
+  K: [128]
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: T, transB: N }
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+  norm_check: 1
+  check_ref: [1, 2]
+  gpu_arch: '950'
+
 ...
