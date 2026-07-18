@@ -1058,6 +1058,10 @@ class Solution(collections.abc.Mapping):
           tdmGrvw = 2
         elif state["ProblemType"]["DataType%s"%tc].is6bitFloat():
           tdmGrvw = 4
+        # The sparse tensor (Sparse==1 -> A, Sparse==2 -> B) loads 2:4 metadata
+        # that requires GRVW % 4 == 0, so it cannot be forced down to 1.
+        elif (state["ProblemType"]["Sparse"] == 1 and tc == "A") or (state["ProblemType"]["Sparse"] == 2 and tc == "B"):
+          tdmGrvw = 4
       state["GlobalReadVectorWidth%s"%tc] = tdmGrvw
       state["NumLoads%s"%tc] = 1
       state["NumLoadsCoalesced%s"%tc] = 1
