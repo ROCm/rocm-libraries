@@ -402,6 +402,76 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    // Launch the segmented (default) coomv-N path for a given workgroup size.
+    // Factored out so the workgroup size can be selected at runtime while still
+    // being a compile-time template parameter for the kernels.
+    template <uint32_t COOMVN_DIM, typename T, typename I, typename A, typename X, typename Y>
+    static rocsparse_status coomvn_segmented_launch(rocsparse_handle          handle,
+                                                    int64_t                   nnz,
+                                                    const T*                  alpha_device_host,
+                                                    const rocsparse_mat_descr descr,
+                                                    const A*                  coo_val,
+                                                    const I*                  coo_row_ind,
+                                                    const I*                  coo_col_ind,
+                                                    const X*                  x,
+                                                    Y*                        y)
+    {
+        hipStream_t stream = handle->stream;
+
+        int maxthreads = handle->properties.maxThreadsPerBlock;
+        int nprocs     = 2 * handle->properties.multiProcessorCount;
+        int maxblocks  = (nprocs * maxthreads - 1) / COOMVN_DIM + 1;
+
+        I minblocks = (nnz - 1) / COOMVN_DIM + 1;
+        I nblocks   = maxblocks < minblocks ? maxblocks : minblocks;
+        I nloops    = (nnz - 1) / (COOMVN_DIM * nblocks) + 1;
+
+        // Buffer
+        char* ptr = reinterpret_cast<char*>(handle->buffer);
+        ptr += 256;
+
+        // row block reduction buffer
+        I* row_block_red = reinterpret_cast<I*>(ptr);
+        ptr += ((sizeof(I) * nblocks - 1) / 256 + 1) * 256;
+
+        // val block reduction buffer
+        T* val_block_red = reinterpret_cast<T*>(ptr);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::coomvn_segmented_loops<COOMVN_DIM>),
+            dim3(nblocks),
+            dim3(COOMVN_DIM),
+            0,
+            stream,
+            nnz,
+            nloops,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            coo_row_ind,
+            coo_col_ind,
+            coo_val,
+            x,
+            y,
+            row_block_red,
+            val_block_red,
+            descr->base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::coomvn_segmented_loops_reduce<COOMVN_DIM>),
+            dim3(1),
+            dim3(COOMVN_DIM),
+            0,
+            stream,
+            nblocks,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            row_block_red,
+            val_block_red,
+            y,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        return rocsparse_status_success;
+    }
+
     template <typename T, typename I, typename A, typename X, typename Y>
     static rocsparse_status coomv_segmented_dispatch(rocsparse_handle          handle,
                                                      rocsparse_operation       trans,
@@ -418,8 +488,6 @@ namespace rocsparse
                                                      Y*                        y)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        // Stream
-        hipStream_t stream = handle->stream;
 
         I ysize = (trans == rocsparse_operation_none) ? m : n;
 
@@ -431,58 +499,52 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-#define COOMVN_DIM 256
+            // Workgroup size selection for the segmented default path.
+            //
+            // The historical value is 256, which was tuned for wave64 GPUs.
+            // On wave32 hardware (RDNA, e.g. gfx1201) a 128-thread workgroup is
+            // faster for all but the smallest problems: it doubles the occupancy
+            // granularity (4 wavefronts per block instead of 8) and halves the
+            // partner distance of the block-wide segmented reduction. For small
+            // problems the extra block-reduction entries and kernel-launch
+            // overhead of the smaller workgroup slightly hurt, so 256 is kept
+            // there. The crossover is driven by total non-zeros (problem size),
+            // not by nnz/row density: matrices with the same density but larger
+            // nnz benefit while smaller ones do not. The threshold below was
+            // measured on gfx1201 (RX 9070), where the switch is a consistent
+            // win from a few million non-zeros upward and a small loss below it.
+            uint32_t coomvn_dim = 256;
+            if(handle->wavefront_size == 32 && nnz >= 3000000)
+            {
+                coomvn_dim = 128;
+            }
 
-            int maxthreads = handle->properties.maxThreadsPerBlock;
-            int nprocs     = 2 * handle->properties.multiProcessorCount;
-            int maxblocks  = (nprocs * maxthreads - 1) / COOMVN_DIM + 1;
-
-            I minblocks = (nnz - 1) / COOMVN_DIM + 1;
-            I nblocks   = maxblocks < minblocks ? maxblocks : minblocks;
-            I nloops    = (nnz - 1) / (COOMVN_DIM * nblocks) + 1;
-
-            // Buffer
-            char* ptr = reinterpret_cast<char*>(handle->buffer);
-            ptr += 256;
-
-            // row block reduction buffer
-            I* row_block_red = reinterpret_cast<I*>(ptr);
-            ptr += ((sizeof(I) * nblocks - 1) / 256 + 1) * 256;
-
-            // val block reduction buffer
-            T* val_block_red = reinterpret_cast<T*>(ptr);
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_segmented_loops<COOMVN_DIM>),
-                dim3(nblocks),
-                dim3(COOMVN_DIM),
-                0,
-                stream,
-                nnz,
-                nloops,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                coo_row_ind,
-                coo_col_ind,
-                coo_val,
-                x,
-                y,
-                row_block_red,
-                val_block_red,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_segmented_loops_reduce<COOMVN_DIM>),
-                dim3(1),
-                dim3(COOMVN_DIM),
-                0,
-                stream,
-                nblocks,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                row_block_red,
-                val_block_red,
-                y,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-#undef COOMVN_DIM
+            if(coomvn_dim == 128)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::coomvn_segmented_launch<128, T>(handle,
+                                                                nnz,
+                                                                alpha_device_host,
+                                                                descr,
+                                                                coo_val,
+                                                                coo_row_ind,
+                                                                coo_col_ind,
+                                                                x,
+                                                                y)));
+            }
+            else
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::coomvn_segmented_launch<256, T>(handle,
+                                                                nnz,
+                                                                alpha_device_host,
+                                                                descr,
+                                                                coo_val,
+                                                                coo_row_ind,
+                                                                coo_col_ind,
+                                                                x,
+                                                                y)));
+            }
             break;
         }
         case rocsparse_operation_transpose:
