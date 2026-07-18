@@ -411,10 +411,10 @@ std::unordered_map<std::string, std::int64_t> sdpaGridSymbols(const CompileSpec&
     // block spans block_q = block_m / (num_query_heads / num_kv_heads) positions
     // (16 for MHA, 4 for the hq8/hkv2 GQA instance). block_m is exposed alongside
     // for the grid formula's readability.
-    constexpr std::int64_t blockM = 16; // num_warps=1 * block_m_per_warp=16
+    constexpr std::int64_t BLOCK_M = 16; // num_warps=1 * block_m_per_warp=16
     const std::int64_t queriesPerKv
         = spec.numKvHeads > 0 ? spec.numQueryHeads / spec.numKvHeads : 1;
-    const std::int64_t blockQ = queriesPerKv > 0 ? blockM / queriesPerKv : blockM;
+    const std::int64_t blockQ = queriesPerKv > 0 ? BLOCK_M / queriesPerKv : BLOCK_M;
     return {{"batch", batch},
             {"seqlen_q", spec.seqlenQ},
             {"seqlen_k", spec.seqlenK},
@@ -425,7 +425,7 @@ std::unordered_map<std::string, std::int64_t> sdpaGridSymbols(const CompileSpec&
             // One length-1 pseudo-sequence per query token (see buildSdpaLaunchInputs):
             // the non-causal dense problem is realized as batch*seqlen_q causal decodes.
             {"num_seqs", batch * spec.seqlenQ},
-            {"block_m", blockM},
+            {"block_m", BLOCK_M},
             {"block_q", blockQ}};
 }
 

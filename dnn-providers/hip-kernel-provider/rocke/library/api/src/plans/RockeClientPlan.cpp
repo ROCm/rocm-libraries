@@ -193,8 +193,8 @@ void RockeClientPlan::buildPagedKvBuffers(std::int64_t batch)
     const std::int64_t btStride = (spec.seqlenK + spec.blockSize - 1) / spec.blockSize;
 
     // seq_lens[p] = seqlen_k: every pseudo-sequence sees the full KV context.
-    std::vector<std::int32_t> seqLens(static_cast<std::size_t>(numSeqs),
-                                      static_cast<std::int32_t>(spec.seqlenK));
+    const std::vector<std::int32_t> seqLens(static_cast<std::size_t>(numSeqs),
+                                            static_cast<std::int32_t>(spec.seqlenK));
 
     // query_start_len[p] = cumulative query tokens (cu_seqlens_q). One query token
     // per pseudo-sequence gives the identity prefix sum [0, 1, 2, ..., numSeqs].
