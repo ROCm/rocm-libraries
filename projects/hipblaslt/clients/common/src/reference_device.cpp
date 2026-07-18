@@ -311,29 +311,40 @@ namespace
     // float-accumulate reference GEMM with runtime-typed A/B loads, so A and B
     // may be different input types (e.g. OCP f8 x bf8). One thread per output
     // element; C/D remain templated. Real inputs only (no conjugation).
+    //
+    // Non-MX scale factors: scaleA/scaleAlphaVec index the M row (i), scaleB the N
+    // column (j); scalar mode passes scaleAIsVec/scaleBIsVec == false (index 0).
+    // All are constant across the K-loop and batch, so fold outside accumulation.
+    // scaleC folds into beta at the caller; scaleD scales the full result at store.
     template <typename Tc, typename To>
-    __global__ void reference_gemm_kernel_f32(bool        transA_is_n,
-                                              bool        transB_is_n,
-                                              int64_t     M,
-                                              int64_t     N,
-                                              int64_t     K,
-                                              float       alpha,
-                                              float       beta,
-                                              const void* A,
-                                              hipDataType tA,
-                                              int64_t     lda,
-                                              int64_t     strideA,
-                                              const void* B,
-                                              hipDataType tB,
-                                              int64_t     ldb,
-                                              int64_t     strideB,
-                                              const Tc*   C,
-                                              int64_t     ldc,
-                                              int64_t     strideC,
-                                              To*         D,
-                                              int64_t     ldd,
-                                              int64_t     strideD,
-                                              int32_t     batchCount)
+    __global__ void reference_gemm_kernel_f32(bool         transA_is_n,
+                                              bool         transB_is_n,
+                                              int64_t      M,
+                                              int64_t      N,
+                                              int64_t      K,
+                                              float        alpha,
+                                              float        beta,
+                                              const void*  A,
+                                              hipDataType  tA,
+                                              int64_t      lda,
+                                              int64_t      strideA,
+                                              const void*  B,
+                                              hipDataType  tB,
+                                              int64_t      ldb,
+                                              int64_t      strideB,
+                                              const Tc*    C,
+                                              int64_t      ldc,
+                                              int64_t      strideC,
+                                              To*          D,
+                                              int64_t      ldd,
+                                              int64_t      strideD,
+                                              int32_t      batchCount,
+                                              const float* scaleA,
+                                              bool         scaleAIsVec,
+                                              const float* scaleB,
+                                              bool         scaleBIsVec,
+                                              const float* scaleAlphaVec,
+                                              float        scaleD)
     {
         const int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
         const int64_t j = int64_t(blockIdx.y) * blockDim.y + threadIdx.y;
@@ -348,6 +359,11 @@ namespace
         const Tc*     Cb     = C + b * strideC;
         To*           Db     = D + b * strideD;
 
+        // Scale factors are constant across K and batch; absent scales are 1.
+        const float sa  = scaleA ? scaleA[scaleAIsVec ? i : 0] : 1.0f;
+        const float sb  = scaleB ? scaleB[scaleBIsVec ? j : 0] : 1.0f;
+        const float sav = scaleAlphaVec ? scaleAlphaVec[i] : 1.0f;
+
         float acc = 0.0f;
         for(int64_t l = 0; l < K; ++l)
         {
@@ -358,9 +374,10 @@ namespace
 
         // alpha==0 drops the A*B product entirely (BLAS convention), so 0*inf
         // does not become nan; beta==0 ignores C even if it holds inf/nan.
-        float out = (alpha == 0.0f) ? 0.0f : alpha * acc;
-        if(beta != 0.0f)
+        float out = (alpha == 0.0f) ? 0.0f : alpha * sa * sav * sb * acc;
+        if(beta != 0.0f) // beta already folded with scaleC by the caller
             out += beta * static_cast<float>(Cb[i + j * ldc]);
+        out *= scaleD;
 
         Db[i + j * ldd] = store_out<To>(out);
     }
@@ -388,34 +405,47 @@ namespace
                                    int64_t     ldd,
                                    int64_t     strideD,
                                    int32_t     batchCount,
+                                   const void* dScaleA,
+                                   bool        scaleAIsVec,
+                                   const void* dScaleB,
+                                   bool        scaleBIsVec,
+                                   const void* dScaleAlphaVec,
+                                   double      scaleD,
                                    hipStream_t stream)
     {
         const dim3 block(16, 16, 1);
         const dim3 grid(uint32_t((M + block.x - 1) / block.x),
                         uint32_t((N + block.y - 1) / block.y),
                         uint32_t(batchCount));
-        reference_gemm_kernel_f32<Tc, To><<<grid, block, 0, stream>>>(transA_is_n,
-                                                                      transB_is_n,
-                                                                      M,
-                                                                      N,
-                                                                      K,
-                                                                      float(alpha),
-                                                                      float(beta),
-                                                                      dA,
-                                                                      tA,
-                                                                      lda,
-                                                                      strideA,
-                                                                      dB,
-                                                                      tB,
-                                                                      ldb,
-                                                                      strideB,
-                                                                      static_cast<const Tc*>(dC),
-                                                                      ldc,
-                                                                      strideC,
-                                                                      static_cast<To*>(dDgold),
-                                                                      ldd,
-                                                                      strideD,
-                                                                      batchCount);
+        reference_gemm_kernel_f32<Tc, To><<<grid, block, 0, stream>>>(
+            transA_is_n,
+            transB_is_n,
+            M,
+            N,
+            K,
+            float(alpha),
+            float(beta),
+            dA,
+            tA,
+            lda,
+            strideA,
+            dB,
+            tB,
+            ldb,
+            strideB,
+            static_cast<const Tc*>(dC),
+            ldc,
+            strideC,
+            static_cast<To*>(dDgold),
+            ldd,
+            strideD,
+            batchCount,
+            static_cast<const float*>(dScaleA),
+            scaleAIsVec,
+            static_cast<const float*>(dScaleB),
+            scaleBIsVec,
+            static_cast<const float*>(dScaleAlphaVec),
+            float(scaleD));
     }
 
     // Input types accepted by the reference path (a_type/b_type). OCP fp8/bf8 only;
@@ -521,13 +551,28 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
         return fail("gradient epilogue");
     if(arg.use_e)
         return fail("auxiliary (E) output");
-    if(arg.scaleA != hipblaslt_scaling_format::none
-       || arg.scaleB != hipblaslt_scaling_format::none)
-        return fail("A/B scaling");
-    if(arg.scaleC || arg.scaleD || arg.scaleE)
-        return fail("C/D/E scaling");
-    if(arg.scaleAlpha_vector)
-        return fail("alpha vector");
+    // Non-MX scalar/vector scaleA/B, scaleAlphaVec, scaleC, scaleD are supported on
+    // the float-accumulate, float-scale computes only (32F and the fast-32F
+    // variants, where the compute type is float so the scale buffers are float).
+    // 16F-compute (half) scaling and MX/block A/B scaling are still deferred.
+    const bool scale_capable
+        = !any_complex
+          && (arg.compute_type == HIPBLAS_COMPUTE_32F
+              || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_16F
+              || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF
+              || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32);
+    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+        return fail("MX/block A/B scaling");
+    if((arg.scaleA != hipblaslt_scaling_format::none
+        || arg.scaleB != hipblaslt_scaling_format::none)
+       && !scale_capable)
+        return fail("A/B scaling requires compute 32F-class (float-scale) path");
+    if((arg.scaleC || arg.scaleD) && !scale_capable)
+        return fail("C/D scaling requires compute 32F-class (float-scale) path");
+    if(arg.scaleAlpha_vector && !scale_capable)
+        return fail("alpha vector requires compute 32F-class (float-scale) path");
+    if(arg.scaleE)
+        return fail("E scaling");
     if(arg.amaxScaleA || arg.amaxScaleB || arg.amaxD)
         return fail("amax");
     if(arg.swizzle_a || arg.swizzle_b)
@@ -569,7 +614,13 @@ void run_reference_gemm_device(bool        transA_is_n,
                                int64_t     ldd,
                                int64_t     strideD,
                                int32_t     batchCount,
-                               hipStream_t stream)
+                               hipStream_t stream,
+                               const void* dScaleA,
+                               bool        scaleAIsVec,
+                               const void* dScaleB,
+                               bool        scaleBIsVec,
+                               const void* dScaleAlphaVec,
+                               double      scaleD)
 {
     if(M <= 0 || N <= 0 || batchCount <= 0)
         return;
@@ -634,7 +685,8 @@ void run_reference_gemm_device(bool        transA_is_n,
     // (C type, D type) are dispatched here (a 3x3 over f32/bf16/f16).
 #define GPU_REF_F32_ARGS                                                              \
     transA_is_n, transB_is_n, M, N, K, alpha, beta, dA, tA, lda, strideA, dB, tB,     \
-        ldb, strideB, dC, ldc, strideC, dDgold, ldd, strideD, batchCount, stream
+        ldb, strideB, dC, ldc, strideC, dDgold, ldd, strideD, batchCount, dScaleA,    \
+        scaleAIsVec, dScaleB, scaleBIsVec, dScaleAlphaVec, scaleD, stream
 
 #define GPU_REF_LAUNCH_F32(TC, TO) launch_reference_gemm_f32<TC, TO>(GPU_REF_F32_ARGS)
 

@@ -5031,6 +5031,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                 beta_r  = get_computeInterface(h_beta[gemmIdx], Tc);
             }
 
+            // Non-MX scale factors (float scale buffers on the 32F-class path the
+            // gate admits scaling on): fold scaleC into beta, read scaleD scalar,
+            // and pass the scale vectors/scalars to the device reference.
+            const bool scaleAPresent = arg.scaleA == hipblaslt_scaling_format::Scalar
+                                       || arg.scaleA == hipblaslt_scaling_format::Vector;
+            const bool scaleBPresent = arg.scaleB == hipblaslt_scaling_format::Scalar
+                                       || arg.scaleB == hipblaslt_scaling_format::Vector;
+            if(arg.scaleC)
+                beta_r *= double(*hScaleC[gemmIdx].as<float>());
+            const double scaleDVal = arg.scaleD ? double(*hScaleD[gemmIdx].as<float>()) : 1.0;
+
             run_reference_gemm_device(
                 transA == HIPBLAS_OP_N,
                 transB == HIPBLAS_OP_N,
@@ -5060,7 +5071,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 ldd[gemmIdx],
                 stride_d[gemmIdx],
                 num_batches[gemmIdx],
-                stream);
+                stream,
+                scaleAPresent ? dScaleA[gemmIdx].buf() : nullptr,
+                arg.scaleA == hipblaslt_scaling_format::Vector,
+                scaleBPresent ? dScaleB[gemmIdx].buf() : nullptr,
+                arg.scaleB == hipblaslt_scaling_format::Vector,
+                arg.scaleAlpha_vector ? dScaleAlphaVec[gemmIdx].buf() : nullptr,
+                scaleDVal);
         }
         CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
