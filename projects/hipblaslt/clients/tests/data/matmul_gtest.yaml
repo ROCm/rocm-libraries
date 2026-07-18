@@ -3333,7 +3333,7 @@ Tests:
 # check_ref selects the verification reference: 1=gpu, 2=both (cpu+gpu). The GPU
 # reference (clients/common/src/reference_device.cpp) supports only plain GEMM:
 # no bias/activation/scaling/aux/gradient/grouped/pointer-array batch, a_type ==
-# b_type, inputs f32/f16/bf16/fp8/bf8/f64, C/D f32/f16/bf16/f64. integer_exact
+# b_type, inputs f32/f16/bf16/fp8/bf8/f64/int8, C/D f32/f16/bf16/f64/int32/int8. integer_exact
 # init keeps the serial reference bit-exact against the library reduction at
 # small K, so the GPU leg's exact 4-ULP unit_check holds. Scoped to gfx950,
 # where these entries are validated (fp8 OCP support and f64 solutions present).
@@ -3406,6 +3406,25 @@ Tests:
   function:
     matmul:
     - *i8_precision_dst_i32
+  M: [128]
+  N: [128]
+  K: [128]
+  transA_transB: *transA_transB_range
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: rand_int
+  unit_check: 1
+  norm_check: 1
+  check_ref: [1, 2]
+  gpu_arch: '950'
+
+# int8 in / int8 out (compute 32I). The int32 result is saturated to [-128, 127]
+# on the int8 store (matching cblas saturate_cast), so the reference stays exact
+# against the library across transpose combos and beta variety.
+- name: matmul_check_ref_i8_dst_i8
+  category: pre_checkin
+  function:
+    matmul:
+    - *i8_precision_dst_i8
   M: [128]
   N: [128]
   K: [128]
