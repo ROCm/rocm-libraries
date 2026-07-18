@@ -99,27 +99,44 @@ namespace rocsparse
         // Run different ellmv kernels
         if(trans == rocsparse_operation_none)
         {
-#define ELLMVN_DIM 512
+#define LAUNCH_ELLMVN(DIM)                                                 \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                    \
+        (rocsparse::ellmvn_kernel<DIM>),                                   \
+        dim3((m - 1) / (DIM) + 1),                                         \
+        dim3(DIM),                                                         \
+        0,                                                                 \
+        stream,                                                            \
+        m,                                                                 \
+        n,                                                                 \
+        ell_width,                                                         \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),      \
+        ell_col_ind,                                                       \
+        ell_val,                                                           \
+        x,                                                                 \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),       \
+        y,                                                                 \
+        descr->base,                                                       \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::ellmvn_kernel<ELLMVN_DIM>),
-                dim3((m - 1) / ELLMVN_DIM + 1),
-                dim3(ELLMVN_DIM),
-                0,
-                stream,
-                m,
-                n,
-                ell_width,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                ell_col_ind,
-                ell_val,
-                x,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                y,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+            // RDNA4 (gfx1201, wavefront size 32) launch tuning for the
+            // one-thread-per-row non-transpose kernel. The historical fixed
+            // 512-thread block is a wave64-era default. On wave32 hardware,
+            // wide-ELL rows (long per-thread reduction loops) run faster with a
+            // smaller 128-thread block, which spreads rows across more
+            // workgroups and improves occupancy/tail behavior. Narrow rows are
+            // insensitive to the block size, so 512 is kept for them to avoid
+            // regressing the configurations it was tuned for.
+            const uint32_t ELLMVN_DIM = (ell_width >= 32) ? 128 : 512;
 
-#undef ELLMVN_DIM
+            if(ELLMVN_DIM == 128)
+            {
+                LAUNCH_ELLMVN(128);
+            }
+            else
+            {
+                LAUNCH_ELLMVN(512);
+            }
+#undef LAUNCH_ELLMVN
         }
         else
         {
