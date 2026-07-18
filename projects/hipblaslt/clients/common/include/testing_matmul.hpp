@@ -5003,6 +5003,13 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.timing)
             cpu_time_used = get_time_us_no_sync();
 
+        // MX/block-scaled A/B: the host already dequantized the narrow inputs to
+        // float (refA/refB, scales baked in). Those uploads are GEMMed as f32 and
+        // must outlive the async reference launches, so hold them until the sync
+        // below.
+        std::vector<HipDeviceBuffer> dRefMX;
+        dRefMX.reserve(2 * gemm_count); // up to A and B per gemm; avoid reallocation
+
         for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
         {
             dD_gold.emplace_back(To, size_D[gemmIdx] * block_count, HMM);
@@ -5042,6 +5049,39 @@ void testing_matmul_with_bias(const Arguments& arg,
                 beta_r *= double(*hScaleC[gemmIdx].as<float>());
             const double scaleDVal = arg.scaleD ? double(*hScaleD[gemmIdx].as<float>()) : 1.0;
 
+            // A block-scaled side GEMMs its host float dequant (refA/refB) as f32,
+            // with the scale already folded in; a non-block side keeps its native
+            // device buffer/type. refA/refB use the same lda/stride as the narrow
+            // input, so the GEMM args below are unchanged apart from buffer + type.
+            const bool  mxA  = isBlockScaling(arg.scaleA);
+            const bool  mxB  = isBlockScaling(arg.scaleB);
+            const void* aBuf = dA[gemmIdx].buf();
+            hipDataType aTyp = arg.a_type;
+            const void* bBuf = dB[gemmIdx].buf();
+            hipDataType bTyp = arg.b_type;
+            if(mxA)
+            {
+                dRefMX.emplace_back(HIP_R_32F, refA[gemmIdx].size(), HMM);
+                CHECK_DEVICE_ALLOCATION(dRefMX.back().memcheck());
+                CHECK_HIP_ERROR(hipMemcpy(dRefMX.back().buf(),
+                                          refA[gemmIdx].data(),
+                                          refA[gemmIdx].size() * sizeof(float),
+                                          hipMemcpyHostToDevice));
+                aBuf = dRefMX.back().buf();
+                aTyp = HIP_R_32F;
+            }
+            if(mxB)
+            {
+                dRefMX.emplace_back(HIP_R_32F, refB[gemmIdx].size(), HMM);
+                CHECK_DEVICE_ALLOCATION(dRefMX.back().memcheck());
+                CHECK_HIP_ERROR(hipMemcpy(dRefMX.back().buf(),
+                                          refB[gemmIdx].data(),
+                                          refB[gemmIdx].size() * sizeof(float),
+                                          hipMemcpyHostToDevice));
+                bBuf = dRefMX.back().buf();
+                bTyp = HIP_R_32F;
+            }
+
             run_reference_gemm_device(
                 transA == HIPBLAS_OP_N,
                 transB == HIPBLAS_OP_N,
@@ -5054,12 +5094,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 alpha_i,
                 beta_r,
                 beta_i,
-                dA[gemmIdx].buf(),
-                arg.a_type,
+                aBuf,
+                aTyp,
                 lda[gemmIdx],
                 stride_a[gemmIdx],
-                dB[gemmIdx].buf(),
-                arg.b_type,
+                bBuf,
+                bTyp,
                 ldb[gemmIdx],
                 stride_b[gemmIdx],
                 dC[gemmIdx].buf(),

@@ -24,11 +24,14 @@
 /// compute 32F, all-f64 on compute 64F, int8 in / int32 out on compute 32I, or
 /// all-complex float/double on compute 32F/64F; default epilogue, strided batch).
 /// Non-MX scalar/vector scaleA/B, scaleAlphaVec, scaleC, and scaleD are supported
-/// on the float-scale computes (32F and the fast-32F variants); MX/block A/B
-/// scaling and 16F-compute scaling are still deferred, as are bias/aux epilogues.
-/// A and B may carry different float-class inputs (f32/f16/bf16/fp8/bf8); f64,
-/// int8, and complex remain same-type. On false, `reason` is filled with the
-/// first unsupported feature encountered.
+/// on the float-scale computes (32F and the fast-32F variants); 16F-compute
+/// scaling is still deferred, as are bias/aux epilogues. MX/block A/B scaling is
+/// supported by having the caller pass the host float dequant (refA/refB, scales
+/// baked in) as f32 inputs, so the block-scaled side may carry any OCP MX narrow
+/// type (fp8/bf8/fp4/fp6/bf6); MX does not combine with C/D scaling or alpha
+/// vector here. A and B may carry different float-class inputs
+/// (f32/f16/bf16/fp8/bf8); f64, int8, and complex remain same-type. On false,
+/// `reason` is filled with the first unsupported feature encountered.
 bool gpu_ref_supported(const Arguments& arg, std::string& reason);
 
 /// Compute D_gold on the device. f64 (tD == HIP_R_64F) accumulates in double,

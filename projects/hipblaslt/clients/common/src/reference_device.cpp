@@ -459,6 +459,15 @@ namespace
                || t == HIP_C_64F;
     }
 
+    // OCP MX narrow input types (fp8/bf8/fp4/fp6/bf6). A block-scaled A/B side is
+    // dequantized to float on the host before the GEMM, so its narrow input type is
+    // never decoded by the kernel; only these OCP formats are generated for MX.
+    bool is_mx_input(hipDataType t)
+    {
+        return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2 || t == HIP_R_4F_E2M1
+               || t == HIP_R_6F_E2M3 || t == HIP_R_6F_E3M2;
+    }
+
     // C/D types accepted by the reference path (the compare kernel handles these).
     // int8 output is only valid on the compute-32I path; complex float/double are
     // all-complex only (both enforced by the gate).
@@ -486,8 +495,15 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
     if(arg.a_type == HIP_R_8F_E4M3_FNUZ || arg.a_type == HIP_R_8F_E5M2_FNUZ
        || arg.b_type == HIP_R_8F_E4M3_FNUZ || arg.b_type == HIP_R_8F_E5M2_FNUZ)
         return fail("FNUZ fp8/bf8 input (only OCP fp8/bf8 supported)");
-    if(!is_supported_input(arg.a_type) || !is_supported_input(arg.b_type))
-        return fail("input type other than f32/f16/bf16/fp8/bf8/f64/int8/complex");
+    // A block-scaled side is dequantized to float on the host, so it may carry any
+    // OCP MX narrow input (fp8/bf8/fp4/fp6/bf6); a non-block side must be directly
+    // supported by the kernel loader.
+    const bool mxA      = isBlockScaling(arg.scaleA);
+    const bool mxB      = isBlockScaling(arg.scaleB);
+    const bool aInputOk = mxA ? is_mx_input(arg.a_type) : is_supported_input(arg.a_type);
+    const bool bInputOk = mxB ? is_mx_input(arg.b_type) : is_supported_input(arg.b_type);
+    if(!aInputOk || !bInputOk)
+        return fail("input type other than f32/f16/bf16/fp8/bf8/f64/int8/complex/MX-narrow");
     if(!is_supported_output(arg.c_type) || !is_supported_output(arg.d_type))
         return fail("C/D type other than f32/f16/bf16/f64/int32/int8/complex");
     // Complex (HIP_C_32F/HIP_C_64F): require all four A/B/C/D the same complex type
@@ -554,15 +570,28 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
     // Non-MX scalar/vector scaleA/B, scaleAlphaVec, scaleC, scaleD are supported on
     // the float-accumulate, float-scale computes only (32F and the fast-32F
     // variants, where the compute type is float so the scale buffers are float).
-    // 16F-compute (half) scaling and MX/block A/B scaling are still deferred.
+    // 16F-compute (half) scaling is still deferred.
     const bool scale_capable
         = !any_complex
           && (arg.compute_type == HIPBLAS_COMPUTE_32F
               || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_16F
               || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF
               || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32);
-    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
-        return fail("MX/block A/B scaling");
+    // MX/block A/B scaling: the host pre-dequantizes the narrow inputs to float
+    // (scales baked in) and this path GEMMs them as f32. It requires the
+    // float-accumulate path and does not combine with other scaling here.
+    if(mxA || mxB)
+    {
+        if(!scale_capable)
+            return fail("MX block scaling requires compute 32F-class (float) path");
+        if(arg.scaleC || arg.scaleD)
+            return fail("MX block scaling combined with C/D scaling");
+        if(arg.scaleAlpha_vector)
+            return fail("MX block scaling combined with alpha vector");
+        if((!mxA && arg.scaleA != hipblaslt_scaling_format::none)
+           || (!mxB && arg.scaleB != hipblaslt_scaling_format::none))
+            return fail("MX block scaling combined with non-block A/B scaling");
+    }
     if((arg.scaleA != hipblaslt_scaling_format::none
         || arg.scaleB != hipblaslt_scaling_format::none)
        && !scale_capable)
