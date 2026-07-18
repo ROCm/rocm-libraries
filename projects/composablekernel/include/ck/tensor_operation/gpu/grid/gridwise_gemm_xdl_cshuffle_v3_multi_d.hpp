@@ -459,13 +459,14 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
     MakeCGridDescriptor_M_N(index_t M, index_t MPad, index_t N, index_t NPad, index_t StrideC)
     {
         const auto c_grid_desc_mraw_nraw = [&]() {
-            if constexpr(is_same<tensor_layout::gemm::RowMajor, ELayout>::value)
-            {
-                return make_naive_tensor_descriptor(make_tuple(M, N), make_tuple(StrideC, I1));
-            }
-            else if constexpr(is_same<tensor_layout::gemm::ColumnMajor, ELayout>::value)
+            if constexpr(is_same<tensor_layout::gemm::ColumnMajor, ELayout>::value)
             {
                 return make_naive_tensor_descriptor(make_tuple(M, N), make_tuple(I1, StrideC));
+            }
+            else
+            {
+                // RowMajor and all convolution output layouts (NHWGK, NDHWGK, etc.)
+                return make_naive_tensor_descriptor(make_tuple(M, N), make_tuple(StrideC, I1));
             }
         }();
 
@@ -2630,7 +2631,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                                const Block2CTileMap& block_2_ctile_map,
                                const AGridDesc_AK0_M_AK1& a_grid_desc_ak0_m_ak1,
                                const BGridDesc_BK0_N_BK1& b_grid_desc_bk0_n_bk1,
-                               const DsGridDesc_M_N_& /*ds_grid_desc_m_n*/,
+                               const DsGridDesc_M_N_& ds_grid_desc_m_n,
                                const EGridDesc_M_N& c_grid_desc_m_n)
     {
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
@@ -3076,17 +3077,14 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
 
                 using EDataType = CDataType;
 
-                const auto ds_grid_desc_m_n_ = MakeDsGridDescriptor_M_N(
-                    problem.M, problem.MPadded, problem.N, problem.NPadded, problem.StrideDs);
-
                 const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
                     MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
-                        ds_grid_desc_m_n_, problem.MBlock, problem.NBlock);
+                        ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
                 const auto ds_grid_buf = generate_tuple(
                     [&](auto i) {
                         return make_dynamic_buffer<AddressSpaceEnum::Global>(
-                            p_ds_grid[i], ds_grid_desc_m_n_[i].GetElementSpaceSize());
+                            p_ds_grid[i], ds_grid_desc_m_n[i].GetElementSpaceSize());
                     },
                     Number<NumDTensor>{});
 
@@ -3232,7 +3230,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                                     const Block2CTileMap& block_2_ctile_map,
                                     const AGridDesc_AK0_M_AK1& a_grid_desc_ak0_m_ak1,
                                     const BGridDesc_BK0_N_BK1& b_grid_desc_bk0_n_bk1,
-                                    const DsGridDesc_M_N_& /*ds_grid_desc_m_n*/,
+                                    const DsGridDesc_M_N_& ds_grid_desc_m_n,
                                     const EGridDesc_M_N& c_grid_desc_m_n)
     {
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
@@ -3689,17 +3687,14 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
 
                 using EDataType = CDataType;
 
-                const auto ds_grid_desc_m_n_ = MakeDsGridDescriptor_M_N(
-                    problem.M, problem.MPadded, problem.N, problem.NPadded, problem.StrideDs);
-
                 const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
                     MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
-                        ds_grid_desc_m_n_, problem.MBlock, problem.NBlock);
+                        ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
 
                 const auto ds_grid_buf = generate_tuple(
                     [&](auto i) {
                         return make_dynamic_buffer<AddressSpaceEnum::Global>(
-                            p_ds_grid[i], ds_grid_desc_m_n_[i].GetElementSpaceSize());
+                            p_ds_grid[i], ds_grid_desc_m_n[i].GetElementSpaceSize());
                     },
                     Number<NumDTensor>{});
 
