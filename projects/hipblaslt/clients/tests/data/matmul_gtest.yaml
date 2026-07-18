@@ -3462,4 +3462,25 @@ Tests:
   check_ref: [1, 2]
   gpu_arch: '950'
 
+# Complex GEMM: f32_c (compute 32F) and f64_c (compute 64F). integer_exact fills
+# small-integer real+imag parts so complex multiply and conjugate-transpose
+# (op == C) stay bit-exact against the library at this K, and the exact
+# per-component unit_check holds. Covers N/T/C transpose combos incl. conjugate.
+- name: matmul_check_ref_complex
+  category: pre_checkin
+  function:
+    matmul:
+    - *complex_float_precision
+    - *complex_double_precision
+  M: [64]
+  N: [64]
+  K: [64]
+  transA_transB: *complex_transA_transB_range
+  alpha_beta: *complex_alpha_beta_range_small
+  initialization: integer_exact
+  unit_check: 1
+  norm_check: 1
+  check_ref: [1, 2]
+  gpu_arch: '950'
+
 ...
