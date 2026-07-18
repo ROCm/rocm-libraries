@@ -8,12 +8,12 @@
     {
       "compute_data_type": "float",
       "inputs": {
-        "dy_tensor_uid": 0,
-        "x_tensor_uid": 1
+        "dy_tensor_uid": 1,
+        "x_tensor_uid": 2
       },
       "name": "ConvolutionWgrad_0",
       "outputs": {
-        "dw_tensor_uid": 2
+        "dw_tensor_uid": 0
       },
       "parameters": {
         "conv_mode": "CROSS_CORRELATION",
@@ -29,7 +29,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "dy",
+      "name": "ConvolutionWgrad_0::DW",
       "strides": "${case.strides}",
       "uid": 0,
       "virtual": false
@@ -37,7 +37,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "x",
+      "name": "dy",
       "strides": "${case.strides}",
       "uid": 1,
       "virtual": false
@@ -45,7 +45,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "ConvolutionWgrad_0::DW",
+      "name": "x",
       "strides": "${case.strides}",
       "uid": 2,
       "virtual": false

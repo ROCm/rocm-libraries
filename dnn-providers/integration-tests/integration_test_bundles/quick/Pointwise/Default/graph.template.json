@@ -10,7 +10,7 @@
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,
-        "in_0_tensor_uid": 0,
+        "in_0_tensor_uid": 1,
         "in_1_tensor_uid": null,
         "in_2_tensor_uid": null,
         "operation": "relu_fwd",
@@ -22,7 +22,7 @@
       },
       "name": "Pointwise_0",
       "outputs": {
-        "out_0_tensor_uid": 1
+        "out_0_tensor_uid": 0
       },
       "type": "PointwiseAttributes"
     }
@@ -31,7 +31,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "x",
+      "name": "Pointwise_0::OUT_0",
       "strides": "${case.strides}",
       "uid": 0,
       "virtual": false
@@ -39,7 +39,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "Pointwise_0::OUT_0",
+      "name": "x",
       "strides": "${case.strides}",
       "uid": 1,
       "virtual": false

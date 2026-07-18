@@ -46,13 +46,14 @@ from bundle_utils import (
     ambiguous_attr_keys,
     assign_case_ids,
     canon,
-    canonical_uid_map,
+    canonical_uid_map_by_name,
     derive_operation,
     expand,
     infer_layout,
     node_attr_items,
     raw_node_attrs,
     remap_graph,
+    remap_meta_inputs,
     sanitize,
     skeleton_hash,
     tensors_by_uid,
@@ -388,11 +389,21 @@ def main() -> int:
         print("place_bundles: no captured cases found", file=sys.stderr)
         return 1
 
+    # Canonicalize UIDs by tensor name so that the same logical tensor carries
+    # the same UID in every case of a topology. The C++ builder auto-assigns
+    # UIDs non-deterministically (GraphTensorIds.hpp iterates an unordered_set),
+    # so without this, sibling cases disagree on which UID is Y / MEAN / momentum
+    # and can never share a template. Graph and metadata inputs are remapped in
+    # lockstep so each tensor keeps its fill spec (canonical_uid_map_by_name).
+    for c in cases:
+        uid_map = canonical_uid_map_by_name(c.graph)
+        c.graph = remap_graph(c.graph, uid_map)
+        c.meta = remap_meta_inputs(c.meta, uid_map)
+
     grouped: dict = defaultdict(list)
     for c in cases:
         h = skeleton_hash(c.graph)
         c.original_graph = c.graph
-        c.graph = remap_graph(c.graph, canonical_uid_map(c.graph))
         grouped[(c.tier, h)].append(c)
 
     buckets = []

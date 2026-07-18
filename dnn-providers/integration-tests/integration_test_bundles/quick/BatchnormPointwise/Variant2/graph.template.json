@@ -8,22 +8,22 @@
     {
       "compute_data_type": "float",
       "inputs": {
-        "bias_tensor_uid": 0,
-        "epsilon_tensor_uid": 1,
-        "momentum_tensor_uid": 2,
+        "bias_tensor_uid": 5,
+        "epsilon_tensor_uid": 6,
+        "momentum_tensor_uid": 7,
         "peer_stats_tensor_uid": [],
-        "prev_running_mean_tensor_uid": 3,
-        "prev_running_variance_tensor_uid": 4,
-        "scale_tensor_uid": 5,
-        "x_tensor_uid": 6
+        "prev_running_mean_tensor_uid": 10,
+        "prev_running_variance_tensor_uid": 11,
+        "scale_tensor_uid": 12,
+        "x_tensor_uid": 4
       },
       "name": "Batchnorm_0",
       "outputs": {
-        "inv_variance_tensor_uid": 7,
-        "mean_tensor_uid": 8,
-        "next_running_mean_tensor_uid": 9,
-        "next_running_variance_tensor_uid": 10,
-        "y_tensor_uid": 11
+        "inv_variance_tensor_uid": 0,
+        "mean_tensor_uid": 1,
+        "next_running_mean_tensor_uid": 8,
+        "next_running_variance_tensor_uid": 9,
+        "y_tensor_uid": 2
       },
       "type": "BatchnormAttributes"
     },
@@ -32,7 +32,7 @@
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,
-        "in_0_tensor_uid": 11,
+        "in_0_tensor_uid": 2,
         "in_1_tensor_uid": null,
         "in_2_tensor_uid": null,
         "operation": "relu_fwd",
@@ -44,7 +44,7 @@
       },
       "name": "Pointwise_1",
       "outputs": {
-        "out_0_tensor_uid": 12
+        "out_0_tensor_uid": 3
       },
       "type": "PointwiseAttributes"
     }
@@ -53,7 +53,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "bias",
+      "name": "Batchnorm_0::INV_VARIANCE",
       "strides": "${case.strides}",
       "uid": 0,
       "virtual": false
@@ -61,9 +61,49 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "epsilon",
+      "name": "Batchnorm_0::MEAN",
       "strides": "${case.strides}",
       "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Batchnorm_0::Y",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": true
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_1::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "X",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 6,
       "value": 9.97212960147963e-05,
       "value_type": "Float64Value",
       "virtual": false
@@ -73,7 +113,7 @@
       "dims": "${case.dims}",
       "name": "momentum",
       "strides": "${case.strides}",
-      "uid": 2,
+      "uid": 7,
       "value": 0.14325573613681652,
       "value_type": "Float64Value",
       "virtual": false
@@ -81,47 +121,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "prev_running_mean",
-      "strides": "${case.strides}",
-      "uid": 3,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "prev_running_variance",
-      "strides": "${case.strides}",
-      "uid": 4,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "scale",
-      "strides": "${case.strides}",
-      "uid": 5,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "X",
-      "strides": "${case.strides}",
-      "uid": 6,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "Batchnorm_0::INV_VARIANCE",
-      "strides": "${case.strides}",
-      "uid": 7,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "Batchnorm_0::MEAN",
+      "name": "next_running_mean",
       "strides": "${case.strides}",
       "uid": 8,
       "virtual": false
@@ -129,7 +129,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "next_running_mean",
+      "name": "next_running_variance",
       "strides": "${case.strides}",
       "uid": 9,
       "virtual": false
@@ -137,7 +137,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "next_running_variance",
+      "name": "prev_running_mean",
       "strides": "${case.strides}",
       "uid": 10,
       "virtual": false
@@ -145,15 +145,15 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "Batchnorm_0::Y",
+      "name": "prev_running_variance",
       "strides": "${case.strides}",
       "uid": 11,
-      "virtual": true
+      "virtual": false
     },
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "Pointwise_1::OUT_0",
+      "name": "scale",
       "strides": "${case.strides}",
       "uid": 12,
       "virtual": false

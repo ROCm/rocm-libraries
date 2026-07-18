@@ -4,21 +4,21 @@
     {
       "id": "1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
-              16,
               1,
-              1
+              16,
+              16
             ],
             "strides": [
+              256,
+              256,
               16,
-              1,
-              1,
               1
             ],
             "data_type": "bfloat16"
@@ -28,13 +28,13 @@
             "dims": [
               1,
               16,
-              16,
-              16
+              1,
+              1
             ],
             "strides": [
-              4096,
-              256,
               16,
+              1,
+              1,
               1
             ],
             "data_type": "bfloat16"
@@ -43,12 +43,12 @@
             "uid": 2,
             "dims": [
               1,
-              1,
+              16,
               16,
               16
             ],
             "strides": [
-              256,
+              4096,
               256,
               16,
               1
@@ -88,11 +88,27 @@
     {
       "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -108,7 +124,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -119,22 +135,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14
-            ],
-            "strides": [
-              196,
-              196,
-              14,
               1
             ],
             "data_type": "bfloat16"
@@ -172,11 +172,27 @@
     {
       "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -192,7 +208,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -204,22 +220,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14
-            ],
-            "strides": [
-              196,
-              1,
-              14,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -254,13 +254,29 @@
       }
     },
     {
-      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_5e3ec1",
+      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_c10d2c",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -276,7 +292,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -288,22 +304,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -338,13 +338,29 @@
       }
     },
     {
-      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_cea304",
+      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_2088ce",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              1,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -360,7 +376,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -372,22 +388,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8
-            ],
-            "strides": [
-              64,
-              1,
-              8,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -424,11 +424,27 @@
     {
       "id": "1_16_3_3_bfp16_nhwc_dil2x2_postpad2x2_prepad2x2",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -444,7 +460,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -456,22 +472,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -508,11 +508,27 @@
     {
       "id": "8_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -528,7 +544,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -540,22 +556,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -590,13 +590,29 @@
       }
     },
     {
-      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_19ede4",
+      "id": "1_16_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1_3fc41a",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -612,7 +628,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -624,22 +640,6 @@
               1,
               128,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8
-            ],
-            "strides": [
-              128,
-              1,
-              8,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -676,11 +676,27 @@
     {
       "id": "2_8_3_3_bfp16_nhwc_dil1x1_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -696,7 +712,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -708,22 +724,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              2
             ],
             "data_type": "bfloat16"
           }
@@ -758,13 +758,29 @@
       }
     },
     {
-      "id": "4_8_3_3_bfp16_nhwc_dil2x2_postpad1x1_prepad1x1",
+      "id": "2_4_7_7_bfp16_nhwc_dil2x2_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -780,7 +796,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -792,22 +808,6 @@
               1,
               512,
               32
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              1,
-              28,
-              4
             ],
             "data_type": "bfloat16"
           }
@@ -842,13 +842,29 @@
       }
     },
     {
-      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_88b1f2",
+      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_95f277",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -864,7 +880,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -873,22 +889,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
               256,
               16,
               1
@@ -926,13 +926,29 @@
       }
     },
     {
-      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_97bf61",
+      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_3d0fcb",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -948,7 +964,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -959,22 +975,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8
-            ],
-            "strides": [
-              64,
-              64,
-              8,
               1
             ],
             "data_type": "bfloat16"
@@ -1012,11 +1012,27 @@
     {
       "id": "1_16_3_3_bfp16_nchw_dil2x2_postpad2x2_prepad2x2",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1032,7 +1048,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1041,22 +1057,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
               256,
               16,
               1
@@ -1096,21 +1096,21 @@
     {
       "id": "8_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
             "dims": [
+              8,
               1,
               16,
-              1,
-              1
+              16
             ],
             "strides": [
+              256,
+              256,
               16,
-              1,
-              1,
               1
             ],
             "data_type": "bfloat16"
@@ -1118,15 +1118,15 @@
           {
             "uid": 1,
             "dims": [
-              8,
+              1,
               16,
-              16,
-              16
+              1,
+              1
             ],
             "strides": [
-              4096,
-              256,
               16,
+              1,
+              1,
               1
             ],
             "data_type": "bfloat16"
@@ -1135,12 +1135,12 @@
             "uid": 2,
             "dims": [
               8,
-              1,
+              16,
               16,
               16
             ],
             "strides": [
-              256,
+              4096,
               256,
               16,
               1
@@ -1178,13 +1178,29 @@
       }
     },
     {
-      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_45bcf4",
+      "id": "1_16_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1_d56cc8",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1200,7 +1216,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1209,22 +1225,6 @@
             ],
             "strides": [
               2048,
-              128,
-              8,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8
-            ],
-            "strides": [
-              128,
               128,
               8,
               1
@@ -1264,11 +1264,27 @@
     {
       "id": "2_8_3_3_bfp16_nchw_dil1x1_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -1284,7 +1300,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1293,22 +1309,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              512,
               256,
               16,
               1
@@ -1346,13 +1346,29 @@
       }
     },
     {
-      "id": "4_8_3_3_bfp16_nchw_dil2x2_postpad1x1_prepad1x1",
+      "id": "2_4_7_7_bfp16_nchw_dil2x2_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              49,
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -1368,7 +1384,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -1379,22 +1395,6 @@
               8192,
               256,
               16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              49,
-              7,
               1
             ],
             "data_type": "bfloat16"
@@ -1432,11 +1432,27 @@
     {
       "id": "1_16_16_16_bfp16_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1452,7 +1468,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1464,22 +1480,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -1516,21 +1516,21 @@
     {
       "id": "1_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
-              16,
               1,
-              1
+              16,
+              16
             ],
             "strides": [
+              256,
+              256,
               16,
-              1,
-              1,
               1
             ],
             "data_type": "half"
@@ -1540,13 +1540,13 @@
             "dims": [
               1,
               16,
-              16,
-              16
+              1,
+              1
             ],
             "strides": [
-              4096,
-              256,
               16,
+              1,
+              1,
               1
             ],
             "data_type": "half"
@@ -1555,12 +1555,12 @@
             "uid": 2,
             "dims": [
               1,
-              1,
+              16,
               16,
               16
             ],
             "strides": [
-              256,
+              4096,
               256,
               16,
               1
@@ -1600,11 +1600,27 @@
     {
       "id": "1_16_3_3_fp16_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1620,7 +1636,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1631,22 +1647,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14
-            ],
-            "strides": [
-              196,
-              196,
-              14,
               1
             ],
             "data_type": "half"
@@ -1684,11 +1684,27 @@
     {
       "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1704,7 +1720,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1716,22 +1732,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14
-            ],
-            "strides": [
-              196,
-              1,
-              14,
-              1
             ],
             "data_type": "half"
           }
@@ -1766,13 +1766,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_d3651c",
+      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_3d3878",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1788,7 +1804,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1800,22 +1816,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -1850,13 +1850,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_eb35b0",
+      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_ac3604",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              1,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1872,7 +1888,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1884,22 +1900,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8
-            ],
-            "strides": [
-              64,
-              1,
-              8,
-              1
             ],
             "data_type": "half"
           }
@@ -1936,11 +1936,27 @@
     {
       "id": "1_16_3_3_fp16_nhwc_dil2x2_postpad2x2_prepad2x2",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -1956,7 +1972,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -1968,22 +1984,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -2020,11 +2020,27 @@
     {
       "id": "8_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -2040,7 +2056,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -2052,22 +2068,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -2102,13 +2102,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_a5b3da",
+      "id": "1_16_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1_d09856",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -2124,7 +2140,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2136,22 +2152,6 @@
               1,
               128,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8
-            ],
-            "strides": [
-              128,
-              1,
-              8,
-              1
             ],
             "data_type": "half"
           }
@@ -2188,11 +2188,27 @@
     {
       "id": "2_8_3_3_fp16_nhwc_dil1x1_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -2208,7 +2224,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2220,22 +2236,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              2
             ],
             "data_type": "half"
           }
@@ -2270,13 +2270,29 @@
       }
     },
     {
-      "id": "4_8_3_3_fp16_nhwc_dil2x2_postpad1x1_prepad1x1",
+      "id": "2_4_7_7_fp16_nhwc_dil2x2_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -2292,7 +2308,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -2304,22 +2320,6 @@
               1,
               512,
               32
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              1,
-              28,
-              4
             ],
             "data_type": "half"
           }
@@ -2354,13 +2354,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_ee8b5c",
+      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_08cc8d",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -2376,7 +2392,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2385,22 +2401,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
               256,
               16,
               1
@@ -2438,13 +2438,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_56256b",
+      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_d7bd0c",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -2460,7 +2476,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2471,22 +2487,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8
-            ],
-            "strides": [
-              64,
-              64,
-              8,
               1
             ],
             "data_type": "half"
@@ -2524,11 +2524,27 @@
     {
       "id": "1_16_3_3_fp16_nchw_dil2x2_postpad2x2_prepad2x2",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -2544,7 +2560,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2553,22 +2569,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
               256,
               16,
               1
@@ -2608,21 +2608,21 @@
     {
       "id": "8_16_16_16_fp16_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
             "dims": [
+              8,
               1,
               16,
-              1,
-              1
+              16
             ],
             "strides": [
+              256,
+              256,
               16,
-              1,
-              1,
               1
             ],
             "data_type": "half"
@@ -2630,15 +2630,15 @@
           {
             "uid": 1,
             "dims": [
-              8,
+              1,
               16,
-              16,
-              16
+              1,
+              1
             ],
             "strides": [
-              4096,
-              256,
               16,
+              1,
+              1,
               1
             ],
             "data_type": "half"
@@ -2647,12 +2647,12 @@
             "uid": 2,
             "dims": [
               8,
-              1,
+              16,
               16,
               16
             ],
             "strides": [
-              256,
+              4096,
               256,
               16,
               1
@@ -2690,13 +2690,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_7cff45",
+      "id": "1_16_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1_e7968e",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -2712,7 +2728,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2721,22 +2737,6 @@
             ],
             "strides": [
               2048,
-              128,
-              8,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8
-            ],
-            "strides": [
-              128,
               128,
               8,
               1
@@ -2776,11 +2776,27 @@
     {
       "id": "2_8_3_3_fp16_nchw_dil1x1_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -2796,7 +2812,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2805,22 +2821,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              512,
               256,
               16,
               1
@@ -2858,13 +2858,29 @@
       }
     },
     {
-      "id": "4_8_3_3_fp16_nchw_dil2x2_postpad1x1_prepad1x1",
+      "id": "2_4_7_7_fp16_nchw_dil2x2_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              49,
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -2880,7 +2896,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -2891,22 +2907,6 @@
               8192,
               256,
               16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              49,
-              7,
               1
             ],
             "data_type": "half"
@@ -2944,11 +2944,27 @@
     {
       "id": "1_16_16_16_fp16_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -2964,7 +2980,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -2976,22 +2992,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -3028,21 +3028,21 @@
     {
       "id": "1_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
-              16,
               1,
-              1
+              16,
+              16
             ],
             "strides": [
+              256,
+              256,
               16,
-              1,
-              1,
               1
             ],
             "data_type": "float"
@@ -3052,13 +3052,13 @@
             "dims": [
               1,
               16,
-              16,
-              16
+              1,
+              1
             ],
             "strides": [
-              4096,
-              256,
               16,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -3067,12 +3067,12 @@
             "uid": 2,
             "dims": [
               1,
-              1,
+              16,
               16,
               16
             ],
             "strides": [
-              256,
+              4096,
               256,
               16,
               1
@@ -3112,11 +3112,27 @@
     {
       "id": "1_16_3_3_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3132,7 +3148,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3143,22 +3159,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14
-            ],
-            "strides": [
-              196,
-              196,
-              14,
               1
             ],
             "data_type": "float"
@@ -3196,11 +3196,27 @@
     {
       "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14
+            ],
+            "strides": [
+              196,
+              1,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3216,7 +3232,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3228,22 +3244,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14
-            ],
-            "strides": [
-              196,
-              1,
-              14,
-              1
             ],
             "data_type": "float"
           }
@@ -3278,13 +3278,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_917ea6",
+      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_366c61",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3300,7 +3316,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3312,22 +3328,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "float"
           }
@@ -3362,13 +3362,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_301c24",
+      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_80fc28",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3384,7 +3400,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3396,22 +3412,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8
-            ],
-            "strides": [
-              64,
-              1,
-              8,
-              1
             ],
             "data_type": "float"
           }
@@ -3448,11 +3448,27 @@
     {
       "id": "1_16_3_3_fp32_nhwc_dil2x2_postpad2x2_prepad2x2",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3468,7 +3484,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3480,22 +3496,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "float"
           }
@@ -3532,11 +3532,27 @@
     {
       "id": "8_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3552,7 +3568,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -3564,22 +3580,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "float"
           }
@@ -3614,13 +3614,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_885af3",
+      "id": "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_d9f61c",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              1,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3636,7 +3652,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3648,22 +3664,6 @@
               1,
               128,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8
-            ],
-            "strides": [
-              128,
-              1,
-              8,
-              1
             ],
             "data_type": "float"
           }
@@ -3700,11 +3700,27 @@
     {
       "id": "2_8_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -3720,7 +3736,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3732,22 +3748,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              2
             ],
             "data_type": "float"
           }
@@ -3782,13 +3782,29 @@
       }
     },
     {
-      "id": "4_8_3_3_fp32_nhwc_dil2x2_postpad1x1_prepad1x1",
+      "id": "2_4_7_7_fp32_nhwc_dil2x2_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              1,
+              28,
+              4
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -3804,7 +3820,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -3816,22 +3832,6 @@
               1,
               512,
               32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              1,
-              28,
-              4
             ],
             "data_type": "float"
           }
@@ -3866,13 +3866,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_43673d",
+      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_cc862f",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3888,7 +3904,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3897,22 +3913,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
               256,
               16,
               1
@@ -3950,13 +3950,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_5f83f0",
+      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_2d800a",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8
+            ],
+            "strides": [
+              64,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -3972,7 +3988,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -3983,22 +3999,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8
-            ],
-            "strides": [
-              64,
-              64,
-              8,
               1
             ],
             "data_type": "float"
@@ -4036,11 +4036,27 @@
     {
       "id": "1_16_3_3_fp32_nchw_dil2x2_postpad2x2_prepad2x2",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -4056,7 +4072,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4065,22 +4081,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
               256,
               16,
               1
@@ -4120,21 +4120,21 @@
     {
       "id": "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
             "dims": [
+              8,
               1,
               16,
-              1,
-              1
+              16
             ],
             "strides": [
+              256,
+              256,
               16,
-              1,
-              1,
               1
             ],
             "data_type": "float"
@@ -4142,15 +4142,15 @@
           {
             "uid": 1,
             "dims": [
-              8,
+              1,
               16,
-              16,
-              16
+              1,
+              1
             ],
             "strides": [
-              4096,
-              256,
               16,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -4159,12 +4159,12 @@
             "uid": 2,
             "dims": [
               8,
-              1,
+              16,
               16,
               16
             ],
             "strides": [
-              256,
+              4096,
               256,
               16,
               1
@@ -4202,13 +4202,29 @@
       }
     },
     {
-      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_fe6be1",
+      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_ed465d",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -4224,7 +4240,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4233,22 +4249,6 @@
             ],
             "strides": [
               2048,
-              128,
-              8,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8
-            ],
-            "strides": [
-              128,
               128,
               8,
               1
@@ -4288,11 +4288,27 @@
     {
       "id": "2_8_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16
+            ],
+            "strides": [
+              512,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -4308,7 +4324,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4317,22 +4333,6 @@
             ],
             "strides": [
               4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16
-            ],
-            "strides": [
-              512,
               256,
               16,
               1
@@ -4370,13 +4370,29 @@
       }
     },
     {
-      "id": "4_8_3_3_fp32_nchw_dil2x2_postpad1x1_prepad1x1",
+      "id": "2_4_7_7_fp32_nchw_dil2x2_postpad1x1_prepad1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7
+            ],
+            "strides": [
+              196,
+              49,
+              7,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -4392,7 +4408,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -4403,22 +4419,6 @@
               8192,
               256,
               16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7
-            ],
-            "strides": [
-              196,
-              49,
-              7,
               1
             ],
             "data_type": "float"
@@ -4456,11 +4456,27 @@
     {
       "id": "1_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16
+            ],
+            "strides": [
+              256,
+              1,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -4476,7 +4492,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4488,22 +4504,6 @@
               1,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16
-            ],
-            "strides": [
-              256,
-              1,
-              16,
-              1
             ],
             "data_type": "float"
           }
@@ -4540,23 +4540,23 @@
     {
       "id": "1_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
+              1,
               16,
-              1,
-              1,
-              1
+              16,
+              16
             ],
             "strides": [
+              4096,
+              4096,
+              256,
               16,
-              1,
-              1,
-              1,
               1
             ],
             "data_type": "bfloat16"
@@ -4566,15 +4566,15 @@
             "dims": [
               1,
               16,
-              16,
-              16,
-              16
+              1,
+              1,
+              1
             ],
             "strides": [
-              65536,
-              4096,
-              256,
               16,
+              1,
+              1,
+              1,
               1
             ],
             "data_type": "bfloat16"
@@ -4583,13 +4583,13 @@
             "uid": 2,
             "dims": [
               1,
-              1,
+              16,
               16,
               16,
               16
             ],
             "strides": [
-              4096,
+              65536,
               4096,
               256,
               16,
@@ -4634,11 +4634,29 @@
     {
       "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              2744,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -4656,7 +4674,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4669,24 +4687,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              2744,
-              196,
-              14,
               1
             ],
             "data_type": "bfloat16"
@@ -4728,11 +4728,29 @@
     {
       "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -4750,7 +4768,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4764,24 +4782,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              1,
-              196,
-              14,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -4820,13 +4820,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_d8aa89",
+      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_48f1b3",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -4844,7 +4862,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4858,24 +4876,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -4914,13 +4914,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_5d9937",
+      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_c579c0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -4938,7 +4956,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -4952,24 +4970,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8,
-              8
-            ],
-            "strides": [
-              512,
-              1,
-              64,
-              8,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -5010,11 +5010,29 @@
     {
       "id": "1_16_3_3_3_bfp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5032,7 +5050,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5046,24 +5064,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -5104,11 +5104,29 @@
     {
       "id": "8_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5126,7 +5144,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -5140,24 +5158,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -5196,13 +5196,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_fe673c",
+      "id": "1_16_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_379ef3",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              4,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5220,7 +5238,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5234,24 +5252,6 @@
               512,
               64,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              4,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -5292,11 +5292,29 @@
     {
       "id": "2_8_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -5314,7 +5332,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5328,24 +5346,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32,
-              2
             ],
             "data_type": "bfloat16"
           }
@@ -5384,13 +5384,31 @@
       }
     },
     {
-      "id": "4_8_3_3_3_bfp16_ndhwc_dil2x2x2_postpad1x1x1_prepad1x1x1",
+      "id": "2_4_7_7_7_bfp16_ndhwc_dil2x2x2_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7,
+              7
+            ],
+            "strides": [
+              1372,
+              1,
+              196,
+              28,
+              4
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -5408,7 +5426,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -5422,24 +5440,6 @@
               8192,
               512,
               32
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7,
-              7
-            ],
-            "strides": [
-              1372,
-              1,
-              196,
-              28,
-              4
             ],
             "data_type": "bfloat16"
           }
@@ -5478,13 +5478,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_5e336a",
+      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_b45cec",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5502,7 +5520,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5512,24 +5530,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -5572,13 +5572,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_f1fc44",
+      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_c10d39",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5596,7 +5614,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5609,24 +5627,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8,
-              8
-            ],
-            "strides": [
-              512,
-              512,
-              64,
-              8,
               1
             ],
             "data_type": "bfloat16"
@@ -5668,11 +5668,29 @@
     {
       "id": "1_16_3_3_3_bfp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5690,7 +5708,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5700,24 +5718,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -5762,11 +5762,29 @@
     {
       "id": "8_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5784,7 +5802,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -5794,24 +5812,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -5854,13 +5854,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_a637e8",
+      "id": "1_16_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_9844b2",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              4,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -5878,7 +5896,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5888,24 +5906,6 @@
             ],
             "strides": [
               8192,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
               512,
               32,
               4,
@@ -5950,11 +5950,29 @@
     {
       "id": "2_8_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -5972,7 +5990,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -5982,24 +6000,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
               4096,
               256,
               16,
@@ -6042,13 +6042,31 @@
       }
     },
     {
-      "id": "4_8_3_3_3_bfp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
+      "id": "2_4_7_7_7_bfp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7,
+              7
+            ],
+            "strides": [
+              1372,
+              343,
+              49,
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -6066,7 +6084,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -6079,24 +6097,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7,
-              7
-            ],
-            "strides": [
-              1372,
-              343,
-              49,
-              7,
               1
             ],
             "data_type": "bfloat16"
@@ -6138,11 +6138,29 @@
     {
       "id": "1_16_16_16_16_bfp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6160,7 +6178,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -6174,24 +6192,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "bfloat16"
           }
@@ -6232,23 +6232,23 @@
     {
       "id": "1_16_16_16_16_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
+              1,
               16,
-              1,
-              1,
-              1
+              16,
+              16
             ],
             "strides": [
+              4096,
+              4096,
+              256,
               16,
-              1,
-              1,
-              1,
               1
             ],
             "data_type": "half"
@@ -6258,15 +6258,15 @@
             "dims": [
               1,
               16,
-              16,
-              16,
-              16
+              1,
+              1,
+              1
             ],
             "strides": [
-              65536,
-              4096,
-              256,
               16,
+              1,
+              1,
+              1,
               1
             ],
             "data_type": "half"
@@ -6275,13 +6275,13 @@
             "uid": 2,
             "dims": [
               1,
-              1,
+              16,
               16,
               16,
               16
             ],
             "strides": [
-              4096,
+              65536,
               4096,
               256,
               16,
@@ -6326,11 +6326,29 @@
     {
       "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              2744,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6348,7 +6366,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -6361,24 +6379,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              2744,
-              196,
-              14,
               1
             ],
             "data_type": "half"
@@ -6420,11 +6420,29 @@
     {
       "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6442,7 +6460,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -6456,24 +6474,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              1,
-              196,
-              14,
-              1
             ],
             "data_type": "half"
           }
@@ -6512,13 +6512,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_d37a39",
+      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_f24434",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6536,7 +6554,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -6550,24 +6568,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -6606,13 +6606,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_b2d59f",
+      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_448560",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6630,7 +6648,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -6644,24 +6662,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8,
-              8
-            ],
-            "strides": [
-              512,
-              1,
-              64,
-              8,
-              1
             ],
             "data_type": "half"
           }
@@ -6702,11 +6702,29 @@
     {
       "id": "1_16_3_3_3_fp16_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6724,7 +6742,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -6738,24 +6756,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -6796,11 +6796,29 @@
     {
       "id": "8_16_16_16_16_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6818,7 +6836,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -6832,24 +6850,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -6888,13 +6888,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_4fc4f1",
+      "id": "1_16_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_1bba0a",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              4,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -6912,7 +6930,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -6926,24 +6944,6 @@
               512,
               64,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              4,
-              1
             ],
             "data_type": "half"
           }
@@ -6984,11 +6984,29 @@
     {
       "id": "2_8_3_3_3_fp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -7006,7 +7024,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -7020,24 +7038,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32,
-              2
             ],
             "data_type": "half"
           }
@@ -7076,13 +7076,31 @@
       }
     },
     {
-      "id": "4_8_3_3_3_fp16_ndhwc_dil2x2x2_postpad1x1x1_prepad1x1x1",
+      "id": "2_4_7_7_7_fp16_ndhwc_dil2x2x2_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7,
+              7
+            ],
+            "strides": [
+              1372,
+              1,
+              196,
+              28,
+              4
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -7100,7 +7118,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -7114,24 +7132,6 @@
               8192,
               512,
               32
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7,
-              7
-            ],
-            "strides": [
-              1372,
-              1,
-              196,
-              28,
-              4
             ],
             "data_type": "half"
           }
@@ -7170,13 +7170,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_9f6aec",
+      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_43bbdf",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -7194,7 +7212,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -7204,24 +7222,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -7264,13 +7264,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_0f59ee",
+      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_af2f25",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -7288,7 +7306,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -7301,24 +7319,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8,
-              8
-            ],
-            "strides": [
-              512,
-              512,
-              64,
-              8,
               1
             ],
             "data_type": "half"
@@ -7360,11 +7360,29 @@
     {
       "id": "1_16_3_3_3_fp16_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -7382,7 +7400,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -7392,24 +7410,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -7454,11 +7454,29 @@
     {
       "id": "8_16_16_16_16_fp16_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -7476,7 +7494,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -7486,24 +7504,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -7546,13 +7546,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_5bbe15",
+      "id": "1_16_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_38a7c4",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              4,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -7570,7 +7588,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -7580,24 +7598,6 @@
             ],
             "strides": [
               8192,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
               512,
               32,
               4,
@@ -7642,11 +7642,29 @@
     {
       "id": "2_8_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -7664,7 +7682,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -7674,24 +7692,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
               4096,
               256,
               16,
@@ -7734,13 +7734,31 @@
       }
     },
     {
-      "id": "4_8_3_3_3_fp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
+      "id": "2_4_7_7_7_fp16_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7,
+              7
+            ],
+            "strides": [
+              1372,
+              343,
+              49,
+              7,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -7758,7 +7776,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -7771,24 +7789,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7,
-              7
-            ],
-            "strides": [
-              1372,
-              343,
-              49,
-              7,
               1
             ],
             "data_type": "half"
@@ -7830,11 +7830,29 @@
     {
       "id": "1_16_16_16_16_fp16_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -7852,7 +7870,7 @@
             "data_type": "half"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -7866,24 +7884,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "half"
           }
@@ -7924,23 +7924,23 @@
     {
       "id": "1_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
             "dims": [
               1,
+              1,
               16,
-              1,
-              1,
-              1
+              16,
+              16
             ],
             "strides": [
+              4096,
+              4096,
+              256,
               16,
-              1,
-              1,
-              1,
               1
             ],
             "data_type": "float"
@@ -7950,15 +7950,15 @@
             "dims": [
               1,
               16,
-              16,
-              16,
-              16
+              1,
+              1,
+              1
             ],
             "strides": [
-              65536,
-              4096,
-              256,
               16,
+              1,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -7967,13 +7967,13 @@
             "uid": 2,
             "dims": [
               1,
-              1,
+              16,
               16,
               16,
               16
             ],
             "strides": [
-              4096,
+              65536,
               4096,
               256,
               16,
@@ -8018,11 +8018,29 @@
     {
       "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              2744,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8040,7 +8058,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8053,24 +8071,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              2744,
-              196,
-              14,
               1
             ],
             "data_type": "float"
@@ -8112,11 +8112,29 @@
     {
       "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              14,
+              14,
+              14
+            ],
+            "strides": [
+              2744,
+              1,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8134,7 +8152,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8148,24 +8166,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              14,
-              14,
-              14
-            ],
-            "strides": [
-              2744,
-              1,
-              196,
-              14,
-              1
             ],
             "data_type": "float"
           }
@@ -8204,13 +8204,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_10fda1",
+      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_30a579",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8228,7 +8246,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8242,24 +8260,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "float"
           }
@@ -8298,13 +8298,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_be1635",
+      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_0ea582",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              1,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8322,7 +8340,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8336,24 +8354,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8,
-              8
-            ],
-            "strides": [
-              512,
-              1,
-              64,
-              8,
-              1
             ],
             "data_type": "float"
           }
@@ -8394,11 +8394,29 @@
     {
       "id": "1_16_3_3_3_fp32_ndhwc_dil2x2x2_postpad2x2x2_prepad2x2x2",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8416,7 +8434,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8430,24 +8448,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "float"
           }
@@ -8488,11 +8488,29 @@
     {
       "id": "8_16_16_16_16_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8510,7 +8528,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -8524,24 +8542,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "float"
           }
@@ -8580,13 +8580,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_01ac0c",
+      "id": "1_16_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1_24b3f3",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              512,
+              1,
+              32,
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8604,7 +8622,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8618,24 +8636,6 @@
               512,
               64,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
-              1,
-              32,
-              4,
-              1
             ],
             "data_type": "float"
           }
@@ -8676,11 +8676,29 @@
     {
       "id": "2_8_3_3_3_fp32_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              1,
+              512,
+              32,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -8698,7 +8716,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8712,24 +8730,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32,
-              2
             ],
             "data_type": "float"
           }
@@ -8768,13 +8768,31 @@
       }
     },
     {
-      "id": "4_8_3_3_3_fp32_ndhwc_dil2x2x2_postpad1x1x1_prepad1x1x1",
+      "id": "2_4_7_7_7_fp32_ndhwc_dil2x2x2_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7,
+              7
+            ],
+            "strides": [
+              1372,
+              1,
+              196,
+              28,
+              4
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -8792,7 +8810,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -8806,24 +8824,6 @@
               8192,
               512,
               32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7,
-              7
-            ],
-            "strides": [
-              1372,
-              1,
-              196,
-              28,
-              4
             ],
             "data_type": "float"
           }
@@ -8862,13 +8862,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_35608b",
+      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_54aa8f",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8886,7 +8904,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8896,24 +8914,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -8956,13 +8956,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_72588c",
+      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_bdc183",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              8,
+              8,
+              8
+            ],
+            "strides": [
+              512,
+              512,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -8980,7 +8998,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -8993,24 +9011,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              8,
-              8,
-              8
-            ],
-            "strides": [
-              512,
-              512,
-              64,
-              8,
               1
             ],
             "data_type": "float"
@@ -9052,11 +9052,29 @@
     {
       "id": "1_16_3_3_3_fp32_ncdhw_dil2x2x2_postpad2x2x2_prepad2x2x2",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -9074,7 +9092,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -9084,24 +9102,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -9146,11 +9146,29 @@
     {
       "id": "8_16_16_16_16_fp32_ncdhw_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              8,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -9168,7 +9186,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               8,
               16,
@@ -9178,24 +9196,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              8,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
               4096,
               256,
               16,
@@ -9238,13 +9238,31 @@
       }
     },
     {
-      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_2073b4",
+      "id": "1_16_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1_38819b",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8,
+              4
+            ],
+            "strides": [
+              512,
+              512,
+              32,
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -9262,7 +9280,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -9272,24 +9290,6 @@
             ],
             "strides": [
               8192,
-              512,
-              32,
-              4,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              8,
-              4
-            ],
-            "strides": [
-              512,
               512,
               32,
               4,
@@ -9334,11 +9334,29 @@
     {
       "id": "2_8_3_3_3_fp32_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               2,
               8,
@@ -9356,7 +9374,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -9366,24 +9384,6 @@
             ],
             "strides": [
               65536,
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
               4096,
               256,
               16,
@@ -9426,13 +9426,31 @@
       }
     },
     {
-      "id": "4_8_3_3_3_fp32_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
+      "id": "2_4_7_7_7_fp32_ncdhw_dil2x2x2_postpad1x1x1_prepad1x1x1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              2,
+              4,
+              7,
+              7,
+              7
+            ],
+            "strides": [
+              1372,
+              343,
+              49,
+              7,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               4,
               8,
@@ -9450,7 +9468,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               2,
               32,
@@ -9463,24 +9481,6 @@
               4096,
               256,
               16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              4,
-              7,
-              7,
-              7
-            ],
-            "strides": [
-              1372,
-              343,
-              49,
-              7,
               1
             ],
             "data_type": "float"
@@ -9522,11 +9522,29 @@
     {
       "id": "1_16_16_16_16_fp32_ndhwc_dil1x1x1_postpad0x0x0_prepad0x0x0",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
             "dims": [
               1,
               16,
@@ -9544,7 +9562,7 @@
             "data_type": "float"
           },
           {
-            "uid": 1,
+            "uid": 2,
             "dims": [
               1,
               16,
@@ -9558,24 +9576,6 @@
               4096,
               256,
               16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              1,
-              1,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16,
-              1
             ],
             "data_type": "float"
           }

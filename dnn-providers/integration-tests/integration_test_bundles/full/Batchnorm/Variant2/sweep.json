@@ -16,33 +16,37 @@
             "strides": [
               8,
               1,
-              1
+              8
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              8,
               1
             ],
             "strides": [
-              1
+              8,
+              1,
+              8
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               8,
-              1
+              56
             ],
             "strides": [
-              8,
+              448,
               1,
-              1
+              8
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -68,12 +72,22 @@
             "strides": [
               8,
               1,
-              8
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               8,
@@ -82,23 +96,9 @@
             "strides": [
               8,
               1,
-              8
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              8,
-              56
-            ],
-            "strides": [
-              448,
-              1,
-              8
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -107,31 +107,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -159,33 +159,37 @@
             "strides": [
               64,
               1,
-              1
+              64
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
               1
             ],
             "strides": [
-              1
+              64,
+              1,
+              64
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               64,
-              1
+              128
             ],
             "strides": [
-              64,
+              8192,
               1,
-              1
+              64
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -211,12 +215,22 @@
             "strides": [
               64,
               1,
-              64
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               64,
@@ -225,23 +239,9 @@
             "strides": [
               64,
               1,
-              64
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              64,
-              128
-            ],
-            "strides": [
-              8192,
-              1,
-              64
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -250,25 +250,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -309,16 +309,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1
@@ -329,6 +319,20 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              14
+            ],
+            "strides": [
+              42,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -361,6 +365,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1
@@ -371,20 +385,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14
-            ],
-            "strides": [
-              42,
-              14,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -393,31 +393,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -452,16 +452,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               8,
               1
@@ -472,6 +462,20 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              56
+            ],
+            "strides": [
+              448,
+              56,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -504,6 +508,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               8,
               1
@@ -514,20 +528,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              8,
-              56
-            ],
-            "strides": [
-              448,
-              56,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -536,31 +536,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -595,16 +595,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               64,
               1
@@ -615,6 +605,20 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              128
+            ],
+            "strides": [
+              8192,
+              128,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -647,6 +651,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               64,
               1
@@ -657,20 +671,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              64,
-              128
-            ],
-            "strides": [
-              8192,
-              128,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -679,25 +679,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -731,33 +731,37 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1
+              14
             ],
             "strides": [
-              3,
+              42,
               1,
-              1
+              3
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -783,12 +787,22 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -797,23 +811,9 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14
-            ],
-            "strides": [
-              42,
-              1,
-              3
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -822,31 +822,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -874,33 +874,37 @@
             "strides": [
               8,
               1,
-              1
+              8
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              8,
               1
             ],
             "strides": [
-              1
+              8,
+              1,
+              8
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               8,
-              1
+              56
             ],
             "strides": [
-              8,
+              448,
               1,
-              1
+              8
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -926,12 +930,22 @@
             "strides": [
               8,
               1,
-              8
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               8,
@@ -940,23 +954,9 @@
             "strides": [
               8,
               1,
-              8
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              8,
-              56
-            ],
-            "strides": [
-              448,
-              1,
-              8
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -965,31 +965,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1017,33 +1017,37 @@
             "strides": [
               64,
               1,
-              1
+              64
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
               1
             ],
             "strides": [
-              1
+              64,
+              1,
+              64
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               64,
-              1
+              128
             ],
             "strides": [
-              64,
+              8192,
               1,
-              1
+              64
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -1069,12 +1073,22 @@
             "strides": [
               64,
               1,
-              64
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               64,
@@ -1083,23 +1097,9 @@
             "strides": [
               64,
               1,
-              64
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              64,
-              128
-            ],
-            "strides": [
-              8192,
-              1,
-              64
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -1108,31 +1108,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1167,16 +1167,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1
@@ -1187,6 +1177,20 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              14
+            ],
+            "strides": [
+              42,
+              14,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -1219,6 +1223,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1
@@ -1229,20 +1243,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14
-            ],
-            "strides": [
-              42,
-              14,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -1251,31 +1251,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1310,16 +1310,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               8,
               1
@@ -1330,6 +1320,20 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              8,
+              56
+            ],
+            "strides": [
+              448,
+              56,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -1362,6 +1366,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               8,
               1
@@ -1372,20 +1386,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              8,
-              56
-            ],
-            "strides": [
-              448,
-              56,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -1394,31 +1394,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1453,16 +1453,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               64,
               1
@@ -1473,6 +1463,20 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              128
+            ],
+            "strides": [
+              8192,
+              128,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -1505,6 +1509,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               64,
               1
@@ -1515,20 +1529,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              64,
-              128
-            ],
-            "strides": [
-              8192,
-              128,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -1537,31 +1537,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1589,33 +1589,37 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1
+              14
             ],
             "strides": [
-              3,
+              42,
               1,
-              1
+              3
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -1641,12 +1645,22 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -1655,23 +1669,9 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14
-            ],
-            "strides": [
-              42,
-              1,
-              3
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -1680,31 +1680,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1732,31 +1732,35 @@
             "strides": [
               8,
               1,
-              1
+              8
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              8,
               1
             ],
             "strides": [
-              1
+              8,
+              1,
+              8
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               8,
-              1
+              56
             ],
             "strides": [
-              8,
+              448,
               1,
-              1
+              8
             ],
             "data_type": "float"
           },
@@ -1784,12 +1788,22 @@
             "strides": [
               8,
               1,
-              8
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               8,
@@ -1798,21 +1812,7 @@
             "strides": [
               8,
               1,
-              8
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              8,
-              56
-            ],
-            "strides": [
-              448,
-              1,
-              8
+              1
             ],
             "data_type": "float"
           }
@@ -1823,31 +1823,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1875,31 +1875,35 @@
             "strides": [
               64,
               1,
-              1
+              64
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
               1
             ],
             "strides": [
-              1
+              64,
+              1,
+              64
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               64,
-              1
+              128
             ],
             "strides": [
-              64,
+              8192,
               1,
-              1
+              64
             ],
             "data_type": "float"
           },
@@ -1927,12 +1931,22 @@
             "strides": [
               64,
               1,
-              64
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               64,
@@ -1941,21 +1955,7 @@
             "strides": [
               64,
               1,
-              64
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              64,
-              128
-            ],
-            "strides": [
-              8192,
-              1,
-              64
+              1
             ],
             "data_type": "float"
           }
@@ -1966,31 +1966,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2025,23 +2025,27 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
+              3,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1
+              14
             ],
             "strides": [
-              3,
-              1,
+              42,
+              14,
               1
             ],
             "data_type": "float"
@@ -2077,27 +2081,23 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
               1
             ],
             "strides": [
-              3,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
               1,
               3,
-              14
+              1
             ],
             "strides": [
-              42,
-              14,
+              3,
+              1,
               1
             ],
             "data_type": "float"
@@ -2109,31 +2109,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2168,23 +2168,27 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              8,
               1
             ],
             "strides": [
+              8,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               8,
-              1
+              56
             ],
             "strides": [
-              8,
-              1,
+              448,
+              56,
               1
             ],
             "data_type": "float"
@@ -2220,27 +2224,23 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              8,
               1
             ],
             "strides": [
-              8,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              4,
+              1,
               8,
-              56
+              1
             ],
             "strides": [
-              448,
-              56,
+              8,
+              1,
               1
             ],
             "data_type": "float"
@@ -2252,31 +2252,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2311,23 +2311,27 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
               1
             ],
             "strides": [
+              64,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               64,
-              1
+              128
             ],
             "strides": [
-              64,
-              1,
+              8192,
+              128,
               1
             ],
             "data_type": "float"
@@ -2363,27 +2367,23 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              64,
               1
             ],
             "strides": [
-              64,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               64,
-              128
+              1
             ],
             "strides": [
-              8192,
-              128,
+              64,
+              1,
               1
             ],
             "data_type": "float"
@@ -2395,31 +2395,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2447,31 +2447,35 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1
+              14
             ],
             "strides": [
-              3,
+              42,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
@@ -2499,12 +2503,22 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -2513,21 +2527,7 @@
             "strides": [
               3,
               1,
-              3
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14
-            ],
-            "strides": [
-              42,
-              1,
-              3
+              1
             ],
             "data_type": "float"
           }
@@ -2538,31 +2538,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2591,36 +2591,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1,
-              1
+              14,
+              14
             ],
             "strides": [
-              3,
+              588,
               1,
-              1,
-              1
+              42,
+              3
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -2649,13 +2655,23 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -2665,26 +2681,10 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              1,
-              42,
-              3
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -2693,25 +2693,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2746,25 +2746,31 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -2772,10 +2778,10 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -2804,31 +2810,25 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -2836,10 +2836,10 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -2848,25 +2848,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2901,36 +2901,42 @@
             "strides": [
               16,
               1,
-              1,
-              1
+              16,
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
+              1,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              8,
               16,
-              1,
-              1
+              28,
+              28
             ],
             "strides": [
-              16,
+              12544,
               1,
-              1,
-              1
+              448,
+              16
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -2959,13 +2965,23 @@
             "strides": [
               16,
               1,
-              16,
-              16
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -2975,26 +2991,10 @@
             "strides": [
               16,
               1,
-              16,
-              16
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              8,
-              16,
-              28,
-              28
-            ],
-            "strides": [
-              12544,
-              1,
-              448,
-              16
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -3003,31 +3003,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3056,36 +3056,42 @@
             "strides": [
               64,
               1,
-              1,
-              1
+              64,
+              64
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
+              1,
               1
             ],
             "strides": [
-              1
+              64,
+              1,
+              64,
+              64
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               64,
-              1,
-              1
+              7,
+              7
             ],
             "strides": [
-              64,
+              3136,
               1,
-              1,
-              1
+              448,
+              64
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -3114,13 +3120,23 @@
             "strides": [
               64,
               1,
-              64,
-              64
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               64,
@@ -3130,26 +3146,10 @@
             "strides": [
               64,
               1,
-              64,
-              64
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              64,
-              7,
-              7
-            ],
-            "strides": [
-              3136,
-              1,
-              448,
-              64
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -3158,31 +3158,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3219,16 +3219,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -3241,6 +3231,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -3277,6 +3283,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -3289,22 +3305,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              196,
-              14,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -3313,31 +3313,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3374,16 +3374,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -3396,6 +3386,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -3432,6 +3438,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -3444,22 +3460,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -3468,31 +3468,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3529,16 +3529,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               16,
               1,
@@ -3551,6 +3541,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              16,
+              28,
+              28
+            ],
+            "strides": [
+              12544,
+              784,
+              28,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -3587,6 +3593,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               16,
               1,
@@ -3599,22 +3615,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              8,
-              16,
-              28,
-              28
-            ],
-            "strides": [
-              12544,
-              784,
-              28,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -3623,25 +3623,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3684,16 +3684,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               64,
               1,
@@ -3706,6 +3696,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              64,
+              7,
+              7
+            ],
+            "strides": [
+              3136,
+              49,
+              7,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -3742,6 +3748,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               64,
               1,
@@ -3754,22 +3770,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              64,
-              7,
-              7
-            ],
-            "strides": [
-              3136,
-              49,
-              7,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -3778,25 +3778,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3831,36 +3831,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1,
-              1
+              14,
+              14
             ],
             "strides": [
-              3,
+              588,
               1,
-              1,
-              1
+              42,
+              3
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -3889,13 +3895,23 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -3905,26 +3921,10 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              1,
-              42,
-              3
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -3933,25 +3933,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3986,25 +3986,31 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -4012,10 +4018,10 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -4044,31 +4050,25 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -4076,10 +4076,10 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -4088,31 +4088,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4141,36 +4141,42 @@
             "strides": [
               16,
               1,
-              1,
-              1
+              16,
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
+              1,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              8,
               16,
-              1,
-              1
+              28,
+              28
             ],
             "strides": [
-              16,
+              12544,
               1,
-              1,
-              1
+              448,
+              16
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -4199,13 +4205,23 @@
             "strides": [
               16,
               1,
-              16,
-              16
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -4215,26 +4231,10 @@
             "strides": [
               16,
               1,
-              16,
-              16
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              8,
-              16,
-              28,
-              28
-            ],
-            "strides": [
-              12544,
-              1,
-              448,
-              16
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -4243,25 +4243,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4296,36 +4296,42 @@
             "strides": [
               64,
               1,
-              1,
-              1
+              64,
+              64
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
+              1,
               1
             ],
             "strides": [
-              1
+              64,
+              1,
+              64,
+              64
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               64,
-              1,
-              1
+              7,
+              7
             ],
             "strides": [
-              64,
+              3136,
               1,
-              1,
-              1
+              448,
+              64
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -4354,13 +4360,23 @@
             "strides": [
               64,
               1,
-              64,
-              64
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               64,
@@ -4370,26 +4386,10 @@
             "strides": [
               64,
               1,
-              64,
-              64
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              64,
-              7,
-              7
-            ],
-            "strides": [
-              3136,
-              1,
-              448,
-              64
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -4398,31 +4398,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4459,16 +4459,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -4481,6 +4471,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -4517,6 +4523,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -4529,22 +4545,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              196,
-              14,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -4553,31 +4553,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4614,16 +4614,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -4636,6 +4626,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -4672,6 +4678,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -4684,22 +4700,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -4708,31 +4708,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4769,16 +4769,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               16,
               1,
@@ -4791,6 +4781,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              8,
+              16,
+              28,
+              28
+            ],
+            "strides": [
+              12544,
+              784,
+              28,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -4827,6 +4833,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               16,
               1,
@@ -4839,22 +4855,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              8,
-              16,
-              28,
-              28
-            ],
-            "strides": [
-              12544,
-              784,
-              28,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -4863,31 +4863,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4924,16 +4924,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               64,
               1,
@@ -4946,6 +4936,22 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              4,
+              64,
+              7,
+              7
+            ],
+            "strides": [
+              3136,
+              49,
+              7,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -4982,6 +4988,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               64,
               1,
@@ -4994,22 +5010,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              64,
-              7,
-              7
-            ],
-            "strides": [
-              3136,
-              49,
-              7,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -5018,25 +5018,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5071,34 +5071,40 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1,
-              1
+              14,
+              14
             ],
             "strides": [
-              3,
+              588,
               1,
-              1,
-              1
+              42,
+              3
             ],
             "data_type": "float"
           },
@@ -5129,13 +5135,23 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -5145,24 +5161,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
               1,
-              3,
-              14,
-              14
-            ],
-            "strides": [
-              588,
-              1,
-              42,
-              3
+              1
             ],
             "data_type": "float"
           }
@@ -5173,31 +5173,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5226,25 +5226,31 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -5252,8 +5258,8 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
@@ -5284,31 +5290,25 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -5316,8 +5316,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -5328,31 +5328,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5381,34 +5381,40 @@
             "strides": [
               16,
               1,
-              1,
-              1
+              16,
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
+              1,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              8,
               16,
-              1,
-              1
+              28,
+              28
             ],
             "strides": [
-              16,
+              12544,
               1,
-              1,
-              1
+              448,
+              16
             ],
             "data_type": "float"
           },
@@ -5439,13 +5445,23 @@
             "strides": [
               16,
               1,
-              16,
-              16
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -5455,24 +5471,8 @@
             "strides": [
               16,
               1,
-              16,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              8,
-              16,
-              28,
-              28
-            ],
-            "strides": [
-              12544,
               1,
-              448,
-              16
+              1
             ],
             "data_type": "float"
           }
@@ -5483,31 +5483,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5536,34 +5536,40 @@
             "strides": [
               64,
               1,
-              1,
-              1
+              64,
+              64
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
+              1,
               1
             ],
             "strides": [
-              1
+              64,
+              1,
+              64,
+              64
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               64,
-              1,
-              1
+              7,
+              7
             ],
             "strides": [
-              64,
+              3136,
               1,
-              1,
-              1
+              448,
+              64
             ],
             "data_type": "float"
           },
@@ -5594,13 +5600,23 @@
             "strides": [
               64,
               1,
-              64,
-              64
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               64,
@@ -5610,24 +5626,8 @@
             "strides": [
               64,
               1,
-              64,
-              64
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              4,
-              64,
-              7,
-              7
-            ],
-            "strides": [
-              3136,
               1,
-              448,
-              64
+              1
             ],
             "data_type": "float"
           }
@@ -5638,25 +5638,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5699,25 +5699,31 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
               1,
               3,
-              1,
-              1
+              14,
+              14
             ],
             "strides": [
-              3,
-              1,
-              1,
+              588,
+              196,
+              14,
               1
             ],
             "data_type": "float"
@@ -5757,31 +5763,25 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
               1,
               3,
-              14,
-              14
+              1,
+              1
             ],
             "strides": [
-              588,
-              196,
-              14,
+              3,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -5793,31 +5793,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5854,17 +5854,23 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -5912,23 +5918,17 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -5948,31 +5948,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6009,25 +6009,31 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
+              1,
               1
             ],
             "strides": [
+              16,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              8,
               16,
-              1,
-              1
+              28,
+              28
             ],
             "strides": [
-              16,
-              1,
-              1,
+              12544,
+              784,
+              28,
               1
             ],
             "data_type": "float"
@@ -6067,31 +6073,25 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              16,
-              1,
               1
             ],
             "strides": [
-              16,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              8,
+              1,
               16,
-              28,
-              28
+              1,
+              1
             ],
             "strides": [
-              12544,
-              784,
-              28,
+              16,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -6103,25 +6103,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6164,25 +6164,31 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              64,
+              1,
               1
             ],
             "strides": [
+              64,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              4,
               64,
-              1,
-              1
+              7,
+              7
             ],
             "strides": [
-              64,
-              1,
-              1,
+              3136,
+              49,
+              7,
               1
             ],
             "data_type": "float"
@@ -6222,31 +6228,25 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              64,
-              1,
               1
             ],
             "strides": [
-              64,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              4,
+              1,
               64,
-              7,
-              7
+              1,
+              1
             ],
             "strides": [
-              3136,
-              49,
-              7,
+              64,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -6258,31 +6258,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6312,39 +6312,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
+              96,
               1,
-              1,
-              1,
-              1
+              48,
+              12,
+              3
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -6376,14 +6384,24 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -6394,29 +6412,11 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              2,
-              4,
-              4
-            ],
-            "strides": [
-              96,
-              1,
-              48,
-              12,
-              3
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -6425,31 +6425,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6479,39 +6479,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              16,
               3,
-              1,
-              1,
-              1
+              8,
+              14,
+              14
             ],
             "strides": [
-              3,
+              4704,
               1,
-              1,
-              1,
-              1
+              588,
+              42,
+              3
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -6543,14 +6551,24 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -6561,29 +6579,11 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              16,
-              3,
-              8,
-              14,
-              14
-            ],
-            "strides": [
-              4704,
-              1,
-              588,
-              42,
-              3
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -6592,31 +6592,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6655,16 +6655,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -6679,6 +6669,24 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              9,
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -6719,6 +6727,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -6733,24 +6751,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              9,
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -6759,31 +6759,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6822,16 +6822,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -6846,6 +6836,24 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              2,
+              4,
+              4
+            ],
+            "strides": [
+              96,
+              32,
+              16,
+              4,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -6886,6 +6894,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -6900,24 +6918,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              2,
-              4,
-              4
-            ],
-            "strides": [
-              96,
-              32,
-              16,
-              4,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -6926,31 +6926,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6989,16 +6989,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -7013,6 +7003,24 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -7053,6 +7061,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -7067,24 +7085,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              16,
-              3,
-              8,
-              14,
-              14
-            ],
-            "strides": [
-              4704,
-              1568,
-              196,
-              14,
-              1
-            ],
-            "data_type": "bfloat16"
           }
         ]
       },
@@ -7093,31 +7093,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7147,39 +7147,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
+              9,
+              1,
               3,
-              1,
-              1,
-              1,
-              1
+              3,
+              3
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 3,
@@ -7211,47 +7219,39 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -7260,25 +7260,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7314,39 +7314,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
+              96,
               1,
-              1,
-              1,
-              1
+              48,
+              12,
+              3
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -7378,14 +7386,24 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -7396,29 +7414,11 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              2,
-              4,
-              4
-            ],
-            "strides": [
-              96,
-              1,
-              48,
-              12,
-              3
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -7427,31 +7427,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7481,39 +7481,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              16,
               3,
-              1,
-              1,
-              1
+              8,
+              14,
+              14
             ],
             "strides": [
-              3,
+              4704,
               1,
-              1,
-              1,
-              1
+              588,
+              42,
+              3
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -7545,14 +7553,24 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -7563,29 +7581,11 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              16,
-              3,
-              8,
-              14,
-              14
-            ],
-            "strides": [
-              4704,
-              1,
-              588,
-              42,
-              3
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -7594,31 +7594,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7657,16 +7657,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -7681,6 +7671,24 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              9,
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -7721,6 +7729,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -7735,24 +7753,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              9,
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -7761,31 +7761,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7824,16 +7824,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -7848,6 +7838,24 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              2,
+              4,
+              4
+            ],
+            "strides": [
+              96,
+              32,
+              16,
+              4,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -7888,6 +7896,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -7902,24 +7920,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              2,
-              4,
-              4
-            ],
-            "strides": [
-              96,
-              32,
-              16,
-              4,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -7928,25 +7928,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7991,16 +7991,6 @@
           {
             "uid": 1,
             "dims": [
-              1
-            ],
-            "strides": [
-              1
-            ],
-            "data_type": "double"
-          },
-          {
-            "uid": 2,
-            "dims": [
               1,
               3,
               1,
@@ -8015,6 +8005,24 @@
               1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              16,
+              3,
+              8,
+              14,
+              14
+            ],
+            "strides": [
+              4704,
+              1568,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -8055,6 +8063,16 @@
           {
             "uid": 5,
             "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
+            "dims": [
               1,
               3,
               1,
@@ -8069,24 +8087,6 @@
               1
             ],
             "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              16,
-              3,
-              8,
-              14,
-              14
-            ],
-            "strides": [
-              4704,
-              1568,
-              196,
-              14,
-              1
-            ],
-            "data_type": "half"
           }
         ]
       },
@@ -8095,31 +8095,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -8149,39 +8149,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
+              9,
+              1,
               3,
-              1,
-              1,
-              1,
-              1
+              3,
+              3
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 3,
@@ -8213,47 +8221,39 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -8262,31 +8262,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -8316,37 +8316,45 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
+              96,
               1,
-              1,
-              1,
-              1
+              48,
+              12,
+              3
             ],
             "data_type": "float"
           },
@@ -8380,14 +8388,24 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -8398,27 +8416,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              2,
-              3,
-              2,
-              4,
-              4
-            ],
-            "strides": [
-              96,
               1,
-              48,
-              12,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -8429,31 +8429,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -8483,37 +8483,45 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              16,
               3,
-              1,
-              1,
-              1
+              8,
+              14,
+              14
             ],
             "strides": [
-              3,
+              4704,
               1,
-              1,
-              1,
-              1
+              588,
+              42,
+              3
             ],
             "data_type": "float"
           },
@@ -8547,14 +8555,24 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -8565,27 +8583,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
-            "dims": [
-              16,
-              3,
-              8,
-              14,
-              14
-            ],
-            "strides": [
-              4704,
               1,
-              588,
-              42,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -8596,31 +8596,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -8659,25 +8659,33 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
+              9,
               3,
-              1,
               1,
               1,
               1
@@ -8723,33 +8731,25 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
               3,
+              1,
               1,
               1,
               1
@@ -8763,25 +8763,25 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -8826,27 +8826,35 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
+              96,
+              32,
+              16,
+              4,
               1
             ],
             "data_type": "float"
@@ -8890,35 +8898,27 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
-              2,
-              4,
-              4
+              1,
+              1,
+              1
             ],
             "strides": [
-              96,
-              32,
-              16,
-              4,
+              3,
+              1,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -8930,31 +8930,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -8993,27 +8993,35 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              16,
               3,
-              1,
-              1,
-              1
+              8,
+              14,
+              14
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
+              4704,
+              1568,
+              196,
+              14,
               1
             ],
             "data_type": "float"
@@ -9057,35 +9065,27 @@
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              16,
+              1,
               3,
-              8,
-              14,
-              14
+              1,
+              1,
+              1
             ],
             "strides": [
-              4704,
-              1568,
-              196,
-              14,
+              3,
+              1,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -9097,31 +9097,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "5": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "2": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -9151,37 +9151,45 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
+              9,
+              1,
               3,
-              1,
-              1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
@@ -9215,45 +9223,37 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -9264,31 +9264,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "3": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "4": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "0": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "1": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,

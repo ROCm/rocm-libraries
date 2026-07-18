@@ -112,6 +112,69 @@ def remap_graph(graph: dict, m: dict) -> dict:
     return g
 
 
+def name_by_uid(graph: dict) -> dict:
+    """uid -> tensor name, for the graph's declared tensors."""
+    return {t["uid"]: t.get("name", "") for t in graph.get("tensors", []) if "uid" in t}
+
+
+def canonical_uid_map_by_name(graph: dict) -> dict:
+    """Deterministic old_uid -> canonical_uid keyed on tensor NAME.
+
+    The C++ graph builder auto-assigns UIDs to operation-created tensors (Y,
+    MEAN, epsilon, momentum, ...) by iterating an ``unordered_set``
+    (GraphTensorIds.hpp), so the same logical tensor gets a different UID in each
+    captured case even when the topology is identical. That non-determinism
+    breaks sweep compression, which requires the same role to carry the same UID
+    across every case sharing a template.
+
+    Tensor *names* are stable across cases (operation outputs are named
+    ``<op>::<ROLE>``; inputs are named by the test), so we assign canonical UIDs
+    by sorted name. Every case of a topology then maps a given named tensor to
+    the same UID, independent of the builder's arbitrary assignment order. Ties
+    on name fall back to the original UID so the map is still total and stable
+    within a single graph.
+    """
+    named = sorted(
+        (t.get("name", ""), t["uid"]) for t in graph.get("tensors", []) if "uid" in t
+    )
+    return {uid: i for i, (_name, uid) in enumerate(named)}
+
+
+def remap_meta_inputs(meta: dict, m: dict) -> dict:
+    """Deep copy of metadata with ``inputs`` fill-spec keys remapped via ``m``.
+
+    ``inputs`` is keyed by stringified tensor UID, so it must be remapped in
+    lockstep with the graph whenever UIDs are canonicalized — otherwise a
+    tensor's fill spec (range/kind/seed) would end up attached to the wrong
+    tensor after remapping.
+    """
+    out = copy.deepcopy(meta)
+    inputs = out.get("inputs")
+    if isinstance(inputs, dict):
+        out["inputs"] = {str(m.get(int(k), int(k))): v for k, v in inputs.items()}
+    return out
+
+
+def inputs_by_name(meta: dict, graph: dict) -> dict:
+    """Metadata ``inputs`` re-keyed by tensor name for UID-agnostic comparison.
+
+    Two graphs describing the same test may label a tensor with different UIDs
+    (see :func:`canonical_uid_map_by_name`), so comparing fill specs by UID is
+    fragile. Re-keying by the stable tensor name lets a captured graph and its
+    placed bundle be compared regardless of how their UIDs were assigned.
+    """
+    nm = name_by_uid(graph)
+    out = {}
+    for k, v in meta.get("inputs", {}).items():
+        try:
+            uid = int(k)
+        except (TypeError, ValueError):
+            out[k] = v
+            continue
+        out[nm.get(uid, k)] = v
+    return out
+
+
 # --------------------------------------------------------------------------
 # Skeleton hash
 # --------------------------------------------------------------------------

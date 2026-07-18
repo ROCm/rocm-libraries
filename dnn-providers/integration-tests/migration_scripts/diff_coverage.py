@@ -58,8 +58,33 @@ def _parse_gtest_json(path: Path) -> dict:
     return results
 
 
+def _sweep_suite_name(sweep_path: Path, bundle_dir: Path) -> str:
+    """Derive the gtest suite name for a sweep from its path.
+
+    Bundle tests register as ``<tier>_<Operation>_<Variant>`` (e.g.
+    ``full_ConvolutionFwdPointwise_Default``), matching the
+    ``<tier>/<Operation>/<Variant>/sweep.json`` layout on disk. The full gtest
+    name of a case is then ``<suite>.<case_id>``.
+    """
+    rel = sweep_path.relative_to(bundle_dir).parts
+    # rel == (tier, Operation, Variant, "sweep.json")
+    if len(rel) >= 3:
+        tier, operation, variant = rel[0], rel[1], rel[2]
+        return f"{tier}_{operation}_{variant}"
+    return ""
+
+
 def _build_reference_source_map(bundle_dir: Path) -> dict:
-    """Return {reference_source_key: bundle_case_id} by scanning sweep.json files."""
+    """Return {reference_source_key: full_test_name} by scanning sweep.json files.
+
+    The value is the *fully-qualified* gtest name ``<suite>.<case_id>``, not the
+    bare case id. Bare case ids collide across sibling suites (e.g. the same
+    shape appears in both ``full_Batchnorm_Default`` and
+    ``full_Batchnorm_Variant2``), so joining on case id alone lets a PASS in one
+    suite falsely satisfy the coverage requirement for a C++ test whose bundle
+    lives in — and may be SKIPPED in — the other. Qualifying by suite makes the
+    join unambiguous.
+    """
     mapping = {}
     if not bundle_dir or not bundle_dir.is_dir():
         return mapping
@@ -69,20 +94,13 @@ def _build_reference_source_map(bundle_dir: Path) -> dict:
                 sweep = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue
+        suite = _sweep_suite_name(sweep_path, bundle_dir)
         for case in sweep.get("cases", []):
             meta = case.get("metadata", {})
             key = meta.get("reference_source")
-            if key:
-                mapping[key] = case.get("id", "")
-    for meta_path in sorted(bundle_dir.rglob("*.meta.json")):
-        try:
-            with open(meta_path) as f:
-                meta = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
-        key = meta.get("reference_source")
-        if key and key not in mapping:
-            mapping[key] = meta_path.parent.name
+            cid = case.get("id", "")
+            if key and suite and cid:
+                mapping[key] = f"{suite}.{cid}"
     return mapping
 
 
@@ -126,14 +144,10 @@ def main() -> int:
         n = name.split("c++ integration suite:")[-1].strip()
         return n.replace("/", "_")
 
-    # normalized C++ name -> bundle case id (from reference_source metadata)
-    ported_by_norm = {_norm(key): cid for key, cid in ported_map.items()}
-
-    bundle_pass_by_case = {}
-    for full, status in bundle_results.items():
-        if status == "PASS":
-            cid = full.split(".")[-1]
-            bundle_pass_by_case.setdefault(cid, set()).add(full)
+    # normalized C++ name -> fully-qualified bundle test name "<suite>.<case_id>"
+    # (from reference_source metadata). Qualifying by suite is what makes the join
+    # unambiguous — see _build_reference_source_map for why bare case ids collide.
+    ported_by_norm = {_norm(key): full for key, full in ported_map.items()}
 
     regressions = []
     matched = 0
@@ -143,8 +157,8 @@ def main() -> int:
             matched += 1
             continue
 
-        bundle_case_id = ported_by_norm.get(_norm(cpp_test))
-        if bundle_case_id and bundle_case_id in bundle_pass_by_case:
+        bundle_full = ported_by_norm.get(_norm(cpp_test))
+        if bundle_full and bundle_full in bundle_pass:
             matched += 1
             continue
 

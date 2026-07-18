@@ -8,16 +8,16 @@
     {
       "compute_data_type": "float",
       "inputs": {
-        "bias_tensor_uid": 0,
-        "epsilon_tensor_uid": 1,
-        "mean_tensor_uid": 2,
-        "scale_tensor_uid": 3,
-        "variance_tensor_uid": 4,
-        "x_tensor_uid": 5
+        "bias_tensor_uid": 2,
+        "epsilon_tensor_uid": 3,
+        "mean_tensor_uid": 4,
+        "scale_tensor_uid": 5,
+        "variance_tensor_uid": 6,
+        "x_tensor_uid": 1
       },
       "name": "BatchnormInferenceVarianceExt_0",
       "outputs": {
-        "y_tensor_uid": 6
+        "y_tensor_uid": 0
       },
       "type": "BatchnormInferenceAttributesVarianceExt"
     }
@@ -26,7 +26,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "bias",
+      "name": "BatchnormInferenceVarianceExt_0::Y",
       "strides": "${case.strides}",
       "uid": 0,
       "virtual": false
@@ -34,9 +34,25 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "epsilon",
+      "name": "X",
       "strides": "${case.strides}",
       "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 3,
       "value": 1e-05,
       "value_type": "Float64Value",
       "virtual": false
@@ -46,7 +62,7 @@
       "dims": "${case.dims}",
       "name": "mean",
       "strides": "${case.strides}",
-      "uid": 2,
+      "uid": 4,
       "virtual": false
     },
     {
@@ -54,29 +70,13 @@
       "dims": "${case.dims}",
       "name": "scale",
       "strides": "${case.strides}",
-      "uid": 3,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "variance",
-      "strides": "${case.strides}",
-      "uid": 4,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "X",
-      "strides": "${case.strides}",
       "uid": 5,
       "virtual": false
     },
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "BatchnormInferenceVarianceExt_0::Y",
+      "name": "variance",
       "strides": "${case.strides}",
       "uid": 6,
       "virtual": false

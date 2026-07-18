@@ -8,15 +8,15 @@
     {
       "compute_data_type": "float",
       "inputs": {
-        "bias_tensor_uid": 0,
-        "inv_variance_tensor_uid": 1,
-        "mean_tensor_uid": 2,
-        "scale_tensor_uid": 3,
-        "x_tensor_uid": 4
+        "bias_tensor_uid": 2,
+        "inv_variance_tensor_uid": 3,
+        "mean_tensor_uid": 4,
+        "scale_tensor_uid": 5,
+        "x_tensor_uid": 6
       },
       "name": "BatchnormInference_0",
       "outputs": {
-        "y_tensor_uid": 5
+        "y_tensor_uid": 0
       },
       "type": "BatchnormInferenceAttributes"
     },
@@ -25,7 +25,7 @@
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,
-        "in_0_tensor_uid": 5,
+        "in_0_tensor_uid": 0,
         "in_1_tensor_uid": null,
         "in_2_tensor_uid": null,
         "operation": "relu_fwd",
@@ -37,7 +37,7 @@
       },
       "name": "Pointwise_1",
       "outputs": {
-        "out_0_tensor_uid": 6
+        "out_0_tensor_uid": 1
       },
       "type": "PointwiseAttributes"
     }
@@ -46,15 +46,15 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "bias",
+      "name": "BatchnormInference_0::Y",
       "strides": "${case.strides}",
       "uid": 0,
-      "virtual": false
+      "virtual": true
     },
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "inv_variance",
+      "name": "Pointwise_1::OUT_0",
       "strides": "${case.strides}",
       "uid": 1,
       "virtual": false
@@ -62,7 +62,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "mean",
+      "name": "bias",
       "strides": "${case.strides}",
       "uid": 2,
       "virtual": false
@@ -70,7 +70,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "scale",
+      "name": "inv_variance",
       "strides": "${case.strides}",
       "uid": 3,
       "virtual": false
@@ -78,7 +78,7 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "x",
+      "name": "mean",
       "strides": "${case.strides}",
       "uid": 4,
       "virtual": false
@@ -86,15 +86,15 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "BatchnormInference_0::Y",
+      "name": "scale",
       "strides": "${case.strides}",
       "uid": 5,
-      "virtual": true
+      "virtual": false
     },
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "Pointwise_1::OUT_0",
+      "name": "x",
       "strides": "${case.strides}",
       "uid": 6,
       "virtual": false

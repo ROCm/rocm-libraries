@@ -23,22 +23,30 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
+              3,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
+              3,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -57,7 +65,7 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
               1
             ],
@@ -66,24 +74,10 @@
               1,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -97,7 +91,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -111,18 +105,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
               1
             ],
             "strides": [
-              3,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -155,7 +155,7 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1
             ],
@@ -164,7 +164,7 @@
               1,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -173,31 +173,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -232,22 +232,30 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
+              16,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
+              16,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -268,31 +276,17 @@
             "dims": [
               1,
               16,
-              1
+              14
             ],
             "strides": [
-              16,
-              1,
+              224,
+              14,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               1,
               16,
@@ -306,7 +300,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -320,18 +314,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              16,
               1
             ],
             "strides": [
-              16,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -366,14 +366,14 @@
             "dims": [
               1,
               16,
-              14
-            ],
-            "strides": [
-              224,
-              14,
               1
             ],
-            "data_type": "bfloat16"
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "float"
           }
         ]
       },
@@ -382,31 +382,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -434,29 +434,37 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -468,40 +476,12 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -515,7 +495,21 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              2,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -524,23 +518,29 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
               1
             ],
             "strides": [
-              3,
-              1,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -552,7 +552,7 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
@@ -566,23 +566,23 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1
             ],
             "strides": [
               3,
               1,
-              3
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -591,31 +591,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -643,29 +643,37 @@
             "strides": [
               16,
               1,
-              1
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -677,40 +685,12 @@
             "strides": [
               16,
               1,
-              1
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               1,
               16,
@@ -724,7 +704,21 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              14
+            ],
+            "strides": [
+              224,
+              1,
+              16
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -733,23 +727,29 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              16,
               1
             ],
             "strides": [
-              16,
-              1,
-              16
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -761,7 +761,7 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
@@ -775,7 +775,7 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
@@ -784,14 +784,14 @@
             "dims": [
               1,
               16,
-              14
+              1
             ],
             "strides": [
-              224,
+              16,
               1,
-              16
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -800,31 +800,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -859,22 +859,30 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
+              3,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
+              3,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -893,7 +901,7 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
               1
             ],
@@ -902,24 +910,10 @@
               1,
               1
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -933,7 +927,7 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -947,18 +941,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
               1
             ],
             "strides": [
-              3,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -991,7 +991,7 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1
             ],
@@ -1000,7 +1000,7 @@
               1,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -1009,31 +1009,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1068,22 +1068,30 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
+              16,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
+              16,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -1104,31 +1112,17 @@
             "dims": [
               1,
               16,
-              1
+              14
             ],
             "strides": [
-              16,
-              1,
+              224,
+              14,
               1
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               1,
               16,
@@ -1142,7 +1136,7 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -1156,18 +1150,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              16,
               1
             ],
             "strides": [
-              16,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -1202,14 +1202,14 @@
             "dims": [
               1,
               16,
-              14
-            ],
-            "strides": [
-              224,
-              14,
               1
             ],
-            "data_type": "half"
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "float"
           }
         ]
       },
@@ -1218,31 +1218,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1270,29 +1270,37 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -1304,40 +1312,12 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -1351,7 +1331,21 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              2,
+              3,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -1360,23 +1354,29 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
               1
             ],
             "strides": [
-              3,
-              1,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -1388,7 +1388,7 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
@@ -1402,23 +1402,23 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1
             ],
             "strides": [
               3,
               1,
-              3
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -1427,31 +1427,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1479,29 +1479,37 @@
             "strides": [
               16,
               1,
-              1
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -1513,40 +1521,12 @@
             "strides": [
               16,
               1,
-              1
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               1,
               16,
@@ -1560,7 +1540,21 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              14
+            ],
+            "strides": [
+              224,
+              1,
+              16
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -1569,23 +1563,29 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              16,
               1
             ],
             "strides": [
-              16,
-              1,
-              16
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -1597,7 +1597,7 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
@@ -1611,7 +1611,7 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
@@ -1620,14 +1620,14 @@
             "dims": [
               1,
               16,
-              14
+              1
             ],
             "strides": [
-              224,
+              16,
               1,
-              16
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -1636,31 +1636,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1695,22 +1695,30 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
+              3,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
+              3,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -1729,7 +1737,7 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
               1
             ],
@@ -1743,7 +1751,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               3,
               1
             ],
@@ -1757,7 +1765,7 @@
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
               1
             ],
@@ -1771,30 +1779,22 @@
           {
             "uid": 7,
             "dims": [
-              1,
-              3,
               1
             ],
             "strides": [
-              3,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 8,
             "dims": [
-              1,
-              3,
               1
             ],
             "strides": [
-              3,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -1827,7 +1827,7 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1
             ],
@@ -1845,31 +1845,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -1904,22 +1904,30 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
+              16,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
+              16,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -1940,31 +1948,17 @@
             "dims": [
               1,
               16,
-              1
+              14
             ],
             "strides": [
-              16,
-              1,
+              224,
+              14,
               1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               1,
               16,
@@ -1978,7 +1972,7 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -1992,18 +1986,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              16,
               1
             ],
             "strides": [
-              16,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -2038,11 +2038,11 @@
             "dims": [
               1,
               16,
-              14
+              1
             ],
             "strides": [
-              224,
-              14,
+              16,
+              1,
               1
             ],
             "data_type": "float"
@@ -2054,31 +2054,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2106,29 +2106,37 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -2140,40 +2148,12 @@
             "strides": [
               3,
               1,
-              1
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -2187,9 +2167,9 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
-              1,
+              2,
               3,
               1
             ],
@@ -2201,7 +2181,7 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -2210,9 +2190,29 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -2224,7 +2224,7 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
@@ -2238,21 +2238,21 @@
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1
             ],
             "strides": [
               3,
               1,
-              3
+              1
             ],
             "data_type": "float"
           }
@@ -2263,31 +2263,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2315,29 +2315,37 @@
             "strides": [
               16,
               1,
-              1
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              16,
               1
             ],
             "strides": [
-              1
+              16,
+              1,
+              16
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -2349,40 +2357,12 @@
             "strides": [
               16,
               1,
-              1
+              16
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              16,
-              1
-            ],
-            "strides": [
-              16,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               1,
               16,
@@ -2396,21 +2376,21 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
               1,
               16,
-              1
+              14
             ],
             "strides": [
-              16,
+              224,
               1,
               16
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 6,
             "dims": [
               1,
               16,
@@ -2419,9 +2399,29 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -2433,7 +2433,7 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
@@ -2447,7 +2447,7 @@
             "strides": [
               16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           },
@@ -2456,12 +2456,12 @@
             "dims": [
               1,
               16,
-              14
+              1
             ],
             "strides": [
-              224,
+              16,
               1,
-              16
+              1
             ],
             "data_type": "float"
           }
@@ -2472,31 +2472,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2533,22 +2533,34 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -2569,7 +2581,7 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -2580,26 +2592,10 @@
               1,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -2615,7 +2611,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -2631,20 +2627,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -2681,7 +2681,7 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -2692,7 +2692,7 @@
               1,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -2701,31 +2701,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2762,22 +2762,34 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -2798,37 +2810,21 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              32,
               3,
               1,
-              1
+              14
             ],
             "strides": [
-              3,
-              1,
-              1,
+              42,
+              14,
+              14,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               32,
               3,
@@ -2844,7 +2840,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -2860,20 +2856,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -2910,18 +2910,18 @@
           {
             "uid": 11,
             "dims": [
-              32,
+              1,
               3,
               1,
-              14
-            ],
-            "strides": [
-              42,
-              14,
-              14,
               1
             ],
-            "data_type": "bfloat16"
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
           }
         ]
       },
@@ -2930,31 +2930,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -2983,30 +2983,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -3019,45 +3031,13 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -3073,9 +3053,9 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -3085,24 +3065,44 @@
               1,
               3,
               3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -3115,8 +3115,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -3131,15 +3131,15 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -3147,10 +3147,10 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -3159,31 +3159,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3212,30 +3212,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -3248,45 +3260,13 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               32,
               3,
@@ -3302,7 +3282,23 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              32,
+              3,
+              1,
+              14
+            ],
+            "strides": [
+              42,
+              1,
+              42,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -3312,26 +3308,30 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -3344,8 +3344,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -3360,26 +3360,26 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              32,
+              1,
               3,
               1,
-              14
+              1
             ],
             "strides": [
-              42,
+              3,
               1,
-              42,
-              3
+              1,
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -3388,31 +3388,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3449,22 +3449,34 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -3485,7 +3497,7 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -3496,26 +3508,10 @@
               1,
               1
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -3531,7 +3527,7 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -3547,20 +3543,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -3597,7 +3597,7 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -3608,7 +3608,7 @@
               1,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -3617,31 +3617,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3678,22 +3678,34 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -3714,37 +3726,21 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              32,
               3,
               1,
-              1
+              14
             ],
             "strides": [
-              3,
-              1,
-              1,
+              42,
+              14,
+              14,
               1
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               32,
               3,
@@ -3760,7 +3756,7 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -3776,20 +3772,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -3826,18 +3826,18 @@
           {
             "uid": 11,
             "dims": [
-              32,
+              1,
               3,
               1,
-              14
-            ],
-            "strides": [
-              42,
-              14,
-              14,
               1
             ],
-            "data_type": "half"
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
           }
         ]
       },
@@ -3846,31 +3846,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -3899,30 +3899,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -3935,45 +3947,13 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -3989,9 +3969,9 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -4001,24 +3981,44 @@
               1,
               3,
               3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -4031,8 +4031,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -4047,15 +4047,15 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -4063,10 +4063,10 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -4075,31 +4075,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4128,30 +4128,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -4164,45 +4176,13 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               32,
               3,
@@ -4218,7 +4198,23 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              32,
+              3,
+              1,
+              14
+            ],
+            "strides": [
+              42,
+              1,
+              42,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -4228,26 +4224,30 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -4260,8 +4260,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -4276,26 +4276,26 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              32,
+              1,
               3,
               1,
-              14
+              1
             ],
             "strides": [
-              42,
+              3,
               1,
-              42,
-              3
+              1,
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -4304,31 +4304,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4365,22 +4365,34 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -4401,7 +4413,7 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -4417,7 +4429,7 @@
           {
             "uid": 5,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -4433,7 +4445,7 @@
           {
             "uid": 6,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -4449,34 +4461,22 @@
           {
             "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 8,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -4513,7 +4513,7 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -4533,31 +4533,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4594,22 +4594,34 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -4630,37 +4642,21 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              32,
               3,
               1,
-              1
+              14
             ],
             "strides": [
-              3,
-              1,
-              1,
+              42,
+              14,
+              14,
               1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               32,
               3,
@@ -4676,7 +4672,7 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -4692,20 +4688,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -4742,15 +4742,15 @@
           {
             "uid": 11,
             "dims": [
-              32,
+              1,
               3,
               1,
-              14
+              1
             ],
             "strides": [
-              42,
-              14,
-              14,
+              3,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -4762,31 +4762,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -4815,30 +4815,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -4851,45 +4863,13 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -4905,9 +4885,9 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
-              1,
+              2,
               3,
               1,
               1
@@ -4921,7 +4901,7 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -4931,10 +4911,30 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -4947,8 +4947,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -4963,15 +4963,15 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
               1,
               1
@@ -4979,8 +4979,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -4991,31 +4991,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5044,30 +5044,42 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -5080,45 +5092,13 @@
             "strides": [
               3,
               1,
-              1,
-              1
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               32,
               3,
@@ -5134,23 +5114,23 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
-              1,
+              32,
               3,
               1,
-              1
+              14
             ],
             "strides": [
-              3,
+              42,
               1,
-              3,
+              42,
               3
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -5160,10 +5140,30 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -5176,8 +5176,8 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -5192,24 +5192,24 @@
             "strides": [
               3,
               1,
-              3,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              32,
+              1,
               3,
               1,
-              14
+              1
             ],
             "strides": [
-              42,
+              3,
               1,
-              42,
-              3
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -5220,31 +5220,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5283,22 +5283,38 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -5321,41 +5337,23 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
+              9,
               3,
-              1,
               1,
               1,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -5373,7 +5371,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -5391,22 +5389,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -5447,20 +5447,20 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
               3,
+              1,
               1,
               1,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -5469,31 +5469,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5532,22 +5532,38 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -5570,41 +5586,23 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
+              96,
+              32,
+              16,
+              4,
               1
             ],
-            "data_type": "float"
+            "data_type": "bfloat16"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -5622,7 +5620,7 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -5640,22 +5638,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -5696,20 +5696,20 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              2,
-              4,
-              4
-            ],
-            "strides": [
-              96,
-              32,
-              16,
-              4,
+              1,
+              1,
               1
             ],
-            "data_type": "bfloat16"
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
           }
         ]
       },
@@ -5718,31 +5718,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -5772,31 +5772,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -5810,50 +5826,14 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -5871,7 +5851,25 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              2,
+              3,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              3,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -5882,29 +5880,31 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -5918,9 +5918,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -5936,29 +5936,29 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -5967,31 +5967,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6021,31 +6021,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -6059,50 +6075,14 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -6120,7 +6100,25 @@
             "data_type": "bfloat16"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              2,
+              3,
+              2,
+              4,
+              4
+            ],
+            "strides": [
+              96,
+              1,
+              48,
+              12,
+              3
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -6131,29 +6129,31 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -6167,9 +6167,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -6185,29 +6185,29 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              2,
-              4,
-              4
+              1,
+              1,
+              1
             ],
             "strides": [
-              96,
+              3,
               1,
-              48,
-              12,
-              3
+              1,
+              1,
+              1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           }
         ]
       },
@@ -6216,31 +6216,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6279,22 +6279,38 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -6317,41 +6333,23 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
+              9,
               3,
-              1,
               1,
               1,
               1
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -6369,7 +6367,7 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -6387,22 +6385,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -6443,20 +6443,20 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
               3,
+              1,
               1,
               1,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -6465,31 +6465,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6528,22 +6528,38 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -6566,41 +6582,23 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
+              96,
+              32,
+              16,
+              4,
               1
             ],
-            "data_type": "float"
+            "data_type": "half"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -6618,7 +6616,7 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -6636,22 +6634,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -6692,20 +6692,20 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              2,
-              4,
-              4
-            ],
-            "strides": [
-              96,
-              32,
-              16,
-              4,
+              1,
+              1,
               1
             ],
-            "data_type": "half"
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
           }
         ]
       },
@@ -6714,31 +6714,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -6768,31 +6768,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -6806,50 +6822,14 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -6867,7 +6847,25 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              2,
+              3,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              3,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -6878,29 +6876,31 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -6914,9 +6914,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -6932,29 +6932,29 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -6963,31 +6963,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7017,31 +7017,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -7055,50 +7071,14 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -7116,7 +7096,25 @@
             "data_type": "half"
           },
           {
-            "uid": 7,
+            "uid": 5,
+            "dims": [
+              2,
+              3,
+              2,
+              4,
+              4
+            ],
+            "strides": [
+              96,
+              1,
+              48,
+              12,
+              3
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -7127,29 +7125,31 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              3,
-              3,
-              3
+              1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -7163,9 +7163,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -7181,29 +7181,29 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              2,
-              4,
-              4
+              1,
+              1,
+              1
             ],
             "strides": [
-              96,
+              3,
               1,
-              48,
-              12,
-              3
+              1,
+              1,
+              1
             ],
-            "data_type": "half"
+            "data_type": "float"
           }
         ]
       },
@@ -7212,31 +7212,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7275,22 +7275,38 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -7313,15 +7329,15 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
+              9,
               3,
-              1,
               1,
               1,
               1
@@ -7330,24 +7346,6 @@
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -7365,7 +7363,7 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -7383,22 +7381,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -7439,15 +7439,15 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
               3,
+              1,
               1,
               1,
               1
@@ -7461,31 +7461,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7524,22 +7524,38 @@
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
+              3,
+              1,
+              1,
+              1,
               1
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -7562,41 +7578,23 @@
           {
             "uid": 4,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
+              96,
+              32,
+              16,
+              4,
               1
             ],
             "data_type": "float"
           },
           {
             "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -7614,7 +7612,7 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -7632,22 +7630,24 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 7,
             "dims": [
-              1,
-              3,
-              1,
-              1,
               1
             ],
             "strides": [
-              3,
-              1,
-              1,
-              1,
               1
             ],
-            "data_type": "float"
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -7688,17 +7688,17 @@
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              2,
-              4,
-              4
+              1,
+              1,
+              1
             ],
             "strides": [
-              96,
-              32,
-              16,
-              4,
+              3,
+              1,
+              1,
+              1,
               1
             ],
             "data_type": "float"
@@ -7710,31 +7710,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -7764,31 +7764,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -7802,50 +7818,14 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -7863,16 +7843,16 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
-              1,
+              2,
               3,
-              1,
+              3,
               1,
               1
             ],
             "strides": [
-              3,
+              9,
               1,
               3,
               3,
@@ -7881,7 +7861,7 @@
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -7892,11 +7872,31 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -7910,9 +7910,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -7928,27 +7928,27 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              3,
+              1,
               1,
               1
             ],
             "strides": [
-              9,
+              3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -7959,31 +7959,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
@@ -8013,31 +8013,47 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 1,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 2,
             "dims": [
+              1,
+              3,
+              1,
+              1,
               1
             ],
             "strides": [
-              1
+              3,
+              1,
+              3,
+              3,
+              3
             ],
-            "data_type": "double"
+            "data_type": "float"
           },
           {
             "uid": 3,
@@ -8051,50 +8067,14 @@
             "strides": [
               3,
               1,
-              1,
-              1,
-              1
+              3,
+              3,
+              3
             ],
             "data_type": "float"
           },
           {
             "uid": 4,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              1,
-              3,
-              1,
-              1,
-              1
-            ],
-            "strides": [
-              3,
-              1,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 6,
             "dims": [
               2,
               3,
@@ -8112,25 +8092,25 @@
             "data_type": "float"
           },
           {
-            "uid": 7,
+            "uid": 5,
             "dims": [
-              1,
+              2,
               3,
-              1,
-              1,
-              1
+              2,
+              4,
+              4
             ],
             "strides": [
-              3,
+              96,
               1,
-              3,
-              3,
+              48,
+              12,
               3
             ],
             "data_type": "float"
           },
           {
-            "uid": 8,
+            "uid": 6,
             "dims": [
               1,
               3,
@@ -8141,11 +8121,31 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
           },
           {
             "uid": 9,
@@ -8159,9 +8159,9 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
@@ -8177,27 +8177,27 @@
             "strides": [
               3,
               1,
-              3,
-              3,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           },
           {
             "uid": 11,
             "dims": [
-              2,
+              1,
               3,
-              2,
-              4,
-              4
+              1,
+              1,
+              1
             ],
             "strides": [
-              96,
+              3,
               1,
-              48,
-              12,
-              3
+              1,
+              1,
+              1
             ],
             "data_type": "float"
           }
@@ -8208,31 +8208,31 @@
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
         "inputs": {
-          "1": {
+          "5": {
             "hi": 1.0,
             "kind": "free",
             "lo": -1.0,
             "seed": 1
           },
-          "2": {
+          "11": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 2
           },
-          "3": {
+          "6": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 3
           },
-          "4": {
+          "9": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,
             "seed": 1001
           },
-          "5": {
+          "10": {
             "hi": 2.0,
             "kind": "free",
             "lo": -2.0,

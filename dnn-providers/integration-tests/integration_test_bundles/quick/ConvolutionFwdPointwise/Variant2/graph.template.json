@@ -8,12 +8,12 @@
     {
       "compute_data_type": "float",
       "inputs": {
-        "w_tensor_uid": 0,
-        "x_tensor_uid": 1
+        "w_tensor_uid": 4,
+        "x_tensor_uid": 5
       },
       "name": "ConvolutionFprop_0",
       "outputs": {
-        "y_tensor_uid": 2
+        "y_tensor_uid": 0
       },
       "parameters": {
         "conv_mode": "CROSS_CORRELATION",
@@ -29,7 +29,7 @@
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,
-        "in_0_tensor_uid": 2,
+        "in_0_tensor_uid": 0,
         "in_1_tensor_uid": 3,
         "in_2_tensor_uid": null,
         "operation": "add",
@@ -41,7 +41,7 @@
       },
       "name": "Pointwise_1",
       "outputs": {
-        "out_0_tensor_uid": 4
+        "out_0_tensor_uid": 1
       },
       "type": "PointwiseAttributes"
     },
@@ -50,7 +50,7 @@
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,
-        "in_0_tensor_uid": 4,
+        "in_0_tensor_uid": 1,
         "in_1_tensor_uid": null,
         "in_2_tensor_uid": null,
         "operation": "relu_fwd",
@@ -62,7 +62,7 @@
       },
       "name": "Pointwise_2",
       "outputs": {
-        "out_0_tensor_uid": 5
+        "out_0_tensor_uid": 2
       },
       "type": "PointwiseAttributes"
     }
@@ -71,26 +71,26 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "w",
-      "strides": "${case.strides}",
-      "uid": 0,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "x",
-      "strides": "${case.strides}",
-      "uid": 1,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
       "name": "ConvolutionFprop_0::Y",
       "strides": "${case.strides}",
-      "uid": 2,
+      "uid": 0,
       "virtual": true
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_1::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": true
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "Pointwise_2::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
     },
     {
       "data_type": "${case.data_type}",
@@ -103,15 +103,15 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "Pointwise_1::OUT_0",
+      "name": "w",
       "strides": "${case.strides}",
       "uid": 4,
-      "virtual": true
+      "virtual": false
     },
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "Pointwise_2::OUT_0",
+      "name": "x",
       "strides": "${case.strides}",
       "uid": 5,
       "virtual": false

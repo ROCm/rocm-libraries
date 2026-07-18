@@ -28,7 +28,13 @@ import json
 import sys
 from pathlib import Path
 
-from bundle_utils import canon, canonical_uid_map, expand, remap_graph
+from bundle_utils import (
+    canon,
+    canonical_uid_map,
+    expand,
+    inputs_by_name,
+    remap_graph,
+)
 
 
 # --------------------------------------------------------------------------
@@ -126,16 +132,28 @@ def _load_placed(bundle_dir: Path) -> dict:
 # --------------------------------------------------------------------------
 
 
-def _compare_meta(captured_meta: dict, placed_meta: dict) -> list:
-    """Return list of mismatch descriptions between captured and placed metadata."""
+def _compare_meta(
+    captured_meta: dict,
+    placed_meta: dict,
+    captured_graph: dict,
+    placed_graph: dict,
+) -> list:
+    """Return list of mismatch descriptions between captured and placed metadata.
+
+    ``inputs`` is keyed by tensor UID, but place_bundles canonicalizes UIDs by
+    tensor name, so the captured metadata (original UIDs) and placed metadata
+    (canonical UIDs) will disagree on the raw keys even when they describe the
+    same tensors. Re-key both by tensor name (inputs_by_name) so the fill specs
+    are compared per logical tensor, independent of UID assignment.
+    """
     mismatches = []
     cap_seed = captured_meta.get("seed")
     plc_seed = placed_meta.get("seed")
     if cap_seed is not None and plc_seed is not None and cap_seed != plc_seed:
         mismatches.append(f"seed: captured={cap_seed} placed={plc_seed}")
 
-    cap_inputs = captured_meta.get("inputs", {})
-    plc_inputs = placed_meta.get("inputs", {})
+    cap_inputs = inputs_by_name(captured_meta, captured_graph)
+    plc_inputs = inputs_by_name(placed_meta, placed_graph)
     if cap_inputs and canon(cap_inputs) != canon(plc_inputs):
         mismatches.append("inputs differ")
     return mismatches
@@ -185,12 +203,19 @@ def main() -> int:
 
     # --- Step 3: load placed bundles ---
     placed = _load_placed(args.bundle_dir)
-    print(f"  placed cases:       {len(placed)}", file=sys.stderr)
+    # Count only placed cases that came from the C++ migration; pre-existing golden
+    # bundles (e.g. PyTorch-sourced) live in the same tree but are not captured here.
+    placed_migrated = {k for k in placed if k.startswith("c++ integration suite:")}
+    print(
+        f"  placed cases:       {len(placed)} "
+        f"({len(placed_migrated)} from c++ migration)",
+        file=sys.stderr,
+    )
 
-    if len(placed) != len(captured):
+    if len(placed_migrated) != len(captured):
         errors.append(
-            f"captured={len(captured)} vs placed={len(placed)} — "
-            f"Hop B lost {len(captured) - len(placed)} cases"
+            f"captured={len(captured)} vs placed(migrated)={len(placed_migrated)} — "
+            f"Hop B lost {len(captured) - len(placed_migrated)} cases"
         )
 
     # --- Step 4: per-case graph + metadata verification ---
@@ -204,13 +229,14 @@ def main() -> int:
             missing_in_placed.append(key)
             continue
         plc_graph, plc_meta = placed[key]
-        cap_canon = remap_graph(cap_graph, canonical_uid_map(cap_graph))
+        cap_uid_map = canonical_uid_map(cap_graph)
+        cap_canon = remap_graph(cap_graph, cap_uid_map)
         plc_canon = remap_graph(plc_graph, canonical_uid_map(plc_graph))
         if canon(cap_canon) != canon(plc_canon):
             graph_mismatch.append(key)
         else:
             graph_match += 1
-        meta_issues = _compare_meta(cap_meta, plc_meta)
+        meta_issues = _compare_meta(cap_meta, plc_meta, cap_graph, plc_graph)
         if meta_issues:
             meta_mismatch.append((key, meta_issues))
 

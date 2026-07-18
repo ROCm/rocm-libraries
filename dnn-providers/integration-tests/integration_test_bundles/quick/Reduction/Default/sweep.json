@@ -4,8 +4,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -57,8 +57,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modemul",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -110,8 +110,8 @@
     {
       "id": "4_8_4_4_bfp16_nchw_modemax_c4414d",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -163,8 +163,8 @@
     {
       "id": "2_3_16_8_bfp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -216,8 +216,8 @@
     {
       "id": "2_3_16_8_bfp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -269,8 +269,8 @@
     {
       "id": "4_8_4_4_bfp16_nchw_modeadd_6c448d",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -322,8 +322,8 @@
     {
       "id": "4_8_4_4_bfp16_nchw_modemax_981929",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -375,8 +375,8 @@
     {
       "id": "2_3_4_4_bfp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -428,8 +428,8 @@
     {
       "id": "2_3_4_4_bfp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -481,8 +481,8 @@
     {
       "id": "1_1_32_32_bfp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -534,8 +534,8 @@
     {
       "id": "1_1_32_32_bfp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -587,8 +587,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -640,8 +640,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modemin",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -693,8 +693,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modemul",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -746,8 +746,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modemin",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -799,8 +799,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -852,8 +852,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modeamax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -905,8 +905,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modeavg",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -958,8 +958,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modenorm1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1011,8 +1011,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modenorm2",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1064,8 +1064,8 @@
     {
       "id": "1_16_8_8_bfp16_nhwc_modemul_no_zeros",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1117,8 +1117,8 @@
     {
       "id": "4_8_4_4_bfp16_nhwc_modeadd_12311d",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1170,8 +1170,8 @@
     {
       "id": "4_8_4_4_bfp16_nhwc_modemax_c155bd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1223,8 +1223,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1276,8 +1276,8 @@
     {
       "id": "2_3_16_8_bfp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1329,8 +1329,8 @@
     {
       "id": "2_3_16_8_bfp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1382,8 +1382,8 @@
     {
       "id": "4_8_4_4_bfp16_nhwc_modeadd_2bddf9",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1435,8 +1435,8 @@
     {
       "id": "4_8_4_4_bfp16_nhwc_modemax_1a57d7",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1488,8 +1488,8 @@
     {
       "id": "2_3_4_4_bfp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1541,8 +1541,8 @@
     {
       "id": "2_3_4_4_bfp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1594,8 +1594,8 @@
     {
       "id": "1_1_32_32_bfp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1647,8 +1647,8 @@
     {
       "id": "1_1_32_32_bfp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1700,8 +1700,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modeamax",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1753,8 +1753,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modeavg",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1806,8 +1806,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modenorm1",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1859,8 +1859,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modenorm2",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1912,8 +1912,8 @@
     {
       "id": "1_16_8_8_bfp16_nchw_modemul_no_zeros",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -1965,8 +1965,8 @@
     {
       "id": "4_8_4_4_bfp16_nchw_modeadd_72487f",
       "values": {
-        "intermediate_data_type": "bfloat16",
         "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
         "tensors": [
           {
             "uid": 0,
@@ -2018,8 +2018,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2071,8 +2071,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modemul",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2124,8 +2124,8 @@
     {
       "id": "4_8_4_4_fp16_nchw_modemax_681fb4",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2177,8 +2177,8 @@
     {
       "id": "2_3_16_8_fp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2230,8 +2230,8 @@
     {
       "id": "2_3_16_8_fp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2283,8 +2283,8 @@
     {
       "id": "4_8_4_4_fp16_nchw_modeadd_bf97df",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2336,8 +2336,8 @@
     {
       "id": "4_8_4_4_fp16_nchw_modemax_dfe69c",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2389,8 +2389,8 @@
     {
       "id": "2_3_4_4_fp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2442,8 +2442,8 @@
     {
       "id": "2_3_4_4_fp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2495,8 +2495,8 @@
     {
       "id": "1_1_32_32_fp16_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2548,8 +2548,8 @@
     {
       "id": "1_1_32_32_fp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2601,8 +2601,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2654,8 +2654,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modemin",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2707,8 +2707,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modemul",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2760,8 +2760,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modemin",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2813,8 +2813,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2866,8 +2866,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modeamax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2919,8 +2919,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modeavg",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -2972,8 +2972,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modenorm1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3025,8 +3025,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modenorm2",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3078,8 +3078,8 @@
     {
       "id": "1_16_8_8_fp16_nhwc_modemul_no_zeros",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3131,8 +3131,8 @@
     {
       "id": "4_8_4_4_fp16_nhwc_modeadd_9a86f9",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3184,8 +3184,8 @@
     {
       "id": "4_8_4_4_fp16_nhwc_modemax_a80799",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3237,8 +3237,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3290,8 +3290,8 @@
     {
       "id": "2_3_16_8_fp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3343,8 +3343,8 @@
     {
       "id": "2_3_16_8_fp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3396,8 +3396,8 @@
     {
       "id": "4_8_4_4_fp16_nhwc_modeadd_1c718e",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3449,8 +3449,8 @@
     {
       "id": "4_8_4_4_fp16_nhwc_modemax_1c164d",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3502,8 +3502,8 @@
     {
       "id": "2_3_4_4_fp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3555,8 +3555,8 @@
     {
       "id": "2_3_4_4_fp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3608,8 +3608,8 @@
     {
       "id": "1_1_32_32_fp16_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3661,8 +3661,8 @@
     {
       "id": "1_1_32_32_fp16_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3714,8 +3714,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modeamax",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3767,8 +3767,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modeavg",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3820,8 +3820,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modenorm1",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3873,8 +3873,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modenorm2",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3926,8 +3926,8 @@
     {
       "id": "1_16_8_8_fp16_nchw_modemul_no_zeros",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -3979,8 +3979,8 @@
     {
       "id": "4_8_4_4_fp16_nchw_modeadd_962389",
       "values": {
-        "intermediate_data_type": "half",
         "io_data_type": "half",
+        "intermediate_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -4032,8 +4032,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4085,8 +4085,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modemul",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4138,8 +4138,8 @@
     {
       "id": "4_8_4_4_fp32_nchw_modemax_cab446",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4191,8 +4191,8 @@
     {
       "id": "2_3_16_8_fp32_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4244,8 +4244,8 @@
     {
       "id": "2_3_16_8_fp32_nchw_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4297,8 +4297,8 @@
     {
       "id": "4_8_4_4_fp32_nchw_modeadd_4b440c",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4350,8 +4350,8 @@
     {
       "id": "4_8_4_4_fp32_nchw_modemax_9a8afe",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4403,8 +4403,8 @@
     {
       "id": "2_3_4_4_fp32_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4456,8 +4456,8 @@
     {
       "id": "2_3_4_4_fp32_nchw_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4509,8 +4509,8 @@
     {
       "id": "1_1_32_32_fp32_nchw_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4562,8 +4562,8 @@
     {
       "id": "1_1_32_32_fp32_nchw_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4615,8 +4615,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4668,8 +4668,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modemin",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4721,8 +4721,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modemul",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4774,8 +4774,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modemin",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4827,8 +4827,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4880,8 +4880,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modeamax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4933,8 +4933,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modeavg",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -4986,8 +4986,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modenorm1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5039,8 +5039,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modenorm2",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5092,8 +5092,8 @@
     {
       "id": "1_16_8_8_fp32_nhwc_modemul_no_zeros",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5145,8 +5145,8 @@
     {
       "id": "4_8_4_4_fp32_nhwc_modeadd_56c2a9",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5198,8 +5198,8 @@
     {
       "id": "4_8_4_4_fp32_nhwc_modemax_2be60e",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5251,8 +5251,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5304,8 +5304,8 @@
     {
       "id": "2_3_16_8_fp32_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5357,8 +5357,8 @@
     {
       "id": "2_3_16_8_fp32_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5410,8 +5410,8 @@
     {
       "id": "4_8_4_4_fp32_nhwc_modeadd_fd73be",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5463,8 +5463,8 @@
     {
       "id": "4_8_4_4_fp32_nhwc_modemax_499910",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5516,8 +5516,8 @@
     {
       "id": "2_3_4_4_fp32_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5569,8 +5569,8 @@
     {
       "id": "2_3_4_4_fp32_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5622,8 +5622,8 @@
     {
       "id": "1_1_32_32_fp32_nhwc_modeadd",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5675,8 +5675,8 @@
     {
       "id": "1_1_32_32_fp32_nhwc_modemax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5728,8 +5728,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modeamax",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5781,8 +5781,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modeavg",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5834,8 +5834,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modenorm1",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5887,8 +5887,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modenorm2",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5940,8 +5940,8 @@
     {
       "id": "1_16_8_8_fp32_nchw_modemul_no_zeros",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -5993,8 +5993,8 @@
     {
       "id": "4_8_4_4_fp32_nchw_modeadd_e3c97c",
       "values": {
-        "intermediate_data_type": "float",
         "io_data_type": "float",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,

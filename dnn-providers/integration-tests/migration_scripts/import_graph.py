@@ -37,11 +37,12 @@ from bundle_utils import (
     _case_hash,
     assign_case_ids,
     canon,
-    canonical_uid_map,
+    canonical_uid_map_by_name,
     derive_operation,
     expand,
     infer_layout,
     remap_graph,
+    remap_meta_inputs,
     sanitize,
     skeleton_hash,
     tensors_by_uid,
@@ -185,18 +186,34 @@ def main() -> int:
         print(f"import_graph: cannot read {args.graph}: {e}", file=sys.stderr)
         return 1
 
-    graph_canon = remap_graph(graph, canonical_uid_map(graph))
-    h = skeleton_hash(graph_canon)
-    op = derive_operation(graph_canon)
-    graph_json = canon(graph_canon)
-
     meta = {"format_version": 1}
     for kv in args.meta:
         if "=" in kv:
             k, v = kv.split("=", 1)
+            if k == "inputs":
+                try:
+                    v = json.loads(v)
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(
+                        f"import_graph: --meta inputs must be a JSON object: {e}",
+                        file=sys.stderr,
+                    )
+                    return 1
             meta[k] = v
     if args.seed is not None:
         meta["seed"] = args.seed
+
+    # Canonicalize UIDs by tensor name so an imported graph lines up with sweeps
+    # built by place_bundles (which does the same). The C++ builder auto-assigns
+    # UIDs non-deterministically, so the graph and its inputs fill-spec map must
+    # be remapped in lockstep before hashing/matching (canonical_uid_map_by_name).
+    uid_map = canonical_uid_map_by_name(graph)
+    graph = remap_graph(graph, uid_map)
+    meta = remap_meta_inputs(meta, uid_map)
+
+    h = skeleton_hash(graph)
+    op = derive_operation(graph)
+    graph_json = canon(graph)
 
     print(f"  skeleton hash: {h}", file=sys.stderr)
     print(f"  operation:     {op}", file=sys.stderr)
@@ -208,8 +225,7 @@ def main() -> int:
     for template, sweep, sweep_path in matches:
         for case in sweep.get("cases", []):
             expanded = expand(template, case.get("values", {}))
-            expanded_canon = remap_graph(expanded, canonical_uid_map(expanded))
-            if canon(expanded_canon) == graph_json:
+            if canon(expanded) == graph_json:
                 existing_meta = case.get("metadata", {})
                 seed_match = meta.get("seed") is None or existing_meta.get(
                     "seed"
@@ -228,7 +244,7 @@ def main() -> int:
     # --- Structural match: append to existing sweep ---
     if matches:
         template, sweep, sweep_path = matches[0]
-        values = _extract_values(graph_canon, template)
+        values = _extract_values(graph, template)
         new_case = {"id": None, "values": values, "metadata": meta}
         existing_cases = sweep.get("cases", [])
         saved_ids = [c["id"] for c in existing_cases]
@@ -241,7 +257,7 @@ def main() -> int:
             new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
 
         expanded = expand(template, values)
-        if canon(expanded) != canon(graph_canon):
+        if canon(expanded) != canon(graph):
             print("  ERROR: round-trip verify failed after extraction", file=sys.stderr)
             return 1
 
@@ -257,7 +273,7 @@ def main() -> int:
         return 0
 
     # --- No structural match: create new template+sweep ---
-    template = copy.deepcopy(graph_canon)
+    template = copy.deepcopy(graph)
     for fld in TOP_LEVEL_IF_VARIES:
         if fld in template:
             template[fld] = f"${{case.{fld}}}"
@@ -266,14 +282,14 @@ def main() -> int:
             if fld in t:
                 t[fld] = f"${{case.{fld}}}"
 
-    values = _extract_values(graph_canon, template)
+    values = _extract_values(graph, template)
 
     expanded = expand(template, values)
-    if canon(expanded) != canon(graph_canon):
+    if canon(expanded) != canon(graph):
         print("  ERROR: round-trip verify failed for new template", file=sys.stderr)
         return 1
 
-    tmap = tensors_by_uid(graph_canon)
+    tmap = tensors_by_uid(graph)
     first = tmap[min(tmap)] if tmap else {}
     layout = infer_layout(first.get("dims"), first.get("strides")) or "Default"
     topo_name = sanitize(layout).replace(" ", "_").title() or "Default"

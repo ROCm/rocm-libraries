@@ -9,13 +9,13 @@
       "compute_data_type": "float",
       "forward_phase": "INFERENCE",
       "inputs": {
-        "epsilon_tensor_uid": 0,
-        "scale_tensor_uid": 1,
-        "x_tensor_uid": 2
+        "epsilon_tensor_uid": 1,
+        "scale_tensor_uid": 2,
+        "x_tensor_uid": 3
       },
       "name": "RMSNorm_0",
       "outputs": {
-        "y_tensor_uid": 3
+        "y_tensor_uid": 0
       },
       "type": "RMSNormAttributes"
     }
@@ -24,9 +24,17 @@
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "epsilon",
+      "name": "RMSNorm_0::Y",
       "strides": "${case.strides}",
       "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 1,
       "value": 9.999999747378752e-06,
       "value_type": "Float32Value",
       "virtual": false
@@ -36,21 +44,13 @@
       "dims": "${case.dims}",
       "name": "scale",
       "strides": "${case.strides}",
-      "uid": 1,
-      "virtual": false
-    },
-    {
-      "data_type": "${case.data_type}",
-      "dims": "${case.dims}",
-      "name": "x",
-      "strides": "${case.strides}",
       "uid": 2,
       "virtual": false
     },
     {
       "data_type": "${case.data_type}",
       "dims": "${case.dims}",
-      "name": "RMSNorm_0::Y",
+      "name": "x",
       "strides": "${case.strides}",
       "uid": 3,
       "virtual": false
