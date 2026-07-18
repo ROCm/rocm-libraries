@@ -14945,9 +14945,12 @@ class KernelWriterAssembly(KernelWriter):
   # The descriptor clamp is FFM-validated on StreamK partial-tile M edges (e.g. M=248/232/216).
   ##############################################################################
   def _tdmStoreSkipsEdge(self, kernel):
+    # Whitelist the accumulation modes whose final store target is D (bf16): None /
+    # 'SingleBuffer' (GSU=1, incl. GSU=-1 -> SingleBuffer) and 'PartialsBuffer' (StreamK).
+    # Any other mode (MultipleBuffer / MultipleBufferSingleKernel / future) is excluded.
     return (kernel.get("TDMStoreInst")
             and not kernel.get("UseSubtileImpl")
-            and kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"))
+            and kernel["_GlobalAccumulation"] in (None, "SingleBuffer", "PartialsBuffer"))
 
   ##############################################################################
   # checkIsEdge

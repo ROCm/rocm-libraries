@@ -41,6 +41,9 @@ import Tensile
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
 from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
+from Tensile.Common.DataType import DataType
+from rocisa.enum import DataTypeEnum
+from Tensile.SolutionStructs.Validators.TDMStoreInst import validateTDMStoreInst
 
 _TENSILE_DIR = os.path.dirname(Tensile.__file__)
 
@@ -106,7 +109,9 @@ class TestTDMStoreInstCodegenWiring:
         assert 'self.kernel.get("TDMStoreInst")' in src
         assert "TDMSubtileHybrid" not in src
         assert "isSubtileTDMStore" not in src
-        assert '"MultipleBufferSingleKernel", "MultipleBuffer"' in src
+        # Gate is a whitelist of D-writing accumulation modes (robust vs. a blacklist).
+        assert 'tdmStoreDestModes = (None, "SingleBuffer", "PartialsBuffer")' in src
+        assert 'self.kernel["_GlobalAccumulation"] in tdmStoreDestModes' in src
 
     def test_store_base_setup_single_vgpr(self):
         # _emitTDMStoreBaseSetup must hold exactly ONE persistent VGPR for the
@@ -118,33 +123,124 @@ class TestTDMStoreInstCodegenWiring:
         assert 'checkOut(2, "tdmStoreBase")' not in setup
 
 
-class TestTDMStoreInstStreamKGate:
-    """Solution-time gate for the StreamK narrow-scope TDM support.
+def _tdm_state(**overrides):
+    """Smallest Solution state read by validateTDMStoreInst (dict-in / bool-out).
 
-    StreamK non-atomic (``_GlobalAccumulation == 'PartialsBuffer'``) keeps its
-    fp32 partial-tile store on ``buffer_store`` (a separate StreamK path) and
-    routes only the fixup-owner's final bf16->D store through the regular
-    ``globalWriteBatch`` -- exactly where the TDM store fires.  These guards lock
-    the accept/reject envelope in ``SolutionStructs/Solution.py``.
+    Defaults to an accepted GSU=1 bf16/HPA/single config on gfx1250.  Pass
+    ``pt={...}`` to override ProblemType fields and any other key as a top-level
+    override (ISA, StreamK, _GlobalAccumulation, GlobalSplitU, ...).
+    """
+    pt = dict(
+        DestDataType=DataType(DataTypeEnum.BFloat16),
+        ComputeDataType=DataType(DataTypeEnum.Float),
+        HighPrecisionAccumulate=True,
+        UseBeta=False,
+        ActivationType="none",
+    )
+    pt.update(overrides.pop("pt", {}))
+    state = dict(
+        TDMStoreInst=True,
+        ISA=[12, 5, 0],
+        StreamK=0,
+        _GlobalAccumulation="SingleBuffer",
+        GlobalSplitU=1,
+        StoreRemapVectorWidth=0,
+        ProblemType=pt,
+    )
+    state.update(overrides)
+    return state
+
+
+class TestTDMStoreInstValidator:
+    """Behavioral accept/reject tests for ``validateTDMStoreInst``.
+
+    Builds a real Solution state and asserts the return value and
+    ``state["Valid"]`` (which ``reject`` sets to False).  Pure dict-in / bool-out:
+    no client build, no GPU.
     """
 
-    def test_streamk_partialsbuffer_is_the_allowed_mode(self):
-        src = _read("SolutionStructs", "Solution.py")
-        # Only the non-atomic PartialsBuffer StreamK mode is allowed; the atomic
-        # path (not PartialsBuffer) is rejected.
-        assert "!= 'PartialsBuffer'" in src
-        assert "atomic StreamK reduction path does not route the final D store" in src
+    def test_valid_gsu1_accepted(self):
+        st = _tdm_state()
+        assert validateTDMStoreInst(st, printRejectionReason=False) is True
+        assert st.get("Valid") is not False
 
-    def test_streamk_requires_usebeta_true(self):
-        # StreamK aliases sgprSkPartialIdx onto sgprBeta, which is unallocated when
-        # UseBeta=False -> cleanly rejected instead of an assembler error.
-        src = _read("SolutionStructs", "Solution.py")
-        assert 'state["StreamK"] != 0 and not pt.get("UseBeta", False)' in src
-        assert "TDMStoreInst + StreamK requires UseBeta=True" in src
+    def test_tdmstoreinst_false_is_noop(self):
+        # TDMStoreInst=False short-circuits: even an otherwise-illegal ISA is untouched.
+        st = _tdm_state(TDMStoreInst=False, ISA=[9, 4, 2])
+        assert validateTDMStoreInst(st, printRejectionReason=False) is True
+        assert "Valid" not in st
 
-    def test_gsu_gt1_still_rejected(self):
-        src = _read("SolutionStructs", "Solution.py")
-        assert "TDMStoreInst does not yet support GlobalSplitU>1" in src
+    def test_gsu_minus1_accepted(self):
+        # auto-GSU resolving to SingleBuffer direct-to-D is allowed (it is not > 1).
+        st = _tdm_state(GlobalSplitU=-1)
+        assert validateTDMStoreInst(st, printRejectionReason=False) is True
+
+    @pytest.mark.parametrize("isa", [[9, 4, 2], [9, 5, 0], [12, 0, 0]],
+                             ids=["gfx942", "gfx950", "gfx1200"])
+    def test_non_gfx1250_rejected(self, isa):
+        st = _tdm_state(ISA=isa)
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+        assert st["Valid"] is False
+
+    def test_non_bf16_dest_rejected(self):
+        st = _tdm_state(pt={"DestDataType": DataType(DataTypeEnum.Half)})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+        assert st["Valid"] is False
+
+    def test_non_hpa_rejected(self):
+        st = _tdm_state(pt={"HighPrecisionAccumulate": False})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+
+    def test_non_single_compute_rejected(self):
+        st = _tdm_state(pt={"ComputeDataType": DataType(DataTypeEnum.Double)})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+
+    def test_gsu_gt1_rejected(self):
+        st = _tdm_state(GlobalSplitU=2)
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+        assert st["Valid"] is False
+
+    def test_storeremap_rejected(self):
+        st = _tdm_state(StoreRemapVectorWidth=4)
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+
+    # --- StreamK envelope ---
+    def test_streamk_partialsbuffer_beta_accepted(self):
+        st = _tdm_state(StreamK=3, _GlobalAccumulation="PartialsBuffer", pt={"UseBeta": True})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is True
+        assert st.get("Valid") is not False
+
+    def test_streamk_usebeta_false_rejected(self):
+        st = _tdm_state(StreamK=3, _GlobalAccumulation="PartialsBuffer")
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+        assert st["Valid"] is False
+
+    def test_streamk_atomic_rejected(self):
+        # StreamK != 0 but not the PartialsBuffer workspace mode (atomic reduction path).
+        st = _tdm_state(StreamK=2, _GlobalAccumulation="SingleBuffer", pt={"UseBeta": True})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+        assert st["Valid"] is False
+
+    # --- unvalidated epilogue features ---
+    def test_activation_rejected(self):
+        # Regression guard for the reject key: it must test ActivationType (not a
+        # non-existent "Activation" key that silently never fires).
+        st = _tdm_state(pt={"ActivationType": "relu"})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+        assert st["Valid"] is False
+
+    def test_activation_none_accepted(self):
+        st = _tdm_state(pt={"ActivationType": "none"})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is True
+
+    @pytest.mark.parametrize("feat,val", [
+        ("UseE", True), ("UseBias", 1), ("UseScaleAlphaVec", 1),
+        ("UseScaleAB", "Scalar"), ("UseScaleCD", True),
+    ])
+    def test_unsupported_epilogue_features_rejected(self, feat, val):
+        st = _tdm_state(pt={feat: val})
+        assert validateTDMStoreInst(st, printRejectionReason=False) is False
+        assert st["Valid"] is False
 
     def test_gate_comment_documents_streamk_partialsbuffer(self):
         # The GlobalWriteBatch gate comment must explain that PartialsBuffer is

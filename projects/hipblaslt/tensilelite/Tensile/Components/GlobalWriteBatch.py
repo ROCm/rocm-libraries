@@ -1324,6 +1324,13 @@ class GlobalWriteBatchWriter:
            self.kernel["ProblemType"]["DestDataType"].isHalf())
       and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
       and self.kernel["WavefrontSize"] != 32  # wave32: skip permute-based packed store (uses wave64-only ops)
+      and not self.kernel.get("TDMStoreInst")  # TDM store path owns the store; it needs ValuC packed
+                                               # by packModule below, whereas the paired-dwordx4 path
+                                               # leaves packModule empty (it packs itself).  Since the
+                                               # TDM store branch runs BEFORE the is16bitSubtile branch,
+                                               # letting both be true would ds_store unpacked fp32.
+                                               # (Only reachable at wave64, which gfx1250 does not
+                                               # currently generate; kept as a correctness guard.)
     )
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
@@ -1816,7 +1823,12 @@ class GlobalWriteBatchWriter:
         #                                   the TDM store correctly fires only on that bf16->D write.
         # GSU=1 (SingleBuffer) and subtile (which itself requires GSU=1) write D directly and
         # therefore use the TDM store.
-        if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):
+        # Gate on a WHITELIST of the accumulation modes whose final store target is D (bf16):
+        # None / 'SingleBuffer' (GSU=1, incl. GSU=-1 resolving to SingleBuffer) and 'PartialsBuffer'
+        # (StreamK fixup-owner).  'MultipleBuffer' / 'MultipleBufferSingleKernel' and any future
+        # mode are excluded by default (safer than a blacklist).
+        tdmStoreDestModes = (None, "SingleBuffer", "PartialsBuffer")
+        if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] in tdmStoreDestModes:
           if self.batchIdx == 0 and elementIdx == 0:
             _setupMod, self.parentWriter._tdmStoreBaseVgpr = self.parentWriter._emitTDMStoreBaseSetup(self.kernel, self.tmpS01)
             storeCodeModule.add(_setupMod)
