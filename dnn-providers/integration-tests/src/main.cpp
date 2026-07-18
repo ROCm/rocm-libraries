@@ -93,10 +93,10 @@ int main(int argc, char** argv) noexcept
             .implicit_value(std::string("support_matrix.md"))
             .help("Generate a markdown support matrix file (default: support_matrix.md).");
         parser.add_argument("--allow-bundles")
-            .default_value(false)
+            .default_value(true)
             .implicit_value(true)
-            .help("Enable golden reference bundle test registration. "
-                  "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=1 env var.");
+            .help("Enable bundle test registration (default: true). "
+                  "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=0 env var to disable.");
         parser.add_argument("--gd", "--golden-data-dir")
             .help("Path to the integration test bundle data directory. "
                   "Defaults to <exe>/../lib/integration_test_bundles/. "
