@@ -13,19 +13,25 @@
 # contains:
 #   - hipdnn_integration_tests_unit_tests  (framework unit tests)
 #   - hipdnn_gpu_ref_tests_quick           (GPU reference smoke tier)
-#
-# The legacy test_hipdnn_integration_tests.py ran `ctest` with no label
-# filter, so every installed test executed in all TEST_TYPEs. The `.*`
-# pattern in the quick tier reproduces that: every installed test is
-# selected by quick (which inherits standard -> comprehensive -> full).
+#   - hipdnn_integration_tests_quick       (bundle sweep integration tests)
 
 test_categories:
   quick:
-    description: "Framework unit + GPU reference smoke tests (run in all tiers)"
+    description: "Framework unit + GPU reference smoke tests"
     test_patterns:
-      - ".*"
+      - "hipdnn_integration_tests_unit_tests"
+      - "hipdnn_gpu_ref_tests_quick"
     labels:
       - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+  standard:
+    description: "Bundle sweep integration tests (migrated C++ graph tests)"
+    test_patterns:
+      - "hipdnn_integration_tests_quick"
+    labels:
       - "standard"
       - "comprehensive"
       - "full"

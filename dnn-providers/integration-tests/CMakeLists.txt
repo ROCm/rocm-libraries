@@ -155,6 +155,8 @@ target_compile_options(${INTEGRATION_TESTS_EXE} PRIVATE ${INTEGRATION_TESTS_WARN
 
 clang_tidy_check(${INTEGRATION_TESTS_EXE})
 
+add_tiered_test_target(${INTEGRATION_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR})
+
 add_subdirectory(gpu-ref)
 add_subdirectory(tests)
 
