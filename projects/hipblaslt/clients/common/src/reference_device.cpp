@@ -204,7 +204,8 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
     if(!is_supported_output(arg.c_type) || !is_supported_output(arg.d_type))
         return fail("C/D type other than f32/f16/bf16/f64/int32");
     // compute 64F requires all f64; compute 32I requires int8 in / int32 out;
-    // compute 32F requires no f64, no int8 in, no int32 out.
+    // the f32-class computes (32F and the 16F/fast-16F/fast-16BF/fast-TF32
+    // variants, all f32-accumulate in the reference) require no f64, no int8/int32.
     if(arg.compute_type == HIPBLAS_COMPUTE_64F)
     {
         if(arg.a_type != HIP_R_64F || arg.b_type != HIP_R_64F || arg.c_type != HIP_R_64F
@@ -217,7 +218,11 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
            || arg.d_type != HIP_R_32I)
             return fail("compute 32I requires int8 A/B and int32 C/D");
     }
-    else if(arg.compute_type == HIPBLAS_COMPUTE_32F)
+    else if(arg.compute_type == HIPBLAS_COMPUTE_32F
+            || arg.compute_type == HIPBLAS_COMPUTE_16F
+            || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_16F
+            || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF
+            || arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
     {
         if(arg.a_type == HIP_R_64F || arg.b_type == HIP_R_64F || arg.c_type == HIP_R_64F
            || arg.d_type == HIP_R_64F)
@@ -228,7 +233,7 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
     }
     else
     {
-        return fail("compute type other than HIPBLAS_COMPUTE_32F/32I/64F");
+        return fail("compute type other than HIPBLAS_COMPUTE_32F-class/32I/64F");
     }
     if(arg.compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
        || arg.compute_input_typeB != HIPBLASLT_DATATYPE_INVALID)
