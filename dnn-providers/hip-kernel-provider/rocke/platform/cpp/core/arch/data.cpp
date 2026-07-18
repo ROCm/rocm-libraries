@@ -852,9 +852,13 @@ static const rocke_layout_map_t lm_wmma_gfx12_c
  * NOTE (drift): this is still a hand-maintained mirror of the Python
  * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it.
  * TODO: codegen this table from the Python SSOT (_MMA_FRAGMENT_INFO) at build
- * time so the two engines share a single source of truth. Until then the tests
- * assert this table and _MMA_FRAGMENT_INFO agree (test_arch_mma_ssot.py) so the
- * two copies cannot silently drift.
+ * time so the two engines share a single source of truth. Until then there is
+ * no direct mirror-agreement test; each side's frag lengths are pinned
+ * independently -- C via tests/core/mma_frag_ssot.cpp (rocke_b_mma) and Python
+ * via tests/core/test_mma_frag_tables.py (_MMA_FRAGMENT_INFO) -- and the
+ * byte-identity gate (tools/check_byte_identity.py) catches any cross-engine
+ * c_frag_len drift, since a wrong length changes the emitted tile.mma result
+ * vector width.
  */
 typedef struct rocke_ati_mma_frag_row
 {

@@ -4977,7 +4977,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Initialize stream-k loop
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.preLoop(self, kernel))
-    if kernel.get("PrefetchAcrossPersistent"):
+    if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
     # Should check for is swizzled instead of usesubtileimpl
@@ -5117,8 +5117,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if dtileInfo.vgprTiles:
       self._subtileDtileBaseVgpr = dtileInfo.vgprTiles[0].regList.indices[0]
-
-    module.add(initVgprTilesToZero(self, kernel, dtileInfo))
 
     for vtiles in dtileInfo.vgprTiles:
       regStr = "Vgpr" if vtiles.regList.pool == self.vgprPool else "Agpr"
@@ -5381,7 +5379,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Initialize stream-k loop
     skComponent = Component.StreamK.find(self)
     module.add(skComponent.preLoop(self, kernel))
-    if kernel.get("PrefetchAcrossPersistent"):
+    if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
     # MFMA F32XEmulation negative identity matrix
@@ -9456,9 +9454,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       ]
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
-      if kernel.get("PrefetchAcrossPersistent"):
+      if self.isPrefetchAcrossPersistentEnabled(kernel):
         requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-        self.states.numSgprStreamK += 1
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
 
@@ -9517,7 +9514,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # With PrefetchAcrossPersistent, loop counters must survive the
     # post-loop store phase so setupNewTile can use them in the
     # prefetch tail.
-    keepLoopCounters = kernel["StreamK"] and kernel.get("PrefetchAcrossPersistent")
+    keepLoopCounters = kernel["StreamK"] and self.isPrefetchAcrossPersistentEnabled(kernel)
     if not keepLoopCounters:
       for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
         self.states.nonPostLoopSgpr.remove(self.loopCounterName(kernel,i))
