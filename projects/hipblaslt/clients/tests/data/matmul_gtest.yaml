@@ -3331,9 +3331,12 @@ Tests:
 # GPU correctness reference (check_ref) coverage.
 #
 # check_ref selects the verification reference: 1=gpu, 2=both (cpu+gpu). The GPU
-# reference (clients/common/src/reference_device.cpp) supports only plain GEMM:
-# no bias/activation/scaling/aux/gradient/grouped/pointer-array batch, a_type ==
-# b_type, inputs f32/f16/bf16/fp8/bf8/f64/int8, C/D f32/f16/bf16/f64/int32/int8. integer_exact
+# reference (clients/common/src/reference_device.cpp) supports plain GEMM plus
+# non-MX scalar/vector scaleA/B, scaleAlphaVec, scaleC and scaleD on the
+# float-scale (32F-class) compute path. MX/block A/B scaling and
+# bias/activation/aux/gradient/grouped/pointer-array batch are not supported.
+# Supported types are a_type == b_type with inputs f32/f16/bf16/fp8/bf8/f64/int8
+# and C/D f32/f16/bf16/f64/int32/int8. integer_exact
 # init keeps the serial reference bit-exact against the library reduction at
 # small K, so the GPU leg's exact 4-ULP unit_check holds. Scoped to gfx950,
 # where these entries are validated (fp8 OCP support and f64 solutions present).
@@ -3482,5 +3485,70 @@ Tests:
   norm_check: 1
   check_ref: [1, 2]
   gpu_arch: '950'
+
+# Scalar scaleA + scalar scaleB on OCP fp8 (f8_r x f8_r -> f16_r, compute f32).
+# Exercises the float-scale A/B path in the GPU reference against the library via
+# the 4-ULP GPU compare. GPU reference only (check_ref: 1): the small scalar
+# scales drive the f16 output into subnormals, where the exact CPU-vs-library
+# unit_check is too tight, so 'both' is not used here.
+- name: matmul_check_ref_f8_scale_ab
+  category: pre_checkin
+  function:
+    matmul:
+    - *f8_precision_dst_fp16
+  M: [128]
+  N: [128]
+  K: [128]
+  transA: T
+  transB: N
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  scaleA: 1
+  scaleB: 1
+  unit_check: 1
+  norm_check: 1
+  check_ref: 1
+  gpu_arch: '950'
+
+# Alpha vector (per-M scale) on OCP fp8 (f8_r x f8_r -> f16_r, compute f32).
+- name: matmul_check_ref_f8_alpha_vec
+  category: pre_checkin
+  function:
+    matmul:
+    - *f8_precision_dst_fp16
+  M: [128]
+  N: [128]
+  K: [128]
+  transA: T
+  transB: N
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  scaleAlpha_vector: true
+  unit_check: 1
+  norm_check: 1
+  check_ref: [1, 2]
+  gpu_arch: '950'
+
+# Alpha vector (per-M scale) on plain f32 (compute 32F).
+- name: matmul_check_ref_alpha_vec
+  category: pre_checkin
+  function:
+    matmul:
+    - *single_precision
+  M: [128]
+  N: [128]
+  K: [128]
+  transA: T
+  transB: N
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  scaleAlpha_vector: true
+  unit_check: 1
+  norm_check: 1
+  check_ref: [1, 2]
+  gpu_arch: '950'
+
+# scaleC/scaleD are code-supported by the GPU reference but not gtest-covered
+# here: no library solution exists for a scaleC- or scaleD-only matmul on gfx950.
 
 ...
