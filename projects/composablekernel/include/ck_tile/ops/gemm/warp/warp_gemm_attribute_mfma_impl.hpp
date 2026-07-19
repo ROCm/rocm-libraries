@@ -155,10 +155,13 @@ struct WarpGemmAttributeMfmaImplF64F64F64M16N16K4
     static constexpr index_t kABKLane    = 4;
     static constexpr index_t kABKPerLane = 1;
 
+    // Unlike other MFMA instructions, f64 output does not use the 4-contiguous-row-per-lane
+    // block layout: MI300 ISA sec. 7.1.4.2 gives H=1 for f64, so row i lands in register
+    // i/4 of lane (i%4)*16+j, i.e. M = kCM0PerLane*4 + lane_m (not lane_m*4 + kCM1PerLane).
     static constexpr index_t kCMLane     = 4;
     static constexpr index_t kCNLane     = 16;
-    static constexpr index_t kCM0PerLane = 1;
-    static constexpr index_t kCM1PerLane = 4;
+    static constexpr index_t kCM0PerLane = 4;
+    static constexpr index_t kCM1PerLane = 1;
 
     // c_vec += a_vec * b_vec
     template <typename... Params>
