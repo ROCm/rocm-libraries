@@ -6,7 +6,8 @@
 // FP64 16x16x4 MFMA warp gemm test case
 // A=fp64, B=fp64, Acc=fp64, TransposeC=false, SwizzleA=false, USS=false, NumAccess=Single
 using F64M16N16K4Case = ck_tile::test::warp_gemm::WGDispCase<
-    fp64_t, fp64_t, fp64_t, false, false, false, WGAttrNumAccessEnum::Single>;
+    ck_tile::fp64_t, ck_tile::fp64_t, ck_tile::fp64_t,
+    false, false, false, ck_tile::WGAttrNumAccessEnum::Single>;
 
 TEST(WarpGemmF64, MFMA_16x16x4)
 {
