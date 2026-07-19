@@ -1361,6 +1361,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // region starts with all regs "very old" (no spurious deferrals from a prior region).
     regLastTouch_.clear();
     clock_ = 0;
+    // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
+    activeWmmaNode_ = nullptr;
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
     const Loop* loop = getLoop();

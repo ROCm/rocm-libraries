@@ -572,9 +572,9 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardDsLoadDeferredPastWindow) {
 //   - 3 independent scalar ops advance positions 4 -> 7; at position 6 the VALU becomes
 //     co-issue pickable while WMMA #0 (v[50:58)) is still the active window.
 //
-// With the gate the hazardous VALU (dst v52) is skipped at position 6 and deferred until
-// after every independent WMMA has issued; without it, the VALU would co-issue at
-// position 6, right inside WMMA #0's latency window, clobbering v52 mid-read.
+// With the gate the hazardous VALU (dst v52) is skipped at position 6 (inside WMMA #0's
+// window) and deferred until that window closes; it then issues right after D#100 opens a
+// non-overlapping window. Without the gate it would co-issue at position 6, clobbering v52.
 // ---------------------------------------------------------------------------
 TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
     const int addrReg = 400;
@@ -628,15 +628,16 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
         seq.push_back({kind, dst});
     }
 
-    // The hazardous VALU (dst v52) must be the last instruction: it is skipped at co-issue
-    // position 6 (inside WMMA #0's window) and only issues once every independent WMMA has.
+    // Hazardous VALU (dst v52) is deferred past WMMA D#12's window, then issues right after
+    // the first independent WMMA (D#100), whose window no longer overlaps v52.
     const std::vector<std::pair<std::string, int>> expected = {
-        {"wmma", 12}, {"ds", 300},   {"ds", 320},   {"ds", 340},   {"s", 10},     {"s", 13},
-        {"s", 16},    {"wmma", 100}, {"wmma", 116}, {"wmma", 132}, {"wmma", 148}, {"valu", 52},
+        {"wmma", 12}, {"ds", 300},   {"ds", 320},  {"ds", 340},   {"s", 10},     {"s", 13},
+        {"s", 16},    {"wmma", 100}, {"valu", 52}, {"wmma", 116}, {"wmma", 132}, {"wmma", 148},
     };
     EXPECT_EQ(seq, expected)
         << "hazardous VALU (dst v52) must not co-issue inside WMMA D#12's latency window; "
-           "it must be deferred until every independent WMMA has issued";
+           "it must be deferred until that window closes, then issue once a non-overlapping "
+           "WMMA window is open";
 }
 
 // ---------------------------------------------------------------------------
