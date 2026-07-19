@@ -12,9 +12,9 @@ runs on any box with torch + a gfx942 GPU.
 
 The harness:
 
-  1. Loads the canonical shapes we validate from the shipped ``shapes.json``
-     (``--scenario`` selects subsets); these mirror the rocke-provider
-     integration-test net plus the case-study perf shapes.
+  1. Defines shapes inline across three scenario groups (``default`` /
+     ``fmha`` / ``creative``); ``--scenario`` selects subsets by group name
+     or exact shape name, defaulting to all groups.
   2. For each shape, builds the gfx942 tiled-2D kernel via
      ``UnifiedAttention2DTiledSpec`` / ``build_unified_attention_2d_tiled``
      (auto-routes to ``instances/gfx942/attention_tiled_2d.py``), gated by
@@ -37,7 +37,7 @@ Run (needs torch + a gfx942 GPU):
 
     PYTHONPATH=python .venv/bin/python \\
         python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
-        --scenario correctness
+        --scenario default
 
     # force the L4 (WG=64) fallback instead of the default wide4:
     HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python .venv/bin/python \\
@@ -77,7 +77,7 @@ class Shape:
     kv_heads: int  # Hkv
     batch: int  # B
     causal: bool
-    group: str  # "correctness" | "perf" | "decode"
+    group: str  # "default" | "fmha" | "creative"
 
     @property
     def num_queries_per_kv(self) -> int:

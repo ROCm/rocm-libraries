@@ -150,8 +150,6 @@ class AttentionSpec:
     num_query_heads: int
     num_kv_heads: int
     name: str = "rocke_attention_unified"
-    # Pinned codegen knobs from a specialized candidate; None for generic paths.
-    # Stored as a sorted tuple of (key, value) pairs for hashability.
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
