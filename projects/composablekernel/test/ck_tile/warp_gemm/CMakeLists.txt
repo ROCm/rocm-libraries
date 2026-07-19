@@ -21,3 +21,8 @@ if(GPU_TARGETS MATCHES "gfx125")
     add_gtest_executable(test_ck_tile_wmma_bf16f32_16x16x32 test_wmma_bf16f32_16x16x32.cpp)
     add_gtest_executable(test_ck_tile_wg_32x16x128_fp4 test_f32_32x16x128_fp4.cpp)
 endif()
+
+# FP64 MFMA warp gemm test (gfx90a, gfx942, gfx950 only)
+if(GPU_TARGETS MATCHES "gfx90a|gfx94|gfx95")
+    add_gtest_executable(test_ck_tile_wg_f64_16x16x4_mfma test_f64_16x16x4_mfma.cpp)
+endif()
