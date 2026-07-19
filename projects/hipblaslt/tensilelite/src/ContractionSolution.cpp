@@ -1145,6 +1145,27 @@ namespace TensileLite
             }
         }
 
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+
         if(problemType.useScaleAlphaVec == 3 || problemType.useBias == 3)
         {
             args.template append<uint32_t>("factorDim",
@@ -1205,27 +1226,6 @@ namespace TensileLite
             args.template append<const void*>("AmaxWS",
                                               (uint8_t*)inputs.ws + workspaceOffsetInByte);
             args.template append<const void*>("AmaxSync", inputs.Synchronizer);
-        }
-
-        if(problemType.useGateResidual)
-        {
-            if(problemType.stridedBatched)
-                args.template append<void const*>("gateResidual", inputs.gateResidual);
-            else
-                args.template append<void const* const*>("batchGateResidual",
-                                                         inputs.batchGateResidual);
-            bool hasGate = problem.useGateResidual();
-            args.template append<uint32_t>(
-                "gate_type",
-                static_cast<uint32_t>(
-                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
-                            : problemType.gateResidualDataTypeWhiteList.at(0)));
-
-            TensorDescriptor const& gate
-                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
-            for(size_t i = startStrideCD; i < d.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
-                                               hasGate ? gate.strides()[i] : 0);
         }
     }
 
