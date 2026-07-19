@@ -13795,36 +13795,18 @@ class KernelWriterAssembly(KernelWriter):
     module.addSpaceLine()
     return module
 
-  def allocPostLoopSrdSuppressRaw(self, ch: str, chAddress: str, labelStr: str, sgprLength, evenAlignedAddr: bool = True) -> Module:
+  def allocPostLoopSrdSuppressRaw(self, ch: str, chAddress: str, labelStr: str, sgprLength) -> Module:
     module = Module("allocPostLoopSrdSuppress")
-    label  = Label("%sAddrValid"%labelStr, "")
-    label2 = Label("%sAddrValid_End"%labelStr, "")
-    # Set SRD base pointer. evenAlignedAddr=False uses 32-bit ops instead of
-    # s_mov_b64/s_cmp_eq_u64, which require an even-aligned AddressX pair.
-    if evenAlignedAddr:
-      module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%chAddress, 2), comment="init SRD base address" ))
-      module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
-      module.add(BranchIfNotZero("Address%s"%chAddress, DataType('int64').toEnum(), label))
-    else:
-      # 32-bit base init (odd-aligned safe): copy lo/hi halves independently.
-      module.add(SMovB32(dst=sgpr("Srd%s+0"%ch), src=sgpr("Address%s+0"%chAddress), comment="init SRD base address (lo, unaligned-safe)" ))
-      module.add(SMovB32(dst=sgpr("Srd%s+1"%ch), src=sgpr("Address%s+1"%chAddress), comment="init SRD base address (hi, unaligned-safe)" ))
-      module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
-      # Address != 0 (64-bit) without s_cmp_eq_u64: branch to valid if either half is nonzero.
-      module.add(SCmpEQU32(src0=sgpr("Address%s+0"%chAddress), src1=0, comment="Address%s lo == 0 ?"%chAddress))
-      module.add(SCBranchSCC0(label.getLabelName(), "branch if Address%s lo != 0"%chAddress))
-      module.add(SCmpEQU32(src0=sgpr("Address%s+1"%chAddress), src1=0, comment="Address%s hi == 0 ?"%chAddress))
-      module.add(SCBranchSCC0(label.getLabelName(), "branch if Address%s hi != 0"%chAddress))
-    module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=0))
-    module.add(SBranch(label2.getLabelName()))
-    module.add(label)
-    module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=sgprLength))
-    module.add(label2)
+    # Srd+2 (num_records) = (Address == 0) ? 0 : sgprLength via s_cselect.
+    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%chAddress, 2), comment="init SRD base address" ))
+    module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
+    module.add(SCmpEQU64(src0=sgpr("Address%s+0"%chAddress, 2), src1=0, comment="Address%s == 0 (null) ?"%chAddress))
+    module.add(SCSelectB32(dst=sgpr("Srd%s+2"%ch), src0=0, src1=sgprLength, comment="num_records = (Address == 0) ? 0 : len"))
     module.addSpaceLine()
     return module
 
-  def allocPostLoopSrdSuppress(self, ch: str, labelStr: str, sgprLength, evenAlignedAddr: bool = True) -> Module:
-    return self.allocPostLoopSrdSuppressRaw(ch, ch, labelStr, sgprLength, evenAlignedAddr=evenAlignedAddr)
+  def allocPostLoopSrdSuppress(self, ch: str, labelStr: str, sgprLength) -> Module:
+    return self.allocPostLoopSrdSuppressRaw(ch, ch, labelStr, sgprLength)
 
   ##############################################################################
   # Not LocalSplitU: Global Write Indices
@@ -15536,8 +15518,11 @@ class KernelWriterAssembly(KernelWriter):
                                src1=sgpr("GateStride+0"),
                                comment="finalize coutRowPtrGate = row * GateStride+0"))
         labelGateStr = self.labels.getNameInc("Gate")
-        gateAddrEven = (self.sgprs.get("AddressGate", 0) % 2 == 0)
-        module.add(self.allocPostLoopSrdSuppress("Gate", labelGateStr, "BufferOOB", evenAlignedAddr=gateAddrEven))
+        module.add(self.allocPostLoopSrdSuppress("Gate", labelGateStr, "BufferOOB"))
+        # s = gate null ? 1.0 : 0.0. FMA does acc = (gate+s)*acc + gate.
+        # No separate compare needed: allocPostLoopSrdSuppress leaves SCC = (AddressGate == 0)
+        # module.add(self.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate null? (SrdGate num_records==0)"))
+        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=hex(0x3f800000), src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
         module.add(self.shiftSrd("Gate"))
         ssslist.append("Gate")
         useSize.append(False)
@@ -15545,10 +15530,6 @@ class KernelWriterAssembly(KernelWriter):
       if ssslist:
         module.add(self.computeStoreSrdStart(kernel, ssslist, useSize=useSize, noMultipleBuffer=True))
 
-      # s = gate null ? 1.0 : 0.0. FMA does acc = (gate+s)*acc + gate.
-      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
-        module.add(self.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate null? (SrdGate num_records==0)"))
-        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=hex(0x3f800000), src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
 
       '''
       Post process for loop end
