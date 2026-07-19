@@ -1265,6 +1265,8 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
+    // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
+    activeWmmaNode_ = nullptr;
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
     const Loop* loop = getLoop();
