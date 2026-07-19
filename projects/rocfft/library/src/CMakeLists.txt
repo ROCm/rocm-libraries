@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,15 +54,7 @@ endfunction()
 
 add_executable( rocfft_rtc_helper rocfft_rtc_helper.cpp )
 
-# each backend requires different libraries for host and device code
-if( USE_CUDA )
-  set( ROCFFT_HOST_LINK_LIBS -lcuda )
-  set( ROCFFT_RTC_LINK_LIBS -lnvrtc -lnvrtc-builtins -lnvptxcompiler_static )
-else()
-  set( ROCFFT_HOST_LINK_LIBS hip::host )
-  set( ROCFFT_DEVICE_LINK_LIBS hip::device )
-  set( ROCFFT_RTC_LINK_LIBS hiprtc::hiprtc )
-endif()
+set( ROCFFT_HOST_LINK_LIBS hip::host )
 
 if( ROCFFT_MPI_ENABLE )
   set( ROCFFT_HOST_LINK_LIBS "${ROCFFT_HOST_LINK_LIBS}" "MPI::MPI_CXX" )
@@ -372,7 +364,7 @@ foreach( target
   if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
     target_compile_options( ${target} PRIVATE -Og )
   endif()
-  target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} ${ROCFFT_RTC_LINK_LIBS} )
+  target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} hiprtc::hiprtc )
   rocfft_add_coverage_flags( ${target} )
   target_link_directories( ${target} PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
@@ -459,7 +451,7 @@ if( NOT BUILD_SHARED_LIBS )
   target_link_directories( rocfft PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 endif()
 
-target_link_libraries( rocfft PRIVATE ${ROCFFT_DEVICE_LINK_LIBS} )
+target_link_libraries( rocfft PRIVATE hip::device )
 
 foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_helper rocfft_kernel_config_search )
 
@@ -533,7 +525,7 @@ target_link_std_experimental_filesystem( rocfft_aot_helper )
  # build executable rocfft-offline-tuner
 if( ROCFFT_BUILD_OFFLINE_TUNER )
   target_link_libraries( rocfft_offline_tuner PRIVATE
-    ${ROCFFT_DEVICE_LINK_LIBS}
+    hip::device
     rocfft
     generator
     rocfft-function-pool
