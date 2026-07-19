@@ -316,7 +316,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::pair<DAGNode*, int> findMostReadyWMMA();
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
     bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
-    bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
+
     bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
     DAGNode* extractForcedBarrier();
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> computeBarrierAfterThresholds(
@@ -560,26 +560,6 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     stampDataReady(*node->inst);
     touchOperands(*node->inst);
     return node;
-}
-
-// True if issuing \p node now would risk a hazard: while the WMMA that opened the current
-// latency window is still in flight, \p node's dest VGPRs overlap that WMMA's src VGPRs, so
-// the write could clobber a source the WMMA is still reading. Applies to any writer whose
-// dest could alias the active WMMA's srcs (e.g. a ds_load dest or a VALU dest).
-bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
-    if (node == nullptr || activeWmmaNode_ == nullptr) return false;
-    // Only relevant while the WMMA latency window is still active.
-    if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
-
-    for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
-        if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
-        for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
-            if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
-            // isOverlap already requires the same register class before checking indices.
-            if (dstReg.isOverlap(srcReg)) return true;
-        }
-    }
-    return false;
 }
 
 // Pick minimum DAG id among ready non-WMMA nodes.
