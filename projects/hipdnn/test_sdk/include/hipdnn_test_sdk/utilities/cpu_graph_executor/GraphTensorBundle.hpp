@@ -128,12 +128,11 @@ struct GraphTensorBundle
         }
     }
 
-private:
-    std::unordered_set<int64_t> _runtimePassByValueTensorIds;
-
-public:
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
     std::unordered_set<int64_t> outputTensorIds;
+
+private:
+    std::unordered_set<int64_t> _runtimePassByValueTensorIds;
 };
 
 }

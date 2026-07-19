@@ -388,8 +388,11 @@ std::unordered_map<int64_t, void*>
         {
             continue;
         }
-        variantPack[uid] = hipdnn_test_sdk::utilities::variantPackData(
-            *tensor, useDevice, tensorAttrMap.at(uid)->is_runtime_pass_by_value());
+        const auto attrIt = tensorAttrMap.find(uid);
+        const bool isRuntimePassByValue
+            = attrIt != tensorAttrMap.end() && attrIt->second->is_runtime_pass_by_value();
+        variantPack[uid]
+            = hipdnn_test_sdk::utilities::variantPackData(*tensor, useDevice, isRuntimePassByValue);
     }
     for(auto& [uid, tensor] : outputs)
     {

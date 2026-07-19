@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
@@ -244,6 +245,7 @@ std::shared_ptr<IntegrationTestBundle> makeRuntimePassByValueBundle()
 
 TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
 {
+    SKIP_IF_NO_DEVICES();
     TestableHarness harness([](std::unordered_map<int64_t, void*>&) {}, /*requiresDevice=*/true);
     auto bundle = makeRuntimePassByValueBundle();
     auto* expectedHostPointer = bundle->tensors->at(1)->rawHostData();
@@ -254,7 +256,7 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
 
     ASSERT_EQ(variantPack.at(1), expectedHostPointer);
     EXPECT_FLOAT_EQ(*static_cast<const float*>(variantPack.at(1)), 0.01f);
-    EXPECT_NE(variantPack.at(2), outputs.at(2)->rawHostData());
+    EXPECT_EQ(variantPack.at(2), outputs.at(2)->rawDeviceData());
 }
 } // namespace
 
