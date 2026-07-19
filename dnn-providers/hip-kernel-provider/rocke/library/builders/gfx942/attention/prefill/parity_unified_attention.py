@@ -125,7 +125,7 @@ def default_scenarios() -> List[Shape]:
     """Core production scenarios adapted from the gfx950 default set.
 
     Sliding-window / softcap / ALiBi / QQ-bias / sinks scenarios are dropped
-    (unsupported on the gfx942 SDPA-fwd net). Decode shapes (seqlen_q == 1)
+    (the harness's torch reference is causal-only, not a kernel limitation).
     are included; they exercise the T=64 single-query path.
     Non-uniform seq_lens from the gfx950 mixed/prefill scenarios are split
     into one Shape per unique (q, k) pair.
