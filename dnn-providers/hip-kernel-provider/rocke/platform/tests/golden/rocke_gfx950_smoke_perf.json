@@ -19,14 +19,14 @@
       "unit": "ms"
     },
     "conv_fwd_bf16_gfx950_N8H56W56C64K64R3S3": {
-      "baseline": 0.0,
+      "baseline": 116.0,
       "direction": "higher_is_better",
       "metric": "best_tflops",
       "min_fraction": 0.85,
       "unit": "TFLOP/s"
     },
     "conv_fwd_fp32_gfx950_N8H56W56C64K64R3S3": {
-      "baseline": 0.0,
+      "baseline": 57.1,
       "direction": "higher_is_better",
       "metric": "best_tflops",
       "min_fraction": 0.85,
