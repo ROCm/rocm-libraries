@@ -27,9 +27,14 @@ using namespace common;
 namespace
 {
 
-template <typename DataType, typename IntermediateType, typename TestCaseType>
+template <typename InputDataType,
+          typename OutputDataType,
+          typename ScaleDataType = float,
+          typename MeanVarDataType = float,
+          typename ComputeDataType = float>
 class BatchnormForwardInferenceWithVarianceAndActivation
-    : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
+    : public IntegrationGraphVerificationHarness<InputDataType,
+                                                 std::tuple<BatchnormTestCase, ActivTestCase>>
 {
 protected:
     void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
@@ -57,7 +62,7 @@ protected:
         }
     }
 
-    void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
+    void runGraphTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         const auto& [testCase, activeCase] = this->GetParam();
 
@@ -67,31 +72,34 @@ protected:
 
         graphObj.set_name("BatchnormInferenceWithVarianceAndActivationTest");
 
-        auto dataType = getDataTypeEnumFromType<DataType>();
-        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        auto inputDataType = getDataTypeEnumFromType<InputDataType>();
+        auto computeDataType = getDataTypeEnumFromType<ComputeDataType>();
+        auto intermediateDataType = hipdnn_frontend::DataType::FLOAT;
         graphObj.set_intermediate_data_type(intermediateDataType)
-            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
-            .set_io_data_type(dataType);
+            .set_compute_data_type(computeDataType)
+            .set_io_data_type(inputDataType);
 
         auto xAttr = makeTensorAttributes(
-            "X", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "X", inputDataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
+        auto meanVarDataType = getDataTypeEnumFromType<MeanVarDataType>();
         auto meanAttr = makeTensorAttributes(
-            "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "mean", meanVarDataType, derivedDims, generateStrides(derivedDims));
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
         auto varianceAttr = makeTensorAttributes(
-            "variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "variance", meanVarDataType, derivedDims, generateStrides(derivedDims));
         _varianceTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(varianceAttr));
 
+        auto scaleDataType = getDataTypeEnumFromType<ScaleDataType>();
         auto scaleAttr = makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "scale", scaleDataType, derivedDims, generateStrides(derivedDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr = makeTensorAttributes(
-            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "bias", scaleDataType, derivedDims, generateStrides(derivedDims));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         // Epsilon (pass-by-value)
@@ -138,9 +146,11 @@ protected:
         }
 
         auto outTensorAttr = graphObj.pointwise(yTensorAttr, pointwiseAttrs);
+        auto outputDataType = getDataTypeEnumFromType<OutputDataType>();
         outTensorAttr->set_output(true);
+        outTensorAttr->set_data_type(outputDataType);
 
-        this->registerValidator(outTensorAttr, tolerance);
+        this->registerValidator(outTensorAttr, getToleranceInferenceWithVariance<OutputDataType>());
 
         this->verifyGraph(graphObj, testCase.seed);
     }
@@ -148,90 +158,91 @@ protected:
     std::shared_ptr<graph::TensorAttributes> _varianceTensorAttr;
 };
 
+// ============================================================================
 // NCHW layouts
+// ============================================================================
+
+// Input: float, Output: float, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp32
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        float,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<float, float>;
+// Input: bfloat16, Output: bfloat16, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwBfp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        bfloat16,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, bfloat16>;
+// Input: bfloat16, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastBfp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, float>;
+// Input: half, Output: half, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        half,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, half>;
+// Input: half, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastFp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, float>;
 
+// ============================================================================
 // NHWC layouts
+// ============================================================================
+
+// Input: float, Output: float, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp32
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        float,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<float, float>;
+// Input: bfloat16, Output: bfloat16, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcBfp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        bfloat16,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, bfloat16>;
+// Input: bfloat16, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastBfp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, float>;
+// Input: half, Output: half, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        half,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, half>;
+// Input: half, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastFp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, float>;
 
-// 5D layouts
+// ============================================================================
+// NCDHW layouts
+// ============================================================================
+
+// Input: float, Output: float, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwFp32
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        float,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<float, float>;
+// Input: bfloat16, Output: bfloat16, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwBfp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        bfloat16,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, bfloat16>;
+// Input: bfloat16, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwUpcastBfp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, float>;
+// Input: half, Output: half, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwFp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        half,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, half>;
+// Input: half, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwUpcastFp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, float>;
 
+// ============================================================================
+// NDHWC layouts
+// ============================================================================
+
+// Input: float, Output: float, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp32
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        float,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<float, float>;
+// Input: bfloat16, Output: bfloat16, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcBfp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        bfloat16,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
-
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, bfloat16>;
+// Input: bfloat16, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcUpcastBfp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<bfloat16, float>;
+// Input: half, Output: half, Scale: float, Mean: float, Compute: float
 using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp16
-    = BatchnormForwardInferenceWithVarianceAndActivation<
-        half,
-        float,
-        std::tuple<BatchnormTestCase, ActivTestCase>>;
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, half>;
+// Input: half, Output: float, Scale: float, Mean: float, Compute: float
+using IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcUpcastFp16
+    = BatchnormForwardInferenceWithVarianceAndActivation<half, float>;
 
 } // namespace
 
-// ============================================================================
-// NCHW FP32
-// ============================================================================
-
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp32, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<float>(), TensorLayout::NCHW);
+    runGraphTest(TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -243,14 +254,10 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp32,
                          testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                                           testing::ValuesIn(createFwdActivationFullCases())));
-
-// ============================================================================
-// NCHW BFP16
-// ============================================================================
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwBfp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -263,13 +270,26 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                                           testing::ValuesIn(createFwdActivationFullCases())));
 
-// ============================================================================
-// NCHW FP16
-// ============================================================================
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceTestCases()),
+                     testing::ValuesIn(createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
+                     testing::ValuesIn(createFwdActivationFullCases())));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwFp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<half>(), TensorLayout::NCHW);
+    runGraphTest(TensorLayout::NCHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -282,13 +302,26 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                                           testing::ValuesIn(createFwdActivationFullCases())));
 
-// ============================================================================
-// NHWC FP32
-// ============================================================================
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceTestCases()),
+                     testing::ValuesIn(createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNchwUpcastFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
+                     testing::ValuesIn(createFwdActivationFullCases())));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp32, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<float>(), TensorLayout::NHWC);
+    runGraphTest(TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -300,14 +333,10 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp32,
                          testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                                           testing::ValuesIn(createFwdActivationFullCases())));
-
-// ============================================================================
-// NHWC BFP16
-// ============================================================================
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcBfp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -320,13 +349,26 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                                           testing::ValuesIn(createFwdActivationFullCases())));
 
-// ============================================================================
-// NHWC FP16
-// ============================================================================
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastBfp16, Correctness)
+{
+    runGraphTest(TensorLayout::NHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceTestCases()),
+                     testing::ValuesIn(createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
+                     testing::ValuesIn(createFwdActivationFullCases())));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcFp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<half>(), TensorLayout::NHWC);
+    runGraphTest(TensorLayout::NHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -339,13 +381,26 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
                                           testing::ValuesIn(createFwdActivationFullCases())));
 
-// ============================================================================
-// NCDHW FP32 (5D)
-// ============================================================================
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceTestCases()),
+                     testing::ValuesIn(createFwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNhwcUpcastFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInferenceFullTestCases()),
+                     testing::ValuesIn(createFwdActivationFullCases())));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwFp32, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<float>(), TensorLayout::NCDHW);
+    runGraphTest(TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -353,13 +408,9 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
                                           testing::ValuesIn(createFwdActivationSmokeCases())));
 
-// ============================================================================
-// NCDHW BFP16 (5D)
-// ============================================================================
-
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwBfp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -367,13 +418,21 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
                                           testing::ValuesIn(createFwdActivationSmokeCases())));
 
-// ============================================================================
-// NCDHW FP16 (5D)
-// ============================================================================
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwUpcastBfp16,
+       Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwUpcastBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
+                     testing::ValuesIn(createFwdActivationSmokeCases())));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwFp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<half>(), TensorLayout::NCDHW);
+    runGraphTest(TensorLayout::NCDHW);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -381,13 +440,20 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
                                           testing::ValuesIn(createFwdActivationSmokeCases())));
 
-// ============================================================================
-// NDHWC FP32 (5D)
-// ============================================================================
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwUpcastFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NCDHW);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNcdhwUpcastFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
+                     testing::ValuesIn(createFwdActivationSmokeCases())));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp32, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<float>(), TensorLayout::NDHWC);
+    runGraphTest(TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -395,13 +461,9 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
                                           testing::ValuesIn(createFwdActivationSmokeCases())));
 
-// ============================================================================
-// NDHWC BFP16 (5D)
-// ============================================================================
-
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcBfp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
@@ -409,18 +471,37 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
                                           testing::ValuesIn(createFwdActivationSmokeCases())));
 
-// ============================================================================
-// NDHWC FP16 (5D)
-// ============================================================================
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcUpcastBfp16,
+       Correctness)
+{
+    runGraphTest(TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcUpcastBfp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
+                     testing::ValuesIn(createFwdActivationSmokeCases())));
 
 TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp16, Correctness)
 {
-    runGraphTest(getToleranceInferenceWithVariance<half>(), TensorLayout::NDHWC);
+    runGraphTest(TensorLayout::NDHWC);
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcFp16,
+    testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+TEST_P(IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcUpcastFp16, Correctness)
+{
+    runGraphTest(TensorLayout::NDHWC);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivationNdhwcUpcastFp16,
     testing::Combine(testing::ValuesIn(getBnFwdInference3dTestCases()),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 

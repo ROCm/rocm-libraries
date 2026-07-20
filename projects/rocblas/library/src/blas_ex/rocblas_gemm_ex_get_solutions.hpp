@@ -24,6 +24,9 @@
 
 #ifdef BUILD_WITH_TENSILE
 #include "../blas3/Tensile/gemm_tensile.hpp"
+#elif defined(BUILD_WITH_HIPBLASLT)
+#include "hipblaslt_host.hpp"
+#include "tensile_host.hpp"
 #endif
 
 #include "../blas3/rocblas_gemm.hpp"
@@ -94,7 +97,11 @@ rocblas_status gemm_ex_get_solutions_typecasting(rocblas_handle                 
                                                       batch_count,
                                                       false,
                                                       flags};
+#if defined(BUILD_WITH_TENSILE)
         return getAllSolutions(problem, option, list_array, list_size);
+#elif defined(BUILD_WITH_HIPBLASLT)
+        return getAllSolutionsHipBlasLT(problem, option, list_array, list_size);
+#endif
     }
     else
     {
@@ -129,7 +136,11 @@ rocblas_status gemm_ex_get_solutions_typecasting(rocblas_handle                 
                                                       batch_count,
                                                       true,
                                                       flags};
+#if defined(BUILD_WITH_TENSILE)
         return getAllSolutions(problem, option, list_array, list_size);
+#elif defined(BUILD_WITH_HIPBLASLT)
+        return getAllSolutionsHipBlasLT(problem, option, list_array, list_size);
+#endif
     }
 }
 

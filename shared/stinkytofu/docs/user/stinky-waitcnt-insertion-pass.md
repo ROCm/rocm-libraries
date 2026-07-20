@@ -21,7 +21,7 @@ Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_loa
 | `CounterKind` | Covers | Wait instruction | Modifier field |
 |---------------|--------|------------------|----------------|
 | `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` |
-| `CK_Buffer` | global/buffer load + store | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` |
+| `CK_Buffer` | global/buffer load + store, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` |
 | `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt N` | `SWaitCntData.kmcnt` |
 | `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` |
 
