@@ -24,6 +24,8 @@ add_executable(hipdnn_plugin_sdk_tests
     TestKnobSettingFactory.cpp
     TestSdkLogging.cpp
     TestVersion.cpp
+    TestPluginDeviceBuffers.cpp
+    TestRuntimePassByValue.cpp
 )
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
@@ -39,4 +41,4 @@ target_link_libraries(
 )
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
-add_unit_test_target(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})

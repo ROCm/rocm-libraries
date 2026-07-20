@@ -271,11 +271,11 @@ std::vector<hipdnnBackendBehaviorNote_t> _behaviorNotes;
 
 - Add `get_behavior_notes_for_engine()`.
 
-`python/src/types_bindings.cpp`
+`python/frontend_bindings/src/types_bindings.cpp`
 
 - Bind `BehaviorNote`.
 
-`python/src/graph_bindings.cpp`
+`python/frontend_bindings/src/graph_bindings.cpp`
 
 - Bind `Graph.get_behavior_notes_for_engine(engine_id)`.
 
