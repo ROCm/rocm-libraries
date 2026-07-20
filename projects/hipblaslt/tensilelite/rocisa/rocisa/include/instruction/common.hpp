@@ -4471,6 +4471,94 @@ namespace rocisa
         }
     };
 
+    // v_pk_mul_f32 (VOP3P, op 0x28). The FMHA kernel needs this in the op_sel_hi:[0,1,1]
+    // form (word1 hi byte 0x18) in two shapes amdclang won't reproduce from mnemonic text:
+    //   (1) an SGPR src1 (the softmax log2e scale) -- rejected outright ("invalid op_sel
+    //       operand"), like VPkFmaF32; and
+    //   (2) a VGPR src1 with op_sel_hi:[0,1,1] -- amdclang assembles it to a DIFFERENT
+    //       op_sel encoding (word0 bit14 set, op_sel_hi text "[0,1]"), not the golden.
+    // Both golden encodings share word1 |= 0x18000000. So toString() emits the raw .long
+    // encoding whenever the resolved op_sel_hi is [0,1,1] (implicit for SGPR src1, which
+    // is only ever this form here; explicit via the vop3 modifier for the VGPR form), and
+    // the normal mnemonic otherwise (a plain VGPR src1 assembles disasm-equal, as the
+    // shipped _VMulPKF32 path proves). This lets the emitter author a typed instruction
+    // node (no bare RawNode). Same conditional-raw-lowering precedent as VPkFmaF32,
+    // mirroring vop_encode.pk_mul_f32.
+    struct VPkMulF32 : public CommonInstruction
+    {
+        VPkMulF32(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<VOP3PModifiers>     vop3    = std::nullopt,
+                  const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
+        {
+            setInst("v_pk_mul_f32");
+        }
+
+        VPkMulF32(const VPkMulF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPkMulF32>(*this);
+        }
+
+        // VOP3/VOP3P src field value: VGPR n -> 256 + n, SGPR n -> n.
+        static int srcField(const InstructionInput& in)
+        {
+            auto reg = std::get<std::shared_ptr<Container>>(in);
+            auto rc  = std::dynamic_pointer_cast<RegisterContainer>(reg);
+            return rc->regType == "v" ? 256 + rc->regIdx : rc->regIdx;
+        }
+
+        static bool isSgpr(const InstructionInput& in)
+        {
+            if(!std::holds_alternative<std::shared_ptr<Container>>(in))
+            {
+                return false;
+            }
+            auto rc = std::dynamic_pointer_cast<RegisterContainer>(
+                std::get<std::shared_ptr<Container>>(in));
+            return rc && rc->regType == "s";
+        }
+
+        bool wantsRawOpSelHi011() const
+        {
+            if(srcs.size() != 2)
+            {
+                return false;
+            }
+            if(isSgpr(srcs[1]))
+            {
+                return true;   // SGPR src1 packed is only ever the [0,1,1] form here
+            }
+            return vop3 && vop3->op_sel_hi == std::vector<int>{0, 1, 1};
+        }
+
+        std::string toString() const override
+        {
+            // The op_sel_hi:[0,1,1] packed-mul encoding is not reproducible from mnemonic
+            // text; emit the raw two-word encoding directly (byte-identical to the golden).
+            if(wantsRawOpSelHi011())
+            {
+                auto dstRc = std::dynamic_pointer_cast<RegisterContainer>(dst);
+                uint32_t d  = static_cast<uint32_t>(dstRc->regIdx);
+                uint32_t s0 = static_cast<uint32_t>(srcField(srcs[0]));
+                uint32_t s1 = static_cast<uint32_t>(srcField(srcs[1]));
+                uint32_t word0 = 0xCC280000u | d;
+                uint32_t word1 = 0x18000000u | s0 | (s1 << 9);
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "    .long 0x%08x\n    .long 0x%08x", word0, word1);
+                return formatWithComment(std::string(buf));
+            }
+            return CommonInstruction::toString();
+        }
+    };
+
     struct VMulLOU32 : public CommonInstruction
     {
         VMulLOU32(const std::shared_ptr<Container>& dst,
