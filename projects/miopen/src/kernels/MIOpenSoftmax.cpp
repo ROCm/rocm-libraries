@@ -21,12 +21,15 @@ struct array
     T data[N];
 };
 
+// The number of elements of T that fit inside of load_t (i.e. int4)
 template <typename T>
 constexpr static unsigned int load_factor = sizeof(load_t) / sizeof(T);
 
+// The largest possible array of elements of T that fit inside of load_t (i.e. int4)
 template <typename T>
 using vec_t = array<T, load_factor<T>>;
 
+// Load up to load_factor elements from src into a vec_t, doing a vectorised load if possible
 template <typename T,
           bool DEFAULT_NEGATIVE_CUTOFF_VAL = false,
           unsigned int BOUND               = INNER_SIZE,
@@ -61,6 +64,7 @@ load(unsigned int i, const unsigned int i_offset, const T* __restrict__ src)
     }
 }
 
+// Store up to load_factor elements into dst from a vec_t, doing a vectorized store if possible
 template <typename T, unsigned int BOUND = INNER_SIZE, unsigned int I_STRIDE = STRIDE>
 __forceinline__ __device__ static void
 store(unsigned int i, const unsigned int i_offset, T* __restrict__ dst, vec_t<T>& data)
@@ -82,6 +86,7 @@ store(unsigned int i, const unsigned int i_offset, T* __restrict__ dst, vec_t<T>
     }
 }
 
+// Calculate log(exp(x) + exp(y))
 template <typename T>
 __device__ T logaddexp(T x, T y)
 {
@@ -95,6 +100,7 @@ __device__ T logaddexp(T x, T y)
                                        : max(T{a + log(T{1} + exp(c))}, NEGATIVE_CUTOFF_VAL<T>);
 }
 
+// Perform a reduction of function across the entire array
 template <int ARRAY_SIZE, typename FUNCTION>
 __device__ void reduce(FLOAT_ACCUM array[ARRAY_SIZE],
                        const unsigned int lid,
@@ -115,6 +121,7 @@ __device__ void reduce(FLOAT_ACCUM array[ARRAY_SIZE],
     }
 }
 
+// Perform a reduction of function across blocks of the array
 template <int ARRAY_SIZE, int BLOCK_SIZE, typename FUNCTION>
 __device__ void reduce_block(FLOAT_ACCUM array[ARRAY_SIZE],
                              const unsigned int lid,
@@ -170,6 +177,9 @@ constexpr struct
     }
 } reduce_max;
 
+// Perform a loop of lambda given a bound, a step and an offset lid
+// This loop is mostly known on compile time, in contrast to
+// for(int i = lid; i < BOUND; i += step)
 template <int BOUND, int STEP, typename LAMBDA>
 __device__ void loop(const unsigned int lid, LAMBDA&& lambda)
 {
@@ -185,6 +195,8 @@ __device__ void loop(const unsigned int lid, LAMBDA&& lambda)
     }
 }
 
+// Obtain the indices gid, offset and stride for CSR-vector from blockIdx depending on an indexing
+// mode
 __forceinline__ __device__ void get_indices(unsigned int& gid, unsigned int& o, unsigned int& s)
 {
     if constexpr(SEPARATE_STRIDE)
@@ -201,6 +213,8 @@ __forceinline__ __device__ void get_indices(unsigned int& gid, unsigned int& o, 
     }
 }
 
+// Obtain the indices gid, offset and stride for CSR-stream from blockIdx depending on an indexing
+// mode
 __forceinline__ __device__ void
 get_indices_stream(unsigned int& o, unsigned int& s, const unsigned int batch)
 {
@@ -214,6 +228,193 @@ get_indices_stream(unsigned int& o, unsigned int& s, const unsigned int batch)
         o = (NUM_BATCH * blockIdx.x + batch) / STRIDE;
         s = (NUM_BATCH * blockIdx.x + batch) % STRIDE;
     }
+}
+
+// Deduplicated operations needed at multiple points in the kernels
+
+template <typename T>
+__forceinline__ __device__ void max_operation(const T& x, FLOAT_ACCUM& tmp)
+{
+    tmp = max(CVT_FLOAT2ACCUM(x), tmp);
+}
+
+template <typename T>
+__forceinline__ __device__ void
+max_batch_operation(const T& x, FLOAT_ACCUM& x_value, unsigned int& index, FLOAT_ACCUM& tmp)
+{
+    x_value = CVT_FLOAT2ACCUM(x);
+    if constexpr(!USE_SOFTMAX_FAST)
+    {
+        tmp = max(x_value, tmp);
+    }
+    ++index;
+}
+
+template <typename T>
+__forceinline__ __device__ void
+sum_exp_operation(const T& x, const FLOAT_ACCUM& channel_max, FLOAT_ACCUM& tmp)
+{
+    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x) - channel_max;
+    if constexpr(USE_SOFTMAX_LOG)
+    {
+        tmp = logaddexp(value, tmp);
+    }
+    else
+    {
+        tmp += exp(value);
+    }
+}
+
+__forceinline__ __device__ void sum_exp_batch_operation(FLOAT_ACCUM& x_value,
+                                                        const FLOAT_ACCUM& channel_max,
+                                                        unsigned int& index,
+                                                        FLOAT_ACCUM& tmp)
+{
+    FLOAT_ACCUM value = x_value - channel_max;
+    if constexpr(USE_SOFTMAX_LOG)
+    {
+        tmp = logaddexp(tmp, value);
+    }
+    else
+    {
+        value = exp(value);
+        tmp += value;
+    }
+    if constexpr(!USE_SOFTMAX_FAST || !USE_SOFTMAX_LOG)
+    {
+        x_value = value;
+    }
+    ++index;
+}
+
+template <typename T>
+__forceinline__ __device__ void softmax_fwd_operation(const T& x,
+                                                      T& y,
+                                                      const FLOAT_ACCUM& channel_max,
+                                                      const FLOAT_ACCUM& channel_sum,
+                                                      const float& alpha,
+                                                      const float& beta)
+{
+    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x) - channel_max;
+    if constexpr(USE_SOFTMAX_LOG)
+    {
+        value -= channel_sum;
+    }
+    else
+    {
+        value = exp(value) * channel_sum;
+    }
+    value = value * CVT_FP32_2ACCUM(alpha);
+    if constexpr(!ZERO_BETA)
+    {
+        value += CVT_FLOAT2ACCUM(y) * CVT_FP32_2ACCUM(beta);
+    }
+    y = CVT_ACCUM2FLOAT(value);
+}
+
+template <typename T>
+__forceinline__ __device__ void softmax_fwd_batch_operation(FLOAT_ACCUM& x_value,
+                                                            T& y,
+                                                            const FLOAT_ACCUM& channel_sum,
+                                                            const float& alpha,
+                                                            const float& beta,
+                                                            unsigned int& index)
+{
+    if constexpr(USE_SOFTMAX_LOG)
+    {
+        x_value -= channel_sum;
+    }
+    else
+    {
+        x_value *= channel_sum;
+    }
+    x_value = x_value * CVT_FP32_2ACCUM(alpha);
+    if constexpr(!ZERO_BETA)
+    {
+        x_value += CVT_FLOAT2ACCUM(y) * CVT_FP32_2ACCUM(beta);
+    }
+    y = CVT_ACCUM2FLOAT(x_value);
+    ++index;
+}
+
+template <typename T>
+__forceinline__ __device__ void sum_dot_operation(const T& dy, const T& y, FLOAT_ACCUM& channel_dot)
+{
+    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy);
+    if constexpr(!USE_SOFTMAX_LOG)
+    {
+        value *= CVT_FLOAT2ACCUM(y);
+    }
+    channel_dot += value;
+}
+
+template <typename T>
+__forceinline__ __device__ void sum_dot_batch_operation(const T& dy,
+                                                        FLOAT_ACCUM& dy_value,
+                                                        const T& y,
+                                                        FLOAT_ACCUM& y_value,
+                                                        FLOAT_ACCUM& channel_dot,
+                                                        unsigned int& index)
+{
+    dy_value = CVT_FLOAT2ACCUM(dy);
+    y_value  = CVT_FLOAT2ACCUM(y);
+    if constexpr(!USE_SOFTMAX_LOG)
+    {
+        dy_value *= y_value;
+    }
+    channel_dot += dy_value;
+    ++index;
+}
+
+template <typename T>
+__forceinline__ __device__ void softmax_bwd_operation(const T& dy,
+                                                      const T& y,
+                                                      T& dx,
+                                                      const FLOAT_ACCUM& channel_dot,
+                                                      const float& alpha,
+                                                      const float& beta)
+{
+    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy);
+    if constexpr(USE_SOFTMAX_LOG)
+    {
+        value -= channel_dot * exp(CVT_FLOAT2ACCUM(y));
+    }
+    else
+    {
+        value = (value - channel_dot) * CVT_FLOAT2ACCUM(y);
+    }
+    value = value * CVT_FP32_2ACCUM(alpha);
+    if constexpr(!ZERO_BETA)
+    {
+        value += CVT_FLOAT2ACCUM(dx) * CVT_FP32_2ACCUM(beta);
+    }
+    dx = CVT_ACCUM2FLOAT(value);
+}
+
+template <typename T>
+__forceinline__ __device__ void softmax_bwd_batch_operation(FLOAT_ACCUM& dy_value,
+                                                            const FLOAT_ACCUM& y_value,
+                                                            T& dx,
+                                                            const FLOAT_ACCUM& channel_dot,
+                                                            const float& alpha,
+                                                            const float& beta,
+                                                            unsigned int& index)
+{
+    if constexpr(USE_SOFTMAX_LOG)
+    {
+        dy_value -= channel_dot * exp(y_value);
+    }
+    else
+    {
+        dy_value -= channel_dot * y_value;
+    }
+    FLOAT_ACCUM value = dy_value * CVT_FP32_2ACCUM(alpha);
+    if constexpr(!ZERO_BETA)
+    {
+        value += CVT_FLOAT2ACCUM(dx) * CVT_FP32_2ACCUM(beta);
+    }
+    dx = CVT_ACCUM2FLOAT(value);
+    ++index;
 }
 
 template <typename T>
@@ -234,6 +435,8 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         {
             if constexpr(VECTORIZED)
             {
+                // Find the maximum value in a block of x with vectorised loading and double
+                // buffering
                 unsigned int i = lid * load_factor<T>;
                 auto xdata     = load<T, true>(i, offset + X_OFFSET, x);
                 i += LOCAL_SIZE * load_factor<T>;
@@ -243,23 +446,25 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
                     for(int k = 0; k < load_factor<T>; ++k)
                     {
-                        tmp = max(CVT_FLOAT2ACCUM(xdata.data[k]), tmp);
+                        max_operation(xdata.data[k], tmp);
                     }
                     xdata = xtmp;
                 }
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    tmp = max(CVT_FLOAT2ACCUM(xdata.data[k]), tmp);
+                    max_operation(xdata.data[k], tmp);
                 }
             }
             else
             {
+                // Find the maximum value in a block of x
                 loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
                     auto x_idx = i * STRIDE + offset + X_OFFSET;
-                    tmp        = max(CVT_FLOAT2ACCUM(x[x_idx]), tmp);
+                    max_operation(x[x_idx], tmp);
                 });
             }
+            // Reduce all maxima if necessary
             if constexpr(LOCAL_SIZE > 1)
             {
                 reduce<LOCAL_SIZE>(ltmp, lid, tmp, reduce_max);
@@ -282,6 +487,8 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         }
         if constexpr(VECTORIZED)
         {
+            // Sum exp(x - channel_max) in linear space or log space with vectorised loading and
+            // double buffering
             unsigned int i = lid * load_factor<T>;
             auto xdata     = load<T, true>(i, offset + X_OFFSET, x);
             i += LOCAL_SIZE * load_factor<T>;
@@ -291,48 +498,26 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(xdata.data[k]) - channel_max;
-                    if constexpr(USE_SOFTMAX_LOG)
-                    {
-                        tmp = logaddexp(value, tmp);
-                    }
-                    else
-                    {
-                        tmp += exp(value);
-                    }
+                    sum_exp_operation(xdata.data[k], channel_max, tmp);
                 }
                 xdata = xtmp;
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(xdata.data[k]) - channel_max;
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    tmp = logaddexp(value, tmp);
-                }
-                else
-                {
-                    tmp += exp(value);
-                }
+                sum_exp_operation(xdata.data[k], channel_max, tmp);
             }
         }
         else
         {
+            // Sum exp(x - channel_max) in linear space or log space
             loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
-                auto x_idx        = i * STRIDE + offset + X_OFFSET;
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[x_idx]) - channel_max;
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    tmp = logaddexp(value, tmp);
-                }
-                else
-                {
-                    tmp += exp(value);
-                }
+                auto x_idx = i * STRIDE + offset + X_OFFSET;
+                sum_exp_operation(x[x_idx], channel_max, tmp);
             });
         }
         FLOAT_ACCUM channel_sum;
+        // Reduce all sums if necessary
         if constexpr(LOCAL_SIZE > 1)
         {
             reduce<LOCAL_SIZE>(ltmp, lid, tmp, reduce_sum_log);
@@ -342,6 +527,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         {
             channel_sum = tmp;
         }
+        // Prepare reciprocal if needed later
         if constexpr(!USE_SOFTMAX_LOG)
         {
             // Calculate approximate reciprocal of channel_sum. The approximate reciprocal
@@ -352,6 +538,8 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 
         if constexpr(VECTORIZED)
         {
+            // Calculate y = alpha * exp(x) / channel_sum + beta * y using vectorised loading and
+            // double buffering
             unsigned int i = lid * load_factor<T>;
             auto xdata     = load<T, !USE_SOFTMAX_LOG>(i, offset + X_OFFSET, x);
             auto ydata     = load(i, offset + Y_OFFSET, y);
@@ -363,21 +551,8 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(xdata.data[k]) - channel_max;
-                    if constexpr(USE_SOFTMAX_LOG)
-                    {
-                        value -= channel_sum;
-                    }
-                    else
-                    {
-                        value = exp(value) * channel_sum;
-                    }
-                    value = value * CVT_FP32_2ACCUM(alpha);
-                    if constexpr(!ZERO_BETA)
-                    {
-                        value += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
-                    }
-                    ydata.data[k] = CVT_ACCUM2FLOAT(value);
+                    softmax_fwd_operation(
+                        xdata.data[k], ydata.data[k], channel_max, channel_sum, alpha, beta);
                 }
                 store(i - LOCAL_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
                 xdata = xtmp;
@@ -386,44 +561,18 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(xdata.data[k]) - channel_max;
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    value -= channel_sum;
-                }
-                else
-                {
-                    value = exp(value) * channel_sum;
-                }
-                value = value * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    value += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
-                }
-                ydata.data[k] = CVT_ACCUM2FLOAT(value);
+                softmax_fwd_operation(
+                    xdata.data[k], ydata.data[k], channel_max, channel_sum, alpha, beta);
             }
             store(i - LOCAL_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
         }
         else
         {
+            // Calculate y = alpha * exp(x) / channel_sum + beta * y
             loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
-                auto x_idx        = i * STRIDE + offset + X_OFFSET;
-                auto y_idx        = i * STRIDE + offset + Y_OFFSET;
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(x[x_idx]) - channel_max;
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    value -= channel_sum;
-                }
-                else
-                {
-                    value = exp(value) * channel_sum;
-                }
-                value = value * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    value += CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
-                }
-                y[y_idx] = CVT_ACCUM2FLOAT(value);
+                auto x_idx = i * STRIDE + offset + X_OFFSET;
+                auto y_idx = i * STRIDE + offset + Y_OFFSET;
+                softmax_fwd_operation(x[x_idx], y[y_idx], channel_max, channel_sum, alpha, beta);
             });
         }
     }
@@ -447,6 +596,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         unsigned int index = 0;
         if constexpr(VECTORIZED)
         {
+            // Find the maximum value in a block of x with vectorised loading and double buffering
             unsigned int i = batch_lid * load_factor<T>;
             auto xdata     = load<T, true>(i, offset + X_OFFSET, x);
             i += BATCH_SIZE * load_factor<T>;
@@ -456,42 +606,29 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    x_values[index] = CVT_FLOAT2ACCUM(xdata.data[k]);
-                    if constexpr(!USE_SOFTMAX_FAST)
-                    {
-                        tmp = max(x_values[index], tmp);
-                    }
-                    ++index;
+                    max_batch_operation(xdata.data[k], x_values[index], index, tmp);
                 }
                 xdata = xtmp;
             }
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                x_values[index] = CVT_FLOAT2ACCUM(xdata.data[k]);
-                if constexpr(!USE_SOFTMAX_FAST)
-                {
-                    tmp = max(x_values[index], tmp);
-                }
-                ++index;
+                max_batch_operation(xdata.data[k], x_values[index], index, tmp);
             }
         }
         else
         {
+            // Find the maximum value in a block of x
             loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
-                auto x_idx      = i * STRIDE + offset + X_OFFSET;
-                x_values[index] = CVT_FLOAT2ACCUM(x[x_idx]);
-                if constexpr(!USE_SOFTMAX_FAST)
-                {
-                    tmp = max(x_values[index], tmp);
-                }
-                ++index;
+                auto x_idx = i * STRIDE + offset + X_OFFSET;
+                max_batch_operation(x[x_idx], x_values[index], index, tmp);
             });
         }
 
         FLOAT_ACCUM channel_max = 0;
         if constexpr(!USE_SOFTMAX_FAST)
         {
+            // Reduce all maxima if necessary
             if constexpr(BATCH_SIZE > 1)
             {
                 reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_max);
@@ -515,51 +652,27 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         index = 0;
         if constexpr(VECTORIZED)
         {
+            // Sum exp(x - channel_max) in linear space or log space with vectorised loading and
+            // double buffering
             for(unsigned int i = batch_lid * load_factor<T>; i < INNER_SIZE;
                 i += BATCH_SIZE * load_factor<T>)
             {
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    FLOAT_ACCUM x_value = x_values[index] - channel_max;
-                    if constexpr(USE_SOFTMAX_LOG)
-                    {
-                        tmp = logaddexp(tmp, x_value);
-                    }
-                    else
-                    {
-                        x_value = exp(x_value);
-                        tmp += x_value;
-                    }
-                    if constexpr(!USE_SOFTMAX_FAST || !USE_SOFTMAX_LOG)
-                    {
-                        x_values[index] = x_value;
-                    }
-                    ++index;
+                    sum_exp_batch_operation(x_values[index], channel_max, index, tmp);
                 }
             }
         }
         else
         {
+            // Sum exp(x - channel_max) in linear space or log space
             loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
-                FLOAT_ACCUM x_value = x_values[index] - channel_max;
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    tmp = logaddexp(tmp, x_value);
-                }
-                else
-                {
-                    x_value = exp(x_value);
-                    tmp += x_value;
-                }
-                if constexpr(!USE_SOFTMAX_FAST || !USE_SOFTMAX_LOG)
-                {
-                    x_values[index] = x_value;
-                }
-                ++index;
+                sum_exp_batch_operation(x_values[index], channel_max, index, tmp);
             });
         }
         FLOAT_ACCUM channel_sum;
+        // Reduce all sums if necessary
         if constexpr(BATCH_SIZE > 1)
         {
             reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, tmp, reduce_sum_log);
@@ -569,6 +682,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         {
             channel_sum = tmp;
         }
+        // Prepare reciprocal if needed later
         if constexpr(!USE_SOFTMAX_LOG)
         {
             // Calculate approximate reciprocal of channel_sum. The approximate reciprocal
@@ -580,6 +694,8 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         index = 0;
         if constexpr(VECTORIZED)
         {
+            // Calculate y = alpha * exp(x) / channel_sum + beta * y using vectorised loading and
+            // double buffering
             unsigned int i = batch_lid * load_factor<T>;
             auto ydata     = load(i, offset + Y_OFFSET, y);
             i += BATCH_SIZE * load_factor<T>;
@@ -589,21 +705,8 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    if constexpr(USE_SOFTMAX_LOG)
-                    {
-                        x_values[index] -= channel_sum;
-                    }
-                    else
-                    {
-                        x_values[index] *= channel_sum;
-                    }
-                    x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha);
-                    if constexpr(!ZERO_BETA)
-                    {
-                        x_values[index] += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
-                    }
-                    ydata.data[k] = CVT_ACCUM2FLOAT(x_values[index]);
-                    ++index;
+                    softmax_fwd_batch_operation(
+                        x_values[index], ydata.data[k], channel_sum, alpha, beta, index);
                 }
                 store(i - BATCH_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
                 ydata = ytmp;
@@ -611,43 +714,18 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    x_values[index] -= channel_sum;
-                }
-                else
-                {
-                    x_values[index] *= channel_sum;
-                }
-                x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    x_values[index] += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
-                }
-                ydata.data[k] = CVT_ACCUM2FLOAT(x_values[index]);
-                ++index;
+                softmax_fwd_batch_operation(
+                    x_values[index], ydata.data[k], channel_sum, alpha, beta, index);
             }
             store(i - BATCH_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
         }
         else
         {
+            // Calculate y = alpha * exp(x) / channel_sum + beta * y
             loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
                 auto y_idx = i * STRIDE + offset + Y_OFFSET;
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    x_values[index] -= channel_sum;
-                }
-                else
-                {
-                    x_values[index] *= channel_sum;
-                }
-                x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    x_values[index] += CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
-                }
-                y[y_idx] = CVT_ACCUM2FLOAT(x_values[index]);
-                ++index;
+                softmax_fwd_batch_operation(
+                    x_values[index], y[y_idx], channel_sum, alpha, beta, index);
             });
         }
     }
@@ -671,6 +749,8 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         FLOAT_ACCUM channel_dot   = 0;
         if constexpr(VECTORIZED)
         {
+            // Calculate the sum of dy or the elementwise multiplication of dy and y using
+            // vectorised loading and double buffering
             unsigned int i = lid * load_factor<T>;
             auto dydata    = load(i, offset + DY_OFFSET, dy);
             vec_t<T> ydata;
@@ -690,12 +770,7 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dydata.data[k]);
-                    if constexpr(!USE_SOFTMAX_LOG)
-                    {
-                        value *= CVT_FLOAT2ACCUM(ydata.data[k]);
-                    }
-                    channel_dot += value;
+                    sum_dot_operation(dydata.data[k], ydata.data[k], channel_dot);
                 }
                 dydata = dytmp;
                 if constexpr(!USE_SOFTMAX_LOG)
@@ -706,27 +781,19 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dydata.data[k]);
-                if constexpr(!USE_SOFTMAX_LOG)
-                {
-                    value *= CVT_FLOAT2ACCUM(ydata.data[k]);
-                }
-                channel_dot += value;
+                sum_dot_operation(dydata.data[k], ydata.data[k], channel_dot);
             }
         }
         else
         {
+            // Calculate the sum of dy or the elementwise multiplication of dy and y
             loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
-                auto dy_idx       = i * STRIDE + offset + DY_OFFSET;
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[dy_idx]);
-                if constexpr(!USE_SOFTMAX_LOG)
-                {
-                    auto y_idx = i * STRIDE + offset + Y_OFFSET;
-                    value *= CVT_FLOAT2ACCUM(y[y_idx]);
-                }
-                channel_dot += value;
+                auto dy_idx = i * STRIDE + offset + DY_OFFSET;
+                auto y_idx  = i * STRIDE + offset + Y_OFFSET;
+                sum_dot_operation(dy[dy_idx], y[y_idx], channel_dot);
             });
         }
+        // Reduce all sums if needed
         if constexpr(LOCAL_SIZE > 1)
         {
             reduce<LOCAL_SIZE>(ltmp, lid, channel_dot, reduce_sum);
@@ -735,6 +802,8 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 
         if constexpr(VECTORIZED)
         {
+            // Calculate dx = (dy - channel_dot) * alpha * y + beta * dy using vectorised loading
+            // and double buffering
             unsigned int i = lid * load_factor<T>;
             auto dydata    = load(i, offset + DY_OFFSET, dy);
             auto ydata     = load(i, offset + Y_OFFSET, y);
@@ -748,21 +817,8 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dydata.data[k]);
-                    if constexpr(USE_SOFTMAX_LOG)
-                    {
-                        value -= channel_dot * exp(CVT_FLOAT2ACCUM(ydata.data[k]));
-                    }
-                    else
-                    {
-                        value = (value - channel_dot) * CVT_FLOAT2ACCUM(ydata.data[k]);
-                    }
-                    value = value * CVT_FP32_2ACCUM(alpha);
-                    if constexpr(!ZERO_BETA)
-                    {
-                        value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
-                    }
-                    dxdata.data[k] = CVT_ACCUM2FLOAT(value);
+                    softmax_bwd_operation(
+                        dydata.data[k], ydata.data[k], dxdata.data[k], channel_dot, alpha, beta);
                 }
                 store(i - LOCAL_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
                 dydata = dytmp;
@@ -772,45 +828,19 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dydata.data[k]);
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    value -= channel_dot * exp(CVT_FLOAT2ACCUM(ydata.data[k]));
-                }
-                else
-                {
-                    value = (value - channel_dot) * CVT_FLOAT2ACCUM(ydata.data[k]);
-                }
-                value = value * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
-                }
-                dxdata.data[k] = CVT_ACCUM2FLOAT(value);
+                softmax_bwd_operation(
+                    dydata.data[k], ydata.data[k], dxdata.data[k], channel_dot, alpha, beta);
             }
             store(i - LOCAL_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
         }
         else
         {
+            // Calculate dx = (dy - channel_dot) * alpha * y + beta * dy
             loop<INNER_SIZE, LOCAL_SIZE>(lid, [&](unsigned int i) {
-                auto dy_idx       = i * STRIDE + offset + DY_OFFSET;
-                auto y_idx        = i * STRIDE + offset + Y_OFFSET;
-                auto dx_idx       = i * STRIDE + offset + DX_OFFSET;
-                FLOAT_ACCUM value = CVT_FLOAT2ACCUM(dy[dy_idx]);
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    value -= channel_dot * exp(CVT_FLOAT2ACCUM(y[y_idx]));
-                }
-                else
-                {
-                    value = (value - channel_dot) * CVT_FLOAT2ACCUM(y[y_idx]);
-                }
-                value = value * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    value += CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
-                }
-                dx[dx_idx] = CVT_ACCUM2FLOAT(value);
+                auto dy_idx = i * STRIDE + offset + DY_OFFSET;
+                auto y_idx  = i * STRIDE + offset + Y_OFFSET;
+                auto dx_idx = i * STRIDE + offset + DX_OFFSET;
+                softmax_bwd_operation(dy[dy_idx], y[y_idx], dx[dx_idx], channel_dot, alpha, beta);
             });
         }
     }
@@ -841,6 +871,8 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         unsigned int index = 0;
         if constexpr(VECTORIZED)
         {
+            // Calculate the sum of dy or the elementwise multiplication of dy and y using
+            // vectorised loading and double buffering
             unsigned int i = batch_lid * load_factor<T>;
             auto ydata     = load(i, offset + Y_OFFSET, y);
             auto dydata    = load(i, offset + DY_OFFSET, dy);
@@ -852,14 +884,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    y_values[index]  = CVT_FLOAT2ACCUM(ydata.data[k]);
-                    dy_values[index] = CVT_FLOAT2ACCUM(dydata.data[k]);
-                    if constexpr(!USE_SOFTMAX_LOG)
-                    {
-                        dy_values[index] *= y_values[index];
-                    }
-                    channel_dot += dy_values[index];
-                    ++index;
+                    sum_dot_batch_operation(dydata.data[k],
+                                            dy_values[index],
+                                            ydata.data[k],
+                                            y_values[index],
+                                            channel_dot,
+                                            index);
                 }
                 ydata  = ytmp;
                 dydata = dytmp;
@@ -867,31 +897,25 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                y_values[index]  = CVT_FLOAT2ACCUM(ydata.data[k]);
-                dy_values[index] = CVT_FLOAT2ACCUM(dydata.data[k]);
-                if constexpr(!USE_SOFTMAX_LOG)
-                {
-                    dy_values[index] *= y_values[index];
-                }
-                channel_dot += dy_values[index];
-                ++index;
+                sum_dot_batch_operation(dydata.data[k],
+                                        dy_values[index],
+                                        ydata.data[k],
+                                        y_values[index],
+                                        channel_dot,
+                                        index);
             }
         }
         else
         {
+            // Calculate the sum of dy or the elementwise multiplication of dy and y
             loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
-                auto y_idx       = i * STRIDE + offset + Y_OFFSET;
-                auto dy_idx      = i * STRIDE + offset + DY_OFFSET;
-                y_values[index]  = CVT_FLOAT2ACCUM(y[y_idx]);
-                dy_values[index] = CVT_FLOAT2ACCUM(dy[dy_idx]);
-                if constexpr(!USE_SOFTMAX_LOG)
-                {
-                    dy_values[index] *= y_values[index];
-                }
-                channel_dot += dy_values[index];
-                ++index;
+                auto y_idx  = i * STRIDE + offset + Y_OFFSET;
+                auto dy_idx = i * STRIDE + offset + DY_OFFSET;
+                sum_dot_batch_operation(
+                    dy[dy_idx], dy_values[index], y[y_idx], y_values[index], channel_dot, index);
             });
         }
+        // Reduce all sums if needed
         if constexpr(BATCH_SIZE > 1)
         {
             reduce_block<LOCAL_SIZE, BATCH_SIZE>(ltmp, lid, batch_lid, channel_dot, reduce_sum);
@@ -901,6 +925,8 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
         index = 0;
         if constexpr(VECTORIZED)
         {
+            // Calculate dx = (dy - channel_dot) * alpha * y + beta * dy using vectorised loading
+            // and double buffering
             unsigned int i = batch_lid * load_factor<T>;
             auto dxdata    = load(i, offset + DX_OFFSET, dx);
             i += BATCH_SIZE * load_factor<T>;
@@ -910,21 +936,13 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
-                    if constexpr(USE_SOFTMAX_LOG)
-                    {
-                        dy_values[index] -= channel_dot * exp(y_values[index]);
-                    }
-                    else
-                    {
-                        dy_values[index] -= channel_dot * y_values[index];
-                    }
-                    FLOAT_ACCUM value = dy_values[index] * CVT_FP32_2ACCUM(alpha);
-                    if constexpr(!ZERO_BETA)
-                    {
-                        value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
-                    }
-                    dxdata.data[k] = CVT_ACCUM2FLOAT(value);
-                    ++index;
+                    softmax_bwd_batch_operation(dy_values[index],
+                                                y_values[index],
+                                                dxdata.data[k],
+                                                channel_dot,
+                                                alpha,
+                                                beta,
+                                                index);
                 }
                 store(i - BATCH_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
                 dxdata = dxtmp;
@@ -932,43 +950,23 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
 #pragma unroll
             for(int k = 0; k < load_factor<T>; ++k)
             {
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    dy_values[index] -= channel_dot * exp(y_values[index]);
-                }
-                else
-                {
-                    dy_values[index] -= channel_dot * y_values[index];
-                }
-                auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
-                }
-                dxdata.data[k] = CVT_ACCUM2FLOAT(value);
-                ++index;
+                softmax_bwd_batch_operation(dy_values[index],
+                                            y_values[index],
+                                            dxdata.data[k],
+                                            channel_dot,
+                                            alpha,
+                                            beta,
+                                            index);
             }
             store(i - BATCH_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
         }
         else
         {
+            // Calculate dx = (dy - channel_dot) * alpha * y + beta * dy
             loop<INNER_SIZE, BATCH_SIZE>(batch_lid, [&](unsigned int i) {
                 auto dx_idx = i * STRIDE + offset + DX_OFFSET;
-                if constexpr(USE_SOFTMAX_LOG)
-                {
-                    dy_values[index] -= channel_dot * exp(y_values[index]);
-                }
-                else
-                {
-                    dy_values[index] -= channel_dot * y_values[index];
-                }
-                auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha);
-                if constexpr(!ZERO_BETA)
-                {
-                    value += CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
-                }
-                dx[dx_idx] = CVT_ACCUM2FLOAT(value);
-                ++index;
+                softmax_bwd_batch_operation(
+                    dy_values[index], y_values[index], dx[dx_idx], channel_dot, alpha, beta, index);
             });
         }
     }
