@@ -4589,11 +4589,12 @@ class SMFMAInstruction(Instruction):
         return _st.SMFMA(
             _smfma_type_convert(self.instType),
             _inst_type_to_str(self.accType),
-            m, n, k, blocks, self.neg,
+            m, n, k, blocks, self.mfma1k,
             _to_stinky_register(self.acc),
             _to_stinky_register(self.a),
             _to_stinky_register(self.b),
             _to_stinky_register(self.metadata),
+            neg=self.neg,
             comment=self.comment)
 
     def getParams(self):
