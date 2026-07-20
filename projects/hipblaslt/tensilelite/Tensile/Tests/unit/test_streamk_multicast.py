@@ -159,29 +159,28 @@ class TestValidation:
             assert not st.get("StreamKMulticast", 0), st.get("StreamKMulticast")
             assert st["Multicast"] == 0, st["Multicast"]
 
-    def test_xor_streamk_cluster_reduction(self):
-        """The mutual-exclusion invariant is enforced at the validator: a state
-        that (hypothetically) has BOTH StreamKMulticast and StreamKClusterReduction
-        is rejected. Through config this is now unreachable -- the collapse gives
-        reduction precedence and leaves the derived StreamKMulticast off (see
-        test_reduction_keeps_cooperative_loads_off) -- but the validator keeps the
-        xor as a hard invariant the collapse depends on."""
-        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
-        st = {
-            "StreamKMulticast": 1,
-            # StreamKMulticast on always co-derives Multicast on (real invariant).
-            "Multicast": 1,
-            "StreamK": 3,
-            "StreamKClusterReduction": 1,
-            "StreamKAtomic": 0,
-            "StreamKXCCMapping": 0,
-            "ClusterDim": [4, 1],
-            "ISA": [12, 5, 0],
-            "TDMInst": 3,
-        }
-        isa_map = {(12, 5, 0): type("_I", (), {"asmCaps": {"HasTDM": True, "HasClusterBarrier": True}})()}
-        assert _validateStreamKMulticast(st, False, isa_map) is False
-        assert st.get("Valid") is False
+    def test_factored_composes_multicast_and_reduction(self, tmp_path):
+        """Relaxed mutual exclusion (factored 2-D cluster mode): the historic
+        multicast/reduction xor is CONVERTED, not removed. When the [C,1] cluster
+        is factored via StreamKClusterKSplit into 1 < Ck < C (here C=4, Ck=2 =>
+        Cs=2), the two features become ORTHOGONAL axes and co-exist: the collapse
+        derives BOTH StreamKMulticast=1 (Cs>1) and StreamKClusterReduction=1
+        (Ck>1), and the validators accept the combination instead of rejecting
+        it. See docs/design/factored-cluster-mode-plan.md (section 6)."""
+        cfg = _write_variant(tmp_path, "factored.yaml",
+                             fork_overrides={"StreamKClusterKSplit": [2],
+                                             "ClusterDim": [[4, 1]]})
+        states = _derive_states(cfg)
+        assert states, "expected >=1 derived solution for the factored config"
+        for st in states:
+            assert st["ClusterDim"] == [4, 1], st["ClusterDim"]
+            assert st["StreamKClusterKSplit"] == 2, st.get("StreamKClusterKSplit")
+            # Both orthogonal axes derived on (Cs=2 spatial multicast, Ck=2 K-split).
+            assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
+            assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
+            assert st["Multicast"] == 1, st.get("Multicast")
+            # Mainloop lockstep barrier for the co-issued multicast loads.
+            assert st["ClusterBarrier"] is True, st.get("ClusterBarrier")
 
     def test_reject_multicast_force_off(self, tmp_path):
         """StreamKMulticast auto-enabled by ClusterDim on SK3 is incompatible with

@@ -2634,6 +2634,91 @@ class StreamKTwoTileDPFirst(StreamK):
     requiresWorkspaceReductionStorePath = True
     supportsSubtileImpl = True
 
+    def streamKFactoredMaskCompute(self, writer, kernel):
+        """Compute the factored 2-D cluster B-multicast mask (multicast along Cs).
+
+        In factored mode the 1-D HW cluster ClusterDim=[C,1] is a logical
+        (Cs x Ck) grid, C = Cs*Ck, Ck = StreamKClusterKSplit. A workgroup's
+        within-cluster rank wg_x = StreamKIdx & (C-1) decodes "k fastest" to
+        (s, k):  k = StreamKIdx & (Ck-1)  (K-reduction axis rank),
+        s = wg_x >> log2(Ck)  (spatial axis rank). B is shared only by the Cs
+        peers with the SAME k (same K-slice) -- within-cluster ranks
+        {k, k+Ck, ..., k+(Cs-1)Ck} -- so the correct B mask is
+
+            maskB_base = OR over s' in [0,Cs) of (1 << (s'*Ck))   # Cs bits, stride Ck
+            MulticastMaskB = maskB_base << k
+
+        A stays per-workgroup (MulticastMaskA = 1<<wg_x, set at kernel init).
+        The kernel-init computeMasks set MulticastMaskB = (1<<C)-1 (the whole-
+        cluster value); we OVERWRITE it here in preLoop once StreamKIdx (hence k)
+        is known -- the same override point the pure-multicast predicate uses.
+
+        Runtime validity gate (self-mask fallback on failure), the factored
+        generalization of the pure-multicast predicate:
+          1. nWG0 % Cs == 0  (the Cs s-peers are M-adjacent -> share B), and
+          2. clusterBase + C <= Ck * totalTiles  (the launched grid unit is now
+             Ck*tiles; a full cluster spans C consecutive StreamK indices).
+        On failure MulticastMaskB is rewritten to the self-only MulticastMaskA so
+        B is loaded per-workgroup (correct for all sizes, never leaving a masked
+        target without a matching load). See
+        docs/design/factored-cluster-mode-plan.md (section 2).
+        """
+        module = Module("StreamK factored multicast mask compute")
+        if not kernel.get("StreamKMulticast", 0):
+            return module
+        c = kernel["ClusterDim"][0]
+        ck = kernel.get("StreamKClusterKSplit", 1)
+        cs = c // ck
+        # maskB_base: Cs bits at stride Ck (compile-time constant).
+        maskBBase = 0
+        for sPrime in range(cs):
+            maskBBase |= (1 << (sPrime * ck))
+        module.addComment0(
+            "StreamKFactored: B-multicast along Cs=%d peers (stride Ck=%d), maskB_base=0x%x" % (cs, ck, maskBBase))
+        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
+        mcInvalid = Label(writer.labels.getNameInc("SKFC_Invalid"), "")
+        mcEnd = Label(writer.labels.getNameInc("SKFC_End"), "")
+        with writer.allocTmpSgpr(4, tag="SKFactoredPredicate") as tRes:
+            t0 = tRes.idx
+            t1 = tRes.idx + 1
+            t2 = tRes.idx + 2
+            tk = tRes.idx + 3
+            # k = StreamKIdx & (Ck-1): this WG's K-slice (reduction axis) rank.
+            sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+            module.add(SAndB32(dst=sgpr(tk), src0=sgpr(sIdx), src1=hex(ck - 1),
+                               comment="k = StreamKIdx & (Ck-1) (K-slice rank)"))
+            # cond1: nWG0 % Cs == 0 (Cs is a power of two)
+            module.add(SAndB32(dst=sgpr(t0), src0=sgpr("NumWorkGroups0"), src1=hex(cs - 1),
+                               comment="nWG0 %% Cs (Cs power of two)"))
+            module.add(SCmpEQU32(src0=sgpr(t0), src1=0, comment="nWG0 aligned to Cs?"))
+            module.add(SCBranchSCC0(labelName=mcInvalid.getLabelName(),
+                                    comment="unaligned M -> B not shared, load normally"))
+            # cond2: clusterBase + C <= Ck * totalTiles
+            module.add(SAndB32(dst=sgpr(t2), src0=sgpr(sIdx), src1=hex((~(c - 1)) & 0xFFFFFFFF),
+                               comment="clusterBase = StreamKIdx & ~(C-1)"))
+            writer.releaseStreamKConstSgpr(sIdx)
+            module.add(SAddU32(dst=sgpr(t2), src0=sgpr(t2), src1=hex(c), comment="clusterBase + C"))
+            module.add(SMulI32(dst=sgpr(t1), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
+                               comment="totalTiles = nWG0 * nWG1"))
+            module.add(SMulI32(dst=sgpr(t1), src0=sgpr(t1), src1=hex(ck),
+                               comment="Ck * totalTiles (launched grid unit)"))
+            module.add(SCmpLeU32(src0=sgpr(t2), src1=sgpr(t1),
+                                 comment="cluster fully populated? clusterBase+C <= Ck*totalTiles"))
+            module.add(SCBranchSCC0(labelName=mcInvalid.getLabelName(),
+                                    comment="partial cluster -> B loaded normally (self-only mask)"))
+            # valid: MulticastMaskB = maskB_base << k (Cs peers sharing k)
+            module.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(tk), src=hex(maskBBase),
+                                      comment="MulticastMaskB = maskB_base << k (Cs s-peers, same K-slice)"))
+            module.add(SBranch(labelName=mcEnd.getLabelName(),
+                               comment="valid cluster -> keep B broadcast mask"))
+            module.add(mcInvalid)
+            module.add(SMovB32(dst=sgpr("MulticastMaskB"), src=sgpr("MulticastMaskA"),
+                               comment="invalid/partial cluster -> B loaded normally (self-only mask)"))
+            module.add(mcEnd)
+        return module
+
     def streamKMulticastMaskPredicate(self, writer, kernel):
         """Gate the DP B-multicast on the runtime clusterMulticastValid predicate.
 
@@ -2659,6 +2744,11 @@ class StreamKTwoTileDPFirst(StreamK):
         if not kernel.get("StreamKMulticast", 0):
             return module
         c = kernel["ClusterDim"][0]
+        ck = kernel.get("StreamKClusterKSplit", 1)
+        if ck > 1:
+            # Factored 2-D cluster mode: multicast runs only along the Cs spatial
+            # axis (peers sharing the same K-slice k), not the whole C cluster.
+            return self.streamKFactoredMaskCompute(writer, kernel)
         module.addComment0("StreamKMulticast: gate B-broadcast on clusterMulticastValid")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         mcInvalid = Label(writer.labels.getNameInc("SKMC_Invalid"), "")

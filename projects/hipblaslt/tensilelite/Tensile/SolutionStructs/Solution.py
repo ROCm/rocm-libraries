@@ -231,6 +231,39 @@ def _validateStreamKForceDPOnly(state, printRejectionReason):
   return True
 
 
+def _validateStreamKClusterKSplit(state, printRejectionReason):
+  """Validate the factored 2-D StreamK cluster factoring C = Cs * Ck.
+
+  StreamKClusterKSplit (Ck) factors the 1-D HW cluster ClusterDim = [C, 1] into
+  Cs = C // Ck spatial B-multicast peers and Ck K-split reduction peers. This
+  is the single validity gate for the factoring itself (the per-axis
+  requirements stay in _validateStreamKMulticast / _validateStreamKClusterReduction,
+  which run only when their derived axis is active). Ck must be a power of two
+  that divides C, with Cs also a power of two. Ck==1 => pure multicast (Cs=C),
+  Ck==C => pure reduction (Cs=1), 1<Ck<C => factored (both axes).
+  See docs/design/factored-cluster-mode-plan.md.
+  """
+  if state["ClusterDim"] == [1, 1] or state.get("StreamK", 0) != 3:
+    return True
+  c = state["ClusterDim"][0]
+  ck = state.get("StreamKClusterKSplit", 1)
+  if ck < 1 or ck > c or (ck & (ck - 1)) != 0:
+    reject(state, printRejectionReason,
+           "StreamKClusterKSplit must be a power of two in [1, ClusterDim[0]=%d] (got %d)" % (c, ck))
+    return False
+  if c % ck != 0:
+    reject(state, printRejectionReason,
+           "StreamKClusterKSplit (%d) must divide ClusterDim[0] (%d)" % (ck, c))
+    return False
+  cs = c // ck
+  if (cs & (cs - 1)) != 0:
+    reject(state, printRejectionReason,
+           "Factored StreamK cluster Cs = ClusterDim[0]//StreamKClusterKSplit "
+           "(%d) must be a power of two" % cs)
+    return False
+  return True
+
+
 def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
   """Validate the gfx1250 StreamK workgroup-cluster reduction fast path.
 
@@ -254,13 +287,11 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
   if not state.get("StreamKClusterReduction", 0):
     return True
 
-  # Mutually exclusive with the cooperative-load multicast fast path: the two
-  # features want incompatible cluster semantics (K-split reduction peers vs.
-  # M-adjacent shared-B multicast peers) on the same 1-D cluster.
-  if state.get("StreamKMulticast", 0):
-    reject(state, printRejectionReason,
-           "StreamKMulticast and StreamKClusterReduction are mutually exclusive")
-    return False
+  # Factored 2-D cluster mode makes the K-split reduction (Ck>1) and the spatial
+  # B-multicast (Cs>1) ORTHOGONAL axes of one C = Cs*Ck factoring, so they are
+  # now composable rather than mutually exclusive. StreamKMulticast being on
+  # here means Cs>1 (a valid factoring), which _validateStreamKClusterKSplit has
+  # already checked; no reject.
 
   # SK3 (StreamKTwoTileDPFirst) only; SK4/SK5 dynamic/atomic peer sets can not
   # be statically clustered.
@@ -342,13 +373,11 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   if not state.get("StreamKMulticast", 0):
     return True
 
-  # Mutually exclusive with the cluster split-barrier reduction fast path: the
-  # two features want incompatible cluster semantics on the same 1-D cluster and
-  # must never be enabled together.
-  if state.get("StreamKClusterReduction", 0):
-    reject(state, printRejectionReason,
-           "StreamKMulticast and StreamKClusterReduction are mutually exclusive")
-    return False
+  # Factored 2-D cluster mode makes the spatial B-multicast (Cs>1) and the
+  # K-split reduction (Ck>1) ORTHOGONAL axes of one C = Cs*Ck factoring, so they
+  # are now composable rather than mutually exclusive. StreamKClusterReduction
+  # being on here means Ck>1 (a valid factoring), which
+  # _validateStreamKClusterKSplit has already checked; no reject.
 
   # StreamKMulticast is auto-enabled by ClusterDim on SK3, but the multicast mask
   # SGPRs are gated on the (derived) Multicast flag while the mask predicate /
@@ -1276,12 +1305,32 @@ class Solution(collections.abc.Mapping):
     # below) never dereferences StreamK for the common non-clustered state, which
     # some partial-state derivation call sites construct without a StreamK key.
     #
-    # StreamKClusterReduction claims the [C,1] cluster for its own split-barrier
-    # K-split reduction (mutually exclusive with the cooperative-load multicast),
-    # so a reduction cluster must NOT auto-enable StreamKMulticast here.
-    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3 \
-       and not state.get("StreamKClusterReduction", 0):
-      state["StreamKMulticast"] = 1
+    # Factored 2-D StreamK cluster mode: the 1-D HW cluster ClusterDim=[C,1] is
+    # factored into two ORTHOGONAL axes, C = Cs * Ck (StreamKClusterKSplit = Ck):
+    #   * Cs = C // Ck spatial B-multicast peers  -> StreamKMulticast on iff Cs>1
+    #   * Ck              K-split reduction peers  -> StreamKClusterReduction iff Ck>1
+    # Ck==1 collapses to today's pure multicast (Cs=C); Ck==C to today's pure
+    # reduction (Cs=1). This SUPERSEDES the historic mutual exclusion between the
+    # multicast and reduction fast paths: they are now composable axes of one
+    # factoring rather than incompatible cluster semantics. The legacy explicit
+    # StreamKClusterReduction=1 opt-in (no StreamKClusterKSplit) is the Ck==C,
+    # Cs==1 degenerate, so it derives byte-identically to before.
+    # See docs/design/factored-cluster-mode-plan.md.
+    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
+      clusterC = state["ClusterDim"][0]
+      ck = state.get("StreamKClusterKSplit", 1)
+      # Legacy pure-reduction opt-in without an explicit K-split factor is the
+      # Ck==C degenerate of the factoring.
+      if ck <= 1 and state.get("StreamKClusterReduction", 0):
+        ck = clusterC
+      # Normalize the effective Ck onto state so the kernel (factored B-mask
+      # k-shift) and host (grid / kernarg skSplit) read a single, consistent
+      # K-split factor regardless of which opt-in expressed it. An invalid
+      # (non-dividing) factor is left for _validateStreamKClusterKSplit to reject.
+      cs = clusterC // ck if ck > 0 and clusterC % ck == 0 else 0
+      state["StreamKClusterKSplit"] = ck
+      state["StreamKMulticast"] = 1 if cs > 1 else 0
+      state["StreamKClusterReduction"] = 1 if ck > 1 else 0
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
     # that omits Multicast is byte-identical.
@@ -2002,6 +2051,7 @@ class Solution(collections.abc.Mapping):
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
       _validateStreamKForceDPOnly(state, printRejectionReason)
+      _validateStreamKClusterKSplit(state, printRejectionReason)
       _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap)
       _validateStreamKMulticast(state, printRejectionReason, isaInfoMap)
       if state["StreamKAtomic"] == 1:
@@ -2071,6 +2121,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["StreamKClusterReduction"] = 0
+      state["StreamKClusterKSplit"] = 1
       state["StreamKMulticast"] = 0
       state["DebugStreamK"] = 0
       state["PrefetchAcrossPersistent"] = 0

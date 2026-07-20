@@ -849,6 +849,25 @@ validParameters = { # we need to make sure this matches develop
     # 0: use the existing global-flag reduction
     # 1: enable the cluster-barrier reduction fast path
     "StreamKClusterReduction": [0, 1],
+    # Factored 2-D StreamK cluster mode (gfx1250). Factors the 1-D HW cluster
+    # ClusterDim = [C, 1] into two ORTHOGONAL axes, C = Cs * Ck:
+    #   * Cs = C // StreamKClusterKSplit -- spatial B-multicast peers (process
+    #     M-adjacent DISTINCT tiles sharing the same B N-block over one K-slice);
+    #   * Ck = StreamKClusterKSplit      -- K-split reduction peers (split one
+    #     tile's K range and reduce partials through the cluster split barrier).
+    # StreamKClusterKSplit is the single knob that selects where a cluster sits
+    # on the Cs x Ck plane:
+    #   * Ck == 1  => Cs == C => pure multicast   (identical to StreamKMulticast);
+    #   * Ck == C  => Cs == 1 => pure reduction   (identical to the explicit
+    #                 StreamKClusterReduction opt-in, its Ck==C degenerate);
+    #   * 1<Ck<C   => factored (both axes active) -- one cluster does the spatial
+    #                 multicast AND the K-split reduction in a single kernel.
+    # The derived StreamKMulticast (Cs>1) and StreamKClusterReduction (Ck>1)
+    # booleans fall out of the factoring in Solution.py, so the two features are
+    # composable rather than mutually exclusive. Must be a power of two that
+    # divides ClusterDim[0], with Cs = ClusterDim[0]//Ck also a power of two.
+    # See docs/design/factored-cluster-mode-plan.md.
+    "StreamKClusterKSplit": [1, 2, 4, 8, 16],
     # NOTE: StreamKMulticast (the gfx1250 StreamK DP cooperative cluster-load /
     # TDM B-multicast fast path) is intentionally NOT a valid/benchmark
     # parameter. It is a DERIVED-ONLY internal state key (see the ClusterBarrier

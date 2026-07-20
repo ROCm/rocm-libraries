@@ -940,16 +940,28 @@ namespace TensileLite
                 // grid, so DISABLE this path and fall through to the standard SK3
                 // accounting (the kernel's intra_cluster runtime guard already
                 // routes partially-filled clusters to the global-flag reduction).
+                // Factored 2-D cluster reduction kernarg: every tile is split Ck
+                // ways (skSplit == Ck = streamKClusterKSplit), so the Ck
+                // consecutive StreamKIdx of an s-row are that tile's fixup peers,
+                // each running itersPerTile/Ck iterations, and skTiles == tiles
+                // (every tile split Ck ways). The launch grid contract is
+                // skGrid == roundUp(Ck*tiles, C) (getSKGridImpl); a solve()
+                // workspace/DP fallback that re-rounds sk.grid off that contract
+                // disables this path (fall through to standard SK3 accounting) so
+                // skItersPerWG stays consistent with the grid. For the pure
+                // reduction degenerate Ck == C this is byte-identical to the
+                // shipped one-tile-per-cluster path (skSplit == C, skGrid == C*tiles).
+                size_t   ckSplit  = sizeMapping.streamKClusterKSplit > 0
+                                        ? static_cast<size_t>(sizeMapping.streamKClusterKSplit)
+                                        : 1;
+                size_t   cCluster = static_cast<size_t>(sizeMapping.clusterDim.x);
+                size_t   factoredGrid
+                    = ((ckSplit * tiles + cCluster - 1) / cCluster) * cCluster;
                 if(sizeMapping.streamKClusterReduction && sizeMapping.clusterDim.x > 1
-                   && sk.grid == static_cast<size_t>(sizeMapping.clusterDim.x) * tiles)
+                   && ckSplit > 1 && sk.grid == factoredGrid)
                 {
-                    // Fixed even split / one-tile-per-cluster: the C = clusterDim.x
-                    // consecutive StreamKIdx of one cluster (its contiguous
-                    // WorkGroup0 range [c*C, c*C + C)) are exactly the fixup peers of
-                    // tile c; each peer runs itersPerTile/C iterations (skSplit == C)
-                    // and skTiles == tiles (every tile split C ways).
-                    uint32_t c            = static_cast<uint32_t>(sizeMapping.clusterDim.x);
-                    uint32_t skItersPerWG = static_cast<uint32_t>(itersPerTile) / c;
+                    uint32_t skItersPerWG
+                        = static_cast<uint32_t>(itersPerTile) / static_cast<uint32_t>(ckSplit);
 
                     args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
                     args.template append<uint32_t>("skGrid", sk.grid);
@@ -4104,36 +4116,31 @@ namespace TensileLite
                 }
             }
 
-            // StreamKMulticast (gfx1250): DP cooperative B-multicast. The multicast
-            // cluster is SPATIAL: the C peers of a cluster process C DISTINCT,
-            // M-adjacent tiles and share the B (N-block) tile. v1 is single-round, so
-            // the launched grid is `tiles` rounded UP to a multiple of C = clusterDim.x.
-            // Rounding up keeps every launched HW cluster full while giving each WG one
-            // tile in the single DP round; a trailing partial cluster (tiles % C != 0)
-            // has idle-but-present tail WGs whose cluster is disabled by the kernel's
-            // clusterMulticastValid runtime predicate (so a masked target is never left
-            // without a matching load). See docs/design/cluster-load-component-and-streamk-multicast.md.
-            if(self.sizeMapping.streamKMulticast && self.sizeMapping.clusterDim.x > 1)
+            // Factored 2-D StreamK cluster mode (gfx1250): the 1-D HW cluster
+            // C = clusterDim.x is factored into two ORTHOGONAL axes, C = Cs*Ck
+            // (Ck = streamKClusterKSplit):
+            //   * Ck > 1: each output tile is split Ck ways along K (reduction
+            //     axis) -> the grid multiplies by Ck.
+            //   * Cs > 1: Cs adjacent tiles are grouped per cluster (spatial
+            //     B-multicast axis) -> this adds NO extra WGs, it only co-locates
+            //     existing tiles.
+            // So skGrid = Ck * tiles, rounded UP to a multiple of C = Cs*Ck so
+            // every launched HW cluster is full. This UNIFIES the two shipped
+            // degenerate paths:
+            //   * Ck == 1  => ceil(tiles/C)*C  (== the pure-multicast grid);
+            //   * Ck == C  => C * tiles        (== the pure-reduction grid).
+            // A trailing partial cluster (tiles % Cs != 0) falls back to the
+            // kernel runtime guards (multicast self-mask + global-flag reduction).
+            // Launch stays clusterDim = [C, 1]; see
+            // docs/design/factored-cluster-mode-plan.md (sections 1.4, 5).
+            if((self.sizeMapping.streamKMulticast || self.sizeMapping.streamKClusterReduction)
+               && self.sizeMapping.clusterDim.x > 1)
             {
-                size_t c = self.sizeMapping.clusterDim.x;
-                skGrid   = ((tiles + c - 1) / c) * c;
-            }
-
-            // StreamKClusterReduction (gfx1250): fixed even split / one-tile-per-cluster
-            // (design docs/design/streamk-wg-clusters.md, section 2.3). Each of the
-            // `tiles` output tiles is owned by exactly one cluster of C = clusterDim.x
-            // peer WGs, so the launched grid is C * tiles. The HW WG-id remap gives
-            // WorkGroup0 = cluster_x*C + wg_x, so the C WGs of cluster c occupy the
-            // contiguous StreamK index range [c*C, c*C + C) -- exactly the consecutive
-            // fixup peers of tile c. C * tiles is inherently a multiple of C, satisfying
-            // the clustered-launch requirement that gridDimX be a multiple of the cluster
-            // size (see HipSolutionAdapter cluster launch). This override intentionally
-            // supersedes the grid-selection heuristics above so the alignment invariant
-            // always holds; residual/partial clusters fall back to the global-flag path
-            // via the kernel's intra_cluster runtime guard.
-            if(self.sizeMapping.streamKClusterReduction && self.sizeMapping.clusterDim.x > 1)
-            {
-                skGrid = static_cast<size_t>(self.sizeMapping.clusterDim.x) * tiles;
+                size_t c  = self.sizeMapping.clusterDim.x;
+                size_t ck = self.sizeMapping.streamKClusterKSplit > 0
+                                ? static_cast<size_t>(self.sizeMapping.streamKClusterKSplit)
+                                : 1;
+                skGrid = ((ck * tiles + c - 1) / c) * c;
             }
 
             return skGrid;

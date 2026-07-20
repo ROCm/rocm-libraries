@@ -1,0 +1,108 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Designed factored 2-D StreamK cluster config for gfx1250 codegen
+# characterization.
+#
+# Mirrors the sibling _designed/gfx1250/streamk_cluster_reduction.yaml (MX-FP8
+# TN, StreamK=3, gfx1250 MX constraints: TDMInst=3, MXLoadInst=TDM,
+# MXScaleFormat=InMemorySwizzle, WavefrontSize=32, ISA=(12,5,0),
+# StreamKXCCMapping=0), but factors the 1-D HW cluster ClusterDim=[C,1] into
+# two ORTHOGONAL axes, C = Cs*Ck, via StreamKClusterKSplit (Ck):
+#
+#   - ClusterDim:           [[4, 1]]   -- 1-D HW cluster, C = 4
+#   - StreamKClusterKSplit: [2]        -- Ck = 2 => Cs = C//Ck = 2 (both axes on)
+#
+# => Cs = 2 spatial B-multicast peers x Ck = 2 K-split reduction peers. Under
+# this config StreamK.py must emit BOTH:
+#   * the factored B-multicast mask along the Cs axis (MulticastMaskB =
+#     maskB_base << k, with maskB_base a Cs-bit stride-Ck constant and k the
+#     within-cluster K-slice rank), gated on nWG0 % Cs; and
+#   * the intra-cluster split-barrier reduction along the Ck axis
+#     (s_barrier_signal -3 / s_barrier_wait -3), with the whole-cluster barrier
+#     reused across both axes and the global-flag reduction retained as fallback.
+# This is the smallest genuine factored kernel (C=4, Cs=2, Ck=2); see
+# docs/design/factored-cluster-mode-plan.md (Appendix A).
+#
+# Coverage: the MacroTile / work-item (MIWaveGroup) sweep from the reduction
+# sibling at the fixed factored (Cs=2, Ck=2) point => 4 fork permutations.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # MX-FP8 (F8 in, float32 out) TN, Batched -- factored 2-D StreamK cluster.
+  ########################################
+  -
+    - # ProblemType: MX-F8 TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      MXBlockA: 32
+      MXBlockB: 32
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 1]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [False]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        - StreamKClusterKSplit: [2]
+        - ClusterDim: [[4, 1]]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]

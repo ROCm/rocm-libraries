@@ -590,7 +590,18 @@ class ProblemPredicate(Properties.Predicate):
         valuepredicates.append(state["MacroTile0"])
         valuepredicates.append(state["MacroTile1"])
         valuepredicates.append(state["GlobalSplitU"])
-        valuepredicates.append(state["ClusterDim"][0])
+        # Factored cluster mode: the M-adjacency (shared-B) alignment axis is Cs
+        # (the spatial multicast peers), not the full cluster C. For pure
+        # multicast Cs==C, so value[3] is byte-identical to the historic
+        # ClusterDim[0]; for pure reduction (no multicast) fall back to
+        # ClusterDim[0] to preserve the historic check; for factored (Cs>1)
+        # feed Cs so the predicate requires nWG_x % Cs == 0.
+        clusterX = state["ClusterDim"][0]
+        ck = state.get("StreamKClusterKSplit", 1)
+        if state.get("StreamKMulticast", 0) and ck >= 1 and clusterX % ck == 0:
+            valuepredicates.append(clusterX // ck)
+        else:
+            valuepredicates.append(clusterX)
         valuepredicates.append(state["ClusterDim"][1])
         rv += [cls('ClusterDimCheck', value=valuepredicates)]
 
@@ -602,9 +613,17 @@ class ProblemPredicate(Properties.Predicate):
         # per-problem HARD REJECT (not a build-time reject, not a silent
         # fallback). Only the K-split reduction path needs it; StreamKMulticast
         # (no K-split) relies on ClusterDimCheck instead.
+        # value[1] is the K-split factor Ck (the number of reduction peers whose
+        # equal-length mainloops the split barrier balances), which in factored
+        # mode is StreamKClusterKSplit rather than the full cluster C. For the
+        # legacy pure-reduction opt-in (StreamKClusterReduction=1 without an
+        # explicit K-split) Ck == C, so value[1] is byte-identical to before.
         if state.get("StreamKClusterReduction", 0) and state["ClusterDim"][0] > 1:
+            ckIter = state.get("StreamKClusterKSplit", 1)
+            if ckIter <= 1:
+                ckIter = state["ClusterDim"][0]
             rv += [cls('ClusterReductionIterCheck',
-                       value=[state["DepthU"], state["ClusterDim"][0]])]
+                       value=[state["DepthU"], ckIter])]
 
         return rv
 
@@ -641,6 +660,7 @@ class SizeMapping:
                  'streamKAtomic',
                  'streamKClusterReduction',
                  'streamKMulticast',
+                 'streamKClusterKSplit',
                  'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
@@ -737,6 +757,7 @@ class SizeMapping:
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
                    streamKClusterReduction  = d.get('StreamKClusterReduction', 0),
                    streamKMulticast         = d.get('StreamKMulticast', 0),
+                   streamKClusterKSplit     = d.get('StreamKClusterKSplit', 1),
                    prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',

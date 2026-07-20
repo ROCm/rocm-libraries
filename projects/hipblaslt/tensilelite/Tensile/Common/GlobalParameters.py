@@ -572,6 +572,11 @@ defaultBenchmarkCommonParameters = [
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"StreamKClusterReduction": [0]},
+    # StreamKClusterKSplit factors the 1-D [C,1] StreamK cluster into Cs spatial
+    # multicast peers x Ck K-split reduction peers (C = Cs*Ck). Default 1 = pure
+    # multicast (Cs=C), so every existing ClusterDim YAML derives identically to
+    # before. See ValidParameters / Solution.py factored-cluster derivation.
+    {"StreamKClusterKSplit": [1]},
     # NOTE: StreamKMulticast is a derived-only internal state key (like
     # ClusterBarrier), auto-enabled by Solution.py for StreamK==3 + ClusterDim
     # clusters; it is deliberately NOT a benchmark/default parameter here.
