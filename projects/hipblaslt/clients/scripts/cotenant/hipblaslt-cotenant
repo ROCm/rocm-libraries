@@ -13,8 +13,10 @@ killed when the command finishes or this script is interrupted.
 
 A precompiled hipblaslt-cotenant-kernel beside this script is used if present;
 otherwise it is built on first use with hipcc (override the compiler with
-HIPCC=...) into a per-user cache. The cotenant log defaults to ./cotenant.log.
+HIPCC=...) into a per-user cache. The cotenant log defaults to ./cotenant.<pid>.log.
 """
+
+from __future__ import annotations
 
 import argparse
 import os
@@ -24,6 +26,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import TextIO
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "hipblaslt-cotenant-kernel.hip"
@@ -31,13 +34,13 @@ SRC = HERE / "hipblaslt-cotenant-kernel.hip"
 SHIPPED_BIN = HERE / "hipblaslt-cotenant-kernel"
 
 
-def cache_dir():
+def cache_dir() -> Path:
     """Writable per-user dir for a self-built binary; the script's own dir may be read-only when installed."""
     base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
     return Path(base) / "hipblaslt" / "cotenant"
 
 
-def probe_device(env):
+def probe_device(env: dict[str, str]) -> tuple[str | None, int | None]:
     """Return (gfx_arch, total_cus) for the first GPU via rocminfo, or (None, None)."""
     try:
         out = subprocess.check_output(
@@ -56,7 +59,7 @@ def probe_device(env):
     return arch, cus
 
 
-def resolve_binary(arch, env, explicit):
+def resolve_binary(arch: str | None, env: dict[str, str], explicit: str | None) -> Path:
     """Locate the cotenant binary: --binary, else a precompiled one beside the script, else build it."""
     if explicit:
         path = Path(explicit)
@@ -68,7 +71,7 @@ def resolve_binary(arch, env, explicit):
     return build_cotenant(arch, env)
 
 
-def build_cotenant(arch, env):
+def build_cotenant(arch: str | None, env: dict[str, str]) -> Path:
     """Build the kernel into the per-user cache and return its path (rebuilds when stale)."""
     if not SRC.is_file():
         sys.exit(f"ERROR: no prebuilt kernel and source not found ({SRC}); pass --binary PATH.")
@@ -107,16 +110,21 @@ def build_cotenant(arch, env):
     return out
 
 
-def resolve_log_path(explicit):
-    """Pick a writable path for the cotenant log: --log, else the cwd, else a temp dir."""
+def resolve_log_path(explicit: str | None) -> Path:
+    """Pick a writable path for the cotenant log: --log, else the cwd, else a temp dir.
+
+    The default name includes the PID so concurrent runs in the same directory
+    don't stomp on each other's log.
+    """
     if explicit:
         return Path(explicit)
+    name = f"cotenant.{os.getpid()}.log"
     if os.access(Path.cwd(), os.W_OK):
-        return Path.cwd() / "cotenant.log"
-    return Path(tempfile.gettempdir()) / "cotenant.log"
+        return Path.cwd() / name
+    return Path(tempfile.gettempdir()) / name
 
 
-def run_command(command, env):
+def run_command(command: list[str], env: dict[str, str]) -> int:
     """Run the user's command, returning its exit code; fail cleanly if not found."""
     try:
         return subprocess.run(command, env=env).returncode
@@ -128,7 +136,9 @@ def run_command(command, env):
 READY_MARKER = "READY"
 
 
-def wait_ready(proc, log_handle, log_path, wait_s):
+def wait_ready(
+    proc: subprocess.Popen, log_handle: TextIO, log_path: Path, wait_s: float
+) -> None:
     """Block until the cotenant logs READY (all workgroups resident); abort if it exits or times out."""
     deadline = time.monotonic() + wait_s
     while True:
@@ -149,10 +159,10 @@ def wait_ready(proc, log_handle, log_path, wait_s):
         time.sleep(0.1)
 
 
-def main():
+def main() -> int:
     # Route SIGTERM through the same cleanup path Ctrl-C already uses, so an
     # external `kill` of this process still tears the cotenant down.
-    def _sigterm(_signum, _frame):
+    def _sigterm(_signum: int, _frame: object) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _sigterm)
@@ -185,7 +195,7 @@ def main():
     ap.add_argument(
         "--log",
         metavar="PATH",
-        help="cotenant log path (default: ./cotenant.log, or a temp dir if cwd is read-only)",
+        help="cotenant log path (default: ./cotenant.<pid>.log, or a temp dir if cwd is read-only)",
     )
     ap.add_argument(
         "--wait",
