@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <hipdnn_flatbuffers_sdk/data_objects/Knob_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 #include <vector>
