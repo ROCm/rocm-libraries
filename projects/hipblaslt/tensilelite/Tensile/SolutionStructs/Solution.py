@@ -231,6 +231,96 @@ def _validateStreamKForceDPOnly(state, printRejectionReason):
   return True
 
 
+def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
+  """Validate the gfx1250 StreamK workgroup-cluster reduction fast path.
+
+  StreamKClusterReduction co-locates a StreamK tile's fixup peers in a single
+  1-D workgroup cluster (ClusterDim = [C, 1]) and replaces the cross-CU
+  global-flag spin-wait with an intra-cluster split barrier. It is an explicit,
+  opt-in fast path (barrier-only in v1); when its solution-level requirements
+  are not met the solution is rejected here at BUILD time with a clear message.
+  See docs/design/streamk-wg-clusters.md.
+
+  Note on the "multiple of the cluster size" limitation: the reduction also
+  requires itersPerTile = ceil(K / DepthU) to be a multiple of ClusterDim[0]=C
+  (otherwise the split barrier over-signals and hangs). That is a HARD REJECT of
+  the cluster solution for non-conforming problems, but it CANNOT be enforced
+  here because itersPerTile depends on the runtime K, which is unknown at build
+  time. It is instead enforced as a per-problem selection reject by the
+  ClusterReductionIterCheck predicate (emitted from Contractions.py), whose
+  diagnostic names the limitation to the user. This is a deliberate reject, not
+  a silent fallback.
+  """
+  if not state.get("StreamKClusterReduction", 0):
+    return True
+
+  # Mutually exclusive with the cooperative-load multicast fast path: the two
+  # features want incompatible cluster semantics (K-split reduction peers vs.
+  # M-adjacent shared-B multicast peers) on the same 1-D cluster.
+  if state.get("StreamKMulticast", 0):
+    reject(state, printRejectionReason,
+           "StreamKMulticast and StreamKClusterReduction are mutually exclusive")
+    return False
+
+  # SK3 (StreamKTwoTileDPFirst) only; SK4/SK5 dynamic/atomic peer sets can not
+  # be statically clustered.
+  if state["StreamK"] != 3:
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction requires StreamK=3 (two-tile DP-first)")
+    return False
+
+  # The fast path replaces the reduction handshake, which the atomic and
+  # DP-only paths skip entirely.
+  if state["StreamKAtomic"]:
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction is not supported with StreamKAtomic")
+    return False
+  if state["StreamKForceDPOnly"]:
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction is not supported with StreamKForceDPOnly")
+    return False
+
+  # StreamKXCCMapping=3 overflows the SGPR budget alongside the cluster coords.
+  if state["StreamKXCCMapping"] == 3:
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction is not supported with StreamKXCCMapping=3 (SGPR overflow)")
+    return False
+
+  # 1-D cluster [C, 1] with C a power of two in [2, 16]. A ClusterDim[1] > 1
+  # would require gridDimY % ClusterDim[1] == 0 while the StreamK grid is 1-D.
+  clusterDim = state["ClusterDim"]
+  c = clusterDim[0]
+  if clusterDim[1] != 1:
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction requires ClusterDim = [C, 1] (got %s)" % clusterDim)
+    return False
+  if c < 2 or c > 16 or (c & (c - 1)) != 0:
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction requires ClusterDim[0] a power of two in [2, 16] (got %d)" % c)
+    return False
+
+  # gfx1250 with the cluster split barrier capability.
+  isa = tuple(state["ISA"])
+  if isa != (12, 5, 0):
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction requires gfx1250 ISA (12, 5, 0)")
+    return False
+  if not isaInfoMap[isa].asmCaps.get("HasClusterBarrier", False):
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction requires asmCap HasClusterBarrier")
+    return False
+
+  # The cluster split-barrier reduction is wired up only on the gfx1250 TDM
+  # cluster path (the cluster-coord SGPRs it relies on are allocated only when
+  # TDM is enabled, same condition that gates ClusterBarrier).
+  if state["TDMInst"] == 0:
+    reject(state, printRejectionReason,
+           "StreamKClusterReduction requires TDMInst != 0")
+    return False
+
+  return True
+
+
 def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   """Validate the gfx1250 StreamK DP cooperative cluster-load fast path.
 
@@ -251,6 +341,14 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   """
   if not state.get("StreamKMulticast", 0):
     return True
+
+  # Mutually exclusive with the cluster split-barrier reduction fast path: the
+  # two features want incompatible cluster semantics on the same 1-D cluster and
+  # must never be enabled together.
+  if state.get("StreamKClusterReduction", 0):
+    reject(state, printRejectionReason,
+           "StreamKMulticast and StreamKClusterReduction are mutually exclusive")
+    return False
 
   # StreamKMulticast is auto-enabled by ClusterDim on SK3, but the multicast mask
   # SGPRs are gated on the (derived) Multicast flag while the mask predicate /
@@ -1177,7 +1275,12 @@ class Solution(collections.abc.Mapping):
     # ClusterDim is tested first so this (like the legacy Multicast auto branch
     # below) never dereferences StreamK for the common non-clustered state, which
     # some partial-state derivation call sites construct without a StreamK key.
-    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
+    #
+    # StreamKClusterReduction claims the [C,1] cluster for its own split-barrier
+    # K-split reduction (mutually exclusive with the cooperative-load multicast),
+    # so a reduction cluster must NOT auto-enable StreamKMulticast here.
+    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3 \
+       and not state.get("StreamKClusterReduction", 0):
       state["StreamKMulticast"] = 1
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
@@ -1899,6 +2002,7 @@ class Solution(collections.abc.Mapping):
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
       _validateStreamKForceDPOnly(state, printRejectionReason)
+      _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap)
       _validateStreamKMulticast(state, printRejectionReason, isaInfoMap)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
@@ -1966,6 +2070,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKAtomic"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
+      state["StreamKClusterReduction"] = 0
       state["StreamKMulticast"] = 0
       state["DebugStreamK"] = 0
       state["PrefetchAcrossPersistent"] = 0

@@ -141,6 +141,48 @@ class TestValidation:
             assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
             assert st["Multicast"] == 1, st["Multicast"]
 
+    def test_reduction_keeps_cooperative_loads_off(self, tmp_path):
+        """Mutual exclusion (reduction wins): adding StreamKClusterReduction=1 to
+        an otherwise auto-multicast SK3 cluster turns the cooperative loads off
+        (StreamKMulticast stays 0, Multicast False) instead of auto-enabling."""
+        from Tensile import LibraryIO
+        import yaml
+        cfg = copy.deepcopy(LibraryIO.read(_STREAMK_CLUSTER_BARE))
+        fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
+        fork.append({"StreamKClusterReduction": [1]})
+        out = tmp_path / "bare_cluster_reduction.yaml"
+        with open(out, "w") as f:
+            yaml.safe_dump(cfg, f, default_flow_style=None)
+        states = _derive_states(str(out))
+        assert states, "expected the SK3 reduction cluster config to derive solutions"
+        for st in states:
+            assert not st.get("StreamKMulticast", 0), st.get("StreamKMulticast")
+            assert st["Multicast"] == 0, st["Multicast"]
+
+    def test_xor_streamk_cluster_reduction(self):
+        """The mutual-exclusion invariant is enforced at the validator: a state
+        that (hypothetically) has BOTH StreamKMulticast and StreamKClusterReduction
+        is rejected. Through config this is now unreachable -- the collapse gives
+        reduction precedence and leaves the derived StreamKMulticast off (see
+        test_reduction_keeps_cooperative_loads_off) -- but the validator keeps the
+        xor as a hard invariant the collapse depends on."""
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        st = {
+            "StreamKMulticast": 1,
+            # StreamKMulticast on always co-derives Multicast on (real invariant).
+            "Multicast": 1,
+            "StreamK": 3,
+            "StreamKClusterReduction": 1,
+            "StreamKAtomic": 0,
+            "StreamKXCCMapping": 0,
+            "ClusterDim": [4, 1],
+            "ISA": [12, 5, 0],
+            "TDMInst": 3,
+        }
+        isa_map = {(12, 5, 0): type("_I", (), {"asmCaps": {"HasTDM": True, "HasClusterBarrier": True}})()}
+        assert _validateStreamKMulticast(st, False, isa_map) is False
+        assert st.get("Valid") is False
+
     def test_reject_multicast_force_off(self, tmp_path):
         """StreamKMulticast auto-enabled by ClusterDim on SK3 is incompatible with
         an explicit Multicast=0 (force off): the mask SGPRs are gated on Multicast

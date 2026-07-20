@@ -1,27 +1,21 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Client-runnable StreamK DP cooperative B-multicast test for gfx1250.
+# Client-runnable StreamK workgroup-cluster-reduction test for gfx1250.
 #
 # MX-FP8 TN, StreamK=3 (TDMInst=3, MXLoadInst=TDM,
 # MXScaleFormat=InMemorySwizzle, WavefrontSize=32, StreamKXCCMapping=0) with the
-# DP cooperative B-multicast fast path (auto-derived from StreamK=3 + ClusterDim):
+# barrier-only cluster reduction fast path:
 #
-#   - ClusterDim: [[2,1],[4,1],[8,1]]   -- 1-D spatial clusters, C in {2,4,8}
-#   - StreamKClusterReduction: [0]      -- mutually exclusive with multicast
+#   - StreamKClusterReduction: [1]      -- intra-cluster split-barrier reduce
+#   - ClusterDim: [[2,1],[4,1],[8,1]]   -- 1-D clusters, C in {2,4,8}
 #
-# StreamKMulticast is a derived-only internal state (no YAML opt-in): a StreamK=3
-# ClusterDim != [1,1] config that does not request StreamKClusterReduction
-# auto-enables the DP cooperative B-multicast path.
-#
-# In the DP region the C consecutive workgroups of a [C,1] cluster process
-# M-adjacent tiles that share the same B over full K, so B is TDM-multicast to
-# the whole cluster while A is per-workgroup. The runtime clusterMulticastValid
-# predicate enables the broadcast only on a fully-populated, M-aligned
-# (nWG0 % C == 0) cluster; otherwise B loads normally. The host rounds the grid
-# up to a multiple of C so every launched cluster is full. Every size below keeps
-# nWG0 % C == 0 for the C it dispatches (a violation is a HARD REJECT via
-# ClusterDimCheck at selection time, not a silent fallback).
+# Sizes force partial-tile reductions (K >> DepthU) and keep both nWG0 % C == 0
+# (cluster selection) and itersPerTile % C == 0 (balanced split barrier). When
+# itersPerTile % C != 0 the split barrier over-signals -> hang, so the
+# ClusterReductionIterCheck predicate HARD-REJECTS such problems at selection
+# time (itersPerTile depends on runtime K, so it cannot be a build-time reject).
+# A K-tail (K % DepthU != 0) is safe as long as itersPerTile % C == 0.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
@@ -44,7 +38,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # MX-FP8 (F8 in, float32 out) TN, Batched -- StreamK DP cooperative multicast.
+  # MX-FP8 (F8 in, float32 out) TN, Batched -- StreamK cluster reduction.
   ########################################
   -
     - # ProblemType: MX-F8 TN
@@ -100,7 +94,7 @@ BenchmarkProblems:
         - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
-        - StreamKClusterReduction: [0]
+        - StreamKClusterReduction: [1]
         - ClusterDim: [[2, 1], [4, 1], [8, 1]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
@@ -115,10 +109,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 256]    # nWG0=16 -> multicast ON (C=2,4,8)
-          - Exact: [256, 256, 1, 256]    # nWG0=8  -> multicast ON (C=2,4,8)
-          - Exact: [128, 128, 1, 512]    # nWG0=4  -> ON (C=2,4); K=512
-          - Exact: [256, 256, 2, 256]    # batched (batch=2); nWG0=8 -> ON (C=2,4,8)
-          - Exact: [256, 256, 1, 1920]   # K-tail (K%256=128); nWG0=8 -> ON (C=2,4,8); tail-loop B-multicast loads
+          - Exact: [128, 128, 1, 1024]   # MT32 nWG0=4  (C=2,4 admit; C=8 nWG0%8!=0); itersPerTile=4 -> C=2,4 partial-tile reduce
+          - Exact: [512, 512, 1, 2048]   # MT32 nWG0=16 (C=2,4,8 admit); itersPerTile=8 -> C=2,4,8 partial-tile reduce (safe C=8)
+          - Exact: [256, 256, 1, 1920]   # K-tail: itersPerTile=ceil(1920/256)=8 (8%2,4,8==0), K%256=128 tail -> tail loop inside cluster reduce (C=8 via MT32 nWG0=8)
+          - Exact: [256, 256, 2, 1024]   # batched (batch=2); nWG0=8, itersPerTile=4 -> C=2,4 partial-tile reduce
         - ActivationArgs:
           - [Enum: none]

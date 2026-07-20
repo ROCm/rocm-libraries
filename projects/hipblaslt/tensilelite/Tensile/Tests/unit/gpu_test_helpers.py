@@ -87,6 +87,7 @@ def _detect_gfx_target():
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
 HAS_GFX950 = GFX_TARGET == "gfx950"
+HAS_GFX1250 = GFX_TARGET == "gfx1250"
 # GPU tests carry two composed marks so the tiering filters work correctly:
 #   - `gpu`   : selection marker so `pytest -m "not gpu"` (quick/standard tiers)
 #               deselects these tests at collection time.
@@ -110,6 +111,26 @@ def requires_gpu(func):
     ``pytestmark = GPU_MARKS`` directly (a function cannot be used there).
     """
     for mark in GPU_MARKS:
+        func = mark(func)
+    return func
+
+
+# gfx1250 gate for the StreamK workgroup-cluster reduction roundtrip. In some
+# environments rocm_agent_enumerator reports the physical host arch, so
+# GFX_TARGET can be driven via the TENSILE_GPU_TARGET=gfx1250 override (see
+# _detect_gfx_target). Kept independent of the gfx950 gate above so both coexist.
+GPU_GFX1250_MARKS = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        hip is None or not HAS_GFX1250,
+        reason=f"requires hip module and gfx1250 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
+    ),
+]
+
+
+def requires_gpu_gfx1250(func):
+    """gfx1250 variant of :func:`requires_gpu`; applies the ``gpu`` marker and skipif."""
+    for mark in GPU_GFX1250_MARKS:
         func = mark(func)
     return func
 WAVESIZE   = 64
