@@ -115,6 +115,12 @@ hipError_t topk_segmented_impl(void*                                 temporary_s
                       "'UseRadix = true' requires the key type to support radix-based sorting");
     }
 
+    if (K < 0)
+    {
+        // K should be >= 0.
+        return hipErrorInvalidValue;
+    }
+    
     // Naive segmented top-k:
     // * Radix-sortable types only
     // * Ordered
