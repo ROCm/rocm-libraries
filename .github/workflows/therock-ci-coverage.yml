@@ -127,17 +127,25 @@ jobs:
         run: |
           set +e  # diagnostic only; never fail the build
           proj="$(echo '${{ inputs.project_name }}' | tr '[:upper:]' '[:lower:]')"
-          nm="$(find TheRock/build-coverage -type f -name llvm-nm -path '*/llvm/bin/*' 2>/dev/null | head -1)"
-          echo "== coverage instrumentation self-check (lib${proj}.so) =="
-          echo "llvm-nm: ${nm:-<not found>}"
-          found=0
-          for so in $(find TheRock/build-coverage -type f -name "lib${proj}.so" 2>/dev/null); do
-            found=1
-            cnt="$("${nm}" "${so}" 2>/dev/null | grep -c __llvm_profile)"
-            echo "  ${cnt} __llvm_profile symbols : ${so}"
+          BC=TheRock/build-coverage
+          nm="$(find "$BC" -type f -name llvm-nm -path '*/llvm/bin/*' 2>/dev/null | head -1)"
+          echo "===== coverage self-check (${proj}) ====="
+          echo "-- [1] lib${proj}.so* symbol counts (symlinks resolved) --"
+          find "$BC" -name "lib${proj}.so*" 2>/dev/null | sort -u | while read -r so; do
+            real="$(readlink -f "$so" 2>/dev/null || echo "$so")"
+            printf '    %6s __llvm_profile  %s\n' "$("${nm}" "$real" 2>/dev/null | grep -c __llvm_profile)" "$so"
           done
-          [ "${found}" -eq 0 ] && echo "  (no lib${proj}.so found under TheRock/build-coverage)"
-          echo "=========================================="
+          echo "-- [2] compile_commands*.json entries with -fprofile-instr-generate --"
+          find "$BC" -name "compile_commands*.json" 2>/dev/null | while read -r cc; do
+            n="$(grep -c "fprofile-instr-generate" "$cc" 2>/dev/null)"
+            printf '    %6s  %s\n' "${n:-0}" "$cc"
+          done
+          echo "-- [3] ${proj} configure log: coverage/ENABLE/fprofile lines --"
+          find "$BC" -iname "*${proj}*configure*.log" 2>/dev/null | while read -r lg; do
+            echo "    log: $lg"
+            grep -iE "coverage|ENABLE_COVERAGE|fprofile" "$lg" 2>/dev/null | head -8 | sed 's/^/       /'
+          done
+          echo "===== end self-check ====="
 
       - name: Report
         if: ${{ !cancelled() }}
