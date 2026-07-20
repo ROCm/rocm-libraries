@@ -377,7 +377,7 @@ class Library:
         else:
             if common["a_type"] == "f16_r" and self.problem["HighPrecisionAccumulate"]:
                 common["compute_type"] = "c_f32_r"
-            elif common["DataType"] == 5:  # i8_r
+            elif common["a_type"] == "i8_r": 
                 common["compute_type"] = "i32_r"
             else:
                 common["compute_type"] = common["a_type"]

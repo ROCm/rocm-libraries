@@ -26,6 +26,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from geko import pipeline as pipeline_mod
 from geko.pipeline import run_optimize
@@ -36,6 +37,25 @@ ROOT = Path(__file__).resolve().parents[1]
 # Configure step matches test_configure.py; optimize can take much longer (Tensile / GA).
 _CONFIGURE_TIMEOUT_S = 600
 _OPTIMIZE_TIMEOUT_S = 7200
+
+
+def _patch_optimize_config(path, n_gen_target=10, pop_size_target=128):
+    """Rewrite one generated optimization config with faster GA settings.
+
+    Config format is stable: Backend -> Config -> {n_gen, pop_size}.
+    """
+    with path.open("r") as f:
+        data = yaml.safe_load(f)
+
+    if data is None:
+        return
+
+    backend_cfg = data.setdefault("Backend", {}).setdefault("Config", {})
+    backend_cfg["n_gen"] = n_gen_target
+    backend_cfg["pop_size"] = pop_size_target
+
+    with path.open("w") as f:
+        yaml.safe_dump(data, f, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +188,12 @@ class TestIntegration:
         )
         assert workdir.is_dir()
         assert (workdir / "optimizations").is_dir()
+        
+        config_files = pipeline_mod.optim.utils.list_optimization_configs(workdir / "optimizations")
+        assert len(config_files) > 0, "Expected config files but workdir is empty"
+        for f in config_files:
+            # Patch config so it runs faster, independent of original defaults.
+            _patch_optimize_config(Path(f), n_gen_target=10, pop_size_target=128)
 
         opt = subprocess.run(
             [

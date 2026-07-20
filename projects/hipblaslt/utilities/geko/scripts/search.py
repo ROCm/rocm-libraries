@@ -72,11 +72,6 @@ def main() -> None:
         help="Target dense-search benchmark duration per GEMM (seconds)",
     )
     parser.add_argument(
-        "--no_retry",
-        action="store_true",
-        help="Do not retry failed operations",
-    )
-    parser.add_argument(
         "--verbose",
         "-v",
         type=int,
@@ -108,7 +103,6 @@ def main() -> None:
         keep_thr=args.keep_thr,
         up_thr=args.up_thr,
         workdir=args.workdir,
-        retry=not args.no_retry,
         verbose=args.verbose,
         duration=args.duration,
         bench_freq=args.bench_freq,

@@ -241,6 +241,7 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
         lib_paths.add(match_table[idx][0])
     logger.debug(f"Extracting from {len(lib_paths)} source libraries")
 
+    lib_paths = sorted(lib_paths)
     libs: dict[str, Library] = {}
     for lib, lib_path in zip(parallel_for(load_library, lib_paths), lib_paths):
         mapping = {}
