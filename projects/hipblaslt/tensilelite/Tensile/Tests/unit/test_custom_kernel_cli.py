@@ -160,6 +160,78 @@ def test_addcustomconfig_main_with_yaml_injects_interface(tmp_path, monkeypatch)
     assert "CustomKernel:" in text
 
 
+_META_WITH_DETECTED = dedent("""\
+    .amdgpu_metadata
+    ---
+    amdhsa.kernels:
+      - .name: mykernel
+        .reqd_workgroup_size: [128, 1, 1]
+        .wavefront_size: 64
+        .args:
+          - .name: D
+            .size: 8
+            .offset: 0
+            .value_kind: global_buffer
+    ...
+    """)
+
+
+def test_addcustomconfig_main_autodetects_threads_and_wavefront(tmp_path, monkeypatch, capsys):
+    p = tmp_path / "k.s"
+    p.write_text(_META_WITH_DETECTED)
+    monkeypatch.setattr(sys, "argv", ["prog", str(p)])
+
+    acc.main()
+
+    out = capsys.readouterr().out
+    assert "Auto-detected" in out
+    assert "wavefront_size=64" in out
+    assert "threads=[128, 1, 1]" in out
+    assert "custom.config:" in p.read_text()
+
+
+def test_addcustomconfig_main_merges_detected_into_yaml_config(tmp_path, monkeypatch):
+    # The YAML CustomKernel omits threads/WavefrontSize; main() fills them from
+    # the .s .reqd_workgroup_size / .wavefront_size auto-detection.
+    p = tmp_path / "mykernel.s"
+    p.write_text(_META_WITH_DETECTED)
+    y = tmp_path / "t.yaml"
+    y.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - CustomKernel:
+                - name: mykernel
+                  args: []
+                  macrotile: [256, 256, 64]
+                  grid: [TilesX, TilesY, One]
+              - MatrixInstruction:
+                - [16, 16, 16, 1]
+        """))
+    monkeypatch.setattr(sys, "argv", ["prog", str(p), "--yaml", str(y)])
+
+    acc.main()
+
+    text = p.read_text()
+    assert "threads: [128, 1, 1]" in text
+    assert "WavefrontSize: 64" in text
+
+
+def test_addcustomconfig_main_inject_failure_exits(tmp_path, monkeypatch, capsys):
+    # A .s with no .amdgpu_metadata section has no insert point, so injection
+    # fails and main() exits non-zero.
+    p = tmp_path / "k.s"
+    p.write_text("s_nop 0\ns_endpgm\n")
+    monkeypatch.setattr(sys, "argv", ["prog", str(p)])
+
+    with pytest.raises(SystemExit) as e:
+        acc.main()
+
+    assert e.value.code == 1
+    assert "No .amdgpu_metadata" in capsys.readouterr().err
+
+
 # --------------------------------------------------------------------------- #
 # ValidateMetadata.main()
 # --------------------------------------------------------------------------- #
@@ -214,3 +286,15 @@ def test_validatemetadata_main_non_strict_bad_exits_zero(tmp_path, monkeypatch, 
 
     assert e.value.code == 0
     assert "1 warning(s)" in capsys.readouterr().out
+
+
+def test_validatemetadata_main_default_root_uses_shipped_kernels(monkeypatch, capsys):
+    # With no --custom-kernels-root, main() auto-detects the shipped
+    # Tensile/CustomKernels directory and validates the real kernels.
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    with pytest.raises(SystemExit) as e:
+        vm.main()
+
+    assert e.value.code == 0
+    assert "Summary:" in capsys.readouterr().out

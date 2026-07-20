@@ -13,6 +13,7 @@ import pytest
 
 from Tensile.BenchmarkProblems import _hashableProblemTypeKV
 from Tensile.Common.DataType import DataType
+from Tensile.Common.Utilities import deriveWaveParams
 from Tensile.SolutionStructs.Naming import _getName, getKernelFileBase
 from Tensile.SolutionStructs.Solution import Solution
 from Tensile.Toolchain.Component import Assembler
@@ -215,3 +216,22 @@ def test_retarget_missing_source_does_not_raise():
     # Opportunistic rewrite: an unreadable/missing source is left alone rather
     # than crashing before the real assembler invocation.
     Assembler._retargetAssemblySource("gfx942", "/no/such/file.s")
+
+
+# --------------------------------------------------------------------------- #
+# deriveWaveParams: non-perfect-square wave count exercises the wgM search loop
+# --------------------------------------------------------------------------- #
+
+
+def test_derive_wave_params_non_square_wave_count():
+    # num_threads=320, wavefront=64 -> num_waves=5 (not a perfect square), so
+    # the wgM-decrement loop runs until wgM divides num_waves (2 -> 1).
+    wave_group, wave_tile = deriveWaveParams([16, 16, 16, 1], 320, [256, 256], 64)
+    assert wave_group == [1, 5]
+    assert wave_tile == [max(1, 256 // (16 * 1)), max(1, 256 // (16 * 5))]
+
+
+def test_derive_wave_params_square_wave_count():
+    # num_threads=256, wavefront=64 -> num_waves=4 (perfect square) -> wgM=2.
+    wave_group, _ = deriveWaveParams([16, 16, 16, 1], 256, [256, 256], 64)
+    assert wave_group == [2, 2]

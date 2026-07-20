@@ -44,7 +44,10 @@ from Tensile.CustomKernels import (
     _buildCustomKernelFromMetadata,
     _metadataArgToCustomArg,
     getCustomKernelConfig,
+    getCustomKernelFilepath,
+    isCustomKernelConfig,
     iterCustomKernelFiles,
+    readCustomKernelConfig,
     validateCustomKernelMetadata,
 )
 from Tensile.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
@@ -793,3 +796,168 @@ def test_validate_metadata_custom_kernel_not_mapping(tmp_path):
 
     assert not valid
     assert "CustomKernel (mapping)" in msg
+
+
+# --------------------------------------------------------------------------- #
+# Remaining CustomKernels branch coverage
+# --------------------------------------------------------------------------- #
+
+
+def test_is_custom_kernel_config_generated_is_false():
+    # A generated (Tensile-emitted) CustomKernel mapping is NOT treated as a
+    # handwritten custom kernel.
+    assert isCustomKernelConfig({"CustomKernel": {"name": "k", "generated": True}}) is False
+    assert isCustomKernelConfig({"CustomKernel": {"name": "k"}}) is True
+
+
+def test_get_custom_kernel_filepath_recursive_fallback(tmp_path):
+    # When no flat <dir>/<name>.s exists, the loader searches subdirectories.
+    nested = tmp_path / "aiter"
+    nested.mkdir()
+    write_kernel(nested / "k.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+        """)
+    assert getCustomKernelFilepath("k", str(tmp_path)) == str(nested / "k.s")
+
+
+def test_read_custom_kernel_config_non_mapping_raises(tmp_path):
+    p = tmp_path / "k.s"
+    p.write_text(".amdgpu_metadata\n---\ncustom.config:\n  - 1\n  - 2\n...\ns_nop 0\n")
+    with pytest.raises(RuntimeError, match="must be a YAML mapping"):
+        readCustomKernelConfig("k", str(tmp_path))
+
+
+def test_build_from_metadata_non_dict_yaml_raises():
+    with pytest.raises(RuntimeError, match="no parseable .amdgpu_metadata"):
+        _buildCustomKernelFromMetadata("k", None, {"MatrixInstruction": [16, 16, 16, 1]})
+
+
+def test_build_from_metadata_mi_length9_derives_wave_from_mi():
+    # MI of length >= 9 carries MIWaveTile (mi[5:7]) / MIWaveGroup (mi[7:9])
+    # inline, so macrotile is computed from them.
+    full = {"amdhsa.kernels": [{".name": "k", ".max_flat_workgroup_size": 256,
+                                ".args": [{".name": "D", ".size": 8, ".value_kind": "global_buffer"}]}]}
+    ck = _buildCustomKernelFromMetadata("k", full, {"MatrixInstruction": [16, 16, 16, 1, 1, 4, 4, 2, 2]})
+    # macrotile0 = mi0 * wt0 * wg0 = 16 * 4 * 2 = 128
+    assert ck["macrotile"][0] == 16 * 4 * 2
+    assert ck["macrotile"][1] == 16 * 4 * 2
+
+
+def test_get_custom_kernel_config_strips_unknown_metadata_key(tmp_path):
+    # A non-tunable, non-passthrough key (e.g. provenance) is dropped from the
+    # solution dict rather than fed to the solution.
+    write_kernel(tmp_path / "k.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          Version: 9.9.9
+        """)
+    config = getCustomKernelConfig("k", {}, str(tmp_path))
+    assert "Version" not in config
+
+
+def test_get_custom_kernel_config_respects_explicit_custom_kernel(tmp_path):
+    # An explicit CustomKernel block is used verbatim (no auto-inference).
+    write_kernel(tmp_path / "k.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args: []
+            macrotile: [128, 128, 64]
+            threads: [256, 1, 1]
+            grid: [TilesX, TilesY, One]
+        """)
+    config = getCustomKernelConfig("k", {}, str(tmp_path))
+    assert config["CustomKernel"]["macrotile"] == [128, 128, 64]
+    assert config["CustomKernel"]["grid"] == ["TilesX", "TilesY", "One"]
+
+
+def test_validate_metadata_tensile_missing_internal_support_params(tmp_path):
+    write_kernel(tmp_path / "k.s", """\
+          ProblemType: {}
+        """)
+    valid, msg = validateCustomKernelMetadata("k", str(tmp_path))
+    assert not valid
+    assert "InternalSupportParams" in msg
+
+
+def test_validate_metadata_external_source_missing_origin(tmp_path):
+    write_kernel(tmp_path / "k.s", """\
+          Source:
+            Repository: http://x
+          Features: {}
+          Version: 1.0.0
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {}
+          MatrixInstruction: [16, 16, 16, 1]
+          CustomKernel:
+            args: []
+            macrotile: [16, 16, 16]
+            threads: [64, 1, 1]
+            grid: [TilesX, TilesY, Batch]
+        """)
+    valid, msg = validateCustomKernelMetadata("k", str(tmp_path))
+    assert not valid
+    assert "Source.Origin" in msg
+
+
+# --------------------------------------------------------------------------- #
+# _parse_tensile_yaml: skip malformed ForkParameter entries
+# --------------------------------------------------------------------------- #
+
+
+def test_build_from_metadata_no_universal_args_skips_header_reorder():
+    full = {"amdhsa.kernels": [{".name": "k", ".max_flat_workgroup_size": 256,
+                                ".args": [{".name": "D", ".size": 8, ".value_kind": "global_buffer"}]}]}
+    ck = _buildCustomKernelFromMetadata("k", full, {
+        "MatrixInstruction": [16, 16, 16, 1],
+        "InternalSupportParams": {"UseUniversalArgs": False},
+    })
+    assert ck["args"][0]["semantic"] == "AddressD"
+
+
+def test_get_custom_kernel_filepath_iterates_past_nonmatching(tmp_path):
+    nested = tmp_path / "aiter"
+    nested.mkdir()
+    # 'aaa.s' sorts before 'k.s' and does not match, so the search loop must
+    # skip it before matching 'k.s'.
+    write_kernel(nested / "aaa.s", "InternalSupportParams:\n  KernArgsVersion: 0")
+    write_kernel(nested / "k.s", "InternalSupportParams:\n  KernArgsVersion: 0")
+    assert getCustomKernelFilepath("k", str(tmp_path)).endswith("/k.s")
+
+
+def test_read_asm_file_comment_only_metadata_returns_no_detection(tmp_path):
+    # yaml_lines non-empty but parses to None (comment only) -> the "no metadata"
+    # early return.
+    p = tmp_path / "k.s"
+    p.write_text(".amdgpu_metadata\n---\n# only a comment\n...\ns_nop 0\n")
+    info = _read_asm_file(str(p))
+    assert info["detected"] == {}
+    assert info["insert_idx"] is not None
+
+
+def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
+    # A non-dict fork entry and a CustomKernel entry without a name are skipped;
+    # the first named kernel still resolves.
+    p = tmp_path / "t.yaml"
+    p.write_text(dedent("""\
+        BenchmarkProblems:
+          -
+            - OperationType: GEMM
+            - ForkParameters:
+              - "a bare string entry"
+              - CustomKernel:
+                - args: []
+                - name: real_kernel
+                  args: []
+                  macrotile: [16, 16, 16]
+                  threads: [64, 1, 1]
+                  grid: [TilesX, TilesY, Batch]
+        """))
+    config = _parse_tensile_yaml(str(p), "real_kernel")
+    assert "CustomKernel" in config
