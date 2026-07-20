@@ -477,7 +477,7 @@ def _run_sweep(
     # Compute reference output once before the sweep (only when --verify).
     ref_out: torch.Tensor | None = None
     if args.verify:
-        from conv_reference import conv_reference
+        from rocke.benchmark.conv_reference import conv_reference
 
         ref_out = conv_reference(_A_f32, _B_f32, p)
         print(

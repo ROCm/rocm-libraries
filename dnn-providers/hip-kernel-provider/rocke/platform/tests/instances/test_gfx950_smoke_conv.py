@@ -25,8 +25,6 @@ from pathlib import Path
 from rocke.assets import platform_root
 from rocke.runtime.hip_module import get_device_arch, get_device_name
 
-_PY_ROOT = platform_root() / "python"
-_BENCHMARK = _PY_ROOT / "rocke" / "benchmark" / "benchmark_implicit_gemm_conv.py"
 _DEFAULT_BASELINE = (
     platform_root() / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
 )
@@ -53,20 +51,18 @@ class TestGfx950ConvSmoke(unittest.TestCase):
     )
 
     def _run_benchmark(self, dtype: str, timeout: int = 600) -> str:
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join([str(_PY_ROOT), env.get("PYTHONPATH", "")])
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         proc = subprocess.run(
             [
                 sys.executable,
-                str(_BENCHMARK),
+                "-m",
+                "rocke.benchmark.benchmark_implicit_gemm_conv",
                 "--arch",
                 "gfx950",
                 "--dtype",
                 dtype,
                 "--verify",
             ],
-            cwd=str(_PY_ROOT),
             env=env,
             capture_output=True,
             text=True,
