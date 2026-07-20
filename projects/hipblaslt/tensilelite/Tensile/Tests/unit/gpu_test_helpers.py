@@ -87,10 +87,31 @@ def _detect_gfx_target():
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
 HAS_GFX950 = GFX_TARGET == "gfx950"
-requires_gpu = pytest.mark.skipif(
-    hip is None or not HAS_GFX950,
-    reason=f"requires hip module and gfx950 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
-)
+# GPU tests carry two composed marks so the tiering filters work correctly:
+#   - `gpu`   : selection marker so `pytest -m "not gpu"` (quick/standard tiers)
+#               deselects these tests at collection time.
+#   - `skipif`: runtime hardware guard so comprehensive/full tiers still skip
+#               when hip or a gfx950 device is unavailable.
+# Note: `pytest.mark.gpu(pytest.mark.skipif(...))` does NOT stack — the inner
+# MarkDecorator is swallowed as an argument and lost — so apply them separately.
+GPU_MARKS = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        hip is None or not HAS_GFX950,
+        reason=f"requires hip module and gfx950 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
+    ),
+]
+
+
+def requires_gpu(func):
+    """Apply both the ``gpu`` selection marker and the hardware ``skipif``.
+
+    Usable as a decorator (``@requires_gpu``). For module-level marking, assign
+    ``pytestmark = GPU_MARKS`` directly (a function cannot be used there).
+    """
+    for mark in GPU_MARKS:
+        func = mark(func)
+    return func
 WAVESIZE   = 64
 NUM_WAVES  = 4
 NUM_THREADS = WAVESIZE * NUM_WAVES  # 256

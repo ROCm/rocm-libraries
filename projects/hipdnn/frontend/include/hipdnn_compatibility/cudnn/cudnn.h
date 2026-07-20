@@ -7,18 +7,14 @@
  * @file cudnn.h
  * @brief Stub C-API header for the hipDNN cuDNN-compatibility shim (v9-only).
  *
- * This is a hand-curated, **v9-only** replacement for NVIDIA's `<cudnn.h>`
- * (RFC 0012 §4.7). It declares only the small set of C-API types that the
- * cuDNN frontend v9 graph API refers to in its own method signatures, plus the
- * handful of C entry points needed for handle init, stream binding, error
- * handling, and version checks (and to build the mirrored samples, §8.3).
- *
- * Everything here forwards to an existing hipDNN equivalent; the full cuDNN C
- * library (convolution-descriptor APIs, etc.) is intentionally out of scope.
+ * Hand-curated, v9-only replacement for NVIDIA's `<cudnn.h>`: declares the few
+ * C-API types the cuDNN frontend v9 graph API names in its signatures, plus the
+ * C entry points for handle init, stream binding, error handling, and version
+ * checks. Everything forwards to an existing hipDNN equivalent.
  *
  * @note Forwarding goes through `hipdnn_frontend::detail::hipdnnBackend()` — the
- *       same mockable indirection `hipdnn_frontend/Handle.hpp` uses — so these
- *       entry points are unit-testable with the in-tree mock backend.
+ *       same mockable indirection `Handle.hpp` uses — so these entry points are
+ *       unit-testable with the in-tree mock backend.
  */
 
 #pragma once
@@ -35,39 +31,29 @@
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 
 // ===========================================================================
-// C-API types (RFC 0012 §4.7)
+// C-API types
 // ===========================================================================
 
 /// @brief cuDNN handle, aliased directly to the hipDNN handle type.
 ///
-/// `hipdnnHandle_t` is the global C typedef from `<hipdnn_backend.h>`
-/// (`typedef struct hipdnnHandle* hipdnnHandle_t;`), not a member of namespace
-/// `hipdnn_frontend`.
+/// `hipdnnHandle_t` is the global C typedef from `<hipdnn_backend.h>`, not a
+/// member of namespace `hipdnn_frontend`.
 using cudnnHandle_t = ::hipdnnHandle_t;
 
 static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
-              "cudnnHandle_t must alias the hipDNN handle type (RFC 0012 §4.7)");
+              "cudnnHandle_t must alias the hipDNN handle type");
 
-// `cudnnStatus_t` is declared in `cudnn_status.h` (included above) so the
-// status enum is available without the C entry points — this lets
-// `detail/status_translation.h` be self-contained.
+// Only the C-API types the v9 graph API actually references are declared here
+// (cudnnHandle_t, plus cudnnStatus_t from cudnn_status.h). Other cuDNN C-API
+// enums are intentionally omitted: the v9 graph surface uses the FE-namespace
+// enums (DataType_t, …) aliased in cudnn_frontend_utils.h, not the C-API ones.
 
-// NOTE: This stub intentionally declares only the C-API types the *implemented*
-// entry points use — `cudnnHandle_t` and `cudnnStatus_t`. The remaining v9
-// C-API enums named in RFC 0012 §4.7 (`cudnnDataType_t`, `cudnnTensorFormat_t`,
-// `cudnnConvolutionMode_t`, `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`,
-// `cudnnBackendHeurMode_t`, `cudnnBackendNumericalNote_t`,
-// `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`) land with the
-// type-mapping work, where their values/aliasing are verified against upstream
-// rather than stubbed here.
-
-// Status translation between the cuDNN and hipDNN enum families. Included after
-// the C-API types above (it needs cudnnStatus_t) and before the entry points
-// below (which use it). Lives under detail/ and is shim-internal.
+// Status translation. Included after cudnnStatus_t above and before the entry
+// points below, which use it.
 #include <hipdnn_compatibility/cudnn/detail/status_translation.h>
 
 // ===========================================================================
-// C entry points (RFC 0012 §4.7) — forward to the hipDNN backend
+// C entry points — forward to the hipDNN backend
 // ===========================================================================
 
 extern "C" {
@@ -118,10 +104,8 @@ inline size_t cudnnGetVersion(void)
 // ===========================================================================
 // create_cudnn_handle() convenience helper
 // ===========================================================================
-// Mirrors the helper NVIDIA ships in its sample utilities
-// (samples/cpp/utils/helpers.h), so mirrored sample code that calls
-// `create_cudnn_handle()` works unchanged (RFC 0012 §4.7, §8.3). Unlike the
-// upstream helper, this version does not depend on a test framework.
+// Mirrors the helper in NVIDIA's sample utilities so mirrored sample code
+// compiles unchanged, minus the upstream test-framework dependency.
 
 /// @brief RAII deleter that destroys a heap-allocated cuDNN handle.
 struct CudnnHandleDeleter
@@ -130,8 +114,8 @@ struct CudnnHandleDeleter
     {
         if(handle != nullptr)
         {
-            // A failed destroy at teardown is not recoverable, so we log and
-            // ignore it (the heap allocation is still freed below).
+            // A failed destroy at teardown is not recoverable; log and ignore
+            // (the heap allocation is still freed below).
             const cudnnStatus_t status = cudnnDestroy(*handle);
             if(status != CUDNN_STATUS_SUCCESS)
             {
@@ -145,11 +129,8 @@ struct CudnnHandleDeleter
 
 /// @brief Create a managed cuDNN handle (mirrors NVIDIA's sample helper).
 ///
-/// The snake_case name intentionally mirrors NVIDIA's helper so mirrored sample
-/// code compiles unchanged; the naming check is suppressed accordingly.
-///
-/// On a backend create failure the error is logged and an empty pointer is
-/// returned, so callers can detect the failure via a null result.
+/// snake_case name mirrors NVIDIA's so sample code compiles unchanged. On a
+/// backend create failure, logs and returns an empty (null) pointer.
 inline std::unique_ptr<cudnnHandle_t, CudnnHandleDeleter>
     create_cudnn_handle() // NOLINT(readability-identifier-naming)
 {

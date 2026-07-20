@@ -31,10 +31,8 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <iostream>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -144,4 +142,3 @@ namespace TensileLite
     } // namespace Serialization
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END
