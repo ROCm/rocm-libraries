@@ -3,6 +3,8 @@
 
 target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHipMlopsEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestHipMlopsKernelCompiler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestHipMlopsModuleCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormFwdTrainingActivPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp

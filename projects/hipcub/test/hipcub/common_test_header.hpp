@@ -160,6 +160,8 @@ hipError_t hipMallocHelper(T** devPtr, size_t size)
 {
     if (use_hmm())
     {
+        if (size == 0)
+            std::cerr << "Warning: attempting to allocate a buffer of size 0 with hipMallocManaged." << std::endl;
         return hipMallocManaged((void**)devPtr, size);
     }
     else

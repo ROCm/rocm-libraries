@@ -174,39 +174,29 @@
     'nonfree_packed': False,
   })
 # ---
-# name: test_print_summary_empty_returns_zero
+# name: test_raise_if_type_mismatches_empty_noops
   dict({
-    'return': 0,
     'stdout': '',
   })
 # ---
-# name: test_print_summary_empty_with_files
+# name: test_raise_if_type_mismatches_empty_stays_silent
   dict({
-    'return': 0,
-    'stdout': '''
-      Checked 7 YAML logic files - no type mismatches found.
-  
-    ''',
+    'stdout': '',
   })
 # ---
-# name: test_print_summary_populated
-  dict({
-    'return': 4,
-    'stdout': '''
-      
-      ===========================================================
-      WARNING: YAML parameter type mismatches detected (4 total across 2 files):
-      ===========================================================
-        DepthU: found float in 1 solutions (values: 8.0) - expected int
-        UseBeta: found int in 3 solutions (values: 0, 1) - expected bool
-      -----------------------------------------------------------
-        This will cause std::bad_cast at runtime because msgpack
-        serializes bool and int as different wire types.
-        Fix these to prevent future build failures.
-      ===========================================================
-  
-    ''',
-  })
+# name: test_raise_if_type_mismatches_populated_raises
+  '''
+  ===========================================================
+  ERROR: YAML parameter type mismatches detected (4 total across 2 files):
+  ===========================================================
+    DepthU: found float in 1 solutions (values: 8.0) - expected int
+    UseBeta: found int in 3 solutions (values: 0, 1) - expected bool
+  -----------------------------------------------------------
+    This will cause std::bad_cast at runtime because msgpack
+    serializes bool and int as different wire types.
+    Fix these type mismatches before building.
+  ===========================================================
+  '''
 # ---
 # name: test_skip_type_check_roster
   list([
