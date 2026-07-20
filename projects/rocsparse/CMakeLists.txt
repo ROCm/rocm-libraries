@@ -88,6 +88,7 @@ option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(ROCSPARSE_ENABLE_ILU0_BOOST_SIGN "Preserve the pivot sign/phase in the ILU0 numeric boost" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
+option(ROCSPARSE_ENABLE_HANDLE_CREATE "Build rocsparse_handle_create/destroy: non-blocking handle creation on a user-defined stream" ON)
 option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
 option(BUILD_WITH_U16_REMOVED "Build rocSPARSE with the deprecated rocsparse_indextype_u16 index type removed" ON)
 

@@ -197,13 +197,14 @@ PRs that change real source code must include at least one accompanying unit tes
 
 **How a test file is recognised**
 
-| Pattern    | Example          |
-| ---------- | ---------------- |
-| `test_*`   | `test_parser.py` |
-| `*_test.*` | `parser_test.py` |
+| Pattern     | Example             |
+| ----------- | ------------------- |
+| `test_*`    | `test_parser.py`    |
+| `*_test.*`  | `parser_test.py`    |
+| `*_gtest.*` | `matmul_gtest.cpp`  |
 
 **How to fix**
-Add a unit test for the code you changed, named `test_<something>`:
+Add a unit test for the code you changed, named to match one of the patterns above (for example `test_<something>.py` or `<something>_gtest.cpp`):
 
 ```bash
 # example for Python

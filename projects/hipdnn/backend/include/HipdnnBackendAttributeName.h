@@ -461,8 +461,14 @@ typedef enum
     /** @brief Pass-by-value tensor data (extension) */
     HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
 
-    /** @brief Read-only: whether a pass-by-value scalar is set on this tensor (extension) */
+    /** @brief Read-only: whether a pass-by-value scalar is set on this tensor */
     HIPDNN_ATTR_TENSOR_IS_BY_VALUE = 1307,
+
+    /** @brief Read-only alias of HIPDNN_ATTR_TENSOR_VALUE_EXT for cuDNN porting parity */
+    HIPDNN_ATTR_TENSOR_CONSTANT_VALUE = HIPDNN_ATTR_TENSOR_VALUE_EXT, // 1306
+
+    /** @brief Settable: whether this tensor is a runtime pass-by-value scalar (extension) */
+    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT = 1308,
 
     /** @} */
 
