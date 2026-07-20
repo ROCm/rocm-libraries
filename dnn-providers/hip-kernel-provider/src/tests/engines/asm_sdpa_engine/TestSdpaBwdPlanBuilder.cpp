@@ -48,7 +48,8 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         bool withScale = false,
                         bool alibiMask = false,
                         bool paddingMask = false,
-                        bool causalMask = false)
+                        bool causalMask = false,
+                        bool overrideShapeEnabled = false)
 {
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(dims,
@@ -63,7 +64,23 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                                                                withScale,
                                                                alibiMask,
                                                                paddingMask,
-                                                               causalMask);
+                                                               causalMask,
+                                                               overrideShapeEnabled);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)

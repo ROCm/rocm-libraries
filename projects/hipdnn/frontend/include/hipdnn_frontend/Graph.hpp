@@ -5986,6 +5986,19 @@ public:
 
         return newTensor;
     }
+
+    /**
+     * @brief Create a pass-by-value scalar tensor with an explicit mode
+     * @tparam T Scalar type
+     * @param scalar The scalar value
+     * @param type RUNTIME_PARAM => runtime-with-default; COMPILE_TIME_CONST => compile-time constant
+     * @return Shared pointer to the created tensor attributes
+     */
+    template <typename T>
+    static std::shared_ptr<TensorAttributes> tensor(const T& scalar, ScalarType type)
+    {
+        return tensor(TensorAttributes(scalar, type));
+    }
 };
 
 } // namespace hipdnn_frontend::graph

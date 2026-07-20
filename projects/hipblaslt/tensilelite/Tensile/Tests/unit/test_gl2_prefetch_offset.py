@@ -296,7 +296,7 @@ def _make_writer(kernel):
     w.states = SimpleNamespace(
         kernel=kernel,
         indexChars=INDEX_CHARS,
-        regCaps={"MaxSgpr": 102, "MaxVgpr": 1024, "PhysicalMaxVgpr": 1024,
+        regCaps={"MaxSgpr": 106, "MaxVgpr": 1024, "PhysicalMaxVgpr": 1024,
                  "GlobalPrefetchSize": GLOBAL_PREFETCH_SIZE},
         asmCaps={"HasSMulHi": True, "HasGlobalPrefetch": True},
         unrollIdx=0,
