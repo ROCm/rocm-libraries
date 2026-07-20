@@ -505,6 +505,18 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
             "use_softmax_mfma_interleave mode 2 (sched_group_barrier grouping): "
             "gfx950 C twin ports iglp_opt modes 0/1 only");
     }
+    if(spec->use_softmax_mfma_interleave && spec->use_sched_barrier)
+    {
+        /* Mirror the Python __post_init__ ValueError: the two levers steer the
+         * post-RA scheduler in opposite directions, so enabling both is a
+         * contract violation. Guard here before the ctx copy so C emission
+         * cannot diverge from the Python contract. */
+        rocke_g950_fail(
+            b,
+            ROCKE_ERR_VALUE,
+            "use_softmax_mfma_interleave and use_sched_barrier are mutually "
+            "exclusive (they steer the post-RA scheduler in opposite directions)");
+    }
     /* K single-buffer IS ported in the gfx950 C twin (it shares the
      * depth-2 V-single `else` schedule). Mirror Python __post_init__ guards so
      * incompatible combos reject with matching reasons rather than mis-emit. */

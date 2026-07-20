@@ -614,6 +614,34 @@ def _enable_softmax_mfma_interleave(problem: UnifiedAttentionProblem) -> bool:
     FlyDSL (~1090 TF) is structural (an 8-wave/32x32 dual-wave rewrite) and is
     tracked separately; this is the hint-only ceiling and ships standalone.
 
+    **Why this cohort only (measured, not assumed).** The interleave lever pays
+    off wherever the loop is schedule-bound with a softmax-VALU/MFMA-idle window
+    to fill -- i.e. a 32x32-transposed (combo) geometry at nw>=2. The full
+    eligible space was swept (MI355X); adding ONLY the hint to each cohort's
+    SHIPPED spec:
+
+        cohort (shipped geometry)        S1024  S2048  S4096
+        d128 single-batch combo, nw4      1.10x  1.05x  1.03x  <- the gated win
+        d64  single-batch combo, nw4      0.97x  0.95x  0.93x  (regresses)
+        d128 multi-seq combo, nw2         1.00x  1.00x  0.99x  (neutral)
+        d256 single-seq plain, nw1        1.00x  1.00x  0.99x  (see note)
+        d128 sliding-window plain, nw2    0.83x  0.72x  0.73x  (see note)
+
+    The hint is inert on d128 multi-seq (already nw2-combo, no idle window to
+    exploit at that occupancy) and regresses d64 and d128-sliding-window on
+    their shipped geometry. It matches the runbook (arch/gfx950.md): iglp_opt
+    is neutral-to-negative without a real MFMA-idle window.
+
+    **d256 and d128-sliding-window ALSO benefit from this lever -- covered
+    elsewhere, not dropped.** On their SHIPPED plain geometry the hint alone is
+    inert/negative, but with the combo+nw geometry those cohorts want, the lever
+    helps there too and is being enabled by the cohort-owning PRs: d256 gfx950
+    via PR #9233 (AICK-1495, 32x32 combo + interleave mode2/g4, 1.1-1.94x vs
+    AOTriton), sliding-window d128 via AICK-1492 (wide-atom windowed path, in
+    progress). This gate stays scoped to the single-batch d128 combo so it does
+    not collide with those; the lever's d256/SWA coverage lives with the kernel
+    geometry work that unlocks it.
+
     ESCAPE HATCH: ``HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0`` (or off/no/false)
     force-DISABLES the lever, restoring the prior nw=2 / no-interleave routing.
     """

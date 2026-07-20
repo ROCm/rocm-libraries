@@ -52,6 +52,48 @@ static bool arch_is(const char* want)
     return strcmp(rocke_unified_attn_resolve_arch(), want) == 0;
 }
 
+/* ----------------------------------------------------- env off-switch gate */
+
+/* Mirror Python's ``os.environ.get(name, "").strip().lower() in
+ * ("0","false","no","off")`` for a boolean feature kill-switch. Returns true
+ * when the env var is set to a recognized OFF keyword (feature force-disabled),
+ * false otherwise (unset, empty, or any other value -> feature stays enabled).
+ *
+ * Strips leading/trailing ASCII whitespace and case-folds before comparison so
+ * values like ``"0 "`` / ``" off"`` behave identically to the Python gate. */
+static bool rocke_env_forces_off(const char* name)
+{
+    const char* env = getenv(name);
+    if(env == NULL)
+    {
+        return false;
+    }
+    /* skip leading whitespace (Python str.strip default set) */
+    while(*env == ' ' || *env == '\t' || *env == '\n' || *env == '\r' || *env == '\v'
+          || *env == '\f')
+    {
+        ++env;
+    }
+    /* copy + case-fold up to the first trailing-whitespace / capacity bound */
+    char   buf[16];
+    size_t n = 0;
+    for(; env[n] != '\0' && n + 1 < sizeof(buf); ++n)
+    {
+        char c = env[n];
+        buf[n] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+    buf[n] = '\0';
+    /* trim trailing whitespace */
+    while(n > 0
+          && (buf[n - 1] == ' ' || buf[n - 1] == '\t' || buf[n - 1] == '\n'
+              || buf[n - 1] == '\r' || buf[n - 1] == '\v' || buf[n - 1] == '\f'))
+    {
+        buf[--n] = '\0';
+    }
+    return strcmp(buf, "0") == 0 || strcmp(buf, "false") == 0 || strcmp(buf, "no") == 0
+           || strcmp(buf, "off") == 0;
+}
+
 /* ----------------------------------------------------- num_queries_per_kv */
 
 int rocke_unified_attn_num_queries_per_kv(rocke_ir_builder_t* b,
@@ -177,24 +219,11 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
  * the Python helper's env gate byte-faithfully (case-folded, off-keywords only). */
 static bool enable_d128_small_tile(const rocke_unified_attn_problem_t* p)
 {
-    const char* env = getenv("HIPDNN_GFX950_D128_SMALL_TILE");
-    if(env != NULL)
+    /* ESCAPE HATCH: HIPDNN_GFX950_D128_SMALL_TILE=0 (or off/no/false)
+       force-DISABLES it. Mirrors the Python .strip().lower() env gate. */
+    if(rocke_env_forces_off("HIPDNN_GFX950_D128_SMALL_TILE"))
     {
-        /* case-fold then compare to the OFF keywords (matches Python
-           .strip().lower() in ("0","false","no","off")). */
-        char buf[16];
-        size_t i = 0;
-        for(; env[i] != '\0' && i + 1 < sizeof(buf); ++i)
-        {
-            char c = env[i];
-            buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-        }
-        buf[i] = '\0';
-        if(strcmp(buf, "0") == 0 || strcmp(buf, "false") == 0 || strcmp(buf, "no") == 0
-           || strcmp(buf, "off") == 0)
-        {
-            return false;
-        }
+        return false;
     }
     return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
 }
@@ -207,22 +236,9 @@ static bool enable_d128_small_tile(const rocke_unified_attn_problem_t* p)
  * force-DISABLES it. Mirrors the Python env gate byte-faithfully. */
 static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p)
 {
-    const char* env = getenv("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE");
-    if(env != NULL)
+    if(rocke_env_forces_off("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE"))
     {
-        char buf[16];
-        size_t i = 0;
-        for(; env[i] != '\0' && i + 1 < sizeof(buf); ++i)
-        {
-            char c = env[i];
-            buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-        }
-        buf[i] = '\0';
-        if(strcmp(buf, "0") == 0 || strcmp(buf, "false") == 0 || strcmp(buf, "no") == 0
-           || strcmp(buf, "off") == 0)
-        {
-            return false;
-        }
+        return false;
     }
     return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
 }
@@ -417,6 +433,16 @@ static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
         if(p->head_size == 64)
         {
             return 128;
+        }
+        /* d128 softmax-MFMA-interleave cohort keeps the WIDE T=2*BS tile (the
+           nw=4 interleave win is measured at the wide tile; nw=4 + T=32 is the
+           occupancy-WORSE combo -- 56 KB LDS -> 1 WG/CU). Guard BEFORE the
+           small-tile check so this cohort mirrors Python _select_2d_tile_size
+           (which returns 2*block_size here). Matches the num_warps selector's
+           interleave-before-small-tile ordering. */
+        if(enable_softmax_mfma_interleave(p))
+        {
+            return 2 * p->block_size;
         }
         /* d128 occupancy lever: halve the tile to T=block_size (one paged
            block per iter) -> LDS 48->24 KB -> 2 WG/CU. DEFAULT-ON;
