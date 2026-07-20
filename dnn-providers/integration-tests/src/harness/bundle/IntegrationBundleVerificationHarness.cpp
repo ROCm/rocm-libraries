@@ -358,6 +358,44 @@ bool IntegrationBundleVerificationHarness::synthesizeInputs()
 // make an unwritten output indistinguishable from a legitimately-computed zero,
 // so engine and reference could silently agree on garbage (both untouched zeros)
 // and the comparison would vacuously pass.
+namespace detail
+{
+std::unordered_map<int64_t, void*> buildVariantPack(
+    TensorMap& inputs,
+    OutputTensors& outputs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorAttributes,
+    const std::vector<int64_t>& outputTensorUids,
+    bool useDevice)
+{
+    std::unordered_map<int64_t, void*> variantPack;
+    const std::set<int64_t> outputUids(outputTensorUids.begin(), outputTensorUids.end());
+
+    for(auto& [uid, tensor] : inputs)
+    {
+        if(outputUids.count(uid) != 0)
+        {
+            continue;
+        }
+
+        const auto attrIt = tensorAttributes.find(uid);
+        const bool isRuntimePassByValue
+            = attrIt != tensorAttributes.end() && attrIt->second->is_runtime_pass_by_value();
+        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
+            *tensor, useDevice, isRuntimePassByValue);
+    }
+
+    for(auto& [uid, tensor] : outputs)
+    {
+        variantPack[uid] = hipdnn_test_sdk::utilities::selectVariantPackPointer(
+            *tensor, useDevice, /*isRuntimePassByValue=*/false);
+    }
+
+    return variantPack;
+}
+}
+
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs() const
 {
     const auto wrapper = _bundle->graphWrapper();
@@ -376,30 +414,9 @@ std::unordered_map<int64_t, void*>
     IntegrationBundleVerificationHarness::buildVariantPack(OutputTensors& outputs,
                                                            bool useDevice) const
 {
-    std::unordered_map<int64_t, void*> variantPack;
-    const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
-                                       _bundle->outputTensorUids.end());
     const auto wrapper = _bundle->graphWrapper();
-    const auto& tensorAttrMap = wrapper.getTensorMap();
-
-    for(auto& [uid, tensor] : *_bundle->tensors)
-    {
-        if(outputUids.count(uid) != 0)
-        {
-            continue;
-        }
-        const auto attrIt = tensorAttrMap.find(uid);
-        const bool isRuntimePassByValue
-            = attrIt != tensorAttrMap.end() && attrIt->second->is_runtime_pass_by_value();
-        variantPack[uid]
-            = hipdnn_test_sdk::utilities::variantPackData(*tensor, useDevice, isRuntimePassByValue);
-    }
-    for(auto& [uid, tensor] : outputs)
-    {
-        variantPack[uid] = hipdnn_test_sdk::utilities::variantPackData(
-            *tensor, useDevice, /*isRuntimePassByValue=*/false);
-    }
-    return variantPack;
+    return detail::buildVariantPack(
+        *_bundle->tensors, outputs, wrapper.getTensorMap(), _bundle->outputTensorUids, useDevice);
 }
 
 std::optional<OutputTensors>

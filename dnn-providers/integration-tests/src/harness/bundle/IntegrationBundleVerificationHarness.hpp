@@ -35,6 +35,18 @@ namespace hipdnn_integration_tests::bundle
 using OutputTensors
     = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
+namespace detail
+{
+std::unordered_map<int64_t, void*> buildVariantPack(
+    TensorMap& inputs,
+    OutputTensors& outputs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorAttributes,
+    const std::vector<int64_t>& outputTensorUids,
+    bool useDevice);
+}
+
 // Verifies a bundle's engine output against an expected source chosen by the
 // verification mode (RFC 0010 §4.4):
 //
@@ -145,10 +157,6 @@ protected:
         return _synthesisConfig;
     }
 
-    OutputTensors allocateSentinelOutputs() const;
-    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
-                                                        bool useDevice) const;
-
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
@@ -197,6 +205,10 @@ private:
     // On success, moves the filled tensors into the bundle so downstream
     // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
     bool synthesizeInputs();
+
+    OutputTensors allocateSentinelOutputs() const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
+                                                        bool useDevice) const;
 
     // ── buffer allocation + execution ───────────────────────────────────
     // allocateSentinelOutputs / buildVariantPack prepare the buffers;

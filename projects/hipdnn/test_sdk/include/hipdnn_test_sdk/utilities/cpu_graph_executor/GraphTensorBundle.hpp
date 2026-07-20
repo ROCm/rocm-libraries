@@ -9,6 +9,7 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -25,24 +26,36 @@ struct GraphTensorBundle
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
-        for(const auto& [id, attr] : tensorMap)
+        for(const auto& tensorEntry : tensorMap)
         {
+            const auto* attr = tensorEntry.second;
             if(attr->virtual_())
             {
                 continue;
             }
 
-            addTensor(
-                id, detail::createTensorFromAttribute(*attr), attr->is_runtime_pass_by_value());
+            addTensor(*attr, detail::createTensorFromAttribute(*attr));
         }
     }
 
-    bool addTensor(int64_t uid,
-                   std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensor,
-                   bool isRuntimePassByValue = false)
+    bool addTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes,
+                   std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
     {
+        const int64_t uid = attributes.uid();
         const bool inserted = tensors.emplace(uid, std::move(tensor)).second;
-        if(inserted && isRuntimePassByValue)
+        if(inserted && attributes.is_runtime_pass_by_value())
+        {
+            _runtimePassByValueTensorIds.insert(uid);
+        }
+        return inserted;
+    }
+
+    bool addTensor(const hipdnn_frontend::graph::TensorAttributes& attributes,
+                   std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
+    {
+        const int64_t uid = attributes.get_uid();
+        const bool inserted = tensors.emplace(uid, std::move(tensor)).second;
+        if(inserted && attributes.get_is_runtime_pass_by_value())
         {
             _runtimePassByValueTensorIds.insert(uid);
         }
@@ -79,7 +92,7 @@ struct GraphTensorBundle
         std::unordered_map<int64_t, void*> variantPack;
         for(auto& [id, tensorPtr] : tensors)
         {
-            variantPack[id] = variantPackData(
+            variantPack[id] = selectVariantPackPointer(
                 *tensorPtr, /*useDevice=*/true, _runtimePassByValueTensorIds.count(id) != 0);
         }
         return variantPack;

@@ -154,9 +154,7 @@ protected:
                 {
                     return;
                 }
-                bundle.addTensor(tensorAttr->get_uid(),
-                                 createTensorFromAttribute(*tensorAttr),
-                                 tensorAttr->get_is_runtime_pass_by_value());
+                bundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
             };
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {

@@ -53,8 +53,6 @@ public:
     {
     }
 
-    using IntegrationBundleVerificationHarness::allocateSentinelOutputs;
-    using IntegrationBundleVerificationHarness::buildVariantPack;
     using IntegrationBundleVerificationHarness::SetUp;
     using IntegrationBundleVerificationHarness::TestBody;
 
@@ -235,24 +233,25 @@ std::shared_ptr<IntegrationTestBundle> makeRuntimePassByValueBundle()
     auto bundle = std::make_shared<IntegrationTestBundle>();
     bundle->graphBuffer = builder.Release();
     bundle->outputTensorUids = {2};
-    bundle->tensors.emplace();
-    auto epsilon
-        = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(scalarDims, scalarStrides);
-    epsilon->fillTensorWithValue(0.01f);
-    bundle->tensors->emplace(1, std::move(epsilon));
     return bundle;
 }
 
 TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePassByValue)
 {
     SKIP_IF_NO_DEVICES();
-    TestableHarness harness([](std::unordered_map<int64_t, void*>&) {}, /*requiresDevice=*/true);
     auto bundle = makeRuntimePassByValueBundle();
-    auto* expectedHostPointer = bundle->tensors->at(1)->rawHostData();
-    harness.setBundle(std::move(bundle), "runtime-pbv-unit-test");
-    auto outputs = harness.allocateSentinelOutputs();
+    const auto wrapper = bundle->graphWrapper();
+    const auto& tensorAttributes = wrapper.getTensorMap();
 
-    auto variantPack = harness.buildVariantPack(outputs, /*useDevice=*/true);
+    TensorMap inputs;
+    inputs.emplace(1, hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(1)));
+    inputs.at(1)->fillTensorWithValue(0.01f);
+    auto* expectedHostPointer = inputs.at(1)->rawHostData();
+
+    OutputTensors outputs;
+    outputs.emplace(2, hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(2)));
+    auto variantPack = detail::buildVariantPack(
+        inputs, outputs, tensorAttributes, bundle->outputTensorUids, /*useDevice=*/true);
 
     ASSERT_EQ(variantPack.at(1), expectedHostPointer);
     EXPECT_FLOAT_EQ(*static_cast<const float*>(variantPack.at(1)), 0.01f);

@@ -76,9 +76,9 @@ public:
                       tensorAttr->get_dim(), tensorAttr->get_stride());
                   tensor->fillWithValue(fillValue);
                   _variantPack[tensorAttr->get_uid()]
-                      = variantPackData(*tensor,
-                                        /*useDevice=*/true,
-                                        tensorAttr->get_is_runtime_pass_by_value());
+                      = selectVariantPackPointer(*tensor,
+                                                 /*useDevice=*/true,
+                                                 tensorAttr->get_is_runtime_pass_by_value());
                   _tensors.push_back(std::move(tensor));
               };
 
