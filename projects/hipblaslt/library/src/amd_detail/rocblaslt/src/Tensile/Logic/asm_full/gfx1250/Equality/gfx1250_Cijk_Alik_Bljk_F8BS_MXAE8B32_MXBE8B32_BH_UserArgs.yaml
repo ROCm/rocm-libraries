@@ -5,7 +5,7 @@
 - Activation: false
   ActivationComputeDataType: 0
   ActivationNoGuard: false
-  ActivationType: hipblaslt_all
+  ActivationType: none
   AllowNoFreeDims: false
   AssignedDerivedParameters: true
   Batched: true

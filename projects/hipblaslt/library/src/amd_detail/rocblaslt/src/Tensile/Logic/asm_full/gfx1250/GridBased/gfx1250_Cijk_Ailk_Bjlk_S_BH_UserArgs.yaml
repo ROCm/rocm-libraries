@@ -137,7 +137,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: true
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 4
@@ -472,7 +472,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: true
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 1
@@ -805,7 +805,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: true
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 1
@@ -1139,7 +1139,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: true
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 4
@@ -1473,7 +1473,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: true
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 2
@@ -1808,7 +1808,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: true
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 1

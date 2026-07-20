@@ -2,10 +2,10 @@
 - gfx1250
 - gfx1250
 - [Device 73f0]
-- Activation: true
+- Activation: false
   ActivationComputeDataType: 0
   ActivationNoGuard: false
-  ActivationType: hipblaslt_all
+  ActivationType: none
   AllowNoFreeDims: false
   AssignedDerivedParameters: true
   Batched: true
@@ -80,17 +80,17 @@
   TransposeA: false
   TransposeB: false
   UseBeta: true
-  UseBias: 1
+  UseBias: 0
   UseE: false
   UseInitialStridesAB: false
   UseInitialStridesCD: false
   UseScaleAB: ''
-  UseScaleAlphaVec: 1
+  UseScaleAlphaVec: 0
   UseScaleCD: false
   isMixMode: false
 - - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AdaptiveGemm: 0
     AdaptiveGemmGSUA: 0
@@ -424,7 +424,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AdaptiveGemm: 0
     AdaptiveGemmGSUA: 0
@@ -758,7 +758,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AdaptiveGemm: 0
     AdaptiveGemmGSUA: 0
@@ -1092,7 +1092,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AdaptiveGemm: 0
     AdaptiveGemmGSUA: 0
@@ -1426,7 +1426,7 @@
     tailLoopOptB: false
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AdaptiveGemm: 0
     AdaptiveGemmGSUA: 0
