@@ -11144,9 +11144,8 @@ class KernelWriterAssembly(KernelWriter):
             imod.middle.add(self.papTdmSelectTailLdsBank(kernel, tailBankSgpr))
             imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
         else:
-          clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
-          imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
-                           comment="Reset TDM LDS swap bit for tail loop"))
+          imod.middle.add(self.tdmForceTailLdsBufferZero(kernel, ldsAddrSgprName,
+                           "Reset TDM LDS swap bit for tail loop"))
       # WS mode: this single shared load also serves B (odd waves) via
       # A's aliased SGPRs, so pass iter operands when either tile is iterate.
       isIterA = kernel.get("_TDMIterateModeA", False)
@@ -11221,9 +11220,8 @@ class KernelWriterAssembly(KernelWriter):
               imod.middle.add(self.papTdmSelectTailLdsBank(kernel, tailBankSgpr))
               imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
           else:
-            clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
-            imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
-                                    comment="Reset TDM LDS swap bit for tail loop"))
+            imod.middle.add(self.tdmForceTailLdsBufferZero(kernel, ldsAddrSgprName,
+                                    "Reset TDM LDS swap bit for tail loop"))
         imod.middle.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
       return imod
 
@@ -11251,9 +11249,8 @@ class KernelWriterAssembly(KernelWriter):
               imod.middle.add(self.papTdmSelectTailLdsBank(kernel, tailBankSgpr))
               imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
           else:
-            clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
-            imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
-                             comment="Reset TDM LDS swap bit for tail loop"))
+            imod.middle.add(self.tdmForceTailLdsBufferZero(kernel, ldsAddrSgprName,
+                             "Reset TDM LDS swap bit for tail loop"))
         isIterB = kernel.get("_TDMIterateModeB", False)
         tdmBGroup2 = "tdmBGroup2" if isIterB else None
         tdmBGroup3 = "tdmBGroup3" if isIterB else None
@@ -11287,9 +11284,8 @@ class KernelWriterAssembly(KernelWriter):
               imod.middle.add(self.papTdmSelectTailLdsBank(kernel, tailBankSgpr))
               imod.middle.add(self.papTdmSetTailLdsBank(kernel, ldsAddrSgprName, tailBankSgpr))
           else:
-            clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
-            imod.middle.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=hex(clearMask),
-                             comment="Reset TDM LDS swap bit for tail loop"))
+            imod.middle.add(self.tdmForceTailLdsBufferZero(kernel, ldsAddrSgprName,
+                             "Reset TDM LDS swap bit for tail loop"))
         imod.middle.add(comp.issueLoad("tdmMXSBGroup0", "tdmMXSBGroup1", None, None))
       return imod
 
@@ -19200,10 +19196,10 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(tdmInitLblEnd)
     return mod
 
-  def tdmGlobalOffset(self, kernel: Mapping, tP: Mapping) -> Module:
+  def tdmGlobalOffset(self, kernel: Mapping, tP: Mapping, dstGroup0: str = None) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
-    return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}")
+    return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}", dstGroup0=dstGroup0)
 
   def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     mod = Module("TDM Global Offset Wave Separated")
@@ -19234,13 +19230,35 @@ class KernelWriterAssembly(KernelWriter):
     incSgprName = f"tdm{tcA}{tcB}Incs"
     group0Name = f"tdm{tcA}Group0"
 
-    with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
-      tmpSgpr = tmpSgprRes.idx
-      mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
-                       comment="StreamK K-offset = localStart * increment"))
-      mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
-                       comment="Apply StreamK K-offset to TDM global addr"))
+    with self.allocTmpSgpr(2, tag="tdmApplyStreamKOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
+      tmpLo = tmpSgprRes.idx
+      tmpHi = tmpSgprRes.idx + 1
+      mod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpLo), sgpr(tmpHi),
+                               sgpr("StreamKLocalStart"), sgpr(incSgprName),
+                               comment="StreamK K-offset = localStart * increment (64b)"))
+      mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpLo),
+                       comment="Apply StreamK K-offset to TDM global addr (lo)"))
+      mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpHi),
+                       comment="Apply StreamK K-offset to TDM global addr (hi)"))
 
+    return mod
+
+  def tdmApplyStreamKOffsetSingleWave(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+    mod = Module("TDM StreamK K-offset Single Wave")
+    with self.allocTmpSgpr(2, tag="tdmApplyStreamKOffsetSingleWave_tmpSgprRes") as tmpSgprRes:
+      tmpLo = tmpSgprRes.idx
+      tmpHi = tmpSgprRes.idx + 1
+      for tP in (tPA, tPB):
+        tc: str = tP["tensorChar"]
+        incSgprName = f"GlobalReadIncs{tc}"
+        group0Name = f"tdm{tc}Group0"
+        mod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpLo), sgpr(tmpHi),
+                                 sgpr("StreamKLocalStart"), sgpr(incSgprName),
+                                 comment="StreamK K-offset = localStart * increment (64b)"))
+        mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpLo),
+                        comment=f"Apply StreamK K-offset to TDM {tc} global addr (lo)"))
+        mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpHi),
+                        comment=f"Apply StreamK K-offset to TDM {tc} global addr (hi)"))
     return mod
 
   def tdmApplyStreamKTailOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
@@ -19250,14 +19268,18 @@ class KernelWriterAssembly(KernelWriter):
     incSgprName = f"tdm{tcA}{tcB}Incs"
     group0Name = f"tdm{tcA}Group0"
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
-      tmpSgpr = tmpSgprRes.idx
-      mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
+    with self.allocTmpSgpr(2) as tmpSgprRes:
+      tmpLo = tmpSgprRes.idx
+      tmpHi = tmpSgprRes.idx + 1
+      mod.add(SSubU32(dst=sgpr(tmpLo), src0=sgpr("StreamKLocalEnd"), src1=1,
                       comment="tail iteration index within current StreamK tile"))
-      mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(incSgprName),
-                      comment="StreamK tail K-offset = (localEnd - 1) * increment"))
-      mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),
-                      comment="Apply StreamK tail K-offset to TDM global addr"))
+      mod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpLo), sgpr(tmpHi),
+                               sgpr(tmpLo), sgpr(incSgprName),
+                               comment="StreamK tail K-offset = (localEnd - 1) * increment (64b)"))
+      mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpLo),
+                      comment="Apply StreamK tail K-offset to TDM global addr (lo)"))
+      mod.add(SAddCU32(dst=sgpr(f"{group0Name}+3"), src0=sgpr(f"{group0Name}+3"), src1=sgpr(tmpHi),
+                      comment="Apply StreamK tail K-offset to TDM global addr (hi)"))
 
     return mod
 
@@ -19666,6 +19688,21 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(SCSelectB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{tcB}"), sgpr(f"GlobalReadIncs{tcA}")))
     return mod
 
+  def tdmForceTailLdsBufferZero(self, kernel, ldsAddrSgprName, comment) -> Module:
+    assert kernel["NumLdsBlk"] == 2
+    mod = Module("tdmForceTailLdsBufferZero")
+    blk = kernel["LdsOffsetA_Blk"]
+    if kernel["StoreSwapAddr"]:
+      with self.allocTmpSgpr(1, tag="tdmForceTailLdsBufferZero") as tmpSgpr:
+        t = tmpSgpr.idx
+        mod.add(SCmpGeU32(src0=sgpr(ldsAddrSgprName), src1=blk, comment="in LDS buffer 1?"))
+        mod.add(SCSelectB32(dst=sgpr(t), src0=blk, src1=0, comment=">=blk: subtract stride, else 0"))
+        mod.add(SSubU32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName), src1=sgpr(t), comment=comment))
+    else:
+      mod.add(SAndB32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName),
+                      src1=hex(~blk & 0xFFFFFFFF), comment=comment))
+    return mod
+
   def resetTDMDescriptorForTail(self, kernel: Mapping, tP: Mapping, tmpSgprWaveOffset = None) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
@@ -19712,10 +19749,9 @@ class KernelWriterAssembly(KernelWriter):
                     self.states.numReadsIterCoalescedB > 1)
     if not kernel["1LDSBuffer"] and needLdsReset:
       ldsAddrSgprName: str = comp.getLdsAddrSgprName(descSgprName(0))
-      swapMask: int = kernel["LdsOffsetA_Blk"]
       mod.addComment("TDM tail: reset LDS write addr to buffer 0 (matches recalculated local-read ptr)")
-      mod.add(SAndB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(~swapMask & 0xFFFFFFFF),
-                      "clear swap bit so TDM writes to buffer 0, same half as tail local reads"))
+      mod.add(self.tdmForceTailLdsBufferZero(kernel, ldsAddrSgprName,
+                      "force TDM tail write to buffer 0, same half as tail local reads"))
                       
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or \
                           (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])

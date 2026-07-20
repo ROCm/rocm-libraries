@@ -2715,11 +2715,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #TODO: TDM handles MXSA and MXSB
       if tdmA:
         if not tdmInited:
-          module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
           if kernel["UseSubtileImpl"]:
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
             module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
           else:
             module.add(self.initTDMDescriptor(kernel, tensorParametersA))
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersA, dstGroup0=f"tdm{tensorParametersA['tensorChar']}Group0"))
       else:
         module.addComment1("global read addresses: tile offset assignment a")
         module.add(self.graTileAssignment(kernel, tensorParametersA))
@@ -2731,9 +2732,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Sparse"]:
         if tdmMetadata:
           if not tdmMetadataInited:
-            # TODO: TDM global offset for metadata
-            module.add(self.tdmGlobalOffset(kernel, tPM))
             module.add(self.initTDMDescriptor(kernel, tPM))
+            module.add(self.tdmGlobalOffset(kernel, tPM, dstGroup0=f"tdm{tPM['tensorChar']}Group0"))
             tdmMetadataInited = True
         else:
           module.addComment1("global read addresses: tile offset assignment metadata")
@@ -2749,11 +2749,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.graTileAssignment(kernel, tensorParametersB["MX"]))
       if tdmB:
         if not tdmInited:
-          module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
           if kernel["UseSubtileImpl"]:
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
             module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
           else:
             module.add(self.initTDMDescriptor(kernel, tensorParametersB))
+            module.add(self.tdmGlobalOffset(kernel, tensorParametersB, dstGroup0=f"tdm{tensorParametersB['tensorChar']}Group0"))
       else:
         module.addComment1("global read addresses: tile offset assignment b")
         module.add(self.graTileAssignment(kernel, tensorParametersB))
@@ -2987,6 +2988,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         if not self.states.staggerUCode:
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+
+      # Single-wave (NumWaves==1) non-subtile TDM: apply the StreamK partial-tile
+      # K-offset that the wave-separated and subtile paths already apply.
+      if tdmA and tdmB and kernel["NumWaves"] == 1 and not kernel.get("UseSubtileImpl") \
+          and kernel["StreamK"] > 0:
+        module.add(self.tdmApplyStreamKOffsetSingleWave(kernel, tensorParametersA, tensorParametersB))
+        if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.tdmApplyStreamKOffsetSingleWave(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
       # WaveIdx already freed for subtile (before graWorkGroup above)
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
@@ -10861,13 +10870,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
-  def tdmGlobalOffset(self, kernel, tP) -> Module:
+  def tdmGlobalOffset(self, kernel, tP, dstGroup0: str = None) -> Module:
     assert False, "Should be overrided"
 
   def tdmGlobalOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
+    assert False, "Should be overrided"
+
+  def tdmApplyStreamKOffsetSingleWave(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel, tPA, tPB) -> Module:
