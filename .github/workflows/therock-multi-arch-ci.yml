@@ -26,6 +26,14 @@ name: TheRock Multi-Arch CI
 # deliberately separate from the build-source `ref:` inputs.
 
 on:
+  # TEMPORARY: added only to demonstrate merge-base-time TheRock ref resolution
+  # on a real pull_request event (see #9601). Remove before merge; enabling the
+  # pull_request trigger for real is deferred to the Multi-Arch cutover.
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
