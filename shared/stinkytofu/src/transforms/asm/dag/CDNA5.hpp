@@ -457,9 +457,9 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     }
     // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
     // (B) elapse: record the timeline touch for all operands (dst + src).
-    stampDataReady(*node->inst);
     touchOperands(*node->inst);
     updateWMMAStatus(node);
+    stampDataReady(*node->inst);
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     return node;
 }
@@ -475,7 +475,8 @@ void CDNA5ReadyQueue::stampDataReady(const StinkyInstruction& inst) {
     for (const StinkyRegister& dst : inst.getDestRegs()) {
         if (!dst.isRegister() || isPseudoReg(dst)) continue;
         for (unsigned off = 0; off < dst.reg.num; ++off)
-            regDataReadyCounters[regDepKey(dst.reg.type, dst.reg.idx + off)] = inst.latencyCycles;
+            regDataReadyCounters[regDepKey(dst.reg.type, dst.reg.idx + off)] =
+                inst.latencyCycles - inst.issueCycles;
     }
 }
 
