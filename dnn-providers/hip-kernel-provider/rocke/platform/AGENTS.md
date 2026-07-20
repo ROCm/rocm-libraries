@@ -27,11 +27,14 @@ govern what you commit and how you describe it.
   internal codenames — in any artifact (code, comments, docs, commits, PRs).
 - **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
   `gfx950`, …) only.
-- **No public performance data.** No benchmarks, TFLOP/s, latencies, frequencies, or
-  throughputs in the repo, git history, PRs, or anything that can become public.
-  Performance measured during AI-driven iteration is confidential: present it in-session
-  and instruct the user to record it in a **protected, access-controlled AMD Confluence
-  page** — never paste numbers into the repo. If asked to, refuse and redirect there.
+- **No public software-performance data.** No **software-achieved** performance —
+  benchmarks, achieved TFLOP/s, MFU, latencies, or throughputs — in the repo, git
+  history, PRs, or anything that can become public. While in development these numbers
+  are volatile and are **not** guidance, so keep them internal: present them in-session
+  and record them only in a **protected, access-controlled AMD Confluence page**; never
+  paste numbers into the repo, and if asked to, refuse and redirect there. (Published
+  **hardware** spec numbers — e.g. theoretical peak — are governed by AMD marketing, not
+  this rule.)
 - **No legal or marketing claims or comparisons** about AMD or competitor
   products/software (performance, superiority, availability, roadmap). No marketing
   language. **Protect AMD.**
@@ -199,14 +202,16 @@ GPU node.
 
 ## Code style
 
-Language style guides for the `rocke` package live alongside this file and are derived
-from the actual code. Follow the guide for the language you're editing; this file
-(`AGENTS.md`) wins on hard invariants.
+Language style guides live in the shared [`style/`](../style/) folder at the rocke root
+(they cover both `platform/` and `library/`) and are derived from the actual code.
+Follow the guide for the language you're editing; this file (`AGENTS.md`) wins on hard
+invariants.
 
-- **Python:** [`PYTHON_STYLE.md`](PYTHON_STYLE.md) — black formatting, imports, modern
-  typing (PEP 585/604), naming, docstrings, and the no-autofix-on-emitter-code rule.
-- **C++ engine:** [`CPP_STYLE.md`](CPP_STYLE.md) — the C99 / `extern "C"` port
-  conventions (snake_case `rocke_*`, `.h` + `#ifndef`, Allman braces, `ckc::` error
+- **Python:** [`style/PYTHON_STYLE.md`](../style/PYTHON_STYLE.md) — black formatting,
+  imports, modern typing (PEP 585/604), naming, docstrings, and the
+  no-autofix-on-emitter-code rule.
+- **C++ engine:** [`style/CPP_STYLE.md`](../style/CPP_STYLE.md) — the C99 / `extern "C"`
+  port conventions (snake_case `rocke_*`, `.h` + `#ifndef`, Allman braces, `ckc::` error
   model).
 
 ## dsl_docs

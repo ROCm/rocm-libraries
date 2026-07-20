@@ -1,6 +1,7 @@
 # rocKE — Python style guide
 
-Conventions for the `rocke` Python package (`platform/python/rocke/`). These rules
+Conventions for the `rocke` Python code — the platform authoring frontend
+(`platform/python/rocke/`) and the `library/` package. These rules
 are **derived from the existing code**, so new code is indistinguishable from what is
 already here — **except** for typing and other modern-language choices, where the
 guide **prescribes the modern standard** (see the PEP baseline below and §3) even when
@@ -150,6 +151,31 @@ function's role, and readers rely on them:
 - Factory `@classmethod`s return a configured instance and are named for the shape
   they produce (`MfmaAtom.f16_16x16x16()`), not `from_*`/`make_*` — match the
   neighbours in the same class.
+
+### Variable naming (kernel-domain axes)
+
+Name kernel-authoring locals after the **problem's own domain axes**, not generic
+`M`/`N`/`K` — those are reserved for the MMA atom shape (`MMA_*`). `TILE_*` and `WAVE_*`
+tile the **problem axes**, not `M`/`N`/`K`.
+
+The example column below uses an **attention / FMHA** kernel, whose axes are query
+tokens (`Q`), key/value tokens (`KV`), and head dimension (`D`). A different problem
+(GEMM, conv, …) uses its own axis names following the same pattern.
+
+| Prefix | Level | Meaning | Example (FMHA) |
+|---|---|---|---|
+| `Q_` / `KV_` / `D_` | problem axis | the problem's own axes; never `M`/`N`/`K` | `Q`, `KV`, `D` |
+| `*_LEN` | tensor | full baked extent of an axis | `Q_LEN`, `KV_LEN`, `D_LEN` |
+| `TILE_*` | CTA | per-CTA tile size **along a problem axis** | `TILE_Q`, `TILE_KV` |
+| `WAVE_*` | wave | per-wave extent **along a problem axis** | `WAVE_Q`, `WAVE_KV` |
+| `MMA_*` | hardware | the fixed MMA atom shape — the **only** place `M`/`N`/`K` appear | `MMA_M`, `MMA_N`, `MMA_K` |
+| `N_*` | count | integer count of things | `N_WAVES`, `N_KV_TILES` |
+| `*_MMAS` | count | number of MMA output subtiles covering an axis | `Q_MMAS` |
+| `<GEMM>_STEPS` | count | number of MMA contraction steps in a named GEMM | `QK_STEPS`, `PV_STEPS` |
+| lowercase | runtime | per-lane/per-wave SSA locals | `lane`, `wave` |
+
+Head dimension: the axis is `D` and its full extent is `D_LEN`; `HEAD_D` is a common
+synonym — pick one per kernel and keep it consistent.
 
 ## 5. Docstrings
 
