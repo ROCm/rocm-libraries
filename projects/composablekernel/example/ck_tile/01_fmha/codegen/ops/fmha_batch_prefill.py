@@ -5,7 +5,6 @@ import copy
 from dataclasses import dataclass, field
 import fnmatch
 import itertools
-import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -217,7 +216,7 @@ float fmha_batch_prefill(fmha_batch_prefill_traits t, fmha_batch_prefill_args a,
     }}
 
     // Host-side arch identity, used to mirror device-only arch gates (e.g. tiles
-    // restricted via F_arch_require) in the host dispatch so we never select an
+    // restricted via F_arch) in the host dispatch so we never select an
     // arm whose device image was elided for this arch.
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
 
@@ -292,7 +291,7 @@ class FmhaFwdApiTrait:
     kv_lookup_table: str
     page_size: int = 1  # page block size
     use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
-    # Host-side arch predicate mirroring a tile's device-only F_arch_require gate.
+    # Host-side arch predicate mirroring a tile's device-only F_arch gate.
     # "true" means arch-agnostic (no host restriction).
     arch_host: str = "true"
 
@@ -595,17 +594,6 @@ class FmhaFwdKernel:
     F_use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
 
     @property
-    def arch_check(self) -> str:
-        # Base device-side gate: gload variants need CDNA3+; others are arch-agnostic.
-        base = CDNA3_PLUS_ARCH.preprocessor_check if self.F_use_global_load else "true"
-        require = self.F_tile.F_arch_require
-        if require is None:
-            return base
-        if base == "true":
-            return require
-        return f"({base}) && ({require})"
-
-    @property
     def template(self) -> str:
         return FMHA_FWD_KERNEL_HEADER + FMHA_FWD_KERNEL_BODY.format(
             F_kname=self.name,
@@ -712,7 +700,11 @@ class FmhaFwdKernel:
             kv_lookup_table=self.F_pipeline.F_kv_lookup_table,
             page_size=self.F_page_size,
             use_global_load=self.F_use_global_load,
-            arch_host=_arch_host_predicate(self.F_tile.F_arch_require),
+            arch_host=(
+                self.F_tile.F_arch.device_name_check
+                if self.F_tile.F_arch is not None
+                else "true"
+            ),
         )
 
 
