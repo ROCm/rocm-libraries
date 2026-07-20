@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/detail/TensorConstants.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -686,7 +687,8 @@ private:
     bool _isRuntimePassByValue = false;
     ValueVariant _value;
     std::shared_ptr<TensorAttributes> _raggedOffset; ///< nullptr = non-ragged
-    int64_t _alignment = 16; ///< byte alignment of the physical buffer pointer (default 16)
+    int64_t _alignment
+        = detail::DEFAULT_TENSOR_ALIGNMENT; ///< byte alignment of the physical buffer pointer
 };
 typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

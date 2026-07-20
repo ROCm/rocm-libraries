@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/TensorConstants.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -216,9 +217,7 @@ inline Error
     // Only send the byte-alignment attribute when the tensor carries a
     // non-default alignment. Sending it unconditionally would break lowering against
     // a pre-1.3.0 backend that doesn't recognize HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT.
-    // Source of truth: tensor_attributes.fbs -> `alignment: long = 16`.
-    static constexpr int64_t K_DEFAULT_TENSOR_ALIGNMENT = 16;
-    if(tensor->get_alignment() != K_DEFAULT_TENSOR_ALIGNMENT)
+    if(tensor->get_alignment() != DEFAULT_TENSOR_ALIGNMENT)
     {
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
                                                    HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
