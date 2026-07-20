@@ -49,6 +49,7 @@ namespace rocsparse
                                                J                   N,
                                                J                   K,
                                                I                   nnz,
+                                               int64_t             batch_count,
                                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                const A* __restrict__ dense_A,
                                                int64_t lda,
@@ -96,15 +97,7 @@ namespace rocsparse
             return;
         }
 
-        // Offset pointers for the current batch so the rest of the kernel
-        // can address the batched inputs as though they were single matrices.
-        const uint32_t batch = hipBlockIdx_y;
-        dense_A              = dense_A + batch_stride_A * batch;
-        dense_B              = dense_B + batch_stride_B * batch;
-        csx_ptr              = csx_ptr + offsets_batch_stride_C * batch;
-        csx_ind              = csx_ind + columns_values_batch_stride_C * batch;
-        csx_val              = csx_val + columns_values_batch_stride_C * batch;
-
+        // These strides depend only on the layout/operation, not the batch.
         const int64_t incx = (orderA == rocsparse_order_column)
                                  ? ((transA == rocsparse_operation_none) ? lda : 1)
                                  : ((transA == rocsparse_operation_none) ? 1 : lda);
@@ -116,68 +109,86 @@ namespace rocsparse
         const int64_t xinc = (ROW_ORIENTED) ? incx : incy;
         const int64_t yinc = (ROW_ORIENTED) ? incy : incx;
 
-        const I start = csx_ptr[rowcol] - csx_base;
-        const I end   = csx_ptr[rowcol + 1] - csx_base;
-
-        if(ROW_ORIENTED)
+        // A HIP grid is limited to 65535 blocks in the y dimension, so for batch
+        // counts above that the launch uses fewer y-blocks than batches and each
+        // y-block strides over the batches it is responsible for.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            const A* x = ((orderA == rocsparse_order_column)
-                              ? ((transA == rocsparse_operation_none) ? (dense_A + rowcol)
-                                                                      : (dense_A + lda * rowcol))
-                              : ((transA == rocsparse_operation_none) ? (dense_A + lda * rowcol)
-                                                                      : (dense_A + rowcol)));
+            // Offset pointers for the current batch so the rest of the loop body
+            // can address the batched inputs as though they were single matrices.
+            const A* dense_A_b = dense_A + batch_stride_A * batch;
+            const B* dense_B_b = dense_B + batch_stride_B * batch;
+            const I* csx_ptr_b = csx_ptr + offsets_batch_stride_C * batch;
+            const J* csx_ind_b = csx_ind + columns_values_batch_stride_C * batch;
+            C*       csx_val_b = csx_val + columns_values_batch_stride_C * batch;
 
-            for(I at = start + swid; at < end; at += NUM_SEQS)
+            const I start = csx_ptr_b[rowcol] - csx_base;
+            const I end   = csx_ptr_b[rowcol + 1] - csx_base;
+
+            if(ROW_ORIENTED)
             {
-                const I  ind = csx_ind[at] - csx_base;
-                const B* y   = ((orderB == rocsparse_order_column)
-                                    ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * ind)
-                                                                            : (dense_B + ind))
-                                    : ((transB == rocsparse_operation_none) ? (dense_B + ind)
-                                                                            : (dense_B + ldb * ind)));
+                const A* x
+                    = ((orderA == rocsparse_order_column)
+                           ? ((transA == rocsparse_operation_none) ? (dense_A_b + rowcol)
+                                                                   : (dense_A_b + lda * rowcol))
+                           : ((transA == rocsparse_operation_none) ? (dense_A_b + lda * rowcol)
+                                                                   : (dense_A_b + rowcol)));
 
-                T sum = static_cast<T>(0);
-                for(J k = slid; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                for(I at = start + swid; at < end; at += NUM_SEQS)
                 {
-                    sum = rocsparse::fma<T>(x[k * xinc], y[k * yinc], sum);
-                }
+                    const I  ind = csx_ind_b[at] - csx_base;
+                    const B* y
+                        = ((orderB == rocsparse_order_column)
+                               ? ((transB == rocsparse_operation_none) ? (dense_B_b + ldb * ind)
+                                                                       : (dense_B_b + ind))
+                               : ((transB == rocsparse_operation_none) ? (dense_B_b + ind)
+                                                                       : (dense_B_b + ldb * ind)));
 
-                sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+                    T sum = static_cast<T>(0);
+                    for(J k = slid; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                    {
+                        sum = rocsparse::fma<T>(x[k * xinc], y[k * yinc], sum);
+                    }
 
-                if(slid == NTHREADS_PER_DOTPRODUCT - 1)
-                {
-                    csx_val[at] = rocsparse::fma<T>(beta, csx_val[at], alpha * sum);
+                    sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+                    if(slid == NTHREADS_PER_DOTPRODUCT - 1)
+                    {
+                        csx_val_b[at] = rocsparse::fma<T>(beta, csx_val_b[at], alpha * sum);
+                    }
                 }
             }
-        }
-        else
-        {
-            const B* x = ((orderB == rocsparse_order_column)
-                              ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * rowcol)
-                                                                      : (dense_B + rowcol))
-                              : ((transB == rocsparse_operation_none) ? (dense_B + rowcol)
-                                                                      : (dense_B + ldb * rowcol)));
-
-            for(I at = start + swid; at < end; at += NUM_SEQS)
+            else
             {
-                const I  ind = csx_ind[at] - csx_base;
-                const A* y   = ((orderA == rocsparse_order_column)
-                                    ? ((transA == rocsparse_operation_none) ? (dense_A + ind)
-                                                                            : (dense_A + lda * ind))
-                                    : ((transA == rocsparse_operation_none) ? (dense_A + lda * ind)
-                                                                            : (dense_A + ind)));
+                const B* x
+                    = ((orderB == rocsparse_order_column)
+                           ? ((transB == rocsparse_operation_none) ? (dense_B_b + ldb * rowcol)
+                                                                   : (dense_B_b + rowcol))
+                           : ((transB == rocsparse_operation_none) ? (dense_B_b + rowcol)
+                                                                   : (dense_B_b + ldb * rowcol)));
 
-                T sum = static_cast<T>(0);
-                for(J k = slid; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                for(I at = start + swid; at < end; at += NUM_SEQS)
                 {
-                    sum = rocsparse::fma<T>(x[k * xinc], y[k * yinc], sum);
-                }
+                    const I  ind = csx_ind_b[at] - csx_base;
+                    const A* y
+                        = ((orderA == rocsparse_order_column)
+                               ? ((transA == rocsparse_operation_none) ? (dense_A_b + ind)
+                                                                       : (dense_A_b + lda * ind))
+                               : ((transA == rocsparse_operation_none) ? (dense_A_b + lda * ind)
+                                                                       : (dense_A_b + ind)));
 
-                sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+                    T sum = static_cast<T>(0);
+                    for(J k = slid; k < K; k += NTHREADS_PER_DOTPRODUCT)
+                    {
+                        sum = rocsparse::fma<T>(x[k * xinc], y[k * yinc], sum);
+                    }
 
-                if(slid == NTHREADS_PER_DOTPRODUCT - 1)
-                {
-                    csx_val[at] = rocsparse::fma<T>(beta, csx_val[at], alpha * sum);
+                    sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
+
+                    if(slid == NTHREADS_PER_DOTPRODUCT - 1)
+                    {
+                        csx_val_b[at] = rocsparse::fma<T>(beta, csx_val_b[at], alpha * sum);
+                    }
                 }
             }
         }

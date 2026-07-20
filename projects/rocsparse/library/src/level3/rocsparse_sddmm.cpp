@@ -486,16 +486,19 @@ try
                        (trans_B == rocsparse_operation_conjugate_transpose),
                        rocsparse_status_not_implemented);
 
+    const bool Ci_A_B_Ci  = (mat_A->batch_count == 1 && mat_B->batch_count == 1);
+    const bool Ci_A_Bi_Ci = (mat_A->batch_count == 1 && mat_B->batch_count == mat_C->batch_count);
+    const bool Ci_Ai_B_Ci = (mat_B->batch_count == 1 && mat_A->batch_count == mat_C->batch_count);
+    const bool Ci_Ai_Bi_Ci
+        = (mat_A->batch_count == mat_C->batch_count && mat_A->batch_count == mat_B->batch_count);
+
+    ROCSPARSE_CHECKARG(7,
+                       mat_C,
+                       (!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci),
+                       rocsparse_status_invalid_value);
+
     // Batched computation is only supported for CSR format with the default
-    // algorithm. The batch counts of the three matrices must agree.
-    ROCSPARSE_CHECKARG(4,
-                       mat_A,
-                       (mat_A->batch_count != mat_C->batch_count),
-                       rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(5,
-                       mat_B,
-                       (mat_B->batch_count != mat_C->batch_count),
-                       rocsparse_status_invalid_value);
+    // algorithm.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
@@ -950,16 +953,19 @@ try
                        (trans_B == rocsparse_operation_conjugate_transpose),
                        rocsparse_status_not_implemented);
 
+    const bool Ci_A_B_Ci  = (mat_A->batch_count == 1 && mat_B->batch_count == 1);
+    const bool Ci_A_Bi_Ci = (mat_A->batch_count == 1 && mat_B->batch_count == mat_C->batch_count);
+    const bool Ci_Ai_B_Ci = (mat_B->batch_count == 1 && mat_A->batch_count == mat_C->batch_count);
+    const bool Ci_Ai_Bi_Ci
+        = (mat_A->batch_count == mat_C->batch_count && mat_A->batch_count == mat_B->batch_count);
+
+    ROCSPARSE_CHECKARG(7,
+                       mat_C,
+                       (!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci),
+                       rocsparse_status_invalid_value);
+
     // Batched computation is only supported for CSR format with the default
-    // algorithm. The batch counts of the three matrices must agree.
-    ROCSPARSE_CHECKARG(4,
-                       mat_A,
-                       (mat_A->batch_count != mat_C->batch_count),
-                       rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(5,
-                       mat_B,
-                       (mat_B->batch_count != mat_C->batch_count),
-                       rocsparse_status_invalid_value);
+    // algorithm.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
@@ -1418,16 +1424,19 @@ try
                        (trans_B == rocsparse_operation_conjugate_transpose),
                        rocsparse_status_not_implemented);
 
-    // Batched computation is only supported for CSR format with the default
-    // algorithm. The batch counts of the three matrices must agree.
-    ROCSPARSE_CHECKARG(4,
-                       mat_A,
-                       (mat_A->batch_count != mat_C->batch_count),
+    const bool Ci_A_B_Ci  = (mat_A->batch_count == 1 && mat_B->batch_count == 1);
+    const bool Ci_A_Bi_Ci = (mat_A->batch_count == 1 && mat_B->batch_count == mat_C->batch_count);
+    const bool Ci_Ai_B_Ci = (mat_B->batch_count == 1 && mat_A->batch_count == mat_C->batch_count);
+    const bool Ci_Ai_Bi_Ci
+        = (mat_A->batch_count == mat_C->batch_count && mat_A->batch_count == mat_B->batch_count);
+
+    ROCSPARSE_CHECKARG(7,
+                       mat_C,
+                       (!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci),
                        rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(5,
-                       mat_B,
-                       (mat_B->batch_count != mat_C->batch_count),
-                       rocsparse_status_invalid_value);
+
+    // Batched computation is only supported for COO format with the default
+    // algorithm.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,

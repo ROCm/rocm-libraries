@@ -73,8 +73,7 @@ void testing_sddmm_batched_csr_bad_arg(const Arguments& arg)
 #define PARAMS_BUFFER_SIZE \
     handle, trans_A, trans_B, &alpha, mat_A, mat_B, &beta, mat_C, ttype, alg, buffer_size
 
-#define PARAMS \
-    handle, trans_A, trans_B, &alpha, mat_A, mat_B, &beta, mat_C, ttype, alg, temp_buffer
+#define PARAMS handle, trans_A, trans_B, &alpha, mat_A, mat_B, &beta, mat_C, ttype, alg, temp_buffer
 
     rocsparse_int batch_count_A;
     rocsparse_int batch_count_B;
@@ -155,15 +154,15 @@ void testing_sddmm_batched_csr_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename A, typename B, typename C, typename T>
 void testing_sddmm_batched_csr(const Arguments& arg)
 {
-    J                    M         = arg.M;
-    J                    N         = arg.N;
-    J                    K         = arg.K;
-    rocsparse_operation  trans_A   = arg.transA;
-    rocsparse_operation  trans_B   = arg.transB;
-    rocsparse_index_base base      = arg.baseA;
-    rocsparse_sddmm_alg  alg       = arg.sddmm_alg;
-    rocsparse_order      order_A   = arg.order;
-    rocsparse_order      order_B   = arg.orderB;
+    J                    M       = arg.M;
+    J                    N       = arg.N;
+    J                    K       = arg.K;
+    rocsparse_operation  trans_A = arg.transA;
+    rocsparse_operation  trans_B = arg.transB;
+    rocsparse_index_base base    = arg.baseA;
+    rocsparse_sddmm_alg  alg     = arg.sddmm_alg;
+    rocsparse_order      order_A = arg.order;
+    rocsparse_order      order_B = arg.orderB;
 
     J batch_count_A = arg.batch_count_A;
     J batch_count_B = arg.batch_count_B;
@@ -183,15 +182,12 @@ void testing_sddmm_batched_csr(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 
-    // SDDMM batched support currently requires all three matrices to share the
-    // same batch count (per public API validation).
-    if(batch_count_A != batch_count_C || batch_count_B != batch_count_C)
-    {
-        return;
-    }
+    bool Ci_A_B_Ci   = (batch_count_A == 1 && batch_count_B == 1);
+    bool Ci_A_Bi_Ci  = (batch_count_A == 1 && batch_count_B == batch_count_C);
+    bool Ci_Ai_B_Ci  = (batch_count_B == 1 && batch_count_A == batch_count_C);
+    bool Ci_Ai_Bi_Ci = (batch_count_A == batch_count_C && batch_count_A == batch_count_B);
 
-    // Currently, only the default algorithm supports batched computation.
-    if(alg != rocsparse_sddmm_alg_default)
+    if(!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci)
     {
         return;
     }
@@ -219,21 +215,29 @@ void testing_sddmm_batched_csr(const Arguments& arg)
     int64_t lda = (order_A == rocsparse_order_column) ? A_m : A_n;
     int64_t ldb = (order_B == rocsparse_order_column) ? B_m : B_n;
 
-    int64_t nnz_A_per_batch = static_cast<int64_t>(A_m) * A_n;
-    int64_t nnz_B_per_batch = static_cast<int64_t>(B_m) * B_n;
+    int64_t tiny_size       = 100;
+    int64_t nnz_A_per_batch = static_cast<int64_t>(A_m) * A_n + tiny_size;
+    int64_t nnz_B_per_batch = static_cast<int64_t>(B_m) * B_n + tiny_size;
+    int64_t nnz_C_per_batch = nnz_C + tiny_size;
 
-    int64_t batch_stride_A                = nnz_A_per_batch;
-    int64_t batch_stride_B                = nnz_B_per_batch;
-    int64_t offsets_batch_stride_C        = 0;
-    int64_t columns_values_batch_stride_C = nnz_C;
+    int64_t batch_stride_A                = (batch_count_A > 1) ? nnz_A_per_batch : 0;
+    int64_t batch_stride_B                = (batch_count_B > 1) ? nnz_B_per_batch : 0;
+    int64_t offsets_batch_stride_C        = 0; //(batch_count_C > 1) ? (A_m + 1) : 0;
+    int64_t columns_values_batch_stride_C = (batch_count_C > 1) ? nnz_C_per_batch : 0;
 
     // Allocate/initialize dense A and B matrices (per batch unique).
-    host_vector<A> hA(batch_count * nnz_A_per_batch);
-    host_vector<B> hB(batch_count * nnz_B_per_batch);
-    rocsparse_init_1d_array<A>(
-        hA, batch_count * nnz_A_per_batch, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
-    rocsparse_init_1d_array<B>(
-        hB, batch_count * nnz_B_per_batch, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    host_vector<A> hA(batch_count_A * nnz_A_per_batch);
+    host_vector<B> hB(batch_count_B * nnz_B_per_batch);
+    rocsparse_init_1d_array<A>(hA,
+                               batch_count_A * nnz_A_per_batch,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
+    rocsparse_init_1d_array<B>(hB,
+                               batch_count_B * nnz_B_per_batch,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
 
     // Output sparse matrix C. The row offsets are shared across batches (we use
     // offsets_batch_stride = 0 so a single row_ptr array is consumed). The
@@ -245,21 +249,24 @@ void testing_sddmm_batched_csr(const Arguments& arg)
         hcsr_row_ptr[i] = hcsr_row_ptr_temp[i];
     }
 
-    host_vector<J> hcsr_col_ind(batch_count * nnz_C);
-    host_vector<C> hcsr_val_1(batch_count * nnz_C);
-    host_vector<C> hcsr_val_2(batch_count * nnz_C);
-    host_vector<C> hcsr_val_gold(batch_count * nnz_C);
+    host_vector<J> hcsr_col_ind(batch_count_C * nnz_C_per_batch);
+    host_vector<C> hcsr_val_1(batch_count_C * nnz_C_per_batch);
+    host_vector<C> hcsr_val_2(batch_count_C * nnz_C_per_batch);
+    host_vector<C> hcsr_val_gold(batch_count_C * nnz_C_per_batch);
 
-    for(J i = 0; i < batch_count; ++i)
+    for(J i = 0; i < batch_count_C; ++i)
     {
         for(I j = 0; j < nnz_C; ++j)
         {
-            hcsr_col_ind[nnz_C * i + j] = hcsr_col_ind_temp[j];
+            hcsr_col_ind[nnz_C_per_batch * i + j] = hcsr_col_ind_temp[j];
         }
     }
 
-    rocsparse_init_1d_array<C>(
-        hcsr_val_1, batch_count * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    rocsparse_init_1d_array<C>(hcsr_val_1,
+                               batch_count_C * nnz_C_per_batch,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
     hcsr_val_2    = hcsr_val_1;
     hcsr_val_gold = hcsr_val_1;
 
@@ -285,12 +292,12 @@ void testing_sddmm_batched_csr(const Arguments& arg)
     rocsparse_local_spmat mat_C2(
         M, N, nnz_C, dcsr_row_ptr, dcsr_col_ind, dcsr_val_2, itype, jtype, base, ctype);
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_A, batch_count, batch_stride_A));
-    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_B, batch_count, batch_stride_B));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A));
+    CHECK_ROCSPARSE_ERROR(rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride_B));
     CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(
-        mat_C1, batch_count, offsets_batch_stride_C, columns_values_batch_stride_C));
+        mat_C1, batch_count_C, offsets_batch_stride_C, columns_values_batch_stride_C));
     CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(
-        mat_C2, batch_count, offsets_batch_stride_C, columns_values_batch_stride_C));
+        mat_C2, batch_count_C, offsets_batch_stride_C, columns_values_batch_stride_C));
 
 #define PARAMS(alpha_, A_, B_, beta_, C_)                                                      \
     handle, trans_A, trans_B, alpha_, (const rocsparse_dnmat_descr&)A_,                        \
@@ -327,11 +334,11 @@ void testing_sddmm_batched_csr(const Arguments& arg)
         // Copy output to host
         CHECK_HIP_ERROR(hipMemcpy(hcsr_val_1,
                                   dcsr_val_1,
-                                  sizeof(C) * batch_count * nnz_C,
+                                  sizeof(C) * batch_count_C * nnz_C_per_batch,
                                   hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hcsr_val_2,
                                   dcsr_val_2,
-                                  sizeof(C) * batch_count * nnz_C,
+                                  sizeof(C) * batch_count_C * nnz_C_per_batch,
                                   hipMemcpyDeviceToHost));
 
         // CPU reference: run csrddmm per batch.
@@ -347,14 +354,14 @@ void testing_sddmm_batched_csr(const Arguments& arg)
                 K,
                 nnz_C,
                 &halpha,
-                hA.data() + i * nnz_A_per_batch,
+                hA.data() + i * batch_stride_A,
                 lda,
-                hB.data() + i * nnz_B_per_batch,
+                hB.data() + i * batch_stride_B,
                 ldb,
                 &hbeta,
-                hcsr_row_ptr.data(),
-                hcsr_col_ind.data() + i * nnz_C,
-                hcsr_val_gold.data() + i * nnz_C,
+                hcsr_row_ptr.data() + i * offsets_batch_stride_C,
+                hcsr_col_ind.data() + i * columns_values_batch_stride_C,
+                hcsr_val_gold.data() + i * columns_values_batch_stride_C,
                 base);
         }
 
@@ -369,14 +376,12 @@ void testing_sddmm_batched_csr(const Arguments& arg)
         const double gpu_time_used = rocsparse_clients::run_benchmark(
             arg, rocsparse_sddmm, PARAMS(&halpha, mat_A, mat_B, &hbeta, mat_C1));
 
-        double gflop_count
-            = batch_count
-              * rocsparse_gflop_count<rocsparse_format_csr>::sddmm(
-                  M, N, nnz_C, K, hbeta != static_cast<T>(0));
-        double gbyte_count
-            = batch_count
-              * rocsparse_gbyte_count<rocsparse_format_csr>::template sddmm<T>(
-                  M, N, nnz_C, K, hbeta != static_cast<T>(0));
+        double gflop_count = batch_count
+                             * rocsparse_gflop_count<rocsparse_format_csr>::sddmm(
+                                 M, N, nnz_C, K, hbeta != static_cast<T>(0));
+        double gbyte_count = batch_count
+                             * rocsparse_gbyte_count<rocsparse_format_csr>::template sddmm<T>(
+                                 M, N, nnz_C, K, hbeta != static_cast<T>(0));
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
@@ -419,13 +424,13 @@ void testing_sddmm_batched_csr(const Arguments& arg)
 #undef PARAMS_BUFFER_SIZE
 }
 
-#define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                                      \
+#define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                                       \
     template void testing_sddmm_batched_csr_bad_arg<ITYPE, JTYPE, TTYPE, TTYPE, TTYPE, TTYPE>( \
         const Arguments& arg);                                                                 \
     template void testing_sddmm_batched_csr<ITYPE, JTYPE, TTYPE, TTYPE, TTYPE, TTYPE>(         \
         const Arguments& arg)
 
-#define INSTANTIATE_MIXED(ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, TTYPE)                             \
+#define INSTANTIATE_MIXED(ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, TTYPE)                            \
     template void testing_sddmm_batched_csr_bad_arg<ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, TTYPE>( \
         const Arguments& arg);                                                                 \
     template void testing_sddmm_batched_csr<ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, TTYPE>(         \

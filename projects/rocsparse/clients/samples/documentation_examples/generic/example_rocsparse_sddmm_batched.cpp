@@ -21,30 +21,31 @@
  *
  * ************************************************************************ */
 
- #include <hip/hip_runtime_api.h>
- #include <rocsparse/rocsparse.h>
- #include <iostream>
- #include <stdio.h>
- #include <stdlib.h>
- 
+#include <cmath>
+#include <hip/hip_runtime_api.h>
+#include <iostream>
+#include <rocsparse/rocsparse.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #define HIP_CHECK(stat)                                                                       \
-{                                                                                         \
-    if(stat != hipSuccess)                                                                \
-    {                                                                                     \
-        std::cerr << "Error: hip error " << stat << " in line " << __LINE__ << std::endl; \
-        return -1;                                                                        \
-    }                                                                                     \
-}
+    {                                                                                         \
+        if(stat != hipSuccess)                                                                \
+        {                                                                                     \
+            std::cerr << "Error: hip error " << stat << " in line " << __LINE__ << std::endl; \
+            return -1;                                                                        \
+        }                                                                                     \
+    }
 
 #define ROCSPARSE_CHECK(stat)                                                         \
-{                                                                                 \
-    if(stat != rocsparse_status_success)                                          \
-    {                                                                             \
-        std::cerr << "Error: rocsparse error " << stat << " in line " << __LINE__ \
-                << std::endl;                                                   \
-        return -1;                                                                \
-    }                                                                             \
-}
+    {                                                                                 \
+        if(stat != rocsparse_status_success)                                          \
+        {                                                                             \
+            std::cerr << "Error: rocsparse error " << stat << " in line " << __LINE__ \
+                      << std::endl;                                                   \
+            return -1;                                                                \
+        }                                                                             \
+    }
 
 //! [doc example]
 int main()
@@ -61,39 +62,49 @@ int main()
     int B_size      = ldb * B_num_rows;
     int num_batches = 2;
 
-    float hA1[] = { 1.0f,   2.0f,  3.0f,  4.0f,
-                    5.0f,   6.0f,  7.0f,  8.0f,
-                    9.0f,  10.0f, 11.0f, 12.0f,
-                13.0f,  14.0f, 15.0f, 16.0f };
-    float hA2[] = {10.0f,  11.0f, 12.0f, 13.0f,
-                14.0f,  15.0f, 16.0f, 17.0f,
-                18.0f,  19.0f, 20.0f, 21.0f,
-                22.0f,  23.0f, 24.0f, 25.0f };
-    float hB1[] = { 1.0f,  2.0f,  3.0f,
-                    4.0f,  5.0f,  6.0f,
-                    7.0f,  8.0f,  9.0f,
-                10.0f, 11.0f, 12.0f };
-    float hB2[] = { 6.0f, 4.0f, 2.0f,
-                    3.0f, 7.0f, 1.0f,
-                    9.0f, 5.0f, 2.0f,
-                    8.0f, 4.0f, 7.0f };
+    float hA1[] = {1.0f,
+                   2.0f,
+                   3.0f,
+                   4.0f,
+                   5.0f,
+                   6.0f,
+                   7.0f,
+                   8.0f,
+                   9.0f,
+                   10.0f,
+                   11.0f,
+                   12.0f,
+                   13.0f,
+                   14.0f,
+                   15.0f,
+                   16.0f};
+    float hA2[] = {10.0f,
+                   11.0f,
+                   12.0f,
+                   13.0f,
+                   14.0f,
+                   15.0f,
+                   16.0f,
+                   17.0f,
+                   18.0f,
+                   19.0f,
+                   20.0f,
+                   21.0f,
+                   22.0f,
+                   23.0f,
+                   24.0f,
+                   25.0f};
+    float hB1[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f};
+    float hB2[] = {6.0f, 4.0f, 2.0f, 3.0f, 7.0f, 1.0f, 9.0f, 5.0f, 2.0f, 8.0f, 4.0f, 7.0f};
     int   hC_offsets[]  = {0, 3, 4, 7, 9};
     int   hC_columns1[] = {0, 1, 2, 1, 0, 1, 2, 0, 2};
     int   hC_columns2[] = {0, 1, 2, 0, 0, 1, 2, 1, 2};
-    float hC_values1[]  = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                        0.0f, 0.0f, 0.0f, 0.0f};
-    float hC_values2[]  = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                        0.0f, 0.0f, 0.0f, 0.0f};
-    float hC_result1[]  = { 70.0f,  80.0f,  90.0f,
-                        184.0f,
-                        246.0f, 288.0f, 330.0f,
-                        334.0f, 450.0f};
-    float hC_result2[]  = {305.0f, 229.0f, 146.0f,
-                        409.0f,
-                        513.0f, 389.0f, 242.0f,
-                        469.0f, 290.0f};
-    float alpha = 1.0f;
-    float beta  = 0.0f;
+    float hC_values1[]  = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float hC_values2[]  = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float hC_result1[]  = {70.0f, 80.0f, 90.0f, 184.0f, 246.0f, 288.0f, 330.0f, 334.0f, 450.0f};
+    float hC_result2[]  = {305.0f, 229.0f, 146.0f, 409.0f, 513.0f, 389.0f, 242.0f, 469.0f, 290.0f};
+    float alpha         = 1.0f;
+    float beta          = 0.0f;
 
     // Device memory management
     int*   dC_offsets;
@@ -107,25 +118,18 @@ int main()
     HIP_CHECK(hipMalloc((void**)&dC_columns, C_nnz * num_batches * sizeof(int)));
     HIP_CHECK(hipMalloc((void**)&dC_values, C_nnz * num_batches * sizeof(float)));
 
-    HIP_CHECK(hipMemcpy(dA, hA1, A_size * sizeof(float),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dA + A_size, hA2, A_size * sizeof(float),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dB, hB1, B_size * sizeof(float),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dB + B_size, hB2, B_size * sizeof(float),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dC_offsets, hC_offsets,
-                        (A_num_rows + 1) * sizeof(int),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dC_columns, hC_columns1, C_nnz * sizeof(int),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dC_columns + C_nnz, hC_columns2, C_nnz * sizeof(int),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dC_values, hC_values1, C_nnz * sizeof(float),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dC_values + C_nnz, hC_values2, C_nnz * sizeof(float),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dA, hA1, A_size * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dA + A_size, hA2, A_size * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dB, hB1, B_size * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dB + B_size, hB2, B_size * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dC_offsets, hC_offsets, (A_num_rows + 1) * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dC_columns, hC_columns1, C_nnz * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dC_columns + C_nnz, hC_columns2, C_nnz * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dC_values, hC_values1, C_nnz * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(dC_values + C_nnz, hC_values2, C_nnz * sizeof(float), hipMemcpyHostToDevice));
 
     // rocSPARSE APIs
     rocsparse_handle      handle = NULL;
@@ -136,36 +140,38 @@ int main()
     ROCSPARSE_CHECK(rocsparse_create_handle(&handle));
 
     // Create dense matrix A
-    ROCSPARSE_CHECK(rocsparse_create_dnmat_descr(&matA,
-                                                A_num_rows, A_num_cols, lda,
-                                                dA,
-                                                rocsparse_datatype_f32_r,
-                                                rocsparse_order_row));
+    ROCSPARSE_CHECK(rocsparse_create_dnmat_descr(
+        &matA, A_num_rows, A_num_cols, lda, dA, rocsparse_datatype_f32_r, rocsparse_order_row));
     ROCSPARSE_CHECK(rocsparse_dnmat_set_strided_batch(matA, num_batches, A_size));
 
     // Create dense matrix B
-    ROCSPARSE_CHECK(rocsparse_create_dnmat_descr(&matB,
-                                                A_num_cols, B_num_cols, ldb,
-                                                dB,
-                                                rocsparse_datatype_f32_r,
-                                                rocsparse_order_row));
+    ROCSPARSE_CHECK(rocsparse_create_dnmat_descr(
+        &matB, A_num_cols, B_num_cols, ldb, dB, rocsparse_datatype_f32_r, rocsparse_order_row));
     ROCSPARSE_CHECK(rocsparse_dnmat_set_strided_batch(matB, num_batches, B_size));
 
     // Create sparse matrix C in CSR format
     ROCSPARSE_CHECK(rocsparse_create_csr_descr(&matC,
-                                                A_num_rows, B_num_cols, C_nnz,
-                                                dC_offsets, dC_columns, dC_values,
-                                                rocsparse_indextype_i32,
-                                                rocsparse_indextype_i32,
-                                                rocsparse_index_base_zero,
-                                                rocsparse_datatype_f32_r));
+                                               A_num_rows,
+                                               B_num_cols,
+                                               C_nnz,
+                                               dC_offsets,
+                                               dC_columns,
+                                               dC_values,
+                                               rocsparse_indextype_i32,
+                                               rocsparse_indextype_i32,
+                                               rocsparse_index_base_zero,
+                                               rocsparse_datatype_f32_r));
     ROCSPARSE_CHECK(rocsparse_csr_set_strided_batch(matC, num_batches, 0, C_nnz));
 
     // Allocate an external buffer if needed
     ROCSPARSE_CHECK(rocsparse_sddmm_buffer_size(handle,
                                                 rocsparse_operation_none,
                                                 rocsparse_operation_none,
-                                                &alpha, matA, matB, &beta, matC,
+                                                &alpha,
+                                                matA,
+                                                matB,
+                                                &beta,
+                                                matC,
                                                 rocsparse_datatype_f32_r,
                                                 rocsparse_sddmm_alg_default,
                                                 &bufferSize));
@@ -173,18 +179,26 @@ int main()
 
     // Execute preprocess (optional)
     ROCSPARSE_CHECK(rocsparse_sddmm_preprocess(handle,
-                                                rocsparse_operation_none,
-                                                rocsparse_operation_none,
-                                                &alpha, matA, matB, &beta, matC,
-                                                rocsparse_datatype_f32_r,
-                                                rocsparse_sddmm_alg_default,
-                                                dBuffer));
+                                               rocsparse_operation_none,
+                                               rocsparse_operation_none,
+                                               &alpha,
+                                               matA,
+                                               matB,
+                                               &beta,
+                                               matC,
+                                               rocsparse_datatype_f32_r,
+                                               rocsparse_sddmm_alg_default,
+                                               dBuffer));
 
     // Execute SDDMM
     ROCSPARSE_CHECK(rocsparse_sddmm(handle,
                                     rocsparse_operation_none,
                                     rocsparse_operation_none,
-                                    &alpha, matA, matB, &beta, matC,
+                                    &alpha,
+                                    matA,
+                                    matB,
+                                    &beta,
+                                    matC,
                                     rocsparse_datatype_f32_r,
                                     rocsparse_sddmm_alg_default,
                                     dBuffer));
@@ -196,21 +210,27 @@ int main()
     ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
 
     // Device result check
-    HIP_CHECK(hipMemcpy(hC_values1, dC_values, C_nnz * sizeof(float),
-                        hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(hC_values2, dC_values + C_nnz, C_nnz * sizeof(float),
-                        hipMemcpyDeviceToHost));
-    int correct = 1;
+    HIP_CHECK(hipMemcpy(hC_values1, dC_values, C_nnz * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(hC_values2, dC_values + C_nnz, C_nnz * sizeof(float), hipMemcpyDeviceToHost));
+    int          correct = 1;
+    const float  abs_tol  = 1.0e-4f;
+    const float  rel_tol  = 1.0e-4f;
+    auto         within_tol
+        = [&](float computed, float expected) {
+              const float diff = std::fabs(computed - expected);
+              return diff <= abs_tol + rel_tol * std::fabs(expected);
+          };
     for(int i = 0; i < C_nnz; i++)
     {
-        if(hC_values1[i] != hC_result1[i])
+        if(!within_tol(hC_values1[i], hC_result1[i]))
         {
-            correct = 0; // direct floating point comparison is not reliable
+            correct = 0;
             break;
         }
-        if(hC_values2[i] != hC_result2[i])
+        if(!within_tol(hC_values2[i], hC_result2[i]))
         {
-            correct = 0; // direct floating point comparison is not reliable
+            correct = 0;
             break;
         }
     }
@@ -218,7 +238,7 @@ int main()
         std::cout << "sddmm_csr_batched_example test PASSED" << std::endl;
     else
         std::cout << "sddmm_csr_batched_example test FAILED: wrong result" << std::endl;
-    
+
     // Device memory deallocation
     HIP_CHECK(hipFree(dBuffer));
     HIP_CHECK(hipFree(dA));

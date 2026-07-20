@@ -278,7 +278,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
         case rocsparse_sddmm_alg_default:
         {
 #define LAUNCH_WAVEFRONT_PER_ROWCOL(BLOCKSIZE, WFSIZE, NTHREADS_PER_DOTPRODUCT)       \
-    dim3 blocks((n - 1) / (BLOCKSIZE / WFSIZE) + 1, batch_count);                     \
+    dim3 blocks((n - 1) / (BLOCKSIZE / WFSIZE) + 1,                                   \
+                (uint32_t)((batch_count <= 65535) ? batch_count : 65535));            \
     dim3 threads(BLOCKSIZE);                                                          \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                               \
         (rocsparse::sddmm_csx_kernel_wavefront_per_rowcol<BLOCKSIZE,                  \
@@ -298,6 +299,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
         n,                                                                            \
         k,                                                                            \
         nnz,                                                                          \
+        batch_count,                                                                  \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                             \
         A_val,                                                                        \
         A_ld,                                                                         \
