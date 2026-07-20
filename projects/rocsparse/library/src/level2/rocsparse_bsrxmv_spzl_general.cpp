@@ -189,7 +189,63 @@ void rocsparse::bsrxmvn_general(rocsparse_handle     handle,
 
     const J size = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
     // Differentiate BSR block dimensions
-    if(block_dim <= 8)
+    //
+    // On wave32 hardware (e.g. RDNA), bsrmv always routes through this general path.
+    // The launch geometry keeps BLOCKSIZE == WFSIZE * WFSIZE so that each of the WFSIZE
+    // logical wavefronts owns one row of the BSR block (row stride == WFSIZE below).
+    // For small block dimensions the old block_dim<=8 bucket launched WFSIZE=8 (64 threads)
+    // regardless, so only (block_dim/8)^2 of the launched threads did any work and the
+    // remaining wavefronts occupied wave slots while idle. Fitting WFSIZE to block_dim for
+    // the 1..4 range removes those idle wave slots and raises effective occupancy on wave32,
+    // without changing the computed result. The >=8 buckets are already fully packed and are
+    // left untouched so the bandwidth-bound cases never regress.
+    if(block_dim <= 2)
+    {
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_general_kernel<4, 2>),
+            dim3(size),
+            dim3(2 * 2),
+            0,
+            handle->stream,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            block_dim,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+    }
+    else if(block_dim <= 4)
+    {
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_general_kernel<16, 4>),
+            dim3(size),
+            dim3(4 * 4),
+            0,
+            handle->stream,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            block_dim,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+    }
+    else if(block_dim <= 8)
     {
         THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrxmvn_general_kernel<64, 8>),
