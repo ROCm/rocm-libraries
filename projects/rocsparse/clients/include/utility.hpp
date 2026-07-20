@@ -29,12 +29,13 @@
 #pragma once
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
-
 #include "rocsparse_clients_float16.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
+#ifdef ROCSPARSE_DEBUGGING
+#include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+#endif
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
-
 #include <hip/hip_runtime_api.h>
 #include <vector>
 
@@ -47,12 +48,6 @@ template <typename T>
 inline rocsparse_datatype get_datatype(void);
 
 /*! \brief  Return \ref rocsparse_indextype */
-template <>
-inline rocsparse_indextype get_indextype<uint16_t>(void)
-{
-    return rocsparse_indextype_u16;
-}
-
 template <>
 inline rocsparse_indextype get_indextype<int32_t>(void)
 {
@@ -130,10 +125,6 @@ inline constexpr size_t rocsparse_indextype_sizeof(rocsparse_indextype indextype
 {
     switch(indextype_)
     {
-    case rocsparse_indextype_u16:
-    {
-        return sizeof(uint16_t);
-    }
     case rocsparse_indextype_i32:
     {
         return sizeof(int32_t);

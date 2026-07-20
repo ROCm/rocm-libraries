@@ -39,6 +39,8 @@ struct BlockGemmARegBRegCRegV1
 
         static constexpr auto KSubTileNum = Policy::KSubTileNum;
 
+        static constexpr auto PackMNIter = Policy::PackMNIter;
+
         static constexpr index_t MWarp        = config.template at<1>();
         static constexpr index_t NWarp        = config.template at<2>();
         static constexpr index_t MIterPerWarp = MPerBlock / (MWarp * WarpGemm::kM);
@@ -69,6 +71,8 @@ struct BlockGemmARegBRegCRegV1
 
     static constexpr index_t KSubTileNum = Traits::KSubTileNum;
 
+    static constexpr bool PackMNIter = Traits::PackMNIter;
+
     static constexpr index_t KPerSubTile = KIterPerWarp / KSubTileNum;
 
     static constexpr index_t MWarp            = Traits::MWarp;
@@ -94,17 +98,34 @@ struct BlockGemmARegBRegCRegV1
         }
         else
         {
-            constexpr auto a_block_outer_dstr_encoding = tile_distribution_encoding<
-                sequence<NWarp>,
-                tuple<sequence<MIterPerWarp, MWarp>, sequence<KPerSubTile>>,
-                tuple<sequence<1, 0>>,
-                tuple<sequence<1, 0>>,
-                sequence<1, 2>,
-                sequence<0, 0>>{};
-            constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-                a_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
+            if constexpr(PackMNIter)
+            {
+                constexpr auto a_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<NWarp>,
+                    tuple<sequence<MWarp, MIterPerWarp>, sequence<KPerSubTile>>,
+                    tuple<sequence<1, 0>>,
+                    tuple<sequence<0, 0>>,
+                    sequence<1, 2>,
+                    sequence<1, 0>>{};
+                constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    a_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
 
-            return a_block_dstr_encode;
+                return a_block_dstr_encode;
+            }
+            else
+            {
+                constexpr auto a_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<NWarp>,
+                    tuple<sequence<MIterPerWarp, MWarp>, sequence<KPerSubTile>>,
+                    tuple<sequence<1, 0>>,
+                    tuple<sequence<1, 0>>,
+                    sequence<1, 2>,
+                    sequence<0, 0>>{};
+                constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    a_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
+
+                return a_block_dstr_encode;
+            }
         }
     }
 
@@ -126,50 +147,103 @@ struct BlockGemmARegBRegCRegV1
         }
         else
         {
-            constexpr auto b_block_outer_dstr_encoding = tile_distribution_encoding<
-                sequence<MWarp>,
-                tuple<sequence<NIterPerWarp, NWarp>, sequence<KPerSubTile>>,
-                tuple<sequence<0, 1>>,
-                tuple<sequence<0, 1>>,
-                sequence<1, 2>,
-                sequence<0, 0>>{};
-            constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-                b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+            if constexpr(PackMNIter)
+            {
+                constexpr auto b_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<MWarp>,
+                    tuple<sequence<NWarp, NIterPerWarp>, sequence<KPerSubTile>>,
+                    tuple<sequence<0, 1>>,
+                    tuple<sequence<0, 0>>,
+                    sequence<1, 2>,
+                    sequence<1, 0>>{};
+                constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
 
-            return b_block_dstr_encode;
+                return b_block_dstr_encode;
+            }
+            else
+            {
+                constexpr auto b_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<MWarp>,
+                    tuple<sequence<NIterPerWarp, NWarp>, sequence<KPerSubTile>>,
+                    tuple<sequence<0, 1>>,
+                    tuple<sequence<0, 1>>,
+                    sequence<1, 2>,
+                    sequence<0, 0>>{};
+                constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+
+                return b_block_dstr_encode;
+            }
         }
     }
 
     CK_TILE_DEVICE static constexpr auto MakeCBlockDistributionEncode()
     {
         using c_distr_ys_major = std::conditional_t<TransposeC, sequence<2, 1>, sequence<1, 2>>;
-        if constexpr(UseDefaultScheduler)
+        if constexpr(PackMNIter)
         {
-            constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
-                sequence<MWarp>,
-                tuple<sequence<MIterPerWarp>, sequence<NIterPerWarp, NWarp>>,
-                tuple<>,
-                tuple<>,
-                c_distr_ys_major,
-                sequence<0, 0>>{};
-            constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-                c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
+            if constexpr(UseDefaultScheduler)
+            {
+                using c_distr_ys_minor =
+                    std::conditional_t<TransposeC, sequence<1, 0>, sequence<0, 1>>;
+                constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<MWarp>,
+                    tuple<sequence<MIterPerWarp>, sequence<NWarp, NIterPerWarp>>,
+                    tuple<sequence<1, 2>>,
+                    tuple<sequence<0, 0>>,
+                    c_distr_ys_major,
+                    c_distr_ys_minor>{};
+                constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
 
-            return c_block_dstr_encode;
+                return c_block_dstr_encode;
+            }
+            else
+            {
+                constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<MWarp, MIterPerWarp>, sequence<NWarp, NIterPerWarp>>,
+                    tuple<sequence<1, 2>>,
+                    tuple<sequence<0, 0>>,
+                    c_distr_ys_major,
+                    sequence<1, 1>>{};
+                constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
+
+                return c_block_dstr_encode;
+            }
         }
         else
         {
-            constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
-                tuple<sequence<1, 2>>,
-                tuple<sequence<1, 1>>,
-                c_distr_ys_major,
-                sequence<0, 0>>{};
-            constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-                c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
+            if constexpr(UseDefaultScheduler)
+            {
+                constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<MWarp>,
+                    tuple<sequence<MIterPerWarp>, sequence<NIterPerWarp, NWarp>>,
+                    tuple<>,
+                    tuple<>,
+                    c_distr_ys_major,
+                    sequence<0, 0>>{};
+                constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
 
-            return c_block_dstr_encode;
+                return c_block_dstr_encode;
+            }
+            else
+            {
+                constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
+                    tuple<sequence<1, 2>>,
+                    tuple<sequence<1, 1>>,
+                    c_distr_ys_major,
+                    sequence<0, 0>>{};
+                constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                    c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
+
+                return c_block_dstr_encode;
+            }
         }
     }
 
@@ -328,62 +402,75 @@ struct BlockGemmARegBRegCRegV1
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
         // hot loop:
-        static_for<0, KPerSubTile, 1>{}([&](auto kIter) {
+        static_ford<sequence<KPerSubTile, MIterPerWarp>>{}([&](auto km) {
+            constexpr auto kIter          = number<km[number<0>{}]>{};
+            constexpr auto mIter          = number<km[number<1>{}]>{};
             constexpr index_t scale_k_idx = SubTileIdx * KPerSubTile + decltype(kIter)::value;
-            static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                // read A warp tensor from A block tensor
-                AWarpTensor a_warp_tensor;
-                a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
-                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+            // read A warp tensor from A block tensor
+            AWarpTensor a_warp_tensor;
+            a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+                merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
-                index_t scale_a = a_scale_tensor.get_y_sliced_thread_data(
-                    sequence<mIter, scale_k_idx, 0>{}, sequence<1, 1, 1>{})[0];
+            // Extract scale value(s) for this M-iteration.
+            // For scale32: 1 int32_t element (4 packed e8m0 bytes).
+            // For scale16: 2 int32_t elements packed into int64_t (8 packed e8m0 bytes).
+            // The scale thread buffer spans the whole block-K (scale_k_idx ranges over
+            // [0, KIterPerWarp)), so divide by KIterPerWarp, not one sub-tile's KPerSubTile.
+            constexpr index_t scale_k_len =
+                AScaleBlockTensor::get_thread_buffer_size() / (MIterPerWarp * KIterPerWarp);
+            static_assert(scale_k_len == 1 || scale_k_len == 2,
+                          "scale_k_len must be 1 (scale32, int32_t) or 2 (scale16, int64_t)");
+            auto scale_a_slice = a_scale_tensor.get_y_sliced_thread_data(
+                sequence<mIter, scale_k_idx * scale_k_len, 0>{}, sequence<1, scale_k_len, 1>{});
+            auto scale_a =
+                bit_cast<std::conditional_t<scale_k_len == 2, int64_t, int32_t>>(scale_a_slice);
 
-                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    // read B warp tensor from B block tensor
-                    BWarpTensor b_warp_tensor;
-                    b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-                        merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+            static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                // read B warp tensor from B block tensor
+                BWarpTensor b_warp_tensor;
+                b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
+                    merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
-                    index_t scale_b = b_scale_tensor.get_y_sliced_thread_data(
-                        sequence<nIter, scale_k_idx, 0>{}, sequence<1, 1, 1>{})[0];
+                auto scale_b_slice = b_scale_tensor.get_y_sliced_thread_data(
+                    sequence<nIter, scale_k_idx * scale_k_len, 0>{}, sequence<1, scale_k_len, 1>{});
+                auto scale_b =
+                    bit_cast<std::conditional_t<scale_k_len == 2, int64_t, int32_t>>(scale_b_slice);
 
-                    // read C warp tensor from C block tensor
-                    using c_iter_idx = std::
-                        conditional_t<TransposeC, sequence<nIter, mIter>, sequence<mIter, nIter>>;
-                    CWarpTensor c_warp_tensor;
-                    c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
-                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+                // read C warp tensor from C block tensor
+                using c_iter_idx =
+                    std::conditional_t<TransposeC, sequence<nIter, mIter>, sequence<mIter, nIter>>;
+                CWarpTensor c_warp_tensor;
+                c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+                    merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
-                    // warp GEMM with scale
-                    if constexpr(nIter != 0)
-                    {
-                        WarpGemm{}
-                            .template operator()<ReuseA<true>,
-                                                 ReuseB<false>,
-                                                 AScaleDataType<AScaleTypeVal>,
-                                                 BScaleDataType<BScaleTypeVal>>(
-                                c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
-                    }
-                    else
-                    {
-                        WarpGemm{}
-                            .template operator()<ReuseA<false>,
-                                                 ReuseB<false>,
-                                                 AScaleDataType<AScaleTypeVal>,
-                                                 BScaleDataType<BScaleTypeVal>>(
-                                c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
-                    }
+                // warp GEMM with scale
+                if constexpr(nIter != 0)
+                {
+                    WarpGemm{}
+                        .template operator()<ReuseA<true>,
+                                             ReuseB<false>,
+                                             AScaleDataType<AScaleTypeVal>,
+                                             BScaleDataType<BScaleTypeVal>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
+                }
+                else
+                {
+                    WarpGemm{}
+                        .template operator()<ReuseA<false>,
+                                             ReuseB<false>,
+                                             AScaleDataType<AScaleTypeVal>,
+                                             BScaleDataType<BScaleTypeVal>>(
+                            c_warp_tensor, a_warp_tensor, b_warp_tensor, scale_a, scale_b);
+                }
 
-                    // write C warp tensor into C block tensor
-                    c_block_tensor.set_y_sliced_thread_data(
-                        merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
-                        c_warp_tensor.get_thread_buffer());
-                });
+                // write C warp tensor into C block tensor
+                c_block_tensor.set_y_sliced_thread_data(
+                    merge_sequences(c_iter_idx{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+                    c_warp_tensor.get_thread_buffer());
             });
         });
     }
@@ -398,9 +485,12 @@ struct BlockGemmARegBRegCRegV1
               typename BBlockTensor,
               typename ScaleATensor,
               typename ScaleBTensor,
-              index_t MXdlPack_ = 2,
-              index_t NXdlPack_ = 2,
-              index_t KXdlPack_ = 2>
+              index_t MXdlPack_                = 2,
+              index_t NXdlPack_                = 2,
+              index_t KXdlPack_                = 2,
+              typename std::enable_if_t<!is_null_tensor_v<ScaleATensor> &&
+                                            !is_null_tensor_v<ScaleBTensor>,
+                                        bool>* = nullptr>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ABlockTensor& a_block_tensor,
                                    const BBlockTensor& b_block_tensor,
@@ -410,7 +500,7 @@ struct BlockGemmARegBRegCRegV1
         static_assert(std::is_same_v<ADataType, remove_cv_t<typename ABlockTensor::DataType>> &&
                           std::is_same_v<BDataType, remove_cv_t<typename BBlockTensor::DataType>> &&
                           std::is_same_v<CDataType, remove_cv_t<typename CBlockTensor::DataType>>,
-                      "wrong!");
+                      "Datatypes do not match BlockTensor datatypes!");
 
         // check ABC-block-distribution
         static_assert(
@@ -532,41 +622,27 @@ struct BlockGemmARegBRegCRegV1
         });
     }
 
+    template <
+        typename CBlockTensor,
+        typename ABlockTensor,
+        typename BBlockTensor,
+        typename ScaleATensor,
+        typename ScaleBTensor,
+        typename std::enable_if_t<is_null_tensor_v<ScaleATensor> && is_null_tensor_v<ScaleBTensor>,
+                                  bool>* = nullptr>
+    CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
+                                   const ABlockTensor& a_block_tensor,
+                                   const BBlockTensor& b_block_tensor,
+                                   const ScaleATensor&,
+                                   const ScaleBTensor&) const
+    {
+        operator()(c_block_tensor, a_block_tensor, b_block_tensor);
+    }
+
     CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
     {
-        using c_distr_ys_major = std::conditional_t<TransposeC, sequence<2, 1>, sequence<1, 2>>;
-        if constexpr(UseDefaultScheduler)
-        {
-            constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
-                sequence<MWarp>,
-                tuple<sequence<MIterPerWarp>, sequence<NIterPerWarp, NWarp>>,
-                tuple<>,
-                tuple<>,
-                c_distr_ys_major,
-                sequence<0, 0>>{};
-
-            constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-                c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
-            constexpr auto c_block_dstr = make_static_tile_distribution(c_block_dstr_encode);
-            auto c_block_tensor         = make_static_distributed_tensor<CDataType>(c_block_dstr);
-            return c_block_tensor;
-        }
-        else
-        {
-            constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
-                tuple<sequence<1, 2>>,
-                tuple<sequence<1, 1>>,
-                c_distr_ys_major,
-                sequence<0, 0>>{};
-
-            constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-                c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});
-            constexpr auto c_block_dstr = make_static_tile_distribution(c_block_dstr_encode);
-            auto c_block_tensor         = make_static_distributed_tensor<CDataType>(c_block_dstr);
-            return c_block_tensor;
-        }
+        return make_static_distributed_tensor<CDataType>(
+            make_static_tile_distribution(MakeCBlockDistributionEncode()));
     }
 
     // C = A * B

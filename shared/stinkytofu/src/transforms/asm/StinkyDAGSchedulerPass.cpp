@@ -22,15 +22,19 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
 
+#include <climits>
+
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
 #include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
@@ -55,13 +59,8 @@ static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGra
     std::cerr << "\n\n";
 }
 
-static bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
-    for (const StinkyRegister& r : inst.getSrcRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    for (const StinkyRegister& r : inst.getDestRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    return false;
-}
+// collapseExecMaskedRegions()/expandExecMaskedGroups(): see ExecMaskGrouping.hpp and
+// docs/developer/exec-mask-grouping.md.
 
 // --- Region scheduler (does NOT move fences) ---
 //
@@ -329,22 +328,6 @@ static void scheduleRegionWithMovableSideEffects(
     }
 }
 
-static bool hasSideEffect(const StinkyInstruction& inst) {
-    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst)) {
-        return true;
-    }
-
-    // Barriers and memory ops without LDS pseudo-registers (no MemTokenData
-    // assigned) must be treated conservatively as non-movable side effects to
-    // preserve strict ordering. When LDS pseudo-regs are present, ordering is
-    // enforced by the DAG via def-use edges, so they are safe to schedule.
-    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
-        !hasLdsPseudoRegs(inst)) {
-        return true;
-    }
-    return false;
-}
-
 // Schedule the instructions in the given IRList.
 // This will split the instructions into regions based on side-effect instructions
 // and schedule each region in a DAG.
@@ -451,7 +434,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 for (auto it = bb->begin(); it != bb->end(); ++it) {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                     if (!inst) continue;
-                    if (isWMMA(*inst) || isSWMMA(*inst)) wmmaIndex[inst] = idx++;
+                    if (isMatrixInstruction(*inst)) wmmaIndex[inst] = idx++;
                 }
             }
         }
@@ -484,6 +467,18 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
             for (BasicBlock* bb : loop.bodyBBs) bbToLoop[bb] = &loop;
         }
 
+        const GfxArchID archId =
+            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
+                         passCtx.getGemmTileConfig().arch[2]);
+        const uint32_t wavefrontSize = passCtx.getWavefrontSize();
+
+        auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq) {
+            AsmIRBuilder builder(*bb, archId);
+            collapseExecMaskedRegions(*bb, builder, wavefrontSize);
+            scheduleInDAG(*bb, rq, wmmaIndex);
+            expandExecMaskedGroups(*bb);
+        };
+
         for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) continue;
 
@@ -496,11 +491,11 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                     rq->setLoopContext(loop);
                 }
                 rq->setAnalysisCache(&analysisCache);
-                scheduleInDAG(*bb, *rq, wmmaIndex);
+                scheduleBlock(bb, *rq);
             } else {
                 auto rq = chooseReadyQueue(passCtx);
                 rq->setAnalysisCache(&analysisCache);
-                scheduleInDAG(*bb, *rq, wmmaIndex);
+                scheduleBlock(bb, *rq);
             }
         }
         return preserveCFGAnalyses();

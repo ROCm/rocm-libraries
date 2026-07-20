@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
  * ************************************************************************ */
 #ifndef HIPSPARSE_GENERIC_AUXILIARY_H
 #define HIPSPARSE_GENERIC_AUXILIARY_H
+
+#include "hipsparse-version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -391,6 +393,7 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
                                                 hipDataType                 valueType);
 #endif
 
+#ifdef HIPSPARSE_WITH_SPMV_BSR
 /*! \ingroup generic_module
 *  \brief Create a sparse BSR matrix descriptor.
 *  \details
@@ -438,6 +441,7 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
                                           hipDataType                 valueType,
                                           hipsparseOrder_t            order);
 #endif
+#endif /* HIPSPARSE_WITH_SPMV_BSR */
 
 /*! \ingroup generic_module
 *  \brief Destroy a sparse matrix descriptor.
@@ -646,7 +650,7 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
 *  \details
 *  \p hipsparseCscSetPointers sets the fields of the sparse CSC matrix descriptor.
 */
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cscColOffsets,
@@ -659,12 +663,24 @@ hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
 *  \details
 *  \p hipsparseCooSetPointers sets the fields of the sparse COO matrix descriptor.
 */
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11040)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cooRowInd,
                                           void*                 cooColInd,
                                           void*                 cooValues);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Set the pointers of a sparse blocked ELL matrix.
+*  \details
+*  \p hipsparseBlockedEllSetPointers sets the fields of the sparse blocked ELL matrix descriptor.
+*/
+#if(!defined(CUDART_VERSION))
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseBlockedEllSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                                 void*                 ellColInd,
+                                                 void*                 ellValue);
 #endif
 
 /*! \ingroup generic_module

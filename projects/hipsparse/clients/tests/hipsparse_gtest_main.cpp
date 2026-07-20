@@ -35,12 +35,68 @@
 #include "hipsparse_parse_data.hpp"
 #include "program_options.hpp"
 
+#include <csignal>
+
 using testing::InitGoogleTest;
 using testing::TestCase;
 using testing::TestEventListener;
 using testing::TestInfo;
 using testing::TestPartResult;
 using testing::UnitTest;
+
+// Log device VRAM usage. A failed hipMemGetInfo is a strong signal that the
+// device has been lost (rather than merely out of memory).
+static bool hipsparse_log_device_memory(const char* context)
+{
+    size_t     free_mem  = 0;
+    size_t     total_mem = 0;
+    hipError_t status    = hipMemGetInfo(&free_mem, &total_mem);
+    if(status == hipSuccess)
+    {
+        fprintf(stderr,
+                "[ MEMORY   ] %s: device free/total = %zu/%zu MB\n",
+                context,
+                free_mem >> 20,
+                total_mem >> 20);
+        return true;
+    }
+
+    fprintf(stderr,
+            "[ MEMORY   ] %s: hipMemGetInfo failed: hip error %d (%s) -- device may be lost\n",
+            context,
+            status,
+            hipGetErrorString(status));
+    return false;
+}
+
+// Print the currently running test on a fatal signal so a single crashed CI run
+// is diagnosable without a rerun, then re-raise with the default handler.
+extern "C" void hipsparse_fatal_signal_handler(int sig)
+{
+    const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : (sig == SIGABRT) ? "SIGABRT" : "signal";
+
+    const TestInfo* info = UnitTest::GetInstance()->current_test_info();
+    if(info != nullptr)
+    {
+        fprintf(stderr,
+                "\n[ FATAL    ] hipsparse-test TERMINATED BY %s during test: %s.%s\n",
+                sig_name,
+                info->test_case_name(),
+                info->name());
+    }
+    else
+    {
+        fprintf(stderr,
+                "\n[ FATAL    ] hipsparse-test TERMINATED BY %s (no test currently running)\n",
+                sig_name);
+    }
+    fflush(stderr);
+
+    // Restore the default disposition and re-raise so the process exit status
+    // still reflects the original signal.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
 
 class ConfigurableEventListener : public TestEventListener
 {
@@ -71,6 +127,7 @@ public:
     void OnTestProgramStart(const UnitTest& unit_test) override
     {
         eventListener->OnTestProgramStart(unit_test);
+        hipsparse_log_device_memory("test program start");
     }
 
     void OnTestIterationStart(const UnitTest& unit_test, int iteration) override
@@ -113,6 +170,26 @@ public:
     void OnTestPartResult(const TestPartResult& result) override
     {
         eventListener->OnTestPartResult(result);
+
+        // On the first failure, capture device memory state. This both proves
+        // the tests themselves are not the memory consumer and detects a device
+        // that has collapsed mid-run. If the device is lost, abort the whole run
+        // so the log shows one clear fault instead of a long cascade of
+        // dependent failures (and a likely SIGSEGV) on the dead device.
+        if(result.failed())
+        {
+            const bool device_alive = hipsparse_log_device_memory("on test failure");
+            if(!device_alive)
+            {
+                fprintf(stderr,
+                        "[ DEVICE   ] Device appears lost after a test failure; aborting the test "
+                        "run to avoid a cascade of dependent failures.\n");
+                fflush(stderr);
+                // _Exit avoids running static destructors that may themselves
+                // fault while the device is in a bad state.
+                std::_Exit(EXIT_FAILURE);
+            }
+        }
     }
 
     void OnTestEnd(const TestInfo& test_info) override
@@ -302,6 +379,12 @@ int main(int argc, char** argv)
     }
 
     listeners.Append(listener);
+
+    // Install fatal-signal handlers so a crash (e.g. a dereference of an
+    // un-initialized device buffer after an allocation failure) still records
+    // the test that was running before the process dies.
+    signal(SIGSEGV, hipsparse_fatal_signal_handler);
+    signal(SIGABRT, hipsparse_fatal_signal_handler);
 
     // Run all tests
     int ret = RUN_ALL_TESTS();

@@ -521,6 +521,33 @@ inline auto get_random_value(typename T::value_type min,
     return T{result};
 }
 
+template<class KeyIter>
+auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
+    -> std::enable_if_t<
+        rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
+{
+    using key_type = typename std::iterator_traits<KeyIter>::value_type;
+    generate_random_data_n(keys_input,
+                           size,
+                           rocprim::numeric_limits<key_type>::min(),
+                           rocprim::numeric_limits<key_type>::max(),
+                           rng_engine);
+    add_special_values(keys_input, size, rng_engine);
+}
+
+template<class KeyIter>
+auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
+    -> std::enable_if_t<
+        !rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
+{
+    using key_type = typename std::iterator_traits<KeyIter>::value_type;
+    generate_random_data_n(keys_input,
+                           size,
+                           rocprim::numeric_limits<key_type>::min(),
+                           rocprim::numeric_limits<key_type>::max(),
+                           rng_engine);
+}
+
 template<class T>
 inline std::vector<T> get_random_data01(size_t size, float p, seed_type seed_value)
 {
@@ -543,13 +570,10 @@ template<class T>
 std::vector<size_t> get_sizes(T seed_value)
 {
 // clang-format off
-#if HAS_VALGRIND_H
-    std::vector<size_t> sizes;
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND){
-        sizes = {1024, 2048, 1, 10, 53, 211, 500};
-    }
-    else{
+#if HAS_VALGRIND_H || USES_ASAN
+    std::vector<size_t> sizes = {1024, 2048, 1, 10, 53, 211, 500};
+    #if HAS_VALGRIND_H
+    if (!RUNNING_ON_VALGRIND){
         sizes = {
                 1024, 2048, 4096, 1792,
                 1, 10, 53, 211, 500, 2345,
@@ -558,6 +582,7 @@ std::vector<size_t> get_sizes(T seed_value)
                 (1 << 20) + 123
             };
     }
+    #endif
 
 #else
     std::vector<size_t> sizes = {
@@ -570,7 +595,6 @@ std::vector<size_t> get_sizes(T seed_value)
 
 #endif // HAS_VALGRIND_H
 // clang-format on
-
 
     if(!common::use_hmm())
     {

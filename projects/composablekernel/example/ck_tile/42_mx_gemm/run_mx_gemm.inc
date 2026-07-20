@@ -14,58 +14,10 @@ auto calculate_rtol_atol(const ck_tile::index_t K, const float max_accumulated_v
     return ck_tile::make_tuple(rtol, atol);
 }
 
-// Pack [MN, K/32] e8m0_t scales into [MN/MNPack, K/32/KPack] int32_t
-// Each int32_t contains MNPack * KPack e8m0_t values with byte layout matching
-// the GPU tile distribution: values are XdlMNThread apart in M and XdlKThread apart in K.
-//   byte[ik * MNPack + imn] = e8m0 at strided (mn, k) position
-// kLast=true for A scales (layout [M, K/32]), kLast=false for B scales (layout [K/32, N])
-template <ck_tile::index_t MNPack      = 2,
-          ck_tile::index_t KPack       = 2,
-          ck_tile::index_t XdlMNThread = 16,
-          ck_tile::index_t XdlKThread  = 4>
-auto packScalesMNxK(const ck_tile::HostTensor<ck_tile::e8m0_t>& src, bool kLast)
-{
-    auto src_lengths                    = src.get_lengths();
-    const ck_tile::index_t MN           = kLast ? src_lengths[0] : src_lengths[1];
-    const ck_tile::index_t K_scale      = kLast ? src_lengths[1] : src_lengths[0];
-    const ck_tile::index_t MN_packed    = MN / MNPack;
-    const ck_tile::index_t K_packed     = K_scale / KPack;
-    const ck_tile::index_t total_packed = MN_packed * K_packed;
-
-    // Output as flat vector of int32_t (row-major [MN/MNPack, K/32/KPack])
-    std::vector<int32_t> packed(total_packed);
-
-    for(ck_tile::index_t packed_mn = 0; packed_mn < MN_packed; packed_mn++)
-    {
-        for(ck_tile::index_t packed_k = 0; packed_k < K_packed; packed_k++)
-        {
-            int32_t val               = 0;
-            ck_tile::index_t mn_lane  = packed_mn % XdlMNThread;
-            ck_tile::index_t mn_group = packed_mn / XdlMNThread;
-            ck_tile::index_t k_lane   = packed_k % XdlKThread;
-            ck_tile::index_t k_group  = packed_k / XdlKThread;
-            for(ck_tile::index_t ik = 0; ik < KPack; ik++)
-            {
-                for(ck_tile::index_t imn = 0; imn < MNPack; imn++)
-                {
-                    ck_tile::index_t byteIdx = ik * MNPack + imn;
-                    ck_tile::index_t orig_mn =
-                        mn_group * XdlMNThread * MNPack + imn * XdlMNThread + mn_lane;
-                    ck_tile::index_t orig_k =
-                        k_group * XdlKThread * KPack + ik * XdlKThread + k_lane;
-
-                    ck_tile::e8m0_t v = kLast ? src(orig_mn, orig_k) : src(orig_k, orig_mn);
-                    val |= (static_cast<int32_t>(v.get()) << (byteIdx * 8));
-                }
-            }
-            packed[packed_mn * K_packed + packed_k] = val;
-        }
-    }
-    return packed;
-}
-
 template <typename ADataType,
           typename BDataType,
+          typename AScaleDataType,
+          typename BScaleDataType,
           typename AccDataType,
           typename GemmConfig,
           bool UsePersistentKernel,
@@ -111,32 +63,19 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
     // Scale tensors - follow parent matrix layouts for optimal memory access
     // A scales: [M, K/32] with A's layout
     // B scales: [K/32, N] with B's layout
-    using ScaleType               = ck_tile::e8m0_t;
     ck_tile::index_t scale_k_size = K / 32;
 
-    // Follow A/BLayout to get the layouts for the scale tensors
-    ck_tile::index_t stride_scale_a =
-        ck_tile::get_default_stride(M, scale_k_size, 0, is_row_major(ALayout{}));
-    ck_tile::index_t stride_scale_b =
-        ck_tile::get_default_stride(scale_k_size, N, 0, is_row_major(BLayout{}));
+    ck_tile::HostTensor<AScaleDataType> scale_a_host(
+        {static_cast<std::size_t>(M), static_cast<std::size_t>(scale_k_size)},
+        {static_cast<std::size_t>(scale_k_size), static_cast<std::size_t>(1)});
 
-    ck_tile::HostTensor<ScaleType> scale_a_host(
-        ck_tile::host_tensor_descriptor(M, scale_k_size, stride_scale_a, is_row_major(ALayout{})));
-    ck_tile::HostTensor<ScaleType> scale_b_host(
-        ck_tile::host_tensor_descriptor(scale_k_size, N, stride_scale_b, is_row_major(BLayout{})));
+    // scale_b uses N as first dimension (col-major like B)
+    ck_tile::HostTensor<BScaleDataType> scale_b_host(
+        {static_cast<std::size_t>(N), static_cast<std::size_t>(scale_k_size)},
+        {static_cast<std::size_t>(scale_k_size), static_cast<std::size_t>(1)});
 
     std::mt19937 gen(42);
     std::uniform_int_distribution<std::uint32_t> fill_seed(0, 500);
-
-    auto gen_scales = [&](auto& scales, float range_min, float range_max) {
-        // e8m0_t is basically an exponent of float32
-        ck_tile::HostTensor<float> pow2(scales.get_lengths());
-        ck_tile::FillUniformDistributionIntegerValue<float>{range_min, range_max, fill_seed(gen)}(
-            pow2);
-        scales.ForEach([&](auto& self, const auto& i) {
-            self(i) = static_cast<ScaleType>(std::exp2(pow2(i)));
-        });
-    };
 
     switch(init_method)
     {
@@ -144,22 +83,28 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
         // Initialize A, B, and scales to random values
         ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, fill_seed(gen)}(a_host);
         ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, fill_seed(gen)}(b_host);
-        gen_scales(scale_a_host, -2, 2);
-        gen_scales(scale_b_host, -2, 2);
+        ck_tile::FillUniformScaleDistribution<AScaleDataType>{0.125f, 2.0f, fill_seed(gen)}(
+            scale_a_host);
+        ck_tile::FillUniformScaleDistribution<BScaleDataType>{0.125f, 2.0f, fill_seed(gen)}(
+            scale_b_host);
         break;
     case 1:
         // Initialize A, B, and scales to 1.0
         ck_tile::FillConstant<ADataType>{ADataType(1.f)}(a_host);
         ck_tile::FillConstant<BDataType>{BDataType(1.f)}(b_host);
-        gen_scales(scale_a_host, 0, 0);
-        gen_scales(scale_b_host, 0, 0);
+        ck_tile::FillUniformScaleDistribution<AScaleDataType>{1.0f, 1.0f, fill_seed(gen)}(
+            scale_a_host);
+        ck_tile::FillUniformScaleDistribution<BScaleDataType>{1.0f, 1.0f, fill_seed(gen)}(
+            scale_b_host);
         break;
     case 2:
         // Initialize A and B with random values but with constant 1.0 scales
         ck_tile::FillUniformDistribution<ADataType>{-2.f, 2.f, fill_seed(gen)}(a_host);
         ck_tile::FillUniformDistribution<BDataType>{-2.f, 2.f, fill_seed(gen)}(b_host);
-        gen_scales(scale_a_host, 0, 0);
-        gen_scales(scale_b_host, 0, 0);
+        ck_tile::FillUniformScaleDistribution<AScaleDataType>{1.0f, 1.0f, fill_seed(gen)}(
+            scale_a_host);
+        ck_tile::FillUniformScaleDistribution<BScaleDataType>{1.0f, 1.0f, fill_seed(gen)}(
+            scale_b_host);
         break;
     }
 
@@ -180,75 +125,65 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
     constexpr ck_tile::index_t XdlMNThread = GemmConfig::M_Warp_Tile;
     constexpr ck_tile::index_t XdlKThread  = 64 / XdlMNThread;
 
-    auto scale_a_packed =
-        packScalesMNxK<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_a_host, true);
-    auto scale_b_packed =
-        packScalesMNxK<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(scale_b_host, false);
+    ck_tile::HostTensor<AScaleDataType> scale_a_shuffled(
+        {static_cast<std::size_t>(M / MXdlPackEff * 2),
+         static_cast<std::size_t>(scale_k_size / KXdlPackEff * 2)},
+        {static_cast<std::size_t>(scale_k_size / KXdlPackEff * 2), static_cast<std::size_t>(1)});
+
+    ck_tile::HostTensor<BScaleDataType> scale_b_shuffled(
+        {static_cast<std::size_t>(N / NXdlPackEff * 2),
+         static_cast<std::size_t>(scale_k_size / KXdlPackEff * 2)},
+        {static_cast<std::size_t>(scale_k_size / KXdlPackEff * 2), static_cast<std::size_t>(1)});
+
+    ck_tile::preShuffleScaleBuffer_gfx950<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+        scale_a_host.mData.data(), scale_a_shuffled.mData.data(), M, scale_k_size, true);
+
+    if constexpr(GemmConfig::Preshuffle && GemmConfig::TiledMMAPermuteN)
+    {
+        ck_tile::preShuffleScaleBufferPermuteN_gfx950<GemmConfig::N_Warp,
+                                                      GemmConfig::N_Tile,
+                                                      XdlMNThread>(
+            scale_b_host.mData.data(), scale_b_shuffled.mData.data(), N, scale_k_size, true);
+    }
+    else
+    {
+        ck_tile::preShuffleScaleBuffer_gfx950<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+            scale_b_host.mData.data(), scale_b_shuffled.mData.data(), N, scale_k_size, true);
+    }
 
     const auto b_host_for_device = [&]() {
         if constexpr(GemmConfig::Preshuffle)
-            return ck_tile::shuffle_b<GemmConfig>(b_host);
+            if constexpr(GemmConfig::TiledMMAPermuteN)
+                return ck_tile::shuffle_b_permuteN<GemmConfig, BDataType, NXdlPackEff>(b_host);
+            else
+                return ck_tile::shuffle_b<GemmConfig>(b_host);
         else
             return b_host;
-    }();
-
-    const auto scale_a_host_for_device = [&]() {
-        if constexpr(GemmConfig::Preshuffle)
-            return MXGemmArchTraits<GemmConfig>::template preShuffleScale<true>(scale_a_host);
-        else
-            return scale_a_packed;
-    }();
-
-    const auto scale_b_host_for_device = [&]() {
-        if constexpr(GemmConfig::Preshuffle)
-            return MXGemmArchTraits<GemmConfig>::template preShuffleScale<false>(scale_b_host);
-        else
-            return scale_b_packed;
-    }();
-
-    const auto scale_a_device_bytes = [&]() {
-        if constexpr(GemmConfig::Preshuffle)
-            return scale_a_host_for_device.get_element_space_size_in_bytes();
-        else
-            return scale_a_host_for_device.size() * sizeof(int32_t);
-    }();
-
-    const auto scale_b_device_bytes = [&]() {
-        if constexpr(GemmConfig::Preshuffle)
-            return scale_b_host_for_device.get_element_space_size_in_bytes();
-        else
-            return scale_b_host_for_device.size() * sizeof(int32_t);
     }();
 
     // Device buffers for A, B, C, and packed scale tensors
     ck_tile::DeviceMem a_dev_buf(a_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem b_dev_buf(b_host_for_device.get_element_space_size_in_bytes());
     ck_tile::DeviceMem c_dev_buf(c_host.get_element_space_size_in_bytes());
-    ck_tile::DeviceMem scale_a_dev_buf(scale_a_device_bytes);
-    ck_tile::DeviceMem scale_b_dev_buf(scale_b_device_bytes);
+    ck_tile::DeviceMem scale_a_dev_buf(scale_a_shuffled.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem scale_b_dev_buf(scale_b_shuffled.get_element_space_size_in_bytes());
 
     a_dev_buf.ToDevice(a_host.data());
     b_dev_buf.ToDevice(b_host_for_device.data());
     c_dev_buf.SetZero();
-    scale_a_dev_buf.ToDevice(scale_a_host_for_device.data());
-    scale_b_dev_buf.ToDevice(scale_b_host_for_device.data());
-
-    // Scale pointers - point to packed int32_t data, kernel reinterprets as int32_t*
-    using ScaleM = ck_tile::MXScalePointer<ScaleType, 1, 32>;
-    using ScaleN = ck_tile::MXScalePointer<ScaleType, 1, 32>;
-    ScaleM scale_m(reinterpret_cast<ScaleType*>(scale_a_dev_buf.GetDeviceBuffer()));
-    ScaleN scale_n(reinterpret_cast<ScaleType*>(scale_b_dev_buf.GetDeviceBuffer()));
+    scale_a_dev_buf.ToDevice(scale_a_shuffled.data());
+    scale_b_dev_buf.ToDevice(scale_b_shuffled.data());
 
     float ave_time = invoke_mx_gemm<GemmConfig,
                                     ADataType,
                                     BDataType,
+                                    AScaleDataType,
+                                    BScaleDataType,
                                     AccDataType,
                                     CDataType,
                                     ALayout,
                                     BLayout,
                                     CLayout,
-                                    ScaleM,
-                                    ScaleN,
                                     UsePersistentKernel>(a_dev_buf,
                                                          b_dev_buf,
                                                          c_dev_buf,
@@ -259,8 +194,8 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
                                                          stride_B,
                                                          stride_C,
                                                          kbatch,
-                                                         scale_m,
-                                                         scale_n,
+                                                         scale_a_dev_buf,
+                                                         scale_b_dev_buf,
                                                          n_warmup,
                                                          n_repeat);
 
@@ -277,9 +212,23 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
         c_m_n_host_ref.SetZero();
 
-        ck_tile::
-            reference_mx_gemm<ADataType, BDataType, ScaleType, ScaleType, AccDataType, CDataType>(
-                a_host, b_host, c_m_n_host_ref, scale_a_host, scale_b_host);
+        // Host reference computation using reference_mx_gemm
+        // reference_mx_gemm expects scale_a(M, K/ScaleBlockSize) and scale_b(K/ScaleBlockSize, N)
+        // We need to create scale_b in (K/ScaleBlockSize, N) format for the reference
+        ck_tile::HostTensor<BScaleDataType> scale_b_ref(
+            {static_cast<std::size_t>(scale_k_size), static_cast<std::size_t>(N)},
+            {static_cast<std::size_t>(1), static_cast<std::size_t>(scale_k_size)});
+        // Copy scale_b data (our scale_b is (N, scale_k_size) row-major,
+        // reference expects (scale_k_size, N) col-major, which is the same memory layout)
+        std::copy(scale_b_host.mData.begin(), scale_b_host.mData.end(), scale_b_ref.mData.begin());
+
+        ck_tile::reference_mx_gemm<ADataType,
+                                   BDataType,
+                                   AScaleDataType,
+                                   BScaleDataType,
+                                   AccDataType,
+                                   CDataType>(
+            a_host, b_host, c_m_n_host_ref, scale_a_host, scale_b_ref);
 
         const float max_accumulated_value =
             *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
@@ -322,6 +271,8 @@ int run_mx_gemm_example(int argc, char* argv[])
             {
                 return run_mx_gemm_with_layouts<ck_tile::pk_fp4_t,
                                                 ck_tile::pk_fp4_t,
+                                                typename GemmConfig::AScaleDataType,
+                                                typename GemmConfig::BScaleDataType,
                                                 float,
                                                 MXfp4_GemmConfig16_Preshuffle,
                                                 true>(argc, argv, Row{}, Col{}, Row{});
@@ -330,6 +281,8 @@ int run_mx_gemm_example(int argc, char* argv[])
             {
                 return run_mx_gemm_with_layouts<ck_tile::pk_fp4_t,
                                                 ck_tile::pk_fp4_t,
+                                                typename GemmConfig::AScaleDataType,
+                                                typename GemmConfig::BScaleDataType,
                                                 float,
                                                 GemmConfig,
                                                 true>(argc, argv, Row{}, Col{}, Row{});
@@ -341,6 +294,8 @@ int run_mx_gemm_example(int argc, char* argv[])
             {
                 return run_mx_gemm_with_layouts<ck_tile::fp8_t,
                                                 ck_tile::fp8_t,
+                                                typename GemmConfig::AScaleDataType,
+                                                typename GemmConfig::BScaleDataType,
                                                 float,
                                                 MXfp8_GemmConfig16_Preshuffle,
                                                 true>(argc, argv, Row{}, Col{}, Row{});
@@ -349,6 +304,8 @@ int run_mx_gemm_example(int argc, char* argv[])
             {
                 return run_mx_gemm_with_layouts<ck_tile::fp8_t,
                                                 ck_tile::fp8_t,
+                                                typename GemmConfig::AScaleDataType,
+                                                typename GemmConfig::BScaleDataType,
                                                 float,
                                                 GemmConfig,
                                                 true>(argc, argv, Row{}, Col{}, Row{});

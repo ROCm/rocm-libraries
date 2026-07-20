@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginHelpers.hpp>
@@ -36,6 +37,13 @@ public:
 
 struct HipdnnEnginePluginExecutionContext
 {
+    // Engine ID captured at execution-context creation. Lets a plugin make
+    // per-engine execution decisions (e.g. an engine that fails on purpose).
+    int64_t engineId = 0;
+
+    // True if global.benchmarking=1 was set in the engine config knob settings.
+    // Used by autotune test plugins to simulate priming-only failures.
+    bool hasBenchmarkingKnobEnabled = false;
 };
 
 inline const char* apiVersionWithoutTweak()
@@ -243,6 +251,20 @@ public:
         }
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         return reinterpret_cast<Fn>(test_plugin_internal::lookupPluginSymbol(_handle, symbolName));
+    }
+
+    /// Like `lookup()`, but throws `std::runtime_error` when the symbol is
+    /// missing instead of returning nullptr. Use for mandatory recorder
+    /// symbols whose absence is a test-setup error.
+    template <typename Fn>
+    Fn requireSymbol(const char* symbolName) const
+    {
+        Fn fn = lookup<Fn>(symbolName);
+        if(fn == nullptr)
+        {
+            throw std::runtime_error("Failed to get symbol: " + std::string(symbolName));
+        }
+        return fn;
     }
 
     const std::string& pluginPath() const
@@ -660,8 +682,12 @@ public:
             }
 
             flatbuffers::FlatBufferBuilder builder;
-            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
-                builder, getInstance()->getEngineId());
+            // This plugin serializes execution plans, so it advertises the note
+            // the frontend checks before serializing a plan alongside the graph.
+            const std::vector<int32_t> behaviorNotes{
+                static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+                builder, getInstance()->getEngineId(), nullptr, &behaviorNotes);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
@@ -793,6 +819,7 @@ public:
                 engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
             auto context = std::make_unique<HipdnnEnginePluginExecutionContext>();
+            context->engineId = engineConfigWrapper.engineId();
             *executionContext = context.release();
 
             LOG_API_SUCCESS(apiName,
