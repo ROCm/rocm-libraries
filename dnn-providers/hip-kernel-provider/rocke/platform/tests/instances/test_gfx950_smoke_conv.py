@@ -22,11 +22,12 @@ import sys
 import unittest
 from pathlib import Path
 
-from rocke.assets import platform_root
+import importlib.resources
+
 from rocke.runtime.hip_module import get_device_arch, get_device_name
 
 _DEFAULT_BASELINE = (
-    platform_root() / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
+    importlib.resources.files("rocke.golden") / "rocke_gfx950_smoke_perf.json"
 )
 
 GPU_ARCH = get_device_arch(0)
@@ -45,9 +46,9 @@ _SKIP_REASON = (
 class TestGfx950ConvSmoke(unittest.TestCase):
     maxDiff = 4000
     baseline = json.loads(
-        Path(
-            os.environ.get("ROCKE_GFX950_PERF_BASELINE", _DEFAULT_BASELINE)
-        ).read_text()
+        Path(os.environ["ROCKE_GFX950_PERF_BASELINE"]).read_text()
+        if "ROCKE_GFX950_PERF_BASELINE" in os.environ
+        else _DEFAULT_BASELINE.read_text()
     )
 
     def _run_benchmark(self, dtype: str, timeout: int = 600) -> str:
