@@ -6,7 +6,7 @@ if sys.version_info < (3, 10):
 import json
 import os
 import re
-from miopen_gtest_runner import calc_union_filter
+from miopen_gtest_runner import calc_union_filter, abort_missing_shards
 
 
 def fixture_filter_to_regex(filter):
@@ -24,6 +24,12 @@ def analyze_sharded_gtest(input_file):
     shard_log_files = config.get("gtest_shards", [])
     if not shard_log_files:
         print(f"Warning: No shard logs found in {input_file} (json key=gtest_shards)")
+
+    # Every shard must have produced output. If any are missing (e.g. a crashed shard),
+    # report exactly which ones and abort -- no partial analysis.
+    absent = [s for s in shard_log_files if not os.path.exists(s)]
+    if absent:
+        abort_missing_shards(absent, len(shard_log_files))
 
     def parse_gtest_filter(filt):
         positives = set()
@@ -65,10 +71,7 @@ def analyze_sharded_gtest(input_file):
     other_fixtures = {}
 
     for log_file in shard_log_files:
-        if not os.path.exists(log_file):
-            print(f"Warning: Shard json file {log_file} not found. Skipping.")
-            continue
-
+        # Presence already guaranteed by the up-front check above (missing shards abort).
         print(f"Parsing log file {log_file}..")
         with open(log_file, "r") as f:
             data = json.load(f)

@@ -74,12 +74,48 @@ def patterns_overlap(dapper_pattern, category_pattern):
     ) or fnmatch.fnmatch(_fixed_prefix(category_pattern), dapper_pattern)
 
 
+def abort_missing_shards(missing, total):
+    """Report every shard that produced no output and abort with a non-zero exit.
+
+    A shard with neither its .xml nor .json means the gtest process exited before
+    writing results (typically a crash). Dapper does NOT continue with a partial set
+    of shards -- a partial analysis is misleading -- so it lists exactly which shards
+    failed and fails the whole run.
+    """
+    bar = "=" * 72
+    print(bar, file=sys.stderr)
+    print(
+        f"DAPPER FATAL: {len(missing)} of {total} gtest shard(s) produced no output "
+        "(the shard's gtest process exited before writing its XML, e.g. it crashed).",
+        file=sys.stderr,
+    )
+    print("Failed shard(s):", file=sys.stderr)
+    for shard in missing:
+        p = Path(shard)
+        print(
+            f"  - {p.stem}: no {p.with_suffix('.json').name} or {p.name} in {p.parent}",
+            file=sys.stderr,
+        )
+    print(
+        "Aborting: dapper will not produce a partial analysis from an incomplete "
+        "set of shards.",
+        file=sys.stderr,
+    )
+    print(bar, file=sys.stderr)
+    sys.exit(1)
+
+
 def _convert_xml_shards(json_data):
-    """Convert XML shard paths to JSON, preferring an existing .json over the .xml source."""
+    """Convert XML shard paths to JSON, preferring an existing .json over the .xml source.
+
+    If any shard has neither output, ALL missing shards are reported and the run is
+    aborted (see abort_missing_shards) -- no partial analysis.
+    """
     from selective_test_filter import _xml_to_gtest_json
 
     shards = json_data.get("gtest_shards", [])
     converted = []
+    missing = []
     changed = False
     for shard in shards:
         p = Path(shard)
@@ -97,16 +133,12 @@ def _convert_xml_shards(json_data):
                 converted.append(str(json_path))
                 changed = True
             else:
-                print(
-                    f"Error: shard '{p.stem}' is missing both its .json and .xml outputs."
-                )
-                print(
-                    "Either run the tests to generate shard outputs, or copy valid shard"
-                )
-                print(f"files ({json_path.name} or {p.name}) into: {p.parent}")
-                sys.exit(1)
+                missing.append(shard)
+                converted.append(shard)
         else:
             converted.append(shard)
+    if missing:
+        abort_missing_shards(missing, len(shards))
     if changed:
         json_data["gtest_shards"] = converted
 
