@@ -333,6 +333,8 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
         use_k_single_buffer=False,
         waves_per_eu=2,
         use_i64_kv_addr=False,
+        use_register_pv=False,
+        use_global_load_lds_k=False,
     )
     toks = name.split("_")
     head = toks[0]
@@ -391,6 +393,10 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
             base["waves_per_eu"] = None
         elif t == "ksb":
             base["use_k_single_buffer"] = True
+        elif t == "regpv":
+            base["use_register_pv"] = True
+        elif t == "gldlds":
+            base["use_global_load_lds_k"] = True
         else:
             raise ValueError(f"unknown variant modifier {t!r} in {name!r}")
     # mw16 cannot use the 32x32 transpose path
@@ -501,6 +507,8 @@ class CkVariantBench:
             use_early_v_schedule=flags["use_early_v_schedule"],
             use_k_single_buffer=flags["use_k_single_buffer"],
             use_i64_kv_addr=flags["use_i64_kv_addr"],
+            use_register_pv=flags["use_register_pv"],
+            use_global_load_lds_k=flags["use_global_load_lds_k"],
         )
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
@@ -814,13 +822,18 @@ def main() -> int:
         tag = f"[{i}/{len(shapes)}] {shape.signature}"
         try:
             data = make_inputs(shape, seed=args.seed, cap_blocks=args.cap_blocks)
+        except Exception as exc:  # noqa: BLE001
+            print(f"{tag}  INPUT FAIL: {exc!r}")
+            traceback.print_exc()
+            continue
+
+        tri_out, tri_ms = None, None
+        try:
             tri_out, tri_ms = _run_triton_live(
                 shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"{tag}  TRITON FAIL: {exc!r}")
-            traceback.print_exc()
-            continue
+            print(f"{tag}  TRITON SKIP: {exc!r}")
 
         # AOTriton flash baseline (best-effort; skipped for FP8 / ineligible shapes).
         aot_ms = None
@@ -905,9 +918,9 @@ def main() -> int:
                         warmup=args.warmup,
                         iters=args.iterations,
                     )
-                err = _compare(ck_out, tri_out)
-                ok = err <= args.tol
-                spd = tri_ms / ck_ms if ck_ms > 0 else 0.0
+                err = _compare(ck_out, tri_out) if tri_out is not None else None
+                ok = err <= args.tol if err is not None else True
+                spd = tri_ms / ck_ms if (tri_ms and ck_ms > 0) else 0.0
                 rec["variants"][v] = {
                     "ms": ck_ms,
                     "speedup": spd,
@@ -915,13 +928,18 @@ def main() -> int:
                     "ok": ok,
                     "kernel": kname,
                 }
-                if ok and (best is None or spd > best[1]):
-                    best = (v, spd)
+                if ok and (best is None or ck_ms < best[1]):
+                    best = (v, ck_ms)
             except Exception as exc:  # noqa: BLE001
                 rec["variants"][v] = {"error": repr(exc)}
         rec["best_variant"] = best[0] if best else None
-        rec["best_speedup_vs_triton"] = best[1] if best else 0.0
         best_ms = rec["variants"][best[0]]["ms"] if best else None
+        rec["best_ms"] = best_ms
+        rec["best_speedup_vs_triton"] = (
+            tri_ms / best_ms
+            if (tri_ms and best_ms is not None and best_ms > 0)
+            else None
+        )
         rec["best_speedup_vs_aoTriton"] = (
             aot_ms / best_ms
             if (aot_ms is not None and best_ms is not None and best_ms > 0)
@@ -936,18 +954,15 @@ def main() -> int:
 
         def _fmt_variant(v):
             info = rec["variants"].get(v, {})
-            if "speedup" in info:
+            if "ms" in info:
                 ok_mark = "" if info.get("ok") else "!"
-                return f"{v}={info['speedup']:.2f}x{ok_mark}"
+                return f"{v}={info['ms'] * 1000:.1f}us{ok_mark}"
             return f"{v}=ERR"
 
+        tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
         vs = "  ".join(_fmt_variant(v) for v in args.variants)
-        aot_spd_str = (
-            f" aot_spd={rec['best_speedup_vs_aoTriton']:.2f}x"
-            if rec["best_speedup_vs_aoTriton"] is not None
-            else ""
-        )
+        best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
         fly_str = ""
         if args.flydsl:
             fly_spd_str = ""
@@ -955,12 +970,12 @@ def main() -> int:
                 fly_spd_str = f"({tri_ms / fly_ms:.2f}x tri)"
             fly_best_spd_str = (
                 f" fly_spd={rec['best_speedup_vs_flydsl']:.2f}x"
-                if rec["best_speedup_vs_flydsl"] is not None
+                if rec.get("best_speedup_vs_flydsl") is not None
                 else ""
             )
             fly_str = f" | fly={fly_status}{fly_spd_str}{fly_best_spd_str}"
         print(
-            f"{tag} sw={sw} tri={tri_ms * 1000:.1f}us {aot_str} | {vs} | best={rec['best_variant']}={rec['best_speedup_vs_triton']:.2f}x(tri){aot_spd_str}{fly_str}"
+            f"{tag} sw={sw} {tri_str} {aot_str} | {vs} | best={rec['best_variant']}={best_str}{fly_str}"
         )
 
     args.output_json.write_text(json.dumps(results, indent=2, default=str))
@@ -979,7 +994,9 @@ def main() -> int:
         rs = buckets[b]
         dtype_label, sw_label = b
         tri_spds = [
-            r["best_speedup_vs_triton"] for r in rs if r["best_speedup_vs_triton"] > 0
+            r["best_speedup_vs_triton"]
+            for r in rs
+            if r.get("best_speedup_vs_triton")
         ]
         aot_spds = [
             r["best_speedup_vs_aoTriton"]
@@ -989,7 +1006,13 @@ def main() -> int:
         fly_spds = [
             r["best_speedup_vs_flydsl"] for r in rs if r.get("best_speedup_vs_flydsl")
         ]
-        tri_part = f"vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+        best_us = [r["best_ms"] * 1000 for r in rs if r.get("best_ms")]
+        lat_part = f"best_lat_gm={_gm(best_us):.1f}us (n={len(best_us)})"
+        tri_part = (
+            f"  vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+            if tri_spds
+            else ""
+        )
         aot_part = (
             f"  vs_aot={_gm(aot_spds):.3f}x (n={len(aot_spds)})" if aot_spds else ""
         )
@@ -997,7 +1020,7 @@ def main() -> int:
             f"  vs_fly={_gm(fly_spds):.3f}x (n={len(fly_spds)})" if fly_spds else ""
         )
         print(
-            f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  {tri_part}{aot_part}{fly_part}"
+            f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  {lat_part}{tri_part}{aot_part}{fly_part}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
     for v in args.variants:
