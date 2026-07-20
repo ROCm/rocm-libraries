@@ -76,7 +76,8 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFa
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-        return {__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(aVec, bVec, cVec)};
+        return {__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
+            bit_cast<int16x8_t>(aVec), bit_cast<int16x8_t>(bVec), cVec)};
     }
 };
 
@@ -128,7 +129,8 @@ struct amdgcn_mma<bf16_t, bf16_t, bf16_t, 16u, 16u, 16u, CompilerTarget, MmaOpFa
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-        return {__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32_gfx12(aVec, bVec, cVec)};
+        return bit_cast<CVecType>(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32_gfx12(
+            bit_cast<int16x8_t>(aVec), bit_cast<int16x8_t>(bVec), bit_cast<int16x8_t>(cVec)));
     }
 };
 
@@ -337,6 +339,7 @@ struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 32u, CompilerTarget, 
 };
 
 // GFX1250
+#if defined(__gfx125__)
 
 /**
  * @struct amdgcn_mma
@@ -1080,5 +1083,7 @@ struct amdgcn_mma<fp16_t, fp16_t, fp16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
                                                        0)}; // matrix_b_reuse
     }
 };
+
+#endif // __gfx125__
 
 } // namespace ck_tile::core::arch::mma
