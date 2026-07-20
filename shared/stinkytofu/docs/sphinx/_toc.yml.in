@@ -40,8 +40,6 @@ subtrees:
     title: Adding intrinsics
   - file: developer/pattern-grammar.md
     title: Pattern grammar reference
-  - file: developer/cluster-barrier.md
-    title: Insert cluster barrier pass
   - file: developer/wmma-vgpr-reorder-pass.md
     title: WMMA VGPR reorder pass
 
