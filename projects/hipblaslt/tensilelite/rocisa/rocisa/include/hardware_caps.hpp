@@ -269,6 +269,9 @@ inline std::map<std::string, int>
     rv["v_pk_mul_f32"] = tryAssembler(
         isaVersion, assemblerPath, "v_pk_mul_f32 v[20:21], v[18:19], v[20:21]", isDebug);
 
+    rv["v_pk_fma_f32"] = tryAssembler(
+        isaVersion, assemblerPath, "v_pk_fma_f32 v[0:1], v[2:3], v[4:5], v[6:7]", isDebug);
+
     rv["v_mad_mix_f32"]
         = tryAssembler(isaVersion,
                        assemblerPath,

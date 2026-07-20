@@ -8309,7 +8309,9 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.useGateResidual:
       self.defineSgpr("SrdGate", 4, 4)
       module.add(RegSet("s", "sgprSrdGate", self.sgprs["SrdGate"]))
-      self.defineSgpr("GateNullOne", 1)
+      # 2 sgprs, 2-aligned: packed gate FMA reads sgpr("GateNullOne",2) and broadcasts
+      # the low element to both lanes via op_sel_hi (only +0 is written by the cselect).
+      self.defineSgpr("GateNullOne", 2, 2)
       module.add(RegSet("s", "sgprGateNullOne", self.sgprs["GateNullOne"]))
 
     if kernel["ProblemType"]["UseE"]:
