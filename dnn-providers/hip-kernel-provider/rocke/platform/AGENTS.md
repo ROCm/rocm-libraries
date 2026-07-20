@@ -186,6 +186,8 @@ GPU node.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
+  *Note*: For non-`gfx950` targets, pass `target_architecture` and beware that some code
+  paths still silently fall back to `gfx950` on non-GPU systems.
 - **torch is optional, never import it from a library to gain a side effect.**
   numpy is the only hard dep. torch is needed only for the fusion frontend,
   torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind

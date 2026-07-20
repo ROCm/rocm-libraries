@@ -328,7 +328,7 @@ target_include_directories( rocfft-test
   )
 
 if( NOT BUILD_SHARED_LIBS )
-  list(APPEND rocfft-test_link_libs ${ROCFFT_CLIENTS_HOST_LINK_LIBS} ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS})
+  list(APPEND rocfft-test_link_libs hip::host hip::device)
 endif()
 
 if( NOT ROCFFT_BUILD_SCOPE )
@@ -375,17 +375,9 @@ endif()
 include( ../../cmake/std-filesystem.cmake )
 target_link_std_experimental_filesystem( rocfft-test )
 
-if( USE_CUDA )
-  target_include_directories( rocfft-test
-    PRIVATE
-    $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-    )
-  target_compile_definitions( rocfft-test PRIVATE __HIP_PLATFORM_NVCC__ )
-endif( )
 target_link_libraries( rocfft-test PRIVATE
-   ${ROCFFT_CLIENTS_HOST_LINK_LIBS}
-   ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS} )
+   hip::host
+   hip::device )
 
 include( ../../cmake/sqlite.cmake )
 target_link_libraries( rocfft-test PUBLIC ${ROCFFT_SQLITE_LIB} )
