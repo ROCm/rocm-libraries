@@ -237,16 +237,30 @@ def resolve_ref(
     return resolution
 
 
+def _is_merge_base_mode(resolution: Resolution) -> bool:
+    """True when the ref was pinned from a PR merge-base (vs. override/live-tip)."""
+    return resolution.merge_base is not None
+
+
 def _check_staleness(resolution: Resolution, now: datetime) -> None:
     commit = resolution.therock_commit
     if commit is None:
         return
     age_days = (now - commit.committed_at).total_seconds() / 86400
     if age_days > resolution.staleness_days:
+        if _is_merge_base_mode(resolution):
+            hint = (
+                "consider syncing your base branch (merge or rebase) to pick up "
+                "a newer TheRock."
+            )
+        else:
+            hint = (
+                "consider building against a newer TheRock (for example via the "
+                "`therock_ref_override` input)."
+            )
         resolution.warnings.append(
             f"This TheRock commit is {int(age_days)} days old "
-            f"(threshold {resolution.staleness_days} days); consider syncing "
-            "your base branch to pick up a newer TheRock."
+            f"(threshold {resolution.staleness_days} days); {hint}"
         )
 
 
@@ -259,13 +273,28 @@ def build_summary(resolution: Resolution, now: Optional[datetime] = None) -> str
     lines: list[str] = []
     lines.append("### TheRock version locked for this run")
     lines.append("")
-    lines.append(
-        "This PR is built against a fixed TheRock commit chosen from the point "
-        "where your branch last synced with its base branch (the merge-base). "
-        "It stays frozen while you push new commits, and only moves when you "
-        "merge or rebase the base branch back into your branch. This keeps the "
-        "ROCm build underneath you stable while you author and debug."
-    )
+    if _is_merge_base_mode(resolution):
+        intro = (
+            "This PR is built against a fixed TheRock commit chosen from the "
+            "point where your branch last synced with its base branch (the "
+            "merge-base). It stays frozen while you push new commits, and only "
+            "moves when you merge or rebase the base branch back into your "
+            "branch. This keeps the ROCm build underneath you stable while you "
+            "author and debug."
+        )
+    elif resolution.mode == MODE_OVERRIDE:
+        intro = (
+            "This run is built against an explicitly pinned TheRock ref supplied "
+            "via the `therock_ref_override` input."
+        )
+    else:
+        intro = (
+            "This run is built against the live tip of "
+            f"{repo}@{DEFAULT_THEROCK_BRANCH}. Merge-base pinning only applies to "
+            "`pull_request` events; other events (push, workflow_dispatch, "
+            "schedule) use the current tip."
+        )
+    lines.append(intro)
     lines.append("")
 
     if commit is not None:
@@ -312,11 +341,18 @@ def build_summary(resolution: Resolution, now: Optional[datetime] = None) -> str
             "run used the live tip instead."
         )
     lines.append("")
-    lines.append(
-        "**How to change this:** merge or rebase your base branch into this PR "
-        "to advance the TheRock version, or set the `therock_ref_override` input "
-        "on a manual run to pin an explicit ref."
-    )
+    if _is_merge_base_mode(resolution):
+        how_to_change = (
+            "**How to change this:** merge or rebase your base branch into this "
+            "PR to advance the TheRock version, or set the `therock_ref_override` "
+            "input on a manual run to pin an explicit ref."
+        )
+    else:
+        how_to_change = (
+            "**How to change this:** set the `therock_ref_override` input on a "
+            "manual run to pin an explicit ref."
+        )
+    lines.append(how_to_change)
 
     for warning in resolution.warnings:
         lines.append("")

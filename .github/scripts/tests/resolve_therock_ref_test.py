@@ -203,6 +203,63 @@ class BuildSummaryTest(unittest.TestCase):
         self.assertIn("How to change this", summary)
         self.assertIn(("b" * 40)[:12], summary)
 
+    def test_summary_live_tip_is_not_pr_worded(self):
+        tip = Commit(sha="d" * 40, committed_at=dt(0.5))
+        client = FakeClient(live_tip=tip)
+        resolution = rtr.resolve_ref(
+            client,
+            event_name="push",
+            source_repo="ROCm/rocm-libraries",
+            base_sha="",
+            head_sha="",
+            override="",
+            now=NOW,
+        )
+
+        summary = rtr.build_summary(resolution, now=NOW)
+        self.assertIn("live tip", summary)
+        self.assertNotIn("This PR is built against", summary)
+        self.assertNotIn("stays frozen", summary)
+        # No "merge or rebase your base branch" guidance in non-PR modes.
+        self.assertNotIn("merge or rebase your base branch", summary)
+
+    def test_summary_override_is_not_pr_worded(self):
+        override_commit = Commit(sha="c" * 40, committed_at=dt(0.5))
+        client = FakeClient(named_commit=override_commit)
+        resolution = rtr.resolve_ref(
+            client,
+            event_name="pull_request",
+            source_repo="ROCm/rocm-libraries",
+            base_sha="base",
+            head_sha="head",
+            override="v1.2.3",
+            now=NOW,
+        )
+
+        summary = rtr.build_summary(resolution, now=NOW)
+        self.assertIn("explicitly pinned", summary)
+        self.assertNotIn("This PR is built against", summary)
+        self.assertNotIn("merge or rebase your base branch", summary)
+
+    def test_staleness_hint_is_mode_agnostic_for_live_tip(self):
+        tip = Commit(sha="d" * 40, committed_at=dt(30))
+        client = FakeClient(live_tip=tip)
+        resolution = rtr.resolve_ref(
+            client,
+            event_name="push",
+            source_repo="ROCm/rocm-libraries",
+            base_sha="",
+            head_sha="",
+            override="",
+            staleness_days=14,
+            now=NOW,
+        )
+
+        warning = " ".join(resolution.warnings)
+        self.assertIn("days old", warning)
+        self.assertNotIn("your base branch", warning)
+        self.assertIn("therock_ref_override", warning)
+
     def test_summary_surfaces_warning(self):
         merge_base = Commit(sha="a" * 40, committed_at=dt(30))
         chosen = Commit(sha="b" * 40, committed_at=dt(30))
