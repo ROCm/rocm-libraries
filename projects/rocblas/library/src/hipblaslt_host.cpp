@@ -103,17 +103,18 @@ namespace
         }
     }
 
-#define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                         \
-    do                                                                                          \
-    {                                                                                           \
-        if(SOL_COUNT == 0)                                                                      \
-        {                                                                                       \
-            rocblas_internal_ostream msg;                                                       \
-            print_if_verbose(msg << "rocBLAS warning: No solution found in hipblaslt. Falling " \
-                                    "back to Tensile backend.\n");                              \
-            throw rocblas_status_not_implemented;                                               \
-        }                                                                                       \
+#define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                 \
+    do                                                                                  \
+    {                                                                                   \
+        if(SOL_COUNT == 0)                                                              \
+        {                                                                               \
+            rocblas_internal_ostream msg;                                               \
+            print_if_verbose(msg << "rocBLAS warning: No solution found in hipBLASLt. " \
+                                    "Fallback to other GEMM backend.\n");               \
+            throw rocblas_status_not_implemented;                                       \
+        }                                                                               \
     } while(0)
+
 #define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                       \
     do                                                                                          \
     {                                                                                           \
@@ -465,7 +466,7 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
+                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found.");
                     return rocblas_status_invalid_value;
                 }
                 else
@@ -482,7 +483,7 @@ namespace
                 {
                     rocblas_internal_ostream msg;
                     print_if_verbose(msg
-                                     << "rocBLAS error: hipBLASLt default heuristic fetch failed!");
+                                     << "rocBLAS error: hipBLASLt default heuristic fetch failed.");
                     return rocblas_status_internal_error;
                 }
                 else
@@ -494,7 +495,8 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt default solution found");
+                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt default solution found. "
+                                            "Falling back to other GEMM backend.");
                     return rocblas_status_not_implemented;
                 }
                 else
