@@ -41,6 +41,7 @@
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
@@ -200,6 +201,14 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     if (moduleOptions.EnableSwPrefetchInsertion) {
         pm.addPass(createSwPrefetchInsertionPass(module));
     }
+
+    // gfx1250 hardware-entrypoint prologue: `global_wb SCOPE:SCOPE_CU` + `v_nop`.
+    // global_wb makes the first VMEM instruction non-clause-bound (it is a VMEM
+    // op that ignores EXEC); v_nop is a safe first VALU instruction. Runs after
+    // flatten + prefetch insertion so nothing is reordered ahead of the prologue,
+    // and before size accounting so the two instructions are counted.
+    pm.addPass(createInsertInitialUnclausedVmemPass());
+
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));
