@@ -226,7 +226,7 @@ TEST(TestVerificationRouting, BatchNormSweepSampleIsDiscoverable)
           });
 
     ASSERT_NE(it, bundles.end());
-    EXPECT_EQ(it->suiteName, "quick_BatchnormFwdInference_Inference");
+    EXPECT_EQ(it->suiteName, "Smoke_BatchnormFwdInference_Inference");
     EXPECT_EQ(it->testName, "small_fp32_nchw");
 }
 
@@ -246,7 +246,7 @@ TEST(TestVerificationRouting, MigratedBatchNormSmokeSweepCaseIsDiscoverable)
           });
 
     ASSERT_NE(it, bundles.end());
-    EXPECT_EQ(it->suiteName, "quick_BatchnormFwdInference_Inference");
+    EXPECT_EQ(it->suiteName, "Smoke_BatchnormFwdInference_Inference");
     EXPECT_EQ(it->testName, "nchw_fp32_n1_c3_h14_w14");
 }
 
