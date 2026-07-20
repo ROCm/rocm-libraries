@@ -301,6 +301,78 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
 ATTENTION_REGISTRY.register(_make_gfx942_dense_pipe_candidate())
 
 
+def _make_d256_decode_candidate() -> KernelCandidate:
+    """D256 bf16 decode candidate for gfx950 and gfx942 — 3D split-KV path.
+
+    Registered at priority 5 so it outranks the generic unified_3d candidate
+    (priority 10) for eligible D256 bf16 decode shapes. Callers can also force
+    this path explicitly via algorithm="d256_decode".
+    """
+    from kernels.common.attention_unified import _d256_decode_cohort
+
+    spec_id = "d256_decode"
+    name = "attention_d256_decode"
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, AttentionRequest)
+        if req.arch not in ("gfx942", "gfx950"):
+            return False, f"d256_decode requires gfx942 or gfx950 (got {req.arch!r})"
+        if req.dtype != "bf16":
+            return False, f"d256_decode is bf16-only (got {req.dtype!r})"
+        ok, why = _selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        problem = _problem(req)
+        ok, why = supports_native_unified_attention(problem)
+        if not ok:
+            return False, why
+        if not _d256_decode_cohort(problem):
+            return False, "problem is not in the D256 bf16 decode cohort"
+        if problem.select_path() != "3d":
+            return False, (
+                f"problem routes to {problem.select_path()!r} path, not '3d'"
+            )
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> AttentionSpec:
+        ok, why = support(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, AttentionRequest)
+        problem = _problem(req)
+        return AttentionSpec(
+            path="3d",
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            dtype=problem.dtype,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            name="rocke_attention_d256_decode",
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="d256_decode",
+        spec_id=spec_id,
+        abi_version=ATTENTION_ABI_VERSION,
+        priority=5,
+        supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=lambda spec, req: (0, 0, 0),
+        block=lambda spec: (0, 0, 0),
+        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+    )
+    return candidate
+
+
+ATTENTION_REGISTRY.register(_make_d256_decode_candidate())
+
+
 def attention_candidates() -> Tuple[KernelCandidate, ...]:
     return ATTENTION_REGISTRY.candidates()
 
