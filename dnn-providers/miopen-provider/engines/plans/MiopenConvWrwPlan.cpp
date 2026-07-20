@@ -74,12 +74,12 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
-                                                         _params.dy().tensorDescriptor(),
-                                                         _params.x().tensorDescriptor(),
-                                                         _params.conv().convDescriptor(),
-                                                         _params.dw().tensorDescriptor(),
-                                                         &solutionCount));
+        miopenConvolutionBackwardWeightsGetSolutionCount_impl(handle.miopenHandle,
+                                                              _params.dy().tensorDescriptor(),
+                                                              _params.x().tensorDescriptor(),
+                                                              _params.conv().convDescriptor(),
+                                                              _params.dw().tensorDescriptor(),
+                                                              &solutionCount));
 
     if(solutionCount == 0)
     {
@@ -104,12 +104,12 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
     else
     {
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
-                                                             _params.dy().tensorDescriptor(),
-                                                             _params.x().tensorDescriptor(),
-                                                             _params.conv().convDescriptor(),
-                                                             _params.dw().tensorDescriptor(),
-                                                             &_workspaceSize));
+            miopenConvolutionBackwardWeightsGetWorkSpaceSize_impl(handle.miopenHandle,
+                                                                  _params.dy().tensorDescriptor(),
+                                                                  _params.x().tensorDescriptor(),
+                                                                  _params.conv().convDescriptor(),
+                                                                  _params.dw().tensorDescriptor(),
+                                                                  &_workspaceSize));
         HIPDNN_PLUGIN_LOG_WARN("Convolution Wrw: Using queried workspace size: " << _workspaceSize);
     }
 }
@@ -163,20 +163,20 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
             int returnedAlgoCount;
 
             THROW_ON_MIOPEN_FAILURE(
-                miopenFindConvolutionBackwardWeightsAlgorithm(handle.miopenHandle,
-                                                              _params.dy().tensorDescriptor(),
-                                                              yBuffer.ptr,
-                                                              _params.x().tensorDescriptor(),
-                                                              xBuffer.ptr,
-                                                              _params.conv().convDescriptor(),
-                                                              _params.dw().tensorDescriptor(),
-                                                              wBuffer.ptr,
-                                                              requestCount,
-                                                              &returnedAlgoCount,
-                                                              perfResults.data(),
-                                                              workspace,
-                                                              workspaceSize,
-                                                              false));
+                miopenFindConvolutionBackwardWeightsAlgorithm_impl(handle.miopenHandle,
+                                                                   _params.dy().tensorDescriptor(),
+                                                                   yBuffer.ptr,
+                                                                   _params.x().tensorDescriptor(),
+                                                                   xBuffer.ptr,
+                                                                   _params.conv().convDescriptor(),
+                                                                   _params.dw().tensorDescriptor(),
+                                                                   wBuffer.ptr,
+                                                                   requestCount,
+                                                                   &returnedAlgoCount,
+                                                                   perfResults.data(),
+                                                                   workspace,
+                                                                   workspaceSize,
+                                                                   false));
 
             if(returnedAlgoCount <= 0)
             {
@@ -214,19 +214,19 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
     float alpha = 1.0f;
     float beta = 0.0f;
 
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardWeights(handle.miopenHandle,
-                                                             &alpha,
-                                                             _params.dy().tensorDescriptor(),
-                                                             yBuffer.ptr,
-                                                             _params.x().tensorDescriptor(),
-                                                             xBuffer.ptr,
-                                                             _params.conv().convDescriptor(),
-                                                             _algorithm.value(),
-                                                             &beta,
-                                                             _params.dw().tensorDescriptor(),
-                                                             wBuffer.ptr,
-                                                             workspace,
-                                                             workspaceSize));
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardWeights_impl(handle.miopenHandle,
+                                                                  &alpha,
+                                                                  _params.dy().tensorDescriptor(),
+                                                                  yBuffer.ptr,
+                                                                  _params.x().tensorDescriptor(),
+                                                                  xBuffer.ptr,
+                                                                  _params.conv().convDescriptor(),
+                                                                  _algorithm.value(),
+                                                                  &beta,
+                                                                  _params.dw().tensorDescriptor(),
+                                                                  wBuffer.ptr,
+                                                                  workspace,
+                                                                  workspaceSize));
 }
 
 } // namespace miopen_plugin

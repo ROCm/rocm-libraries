@@ -5,7 +5,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <memory>
-#include <miopen/miopen.h>
+#include <miopen/miopen_impl.h>
 #include <unordered_map>
 
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
@@ -39,7 +39,7 @@ public:
 
     HipdnnMiopenHandle()
     {
-        miopenStatus_t status = miopenCreate(&miopenHandle);
+        miopenStatus_t status = miopenCreate_impl(&miopenHandle);
         if(status != miopenStatusSuccess)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -51,7 +51,7 @@ public:
     {
         if(miopenHandle != nullptr)
         {
-            miopenStatus_t status = miopenDestroy(miopenHandle);
+            miopenStatus_t status = miopenDestroy_impl(miopenHandle);
             if(status != miopenStatusSuccess)
             {
                 HIPDNN_PLUGIN_LOG_ERROR("Failed to destroy MIOpen handle");
@@ -63,7 +63,7 @@ public:
 
     void setStream(hipStream_t stream)
     {
-        THROW_ON_MIOPEN_FAILURE(miopenSetStream(miopenHandle, stream));
+        THROW_ON_MIOPEN_FAILURE(miopenSetStream_impl(miopenHandle, stream));
         _stream = stream;
     }
 

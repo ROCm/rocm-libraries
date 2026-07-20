@@ -18,8 +18,8 @@ MiopenActivationDescriptor::MiopenActivationDescriptor(
     HIPDNN_PREPEND_MESSAGE_ON_THROW(params = mapPointwiseModeToMiopenActivation(pointwiseAttrs),
                                     "MiopenActivationDescriptor: ");
 
-    THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor(&_descriptor));
-    THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(
+    THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor_impl(&_descriptor));
+    THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor_impl(
         _descriptor, params.mode, params.alpha, params.beta, params.gamma));
 }
 
@@ -39,7 +39,7 @@ MiopenActivationDescriptor&
 
     if(_descriptor != nullptr)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyActivationDescriptor(_descriptor));
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyActivationDescriptor_impl(_descriptor));
     }
 
     _descriptor = other._descriptor;
@@ -51,7 +51,7 @@ MiopenActivationDescriptor::~MiopenActivationDescriptor()
 {
     if(_descriptor != nullptr)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyActivationDescriptor(_descriptor));
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyActivationDescriptor_impl(_descriptor));
     }
 }
 

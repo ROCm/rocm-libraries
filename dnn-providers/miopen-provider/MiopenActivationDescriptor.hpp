@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
-#include <miopen/miopen.h>
+#include <miopen/miopen_impl.h>
 
 namespace miopen_plugin
 {

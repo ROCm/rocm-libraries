@@ -28,6 +28,17 @@ cmake_policy(SET CMP0057 NEW)
 
 include(CheckCXXCompilerFlag)
 
+# Drift gate for the parallel _impl-form public header (RFC 0001 §4.6,
+# ALMIOPEN-2160): fail if <miopen/miopen_impl.h> falls out of sync with the public
+# <miopen/miopen.h>. CPU-only, no GPU required, so it always runs under ctest.
+if(NOT WIN32)
+    add_test(
+        NAME check_impl_header_sync
+        COMMAND ${PROJECT_SOURCE_DIR}/script/check_impl_header_sync.sh
+                ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h
+                ${PROJECT_SOURCE_DIR}/src/include/miopen/miopen_impl.h)
+endif()
+
 if(MIOPEN_USE_HIPBLASLT)
   find_package(hipblaslt REQUIRED PATHS /opt/rocm $ENV{HIP_PATH})
 endif()

@@ -14,7 +14,7 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <miopen/miopen.h>
+#include <miopen/miopen_impl.h>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "common/ConvolutionCommon.hpp"
@@ -44,7 +44,7 @@ protected:
     {
         TestMiopenConvPlanBuilder::SetUp();
         // GTEST_SKIP() in the base only unwinds the base SetUp() frame; without this
-        // guard, _handle would still be constructed and miopenCreate() would throw on
+        // guard, _handle would still be constructed and miopenCreate_impl() would throw on
         // no-device, turning the intended skip into a fixture failure.
         if(IsSkipped())
         {

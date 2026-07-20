@@ -168,7 +168,13 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # projects/miopen as a sibling component, the MIOpen target is already in the
 # build graph and find_package would either fail or pull in a stale installed
 # copy.
-if(NOT TARGET MIOpen)
+# The provider links MIOpen's private implementation library directly and calls
+# the renamed _impl entry points (RFC 0001 §4.5). MIOpen_private exports the _impl
+# C API and, via its INTERFACE_INCLUDE_DIRECTORIES, the <miopen/miopen_impl.h>
+# shim header the provider TUs include. Linking the public wrapper here would fail
+# to load: libMIOpen.so exports only the public names, while the provider
+# references the _impl names.
+if(NOT TARGET MIOpen_private)
     find_package(miopen CONFIG REQUIRED)
 endif()
 
@@ -178,7 +184,7 @@ endif()
 # does not mark its include dirs SYSTEM, so we promote them here.
 # Requires CMake 3.25+ (SYSTEM target property); enforced by
 # cmake_minimum_required above.
-set_target_properties(MIOpen PROPERTIES SYSTEM TRUE)
+set_target_properties(MIOpen_private PROPERTIES SYSTEM TRUE)
 
 add_library(
     miopen_plugin_impl OBJECT
@@ -209,7 +215,7 @@ add_library(
 )
 
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin_impl PUBLIC MIOpen_private hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 target_compile_options(miopen_plugin_impl PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
@@ -231,10 +237,10 @@ clang_tidy_check(miopen_plugin_impl)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_include_directories(miopen_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Link to miopen_plugin_impl to inherit its PUBLIC properties
-target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
+target_link_libraries(miopen_plugin_private PUBLIC MIOpen_private hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk miopen_plugin_impl)
 
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
-target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(miopen_plugin PRIVATE MIOpen_private hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 if(NOT WIN32)
     target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")

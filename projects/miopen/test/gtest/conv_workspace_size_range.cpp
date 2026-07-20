@@ -13,39 +13,16 @@
 
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
+// The miopenConvolution*GetWorkSpaceSizeRange entry points are exported from
+// libMIOpen_private.so under _impl names and declared in the private shim header
+// (ALMIOPEN-2246); they are intentionally not in the public miopen.h. This test
+// binary resolves them through its transitive MIOpen_private linkage.
+#include <miopen/miopen_impl.h>
 
 #include "gtest_desc_guard.hpp"
 #include "gtest_handle_guard.hpp"
 
 #include <hip/hip_runtime_api.h>
-
-// These functions are exported from libMIOpen but intentionally not declared
-// in the public miopen.h header. Declare the prototypes locally.
-extern "C" {
-miopenStatus_t miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t,
-                                                             const miopenTensorDescriptor_t,
-                                                             const miopenTensorDescriptor_t,
-                                                             const miopenConvolutionDescriptor_t,
-                                                             const miopenTensorDescriptor_t,
-                                                             size_t*,
-                                                             size_t*);
-miopenStatus_t
-miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t,
-                                                   const miopenTensorDescriptor_t,
-                                                   const miopenTensorDescriptor_t,
-                                                   const miopenConvolutionDescriptor_t,
-                                                   const miopenTensorDescriptor_t,
-                                                   size_t*,
-                                                   size_t*);
-miopenStatus_t
-miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t,
-                                                      const miopenTensorDescriptor_t,
-                                                      const miopenTensorDescriptor_t,
-                                                      const miopenConvolutionDescriptor_t,
-                                                      const miopenTensorDescriptor_t,
-                                                      size_t*,
-                                                      size_t*);
-}
 
 namespace {
 
@@ -119,7 +96,7 @@ protected:
                   miopenStatusSuccess);
 
         size_t minWs = 42, maxWs = 0;
-        ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSizeRange(
+        ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSizeRange_impl(
                       handle_, wDesc, xDesc, convDesc, yDesc, &minWs, &maxWs),
                   miopenStatusSuccess);
 
@@ -159,7 +136,7 @@ protected:
                   miopenStatusSuccess);
 
         size_t minWs = 42, maxWs = 0;
-        ASSERT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSizeRange(
+        ASSERT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl(
                       handle_, dyDesc, wDesc, convDesc, dxDesc, &minWs, &maxWs),
                   miopenStatusSuccess);
 
@@ -199,7 +176,7 @@ protected:
                   miopenStatusSuccess);
 
         size_t minWs = 42, maxWs = 0;
-        ASSERT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(
+        ASSERT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl(
                       handle_, dyDesc, xDesc, convDesc, dwDesc, &minWs, &maxWs),
                   miopenStatusSuccess);
 

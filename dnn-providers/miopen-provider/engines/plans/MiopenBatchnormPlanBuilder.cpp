@@ -4,7 +4,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <miopen/miopen.h>
+#include <miopen/miopen_impl.h>
 #include <string>
 #include <unordered_set>
 

@@ -6,7 +6,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
-#include <miopen/miopen.h>
+#include <miopen/miopen_impl.h>
 
 namespace miopen_plugin
 {

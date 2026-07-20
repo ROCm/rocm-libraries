@@ -141,8 +141,13 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # HIP runtime (hip::device required for compiling CK device code)
     target_link_libraries(${lib_name} PRIVATE hip::device)
 
-    # Link against MIOpen for shared types (ConvSolution, InvokerFactory, etc.)
-    target_link_libraries(${lib_name} PRIVATE MIOpen)
+    # Link against MIOpen_private for shared internal C++ types (ConvSolution,
+    # InvokerFactory, ProblemDescription, etc.). These live only in
+    # libMIOpen_private.so after the public/private split; the public MIOpen
+    # wrapper exports only the public C API (RFC 0001 §4.10 item 1). Unlike the
+    # hipDNN provider these plugins consume internal C++ symbols, not the _impl C
+    # API, so they do NOT include <miopen/miopen_impl.h>.
+    target_link_libraries(${lib_name} PRIVATE MIOpen_private)
 
     # Install alongside MIOpen
     set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")

@@ -68,21 +68,21 @@ miopenTensorDescriptor_t
 
     // Create and configure the descriptor
     miopenTensorDescriptor_t descriptor;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateTensorDescriptor(&descriptor));
+    THROW_ON_MIOPEN_FAILURE(miopenCreateTensorDescriptor_impl(&descriptor));
 
     try
     {
         THROW_ON_MIOPEN_FAILURE(
-            miopenSetTensorDescriptorV2(descriptor,
-                                        miopen_utils::tensorDataTypeToMiopenDataType(dataType),
-                                        static_cast<int>(dims.size()),
-                                        dims.data(),
-                                        strides.data()));
+            miopenSetTensorDescriptorV2_impl(descriptor,
+                                             miopen_utils::tensorDataTypeToMiopenDataType(dataType),
+                                             static_cast<int>(dims.size()),
+                                             dims.data(),
+                                             strides.data()));
         return descriptor;
     }
     catch(...)
     {
-        miopenDestroyTensorDescriptor(descriptor);
+        miopenDestroyTensorDescriptor_impl(descriptor);
         throw;
     }
 }
@@ -124,7 +124,7 @@ MiopenTensor& MiopenTensor::operator=(MiopenTensor&& other) noexcept
     {
         if(_descriptor != nullptr)
         {
-            LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor(_descriptor));
+            LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor_impl(_descriptor));
         }
 
         _uid = other._uid;
@@ -139,7 +139,7 @@ MiopenTensor::~MiopenTensor()
 {
     if(_descriptor != nullptr)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor(_descriptor));
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor_impl(_descriptor));
     }
 }
 

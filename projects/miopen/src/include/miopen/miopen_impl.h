@@ -16,7 +16,13 @@
 // wrapper (libMIOpen.so) to bind against. Every TU that defines an _impl entry
 // point must include this header for that reason.
 //
-// This header is internal to the MIOpen private build and is not installed.
+// This header is installed under a private include subtree
+// (<prefix>/include/miopen_private/miopen/miopen_impl.h) and exposed only via the
+// MIOpen_private CMake target's INTERFACE_INCLUDE_DIRECTORIES, so that direct
+// consumers of the private library (the hipDNN MIOpen provider plugin) can call
+// the _impl C API by including <miopen/miopen_impl.h>. It is deliberately NOT on
+// the public MIOpen wrapper's public include path: consumers that link only the
+// public MIOpen target see <miopen/miopen.h> and the public names alone.
 
 #pragma once
 
@@ -334,6 +340,36 @@ miopenConvolutionForwardGetWorkSpaceSize_impl(miopenHandle_t handle,
                                               miopenConvolutionDescriptor_t convDesc,
                                               miopenTensorDescriptor_t yDesc,
                                               size_t* workSpaceSize);
+// The three miopenConvolution*GetWorkSpaceSizeRange entry points are exported from
+// libMIOpen_private.so but deliberately NOT declared in the public <miopen/miopen.h>
+// (ALMIOPEN-2246). They are declared here in _impl form so that direct private
+// consumers (the hipDNN MIOpen provider) can call them without a local prototype.
+// NOTE: whether these should also be exposed publicly via wrapper pass-throughs is
+// an open follow-up; if so, add matching public stubs in src/private/wrapper.cpp.
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange_impl(miopenHandle_t handle,
+                                                   const miopenTensorDescriptor_t wDesc,
+                                                   const miopenTensorDescriptor_t xDesc,
+                                                   const miopenConvolutionDescriptor_t convDesc,
+                                                   const miopenTensorDescriptor_t yDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize);
+MIOPEN_EXPORT extern "C" miopenStatus_t miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl(
+    miopenHandle_t handle,
+    const miopenTensorDescriptor_t dyDesc,
+    const miopenTensorDescriptor_t wDesc,
+    const miopenConvolutionDescriptor_t convDesc,
+    const miopenTensorDescriptor_t dxDesc,
+    size_t* minWorkspaceSize,
+    size_t* maxWorkspaceSize);
+MIOPEN_EXPORT extern "C" miopenStatus_t miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl(
+    miopenHandle_t handle,
+    const miopenTensorDescriptor_t dyDesc,
+    const miopenTensorDescriptor_t xDesc,
+    const miopenConvolutionDescriptor_t convDesc,
+    const miopenTensorDescriptor_t dwDesc,
+    size_t* minWorkspaceSize,
+    size_t* maxWorkspaceSize);
 MIOPEN_EXPORT extern "C" miopenStatus_t
 miopenFindConvolutionForwardAlgorithm_impl(miopenHandle_t handle,
                                            miopenTensorDescriptor_t xDesc,
