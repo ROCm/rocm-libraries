@@ -13,10 +13,10 @@
 
   <!-- Authoring box -->
   <rect x="20" y="36" width="250" height="140" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
-  <text x="36" y="66" font-family="Consolas, monospace" font-size="12">ukd/*.ukd</text>
-  <text x="36" y="90" font-family="Consolas, monospace" font-size="12">ued/*.ued</text>
-  <text x="36" y="114" font-family="Consolas, monospace" font-size="12">uhd/*.uhd</text>
-  <text x="36" y="138" font-family="Consolas, monospace" font-size="12">kernels/&lt;arch&gt;/...</text>
+  <text x="36" y="64" font-family="Consolas, monospace" font-size="12">kdp/*.kdp   (many UKDs)</text>
+  <text x="36" y="86" font-family="Consolas, monospace" font-size="12">umd/*.umd   udd/*.udd</text>
+  <text x="36" y="108" font-family="Consolas, monospace" font-size="12">ued/*.ued   uhd/*.uhd</text>
+  <text x="36" y="130" font-family="Consolas, monospace" font-size="12">kernels/&lt;arch&gt;/...</text>
 
   <!-- Build-time box -->
   <rect x="335" y="36" width="250" height="140" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
@@ -33,7 +33,7 @@
   <rect x="668" y="76" width="214" height="86" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1"/>
   <text x="775" y="98" text-anchor="middle" font-weight="600" font-size="12">Generic engine</text>
   <text x="682" y="120" font-family="Consolas, monospace" font-size="11">UED → engines</text>
-  <text x="682" y="138" font-family="Consolas, monospace" font-size="11">UKD → plan-builders</text>
+  <text x="682" y="138" font-family="Consolas, monospace" font-size="11">KDP → UKDs → plan-builders</text>
   <text x="682" y="156" font-family="Consolas, monospace" font-size="11">UHD → kernel-selector</text>
 
   <!-- arrows across top row -->
@@ -45,7 +45,7 @@
   <!-- runtime-drop box -->
   <rect x="335" y="210" width="250" height="60" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="460" y="234" text-anchor="middle" font-size="12">runtime-drop folder</text>
-  <text x="460" y="254" text-anchor="middle" font-family="Consolas, monospace" font-size="10">*.ukd + code object (or JIT source)</text>
+  <text x="460" y="254" text-anchor="middle" font-family="Consolas, monospace" font-size="10">*.kdp + code objects (or JIT source)</text>
   <!-- runtime-drop -> runtime provider -->
   <path d="M585 232 L775 232 L775 176" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrow5)"/>
 

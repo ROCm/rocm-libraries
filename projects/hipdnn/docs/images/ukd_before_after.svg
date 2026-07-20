@@ -45,17 +45,24 @@
   <rect x="560" y="20" width="320" height="420" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="720" y="46" text-anchor="middle" font-weight="600">Proposed: drop in data</text>
 
-  <!-- three descriptor file boxes -->
-  <rect x="584" y="70" width="82" height="44" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="625" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UKD</text>
+  <!-- descriptor boxes: KDP (batched UKDs) + reusable descriptors -->
+  <rect x="566" y="70" width="56" height="44" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="594" y="90" text-anchor="middle" font-family="Consolas, monospace" font-size="11">KDP</text>
+  <text x="594" y="106" text-anchor="middle" font-size="9" fill="#8a6d1f">N UKDs</text>
 
-  <rect x="679" y="70" width="82" height="44" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="720" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UED</text>
+  <rect x="630" y="70" width="56" height="44" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
+  <text x="658" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UMD</text>
 
-  <rect x="774" y="70" width="82" height="44" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="815" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UHD</text>
+  <rect x="694" y="70" width="56" height="44" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="722" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UDD</text>
 
-  <text x="720" y="132" text-anchor="middle" font-size="11" fill="#8a6d1f">descriptor files</text>
+  <rect x="758" y="70" width="56" height="44" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="786" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UED</text>
+
+  <rect x="822" y="70" width="56" height="44" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="850" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UHD</text>
+
+  <text x="720" y="132" text-anchor="middle" font-size="11" fill="#8a6d1f">descriptor files (a KDP of kernels + reusable descriptors)</text>
 
   <!-- arrow down into engine -->
   <line x1="720" y1="140" x2="720" y2="182" stroke="#444" stroke-width="1.5" marker-end="url(#arrowBA)"/>

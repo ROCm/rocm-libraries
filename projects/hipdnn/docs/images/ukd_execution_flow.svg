@@ -14,7 +14,7 @@
   <!-- applicable engines -->
   <rect x="60" y="76" width="700" height="74" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
   <text x="78" y="100" font-size="12" font-weight="600">Applicable engines</text>
-  <text x="78" y="120" font-size="12">match each kernel's graph_criteria; a match binds its named variables ($q, $k, dims, ...)</text>
+  <text x="78" y="120" font-size="12">match each kernel's UMD; a match binds its named variables ($q, $k, dims, ...)</text>
   <text x="78" y="140" font-size="12">an engine is applicable if any of its kernels match</text>
   <line x1="410" y1="150" x2="410" y2="170" stroke="#444" stroke-width="1.5" marker-end="url(#arrow11)"/>
 
@@ -34,7 +34,7 @@
   <!-- configure -->
   <rect x="60" y="340" width="700" height="58" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="78" y="364" font-size="12" font-weight="600">Configure</text>
-  <text x="78" y="384" font-size="12">engine + chosen knob values; size workspace from the launch formula</text>
+  <text x="78" y="384" font-size="12">engine + chosen knob values; size workspace from the UDD formula</text>
   <line x1="410" y1="398" x2="410" y2="418" stroke="#444" stroke-width="1.5" marker-end="url(#arrow11)"/>
 
   <!-- generic launch -->
