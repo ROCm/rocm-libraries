@@ -311,6 +311,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
     bool nonWmmaHasHazard(DAGNode* node) const;
+    bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue) const;
     std::pair<DAGNode*, int> findMostReadyWMMA();
@@ -474,6 +475,22 @@ bool CDNA5ReadyQueue::nonWmmaHasHazard(DAGNode* node) const {
     return getMaxSrcDataWait(node) > 0;
 }
 
+// True if issuing \p node now would risk a co-execution hazard: while the WMMA that
+// opened the current latency window is still in flight, \p node's dest VGPRs overlap
+// that WMMA's src VGPRs, so the write could clobber a source the WMMA is still reading.
+bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
+    if (node == nullptr || activeWmmaNode_ == nullptr) return false;
+    if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
+    for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
+        if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
+        for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
+            if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
+            if (dstReg.isOverlap(srcReg)) return true;
+        }
+    }
+    return false;
+}
+
 // (B) elapse key: min over the node's operand regs (dst + src) of (clock_ - lastTouch).
 // The most-recently-touched operand binds (smallest elapse), so a node reusing a
 // just-touched reg ranks low and is deferred. Regs never touched => INT_MAX (very old).
@@ -582,7 +599,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
     // bounded only by the real hardware limiter dsReadQueueFull().
     const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= maxDsPerWmmaWindow_;
-    bool dsWindowOk = pickedDS && !dsCapReached && !dsReadQueueFull();
+    bool dsWindowOk =
+        pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -603,7 +621,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     }
     if (isValuPickable()) {
         if (DAGNode* t = pickFreeBest(valuQueue)) {
-            if (!dsWindowOk && (!best || t->id < best->id)) {
+            if (!dsWindowOk && (!best || t->id < best->id) && !destOverlapsActiveWmmaSrc(t)) {
                 best = t;
                 kind = kValu;
             }
