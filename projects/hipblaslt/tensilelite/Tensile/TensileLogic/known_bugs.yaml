@@ -3,7 +3,7 @@
 #
 # Each skip is keyed on (path, solution_name). solution_name is the solution's
 # SolutionNameMin: a canonical, content-derived name that is stable across library
-# re-tuning/regeneration (unlike the positional SolutionIndex, which shifts). If the
+# re-tuning/regeneration (unlike the positional SolutionIndex, which can change position). If the
 # buggy kernel is genuinely fixed or removed, its name stops matching and the entry
 # should be pruned; `run_tensile_logic_check.py` reports such stale entries.
 #
