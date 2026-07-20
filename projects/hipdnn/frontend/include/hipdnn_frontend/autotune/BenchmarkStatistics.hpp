@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <numeric>
@@ -24,6 +25,14 @@ namespace hipdnn_frontend::autotune::detail
 
 // Compute the arithmetic mean of a range of floating-point timing samples.
 // Throws std::invalid_argument if values is empty.
+//
+// The result is clamped to the observed [min, max] range. Floating-point
+// summation and division can round the mean a few ULP outside that range when
+// the samples are near-identical, which would otherwise violate the
+// min <= mean <= max invariant that callers rely on (e.g. the autotune
+// min/avg timing stats, where avg dipping below min by a ULP is a real,
+// observed flake). The mean of a set is mathematically within its range, so
+// clamping only corrects rounding noise and is a no-op for well-separated data.
 template <typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T computeMean(const std::vector<T>& values)
 {
@@ -31,8 +40,10 @@ T computeMean(const std::vector<T>& values)
     {
         throw std::invalid_argument("computeMean: input vector must not be empty");
     }
-    auto sum = std::accumulate(values.begin(), values.end(), T{0});
-    return sum / static_cast<T>(values.size());
+    const auto [minIt, maxIt] = std::minmax_element(values.begin(), values.end());
+    const auto sum = std::accumulate(values.begin(), values.end(), T{0});
+    const auto mean = sum / static_cast<T>(values.size());
+    return std::clamp(mean, *minIt, *maxIt);
 }
 
 // Compute the population standard deviation of a range of floating-point

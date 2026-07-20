@@ -1033,6 +1033,18 @@ void host_dense_to_coo(I                     m,
                        std::vector<I>&       coo_col_ind);
 
 template <typename I, typename T>
+void host_dense_to_bell(I                     m,
+                        I                     n,
+                        rocsparse_index_base  base,
+                        const std::vector<T>& A,
+                        int64_t               ld,
+                        rocsparse_order       order,
+                        I                     ell_block_size,
+                        I&                    ell_cols,
+                        std::vector<T>&       bell_val,
+                        std::vector<I>&       bell_col_ind);
+
+template <typename I, typename T>
 void host_coo_to_dense(I                     m,
                        I                     n,
                        int64_t               nnz,
