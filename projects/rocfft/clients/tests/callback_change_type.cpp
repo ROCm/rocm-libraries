@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef SPIRV
+#ifndef __SPIRV__
 
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"

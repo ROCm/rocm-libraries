@@ -20,7 +20,7 @@
 * THE SOFTWARE.
 *******************************************************************************/
 
-#ifndef SPIRV
+#ifndef __SPIRV__
 
 #include <iostream>
 #ifndef _WIN32
