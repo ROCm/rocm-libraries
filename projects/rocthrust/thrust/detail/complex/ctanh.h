@@ -117,14 +117,14 @@ THRUST_HOST_DEVICE inline complex<double> ctanh(const complex<double>& z)
   /*
    * ctanh(NaN + i 0) = NaN + i 0
    *
-   * ctanh(NaN + i y) = NaN + i NaN		for y != 0
+   * ctanh(NaN + i y) = NaN + i NaN    for y != 0
    *
    * The imaginary part has the sign of x*sin(2*y), but there's no
    * special effort to get this right.
    *
    * ctanh(+-Inf +- i Inf) = +-1 +- 0
    *
-   * ctanh(+-Inf + i y) = +-1 + 0 sin(2y)		for y finite
+   * ctanh(+-Inf + i y) = +-1 + 0 sin(2y)    for y finite
    *
    * The imaginary part of the sign is unspecified.  This special
    * case is only needed to avoid a spurious invalid exception when

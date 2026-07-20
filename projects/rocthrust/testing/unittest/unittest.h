@@ -27,18 +27,18 @@
 #include <unittest/testframework.h>
 
 #ifdef ADDRESS_SANITIZER_BUILD
-#define CHECK_ASAN_ENABLEMENT() \
-{ \
-  static bool printed_warning = false; \
-  if (!printed_warning) \
-  { \
-    std::cerr << "Skipping test due to memory constraints in address sanitizer build." << std::endl; \
-	printed_warning = true; \
-  } \
-  return; \
-}
+#  define CHECK_ASAN_ENABLEMENT()                                                                        \
+    {                                                                                                    \
+      static bool printed_warning = false;                                                               \
+      if (!printed_warning)                                                                              \
+      {                                                                                                  \
+        std::cerr << "Skipping test due to memory constraints in address sanitizer build." << std::endl; \
+        printed_warning = true;                                                                          \
+      }                                                                                                  \
+      return;                                                                                            \
+    }
 #else
-#define CHECK_ASAN_ENABLEMENT()
+#  define CHECK_ASAN_ENABLEMENT()
 #endif
 
 #if THRUST_HAS_HIP_COMPILER()
