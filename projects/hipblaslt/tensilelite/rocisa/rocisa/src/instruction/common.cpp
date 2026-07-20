@@ -900,6 +900,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SEndpgm& self, nb::dict&) { return new rocisa::SEndpgm(self); });
 
+    nb::class_<rocisa::SCodeEnd, rocisa::Instruction>(m_common, "SCodeEnd")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::SCodeEnd::getParams)
+        .def("__str__", &rocisa::SCodeEnd::toString)
+        .def("__deepcopy__",
+             [](const rocisa::SCodeEnd& self, nb::dict&) { return new rocisa::SCodeEnd(self); });
+
     nb::class_<rocisa::STtraceData, rocisa::Instruction>(m_common, "STtraceData")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::STtraceData::getParams)

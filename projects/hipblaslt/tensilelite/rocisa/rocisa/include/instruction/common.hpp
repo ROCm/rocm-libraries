@@ -2365,6 +2365,47 @@ namespace rocisa
         }
     };
 
+    // s_code_end (SOPP, no operands). The FMHA kernel pads its trailing 64 dwords with
+    // s_code_end; the assembler emits it from the bare mnemonic. Mirrors SEndpgm.
+    struct SCodeEnd : public Instruction
+    {
+        SCodeEnd(const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+        {
+            setInst("s_code_end");
+        }
+
+        SCodeEnd(const SCodeEnd& other)
+            : Instruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SCodeEnd>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+    };
+
     struct STtraceData : public Instruction
     {
         STtraceData(const std::string& comment = "")
