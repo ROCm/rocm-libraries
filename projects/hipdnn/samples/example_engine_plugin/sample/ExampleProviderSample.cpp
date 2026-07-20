@@ -56,6 +56,19 @@
 
 using namespace hipdnn_frontend;
 
+// Gracefully skip the sample when no GPU is present: prints a skip message and
+// returns 0 from the enclosing function.
+#define RETURN_SUCCESS_IF_NO_DEVICE()                                         \
+    do                                                                        \
+    {                                                                         \
+        int deviceCount = 0;                                                  \
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0) \
+        {                                                                     \
+            std::cout << "SKIPPED: No GPU devices available.\n";              \
+            return 0;                                                         \
+        }                                                                     \
+    } while(0)
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -741,12 +754,7 @@ int main(int argc, char* argv[])
         std::cout << "hipDNN Example Plugin Sample Application\n";
         std::cout << "=========================================\n";
 
-        int deviceCount = 0;
-        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        {
-            std::cout << "SKIPPED: No GPU devices available.\n";
-            return 0;
-        }
+        RETURN_SUCCESS_IF_NO_DEVICE();
         hipDeviceProp_t props;
         static_cast<void>(hipGetDeviceProperties(&props, 0));
         std::cout << "GPU: " << props.name << " (" << props.gcnArchName << ")\n";

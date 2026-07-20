@@ -26,12 +26,7 @@ int main()
 {
     try
     {
-        int deviceCount = 0;
-        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        {
-            std::cout << "SKIPPED: No GPU devices available.\n";
-            return 0;
-        }
+        RETURN_SUCCESS_IF_NO_DEVICE();
 
         constexpr int64_t N = 2; // Batch size
         constexpr int64_t C = 4; // Input channels
