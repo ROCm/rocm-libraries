@@ -28,15 +28,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running batch normalization inference with variance graph " << inputType << " ["
               << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    const int64_t n = 16; // BATCH SIZE
-    const int64_t c = 16; // CHANNELS (FEATURES)
-    const int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    const int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    // Input dimensions
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    setPreferredEngine(graph, config);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
@@ -44,17 +47,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto mean = createTensor({1, c, 1, 1}, intermediateType);
     auto variance = createTensor({1, c, 1, 1}, intermediateType);
     // Epsilon is a pass-by-value scalar, not a buffer
-    auto epsilon = std::make_shared<graph::TensorAttributes>();
-    epsilon->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
+    auto epsilonTensor = std::make_shared<graph::TensorAttributes>();
+    epsilonTensor->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
 
     auto bnAttributes = graph::BatchnormInferenceAttributesVarianceExt();
     bnAttributes.set_name("bn_inference_variance_ext_node");
 
     auto y = graph->batchnorm_inference_variance_ext(
-        x, mean, variance, scale, bias, epsilon, bnAttributes);
+        x, mean, variance, scale, bias, epsilonTensor, bnAttributes);
     y->set_output(true);
 
     HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
+
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -97,6 +101,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
         auto tolerance
             = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<InputType>();
+
         const double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
@@ -106,6 +111,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         std::cout << "CPU reference validation:\n";
+
         const bool yValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
             std::cout, "y", validator, yRefTensor, yTensor, tolerance, tolerance);
 
@@ -120,6 +126,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "\nBatch normalization inference with variance graph execution complete for "
               << inputType << ".\n\n";
+
     return validationPassed;
 }
 
@@ -140,6 +147,7 @@ int main(int argc, char* argv[])
                 << "All batch normalization inference with variance runs completed successfully.\n";
             return 0;
         }
+
         std::cout
             << "One or more batch normalization inference with variance runs failed validation.\n";
         return 1;
