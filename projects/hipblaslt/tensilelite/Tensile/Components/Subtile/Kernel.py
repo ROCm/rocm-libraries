@@ -114,7 +114,7 @@ from .SubtileLREmit import (
     _emitLocalReadOffset, _emitLocalRead,
     _allocLROffsetRegisters, _deallocLROffsetRegisters,
     _emitLRDTLInit, _emitLRLDSBufferSwap,
-    localReadDoSubtile,
+    lraTileAssignment, localReadDoSubtile, localReadDTLInitCommonSwapVgpr,
 )
 from .SubtileScaleEmit import (
     emitScaleGROffset, emitScaleLROffset,
