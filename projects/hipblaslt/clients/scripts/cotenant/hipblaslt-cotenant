@@ -36,7 +36,9 @@ SHIPPED_BIN = HERE / "hipblaslt-cotenant-kernel"
 
 def cache_dir() -> Path:
     """Writable per-user dir for a self-built binary; the script's own dir may be read-only when installed."""
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache"
+    )
     return Path(base) / "hipblaslt" / "cotenant"
 
 
@@ -74,7 +76,9 @@ def resolve_binary(arch: str | None, env: dict[str, str], explicit: str | None) 
 def build_cotenant(arch: str | None, env: dict[str, str]) -> Path:
     """Build the kernel into the per-user cache and return its path (rebuilds when stale)."""
     if not SRC.is_file():
-        sys.exit(f"ERROR: no prebuilt kernel and source not found ({SRC}); pass --binary PATH.")
+        sys.exit(
+            f"ERROR: no prebuilt kernel and source not found ({SRC}); pass --binary PATH."
+        )
     out = cache_dir() / "hipblaslt-cotenant-kernel"
     stamp = cache_dir() / "arch"
     try:
@@ -93,20 +97,32 @@ def build_cotenant(arch: str | None, env: dict[str, str]) -> Path:
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
-            [hipcc, "-O2", "-std=c++17", f"--offload-arch={arch}", str(SRC), "-o", str(out)],
+            [
+                hipcc,
+                "-O2",
+                "-std=c++17",
+                f"--offload-arch={arch}",
+                str(SRC),
+                "-o",
+                str(out),
+            ],
             check=True,
             env=env,
         )
     except FileNotFoundError:
         sys.exit(f"ERROR: '{hipcc}' not found; install ROCm or set HIPCC to its path.")
     except subprocess.CalledProcessError as e:
-        sys.exit(f"ERROR: building hipblaslt-cotenant-kernel failed (hipcc exited {e.returncode}).")
+        sys.exit(
+            f"ERROR: building hipblaslt-cotenant-kernel failed (hipcc exited {e.returncode})."
+        )
     except OSError as e:
         sys.exit(f"ERROR: could not write {out} ({e.strerror}).")
     try:
         stamp.write_text(arch)
     except OSError as e:
-        print(f"WARNING: could not write build cache stamp {stamp} ({e.strerror}); will rebuild next run.")
+        print(
+            f"WARNING: could not write build cache stamp {stamp} ({e.strerror}); will rebuild next run."
+        )
     return out
 
 
@@ -267,7 +283,9 @@ def main() -> int:
     try:
         log = open(log_path, "w")
     except OSError as e:
-        sys.exit(f"ERROR: cannot write log to {log_path} ({e.strerror}); pass --log PATH.")
+        sys.exit(
+            f"ERROR: cannot write log to {log_path} ({e.strerror}); pass --log PATH."
+        )
     with log, open(log_path, "r") as log_reader:
         # No start_new_session: keep the cotenant in this process's group so
         # terminal signals (SIGINT/SIGHUP) reach it directly even if our cleanup
