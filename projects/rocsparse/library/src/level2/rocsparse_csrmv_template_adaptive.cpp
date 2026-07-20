@@ -64,15 +64,23 @@ namespace rocsparse
     // working on each row. If you have 5 rows, only 32 threads could
     // reliably work on each row because our reduction assumes power-of-2.
     // Choose the general (non-symmetric) CSR-adaptive workgroup size from the
-    // average nnz/row. On RDNA (32-wide wavefronts), a smaller workgroup (128)
-    // lowers reduction/sync overhead and raises occupancy for longer rows, while
-    // short-row matrices are faster with the original 256. Both the analysis
-    // (which bakes numThreadsForReduction into wg_ids) and the kernel launch
-    // derive the size from m/nnz, so they always agree without storing extra state.
-    // The symmetric adaptive kernels are unaffected: they never read wg_ids.
-    static inline uint32_t general_wg_size(int64_t m, int64_t nnz)
+    // average nnz/row. For dense rows a smaller workgroup lowers reduction/sync
+    // overhead and raises occupancy; short-row matrices keep the historical 256.
+    //
+    // The dense-row size is expressed in WAVEFRONTS rather than a fixed thread
+    // count, so it scales with the hardware wavefront width: 4 wavefronts is 128
+    // threads on wave32 and 256 threads on wave64. This keeps the tuned small
+    // workgroup on 32-wide parts while wide-wavefront (64) parts retain the
+    // original 256-thread workgroup instead of dropping to a half-occupancy 128.
+    //
+    // Both the analysis (which bakes numThreadsForReduction into wg_ids) and the
+    // kernel launch derive the size from the handle + m/nnz, so they always agree
+    // without storing extra state. The symmetric adaptive kernels are unaffected:
+    // they never read wg_ids.
+    static inline uint32_t general_wg_size(rocsparse_handle handle, int64_t m, int64_t nnz)
     {
-        return (m > 0 && (double)nnz >= 32.0 * (double)m) ? 128u : 256u;
+        const bool dense = (m > 0 && (double)nnz >= 32.0 * (double)m);
+        return dense ? (4u * (uint32_t)handle->wavefront_size) : 256u;
     }
 
     static uint64_t numThreadsForReduction(uint64_t num_rows, uint32_t wg_size)
@@ -400,7 +408,7 @@ rocsparse_status
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         // Choose the general-path workgroup size from avg nnz/row; wg_ids must be
         // built with the same value the kernel is later launched with.
-        const uint32_t gen_wg = rocsparse::general_wg_size(m, (int64_t)(hptr[m] - hptr[0]));
+        const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, (int64_t)(hptr[m] - hptr[0]));
 
         // Determine row blocks array size
         ComputeRowBlocks<I, J>((I*)NULL,
@@ -743,7 +751,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     {
         // Matrix-adaptive general-path workgroup size (must match the value used
         // to build wg_ids in analysis, which is derived the same way from m/nnz).
-        const uint32_t gen_wg = rocsparse::general_wg_size(m, nnz);
+        const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
 
         // Run different csrmv kernels
         dim3 csrmvn_blocks((info->adaptive.size) - 1);
