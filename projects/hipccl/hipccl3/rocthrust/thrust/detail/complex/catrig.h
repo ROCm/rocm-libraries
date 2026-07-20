@@ -88,9 +88,9 @@ THRUST_HOST_DEVICE inline complex<double> clog_for_large_values(complex<double> 
  */
 
 /*
- *			================================
- *			| casinh, casin, cacos, cacosh |
- *			================================
+ *      ================================
+ *      | casinh, casin, cacos, cacosh |
+ *      ================================
  */
 
 /*
@@ -588,9 +588,9 @@ THRUST_HOST_DEVICE inline complex<double> clog_for_large_values(complex<double> 
 }
 
 /*
- *				=================
- *				| catanh, catan |
- *				=================
+ *        =================
+ *        | catanh, catan |
+ *        =================
  */
 
 /*
@@ -635,10 +635,10 @@ THRUST_HOST_DEVICE inline double real_part_reciprocal(double x, double y)
   ix = hx & 0x7ff00000;
   get_high_word(hy, y);
   iy = hy & 0x7ff00000;
-  // #define	BIAS	(DBL_MAX_EXP - 1)
+  // #define  BIAS  (DBL_MAX_EXP - 1)
   const int BIAS = DBL_MAX_EXP - 1;
   /* XXX more guard digits are useful iff there is extra precision. */
-  // #define	CUTOFF	(DBL_MANT_DIG / 2 + 1)	/* just half or 1 guard digit */
+  // #define  CUTOFF  (DBL_MANT_DIG / 2 + 1)  /* just half or 1 guard digit */
   const int CUTOFF = (DBL_MANT_DIG / 2 + 1);
   if (ix - iy >= CUTOFF << 20 || isinf(x))
   {
