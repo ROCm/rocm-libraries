@@ -22,6 +22,9 @@ Documentation for rocSPARSE is available at
 ### Added
 * Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
 
+### Changed
+* `rocsparse_spmm` with CSR/CSC and the default algorithm (`rocsparse_spmm_alg_default` or `rocsparse_spmm_alg_csr`) now automatically selects a load-balanced (nnz-split) kernel for strongly skewed matrices (those containing a single very long row for CSR, or column for transposed CSC). Behavior is unchanged for non-skewed matrices and for explicit algorithm choices (`rocsparse_spmm_alg_csr_row_split`, `rocsparse_spmm_alg_csr_nnz_split`, `rocsparse_spmm_alg_csr_merge_path`).
+
 ### Upcoming changes
 * Deprecated the `rocsparse_indextype_u16` index type. It is  no longer supported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
 
@@ -31,6 +34,8 @@ Documentation for rocSPARSE is available at
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added
+* Added `rocsparse_handle_create` to create a handle associated with a user-provided stream. All internal device memory allocation and initialization are stream-ordered on that stream, so handle creation never blocks the calling thread or other GPU streams.
+* Added `rocsparse_handle_destroy` to destroy a handle created by `rocsparse_handle_create`, with an optional error descriptor argument.
 * Added the `rocsparse_create_const_bsr_descr` routine for creating a const sparse BSR matrix descriptor.
 * Added the `rocsparse_spic0` and `rocsparse_spilu0` routines for incomplete factorizations, with strided batched computations enabled.
 * Added the `rocsparse_sptrsv_descr_create` and the `rocsparse_sptrsv_descr_destroy` routines.

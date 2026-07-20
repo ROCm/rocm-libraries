@@ -35,8 +35,8 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFro
     EXPECT_NO_THROW(params.bias());
     EXPECT_NO_THROW(params.estMean());
     EXPECT_NO_THROW(params.variance());
-    EXPECT_NO_THROW(params.epsilonValue());
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NO_THROW(params.epsilonValue(nullptr, 0));
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
@@ -75,6 +75,6 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
     EXPECT_NO_THROW(params.bias());
     EXPECT_NO_THROW(params.estMean());
     EXPECT_NO_THROW(params.variance());
-    EXPECT_NO_THROW(params.epsilonValue());
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NO_THROW(params.epsilonValue(nullptr, 0));
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
