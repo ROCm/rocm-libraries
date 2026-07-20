@@ -27,24 +27,6 @@ COVERAGE_PROJECT_METADATA = {
         "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects/hiprand/test_categories_coverage.yaml",
     ),
-    "rocrand": (
-        "rocRAND",
-        "math-libs/rocRAND",
-        "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects/rocrand/test/test_categories_coverage.yaml",
-    ),
-    "rocfft": (
-        "rocFFT",
-        "math-libs/rocFFT",
-        "-DTHEROCK_ENABLE_FFT=ON -DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects/rocfft/clients/tests/test_categories_coverage.yaml",
-    ),
-    "rocblas": (
-        "rocBLAS",
-        "math-libs/rocBLAS",
-        "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects/rocblas/clients/gtest/test_categories_coverage.yaml",
-    ),
 }
 
 def get_build_metadata(project_key: str, base_dir: str = "TheRock/build-coverage"):

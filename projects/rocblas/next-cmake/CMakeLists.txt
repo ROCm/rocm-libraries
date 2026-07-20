@@ -78,7 +78,7 @@ if(ROCBLAS_ENABLE_FORTRAN AND ROCBLAS_ENABLE_ASAN)
   message(FATAL_ERROR "Cannot enable fortran clients and address sanitizers.")
 endif()
 
-if(ROCBLAS_BUILD_COVERAGE OR ROCBLAS_ENABLE_COVERAGE)
+if(ROCBLAS_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
   if(ROCBLAS_ENABLE_FORTRAN)
     message(FATAL_ERROR "Cannot enable fortran clients and code coverage.")
   elseif(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -366,7 +366,7 @@ rocm_create_package(
   LDCONFIG_DIR
   ${ROCBLAS_CONFIG_DIR})
 
-if(ROCBLAS_BUILD_COVERAGE OR ROCBLAS_ENABLE_COVERAGE)
+if(ROCBLAS_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
   message(STATUS "Configuring code coverage target")
   target_compile_options(rocblas PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(rocblas PRIVATE -fprofile-instr-generate)

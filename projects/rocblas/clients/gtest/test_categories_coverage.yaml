@@ -1,8 +1,0 @@
-enabled: true
-coverage_objects:
-  libraries:
-    - librocblas.so
-  test_binaries: []
-ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*[Tt]ensile.*|.*/_deps/.*|.*deps.*'
-llvm_profile_pattern: '%m'
-test_category: quick

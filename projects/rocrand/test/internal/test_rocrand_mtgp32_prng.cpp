@@ -60,7 +60,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(mtgp32_generator,
 //                                generator_prng_continuity_tests,
 //                                rocrand_mtgp32_generator_prng_tests_types);
 
-#ifdef ROCRAND_ENABLE_COVERAGE
+#ifdef CODE_COVERAGE_ENABLED
 #include "test_rocrand_host_prng.hpp"
 
 using rocrand_impl::host::mtgp32_generator_host;
@@ -70,7 +70,7 @@ using mtgp32_generator_prng_host_tests_types = ::testing::Types<
 INSTANTIATE_TYPED_TEST_SUITE_P(mtgp32_host_generator,
                                generator_prng_host_tests,
                                mtgp32_generator_prng_host_tests_types);
-#endif //ROCRAND_ENABLE_COVERAGE
+#endif //CODE_COVERAGE_ENABLED
 TEST(AdditionalTests, rocrand_make_constant)
 {
     // test to make sure the copy is working and that all data is being coverted properly
