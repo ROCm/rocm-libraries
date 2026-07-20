@@ -248,8 +248,8 @@ struct TestUniqueByKey
 {
   void operator()(const size_t n)
   {
-	CHECK_ASAN_ENABLEMENT();
-	  
+    CHECK_ASAN_ENABLEMENT();
+
     using V = unsigned int; // ValueType
 
     thrust::host_vector<K> h_keys   = unittest::random_integers<bool>(n);
@@ -290,7 +290,7 @@ struct TestUniqueCopyByKey
   void operator()(const size_t n)
   {
     CHECK_ASAN_ENABLEMENT();
-	
+
     using V = unsigned int; // ValueType
 
     thrust::host_vector<K> h_keys   = unittest::random_integers<bool>(n);
@@ -338,7 +338,7 @@ struct TestUniqueCopyByKeyToDiscardIterator
   void operator()(const size_t n)
   {
     CHECK_ASAN_ENABLEMENT();
-	
+
     using V = unsigned int; // ValueType
 
     thrust::host_vector<K> h_keys   = unittest::random_integers<bool>(n);
@@ -422,7 +422,7 @@ struct TestUniqueCopyByKeyLargeInput
   void operator()()
   {
     CHECK_ASAN_ENABLEMENT();
-	
+
     using type       = K;
     using index_type = std::int64_t;
 
@@ -457,7 +457,7 @@ struct TestUniqueCopyByKeyLargeOutCount
   void operator()()
   {
     CHECK_ASAN_ENABLEMENT();
-	
+
     constexpr std::size_t num_items = 4400000000ULL;
 
     auto keys_in   = thrust::make_counting_iterator(0ULL);
