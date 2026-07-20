@@ -31,6 +31,8 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/PropertyMatching.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -222,3 +224,4 @@ namespace TensileLite
         }
     };
 } // namespace TensileLite
+

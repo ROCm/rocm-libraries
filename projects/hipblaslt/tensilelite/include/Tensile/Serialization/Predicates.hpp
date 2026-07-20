@@ -32,6 +32,8 @@
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/Predicates.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -291,3 +293,4 @@ namespace TensileLite
 
     } // namespace Serialization
 } // namespace TensileLite
+

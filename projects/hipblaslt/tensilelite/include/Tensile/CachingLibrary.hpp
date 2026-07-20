@@ -37,6 +37,8 @@
 #include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <typename Value, typename Key, typename... Keys>
@@ -347,3 +349,4 @@ namespace TensileLite
 #endif
 
 } // namespace TensileLite
+

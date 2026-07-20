@@ -29,6 +29,8 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/Properties.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
 
@@ -83,3 +85,4 @@ namespace TensileLite
         }
     }
 }
+

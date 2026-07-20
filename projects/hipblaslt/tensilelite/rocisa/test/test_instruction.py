@@ -213,8 +213,229 @@ def test_instruction_tdm_2_sgprs():
     except ValueError as e:
         pass
 
+def test_instruction_swait_xcnt():
+    from rocisa.instruction import SWaitXCnt
+
+    # Default constructor: xcnt=0, no comment -> "s_wait_xcnt 0\n"
+    inst = SWaitXCnt()
+    assert str(inst) == "s_wait_xcnt 0\n"
+    assert inst.comment == ""
+
+    # Explicit xcnt within range
+    inst = SWaitXCnt(xcnt=5)
+    assert str(inst) == "s_wait_xcnt 5\n"
+
+    # min(xcnt, 63) clamping: xcnt=100 should clamp to 63
+    inst = SWaitXCnt(xcnt=100)
+    assert str(inst) == "s_wait_xcnt 63\n"
+
+    # Boundary: xcnt=63 should also produce 63 (not clamped further)
+    inst = SWaitXCnt(xcnt=63)
+    assert str(inst) == "s_wait_xcnt 63\n"
+
+    # Comment formatting: use relaxed assertions to sidestep alignment math
+    inst = SWaitXCnt(xcnt=5, comment="test comment")
+    assert inst.comment == "test comment"
+    assert str(inst).startswith("s_wait_xcnt 5")
+    assert "// test comment" in str(inst)
+    assert str(inst).endswith("\n")
+
+    # deepcopy independence: mutate the original AFTER deepcopy and confirm
+    # the copy is unaffected (SWaitXCnt does not expose xcnt as a writable
+    # attribute, so we mutate the inherited `comment` field).
+    inst = SWaitXCnt(xcnt=7, comment="original")
+    inst2 = deepcopy(inst)
+    inst.comment = "mutated"
+    assert inst2.comment == "original"
+    assert str(inst2).startswith("s_wait_xcnt 7")
+    assert "// original" in str(inst2)
+    assert "// mutated" not in str(inst2)
+
+    # Embed in a Module and verify rendered text contains the instruction
+    from rocisa.code import Module
+    module = Module("Test")
+    module.add(SWaitXCnt(xcnt=3))
+    assert "s_wait_xcnt 3" in str(module)
+
+
+def test_instruction_global_wb():
+    from rocisa.instruction import GlobalWb
+    from rocisa.enum import CacheScope
+
+    # Default constructor: SCOPE_DEV, no comment
+    inst = GlobalWb()
+    assert str(inst) == "global_wb scope:SCOPE_DEV\n"
+    assert inst.scope == CacheScope.SCOPE_DEV
+    assert inst.comment == ""
+
+    # SCOPE_NONE: scope modifier omitted
+    inst = GlobalWb(scope=CacheScope.SCOPE_NONE)
+    assert str(inst) == "global_wb\n"
+    assert inst.scope == CacheScope.SCOPE_NONE
+
+    # Alternate scopes: enum -> string conversion
+    inst = GlobalWb(scope=CacheScope.SCOPE_CU)
+    assert str(inst) == "global_wb scope:SCOPE_CU\n"
+
+    inst = GlobalWb(scope=CacheScope.SCOPE_SE)
+    assert str(inst) == "global_wb scope:SCOPE_SE\n"
+
+    inst = GlobalWb(scope=CacheScope.SCOPE_SYS)
+    assert str(inst) == "global_wb scope:SCOPE_SYS\n"
+
+    # Comment formatting (relaxed assertions to avoid alignment math)
+    inst = GlobalWb(scope=CacheScope.SCOPE_DEV, comment="release fence")
+    assert inst.comment == "release fence"
+    assert str(inst).startswith("global_wb scope:SCOPE_DEV")
+    assert "// release fence" in str(inst)
+    assert str(inst).endswith("\n")
+
+    # deepcopy independence: mutate the original `scope` (and comment) after
+    # deepcopy and confirm the copy is unaffected.
+    inst = GlobalWb(scope=CacheScope.SCOPE_DEV, comment="orig")
+    inst2 = deepcopy(inst)
+    inst.scope = CacheScope.SCOPE_SYS
+    inst.comment = "mutated"
+    assert inst2.scope == CacheScope.SCOPE_DEV
+    assert inst2.comment == "orig"
+    assert str(inst2).startswith("global_wb scope:SCOPE_DEV")
+    assert "// orig" in str(inst2)
+    assert "// mutated" not in str(inst2)
+    assert "SCOPE_SYS" not in str(inst2)
+
+    # Embed in a Module and verify rendered text contains the instruction
+    from rocisa.code import Module
+    module = Module("Test")
+    module.add(GlobalWb(scope=CacheScope.SCOPE_DEV))
+    assert "global_wb scope:SCOPE_DEV" in str(module)
+
+
+def test_instruction_global_inv():
+    from rocisa.instruction import GlobalInv
+    from rocisa.enum import CacheScope
+
+    # Default constructor: SCOPE_DEV, no comment
+    inst = GlobalInv()
+    assert str(inst) == "global_inv scope:SCOPE_DEV\n"
+    assert inst.scope == CacheScope.SCOPE_DEV
+    assert inst.comment == ""
+
+    # SCOPE_NONE: scope modifier omitted
+    inst = GlobalInv(scope=CacheScope.SCOPE_NONE)
+    assert str(inst) == "global_inv\n"
+    assert inst.scope == CacheScope.SCOPE_NONE
+
+    # Alternate scope sanity check
+    inst = GlobalInv(scope=CacheScope.SCOPE_CU)
+    assert str(inst) == "global_inv scope:SCOPE_CU\n"
+
+    # Comment formatting (relaxed assertions to avoid alignment math)
+    inst = GlobalInv(scope=CacheScope.SCOPE_DEV, comment="acquire fence")
+    assert inst.comment == "acquire fence"
+    assert str(inst).startswith("global_inv scope:SCOPE_DEV")
+    assert "// acquire fence" in str(inst)
+    assert str(inst).endswith("\n")
+
+    # deepcopy independence: mutate the original `scope` (and comment) after
+    # deepcopy and confirm the copy is unaffected.
+    inst = GlobalInv(scope=CacheScope.SCOPE_DEV, comment="orig")
+    inst2 = deepcopy(inst)
+    inst.scope = CacheScope.SCOPE_NONE
+    inst.comment = "mutated"
+    assert inst2.scope == CacheScope.SCOPE_DEV
+    assert inst2.comment == "orig"
+    assert str(inst2).startswith("global_inv scope:SCOPE_DEV")
+    assert "// orig" in str(inst2)
+    assert "// mutated" not in str(inst2)
+
+
+def test_instruction_scalar_float():
+    # gfx12+ scalar-float / scalar-u64 instruction wrappers. Each src is an
+    # InstructionInput variant (register | int | double | str); the cases below
+    # exercise those arms and assert the emitted mnemonic/operands.
+    from rocisa.instruction import SMulF32, SAddF32, SCvtF32U32, SCvtU32F32, \
+        VSRcpF32, SMulU64
+
+    # --- SMulF32: s_mul_f32 dst, src0, src1 ---
+    inst = SMulF32(sgpr(0), sgpr(1), sgpr(2))
+    assert str(inst) == "s_mul_f32 s0, s1, s2\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(inst.srcs[1]) == "s2"
+    assert str(SMulF32(sgpr(0), sgpr(1), 2)) == "s_mul_f32 s0, s1, 2\n"
+    assert str(SMulF32(sgpr(0), "s1", sgpr(2))) == "s_mul_f32 s0, s1, s2\n"
+
+    # --- SAddF32: s_add_f32 dst, src0, src1 ---
+    inst = SAddF32(sgpr(0), sgpr(1), sgpr(2))
+    assert str(inst) == "s_add_f32 s0, s1, s2\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(inst.srcs[1]) == "s2"
+    assert str(SAddF32(sgpr(0), sgpr(1), 3)) == "s_add_f32 s0, s1, 3\n"
+    # integral doubles get a ".0" suffix
+    assert str(SAddF32(sgpr(0), sgpr(1), 2.0)) == "s_add_f32 s0, s1, 2.0\n"
+
+    # --- SCvtF32U32: s_cvt_f32_u32 dst, src ---
+    inst = SCvtF32U32(sgpr(0), sgpr(1))
+    assert str(inst) == "s_cvt_f32_u32 s0, s1\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(SCvtF32U32(sgpr(0), "s2")) == "s_cvt_f32_u32 s0, s2\n"
+
+    # --- SCvtU32F32: s_cvt_u32_f32 dst, src ---
+    inst = SCvtU32F32(sgpr(0), sgpr(1))
+    assert str(inst) == "s_cvt_u32_f32 s0, s1\n"
+    assert str(inst.dst) == "s0"
+    assert str(inst.srcs[0]) == "s1"
+    assert str(SCvtU32F32(sgpr(0), 1.5)) == "s_cvt_u32_f32 s0, 1.5\n"
+
+    # --- VSRcpF32: v_s_rcp_f32 dst, src (vgpr dst) ---
+    inst = VSRcpF32(vgpr(0), sgpr(1))
+    assert str(inst) == "v_s_rcp_f32 v0, s1\n"
+    assert str(inst.dst) == "v0"
+    assert str(inst.srcs[0]) == "s1"
+    # vgpr src must stay clean (no s_set_vgpr_msb) under the default ISA
+    assert str(VSRcpF32(vgpr(0), vgpr(1))) == "v_s_rcp_f32 v0, v1\n"
+    assert str(VSRcpF32(vgpr(0), 0.5)) == "v_s_rcp_f32 v0, 0.5\n"
+
+    # --- SMulU64: s_mul_u64 dst, src0, src1 (64-bit register pairs) ---
+    inst = SMulU64(sgpr(0, 2), sgpr(2, 2), sgpr(4, 2))
+    assert str(inst) == "s_mul_u64 s[0:1], s[2:3], s[4:5]\n"
+    assert str(inst.dst) == "s[0:1]"
+    assert str(inst.srcs[0]) == "s[2:3]"
+    assert str(inst.srcs[1]) == "s[4:5]"
+    assert str(SMulU64(sgpr(0, 2), sgpr(2, 2), 4)) == "s_mul_u64 s[0:1], s[2:3], 4\n"
+
+    # --- Comment formatting (relaxed to sidestep the 50-col alignment pad) ---
+    inst = SMulF32(sgpr(0), sgpr(1), sgpr(2), comment="scale")
+    assert str(inst).startswith("s_mul_f32 s0, s1, s2")
+    assert "// scale" in str(inst)
+    assert str(inst).endswith("\n")
+    assert inst.comment == "scale"
+
+    # --- deepcopy independence + comment accessor, one per class ---
+    for a in [
+        SMulF32(sgpr(0), sgpr(1), sgpr(2), comment="orig"),
+        SAddF32(sgpr(0), sgpr(1), sgpr(2), comment="orig"),
+        SCvtF32U32(sgpr(0), sgpr(1), comment="orig"),
+        SCvtU32F32(sgpr(0), sgpr(1), comment="orig"),
+        VSRcpF32(vgpr(0), sgpr(1), comment="orig"),
+        SMulU64(sgpr(0, 2), sgpr(2, 2), sgpr(4, 2), comment="orig"),
+    ]:
+        assert a.comment == "orig"
+        b = deepcopy(a)
+        a.comment = "mutated"
+        assert b.comment == "orig"
+        assert "// orig" in str(b)
+        assert "// mutated" not in str(b)
+
+
 if __name__ == "__main__":
     test_instruction_common()
     test_instruction_cvt()
     test_instruction_tdm()
     test_instruction_tdm_2_sgprs()
+    test_instruction_swait_xcnt()
+    test_instruction_global_wb()
+    test_instruction_global_inv()
+    test_instruction_scalar_float()

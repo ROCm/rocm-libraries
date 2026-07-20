@@ -36,6 +36,8 @@
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <tensilelitehost/export.h>
+
 #define HIP_CHECK_EXC(expr)                                                                       \
     do                                                                                            \
     {                                                                                             \
@@ -264,3 +266,4 @@ namespace TensileLite
         }
     } // namespace hip
 } // namespace TensileLite
+

@@ -159,4 +159,153 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 
     return graph;
 }
+
+inline std::shared_ptr<hipdnn_frontend::graph::Graph>
+    buildLayernormBpropGraph(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
+                             const std::vector<int64_t>& dims,
+                             const int64_t normalizedDimCount,
+                             const hipdnn_data_sdk::utilities::TensorLayout& layout,
+                             bool meanInvVar = false,
+                             bool onePadded = false)
+{
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
+    graph->set_name("LayernormBpropTest");
+
+    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
+
+    // Scale/bias shape = normalized dims (last normalizedDimCount dims for NCHW)
+    std::vector<int64_t> normalizedDims;
+    std::vector<int64_t> statDims;
+    if(onePadded)
+    {
+        normalizedDims = std::vector<int64_t>(dims.size(), 1);
+        statDims = std::vector<int64_t>(dims.size(), 1);
+        for(size_t i = 0; i < dims.size(); ++i)
+        {
+            if(static_cast<int64_t>(i) < static_cast<int64_t>(dims.size()) - normalizedDimCount)
+            {
+                statDims[i] = dims[i];
+            }
+            else
+            {
+                normalizedDims[i] = dims[i];
+            }
+        }
+    }
+    else
+    {
+        normalizedDims = std::vector<int64_t>(
+            dims.begin()
+                + std::max(static_cast<int64_t>(dims.size()) - normalizedDimCount, int64_t{0}),
+            dims.end());
+        statDims = std::vector<int64_t>(
+            dims.begin(),
+            dims.begin()
+                + std::max(static_cast<int64_t>(dims.size()) - normalizedDimCount, int64_t{0}));
+    }
+    auto normalizedStrides = hipdnn_data_sdk::utilities::generateStrides(normalizedDims);
+    auto statStrides = hipdnn_data_sdk::utilities::generateStrides(statDims);
+
+    int64_t uid = 1;
+    auto dyAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "dy", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
+    dyAttr.set_uid(uid++);
+    auto dyTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(dyAttr));
+
+    auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "x", hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType), dims, strides);
+    xAttr.set_uid(uid++);
+    auto xTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(xAttr));
+
+    auto scaleAttr = hipdnn_frontend::graph::makeTensorAttributes(
+        "scale",
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(scaleBiasDataType),
+        normalizedDims,
+        normalizedStrides);
+    scaleAttr.set_uid(uid++);
+    auto scaleTensorAttr
+        = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
+
+    auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    epsilonTensor->set_uid(uid++)
+        .set_name("EpsilonTensor")
+        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_dim({1})
+        .set_stride({1})
+        .set_value(hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON);
+
+    hipdnn_frontend::graph::LayernormBackwardAttributes lnAttrs;
+    lnAttrs.set_name("layernorm_bprop");
+    lnAttrs.set_epsilon(epsilonTensor);
+    lnAttrs.set_compute_data_type(
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(computeDataType));
+
+    if(meanInvVar)
+    {
+        auto meanAttr = hipdnn_frontend::graph::makeTensorAttributes(
+            "mean",
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(meanInvVarianceDataType),
+            statDims,
+            statStrides);
+        meanAttr.set_uid(uid++);
+        auto meanTensorAttr
+            = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(meanAttr));
+        lnAttrs.set_mean(std::move(meanTensorAttr));
+
+        auto invVarianceAttr = hipdnn_frontend::graph::makeTensorAttributes(
+            "inv_variance",
+            hipdnn_test_sdk::utilities::sdkToFrontendDataType(meanInvVarianceDataType),
+            statDims,
+            statStrides);
+        invVarianceAttr.set_uid(uid++);
+        auto invVarianceTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(
+            std::move(invVarianceAttr));
+        lnAttrs.set_inv_variance(std::move(invVarianceTensorAttr));
+    }
+
+    auto outputTensorsAttr
+        = graph->layernorm_backward(dyTensorAttr, xTensorAttr, scaleTensorAttr, lnAttrs);
+
+    auto& dxTensorAttr = outputTensorsAttr[0];
+    if(!dxTensorAttr->has_uid())
+    {
+        dxTensorAttr->set_uid(uid++);
+    }
+    dxTensorAttr->set_name("DX");
+    dxTensorAttr->set_data_type(hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+    dxTensorAttr->set_dim(dims);
+    dxTensorAttr->set_stride(strides);
+    dxTensorAttr->set_is_virtual(false);
+
+    auto& dscaleTensorAttr = outputTensorsAttr[1];
+    if(!dscaleTensorAttr->has_uid())
+    {
+        dscaleTensorAttr->set_uid(uid++);
+    }
+    dscaleTensorAttr->set_name("DSCALE");
+    dscaleTensorAttr->set_data_type(
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+    dscaleTensorAttr->set_dim(normalizedDims);
+    dscaleTensorAttr->set_stride(normalizedStrides);
+    dscaleTensorAttr->set_is_virtual(false);
+
+    auto& dbiasTensorAttr = outputTensorsAttr[2];
+    if(!dbiasTensorAttr->has_uid())
+    {
+        dbiasTensorAttr->set_uid(uid++);
+    }
+    dbiasTensorAttr->set_name("DBIAS");
+    dbiasTensorAttr->set_data_type(
+        hipdnn_test_sdk::utilities::sdkToFrontendDataType(inputDataType));
+    dbiasTensorAttr->set_dim(normalizedDims);
+    dbiasTensorAttr->set_stride(normalizedStrides);
+    dbiasTensorAttr->set_is_virtual(false);
+
+    return graph;
+}
+
 }

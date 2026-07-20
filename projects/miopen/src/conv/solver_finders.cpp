@@ -1,34 +1,15 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/conv/solver_finders.hpp>
+
+#include <algorithm>
+#include <numeric>
 
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/config.h>
 #include <miopen/env.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/perf_field.hpp>
 #include <miopen/conv/problem_description.hpp>
@@ -45,6 +26,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMPILE_ONLY)
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE)
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_DISABLE_IF_ALT, true)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
@@ -227,7 +209,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const NetworkConfig& network_config,
                                        const AnyInvokeParams& invoke_ctx,
                                        FindCoreResult& core_result,
-                                       bool force_attach_binary)
+                                       bool force_attach_binary,
+                                       bool& non_naive_succeeded)
 {
     std::vector<Solution> ret;
 
@@ -235,14 +218,50 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     if(!arch.empty())
         return ret;
 
+    const auto is_naive_solver = [](const solver::ConvSolution& s) {
+        return s.solver_id.find("Naive") != std::string::npos;
+    };
+
+    bool naive_disable       = env::value(MIOPEN_NAIVE_DISABLE_IF_ALT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
-    auto selected            = miopen::solver::ConvSolution{miopenStatusUnknownError};
-    auto best                = std::numeric_limits<float>::max();
-    auto best_invoker        = Invoker{};
+    // Defer Naive only when a non-Naive alternative exists across all algorithms or this one.
+    const bool defer_naive =
+        naive_disable &&
+        (non_naive_succeeded || std::any_of(solutions.begin(), solutions.end(), [&](const auto& s) {
+             return !is_naive_solver(s);
+         }));
+    auto selected     = miopen::solver::ConvSolution{miopenStatusUnknownError};
+    auto best         = std::numeric_limits<float>::max();
+    auto best_invoker = Invoker{};
     std::vector<float> samples;
 
-    for(const auto& sol : solutions)
+    // Iterate non-Naive solutions first, Naive last
+    std::vector<std::size_t> order(solutions.size());
+    std::iota(order.begin(), order.end(), 0);
+    if(defer_naive)
     {
+        std::stable_partition(order.begin(), order.end(), [&](std::size_t i) {
+            return !is_naive_solver(solutions[i]);
+        });
+    }
+
+    for(std::size_t idx : order)
+    {
+        const auto& sol = solutions[idx];
+
+        const bool is_naive = is_naive_solver(sol);
+        if(naive_disable && is_naive)
+        {
+            if(defer_naive && non_naive_succeeded)
+            {
+                MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
+                                                       << sol.solver_id);
+                continue;
+            }
+            MIOPEN_LOG_I("Unable to Skip Naive Solver: " << algorithm_name.ToString() << ":"
+                                                         << sol.solver_id);
+        }
+
         if(!conv::IsEnoughWorkspace(
                "EvaluateInvokers", solver::Id{sol.solver_id}, sol.workspace_sz, &invoke_ctx))
         {
@@ -267,14 +286,6 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
         float skip_time = core_result.find_search_best_time;
         if(skip_time < std::numeric_limits<float>::max())
         {
-            // skip Naive if another solver has been timed and solution took more than 5ms.
-            if(using_search_cutoff && sol.solver_id.find("Naive") != std::string::npos &&
-               skip_time > 5.0f)
-            {
-                MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
-                                                       << sol.solver_id);
-                continue;
-            }
             skip_time *= env::value(MIOPEN_FIND_SKIP_PCT) / 100.0f;
         }
         MIOPEN_LOG_I("Evaluating Solver: " << algorithm_name.ToString() << ":" << sol.solver_id);
@@ -286,6 +297,29 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
         try
         {
+            // Log solution name for grouped kernel logging
+            const auto solver_id_obj = solver::Id{sol.solver_id};
+
+            if(IsLoggingKernel())
+            {
+                LogSolutionName(sol.solver_id, solver_id_obj.Value(), sol.workspace_sz);
+
+                // Extract kernel name from first kernel in solution (if available)
+                std::string kernel_name;
+                if(!sol.construction_params.empty() &&
+                   !sol.construction_params[0].kernel_name.empty())
+                {
+                    kernel_name = sol.construction_params[0].kernel_name;
+                }
+                else
+                {
+                    kernel_name = sol.solver_id; // Fallback to solver name
+                }
+
+                // Log performance config before timing runs. We don't have config descriptor so
+                // leave it blank.
+                AddPerformanceConfig(kernel_name, "");
+            }
             // Run invoker max 8 times, with ~5 sec time limit.
             using elapsed_t                 = decltype(handle.GetKernelTime());
             constexpr elapsed_t TIME_MS_MAX = 5000.0;
@@ -322,6 +356,11 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
             if(samples.size() > 0)
             {
+                if(IsLoggingKernel())
+                {
+                    // Update the performance config with the collected samples
+                    AddInvokerTimes(samples);
+                }
                 // Remove outliers that are more than 2 positive modified z-score's away, and get
                 // the mean.
                 elapsed = miopen::removeHighOutliersAndGetMean(samples, 2.0f);
@@ -350,6 +389,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             else
                 solution.SetInvoker(invoker, {}, {});
             ret.emplace_back(std::move(solution));
+            if(!is_naive)
+                non_naive_succeeded = true;
         }
         catch(const miopen::Exception& ex)
         {
@@ -427,10 +468,17 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
     ret.solutions.reserve(total);
 
+    bool non_naive_succeeded = false;
     for(const auto& ss : solutions)
     {
-        auto evaluated = EvaluateInvokers(
-            handle, ss.second, ss.first, network_config, invoke_ctx, ret, force_attach_binary);
+        auto evaluated = EvaluateInvokers(handle,
+                                          ss.second,
+                                          ss.first,
+                                          network_config,
+                                          invoke_ctx,
+                                          ret,
+                                          force_attach_binary,
+                                          non_naive_succeeded);
 
         ret.solutions.insert(ret.solutions.end(),
                              std::make_move_iterator(evaluated.begin()),
@@ -476,9 +524,11 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
 {
     switch(algo)
     { // clang-format off
-#if MIOPEN_USE_GEMM
     case miopenConvolutionAlgoGEMM:
+#if MIOPEN_USE_GEMM
         return env::disabled(MIOPEN_DEBUG_CONV_GEMM);
+#else
+        return true;
 #endif
     case miopenConvolutionAlgoDirect:
         return env::disabled(MIOPEN_DEBUG_CONV_DIRECT) || detail::IsDirectProblemTooLarge(problem);
@@ -488,9 +538,10 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
         return env::disabled(MIOPEN_DEBUG_CONV_WINOGRAD);
     case miopenConvolutionAlgoImplicitGEMM:
         return env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM);
-    default: // Disable future algos by default to enforce explicit handling:
-        return true;
     } // clang-format on
+
+    // Disable future algos by default to enforce explicit handling
+    return true;
 }
 
 bool IsEnoughWorkspace(std::string_view where,

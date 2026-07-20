@@ -27,6 +27,19 @@ set_tests_properties(dispatcher_test_autocorrect PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# Operator tile-constraints table regression test
+add_test(
+    NAME dispatcher_test_arch_filter_constraints
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_arch_filter_constraints.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_arch_filter_constraints PROPERTIES
+    LABELS "dispatcher;python;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Verbose version of the test
 add_test(
     NAME dispatcher_test_autocorrect_verbose
@@ -86,6 +99,73 @@ add_test(
 set_tests_properties(dispatcher_test_arch_support PROPERTIES
     LABELS "dispatcher;python;arch"
     TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+add_test(
+    NAME dispatcher_test_fmha_codegen
+    COMMAND ${Python3_EXECUTABLE} -m unittest test_fmha_codegen -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_fmha_codegen PROPERTIES
+    LABELS "dispatcher;python;fmha;codegen"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+add_test(
+    NAME dispatcher_test_fmha_rules
+    COMMAND ${Python3_EXECUTABLE} -m unittest test_fmha_rules -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_fmha_rules PROPERTIES
+    LABELS "dispatcher;python;fmha;rules"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# FMHA parity test (requires GPU)
+add_test(
+    NAME dispatcher_test_fmha_parity
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_parity.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_fmha_parity PROPERTIES
+    LABELS "dispatcher;python;fmha;parity;gpu"
+    TIMEOUT 600
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Stream-K deep-core registry test (requires GPU + hipcc; SKIPs otherwise).
+# Pass the gfx target CMake already configured with so the test does not have to
+# detect it at runtime (no rocminfo dependency); it falls back to ROCm env vars
+# / amdgpu-arch if none is set here.
+set(_streamk_test_arch "")
+if(GPU_TARGETS)
+    list(GET GPU_TARGETS 0 _streamk_test_arch)
+elseif(CMAKE_HIP_ARCHITECTURES)
+    list(GET CMAKE_HIP_ARCHITECTURES 0 _streamk_test_arch)
+elseif(AMDGPU_TARGETS)
+    list(GET AMDGPU_TARGETS 0 _streamk_test_arch)
+endif()
+set(_streamk_arch_arg "")
+if(_streamk_test_arch)
+    set(_streamk_arch_arg --arch ${_streamk_test_arch})
+endif()
+
+add_test(
+    NAME dispatcher_test_streamk_registry
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_registry.py ${_streamk_arch_arg}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_streamk_registry PROPERTIES
+    LABELS "dispatcher;python;streamk;gpu"
+    TIMEOUT 900
+    SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
@@ -180,6 +260,9 @@ set(TEST_SOURCES
     test_registry.cpp
     test_dispatcher.cpp
     test_tile_backend.cpp
+    test_fmha_problem.cpp
+    test_fmha_dispatcher.cpp
+    test_fmha_registry.cpp
     
     # Extended unit tests (more comprehensive coverage)
     test_kernel_key_extended.cpp
@@ -221,6 +304,7 @@ set(STANDALONE_TESTS
     test_grouped_conv_problem.cpp
     test_grouped_conv_kernel_decl.cpp
     test_grouped_conv_registry.cpp
+    test_fmha_kernel_decl.cpp
 )
 
 foreach(test_source ${STANDALONE_TESTS})

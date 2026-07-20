@@ -44,6 +44,7 @@ set(rocblas_no_tensile_test_source
     general_gtest.cpp
     set_get_pointer_mode_gtest.cpp
     set_get_atomics_mode_gtest.cpp
+    set_get_alpha_beta_stride_gtest.cpp
     logging_mode_gtest.cpp
     ostream_threadsafety_gtest.cpp
     set_get_vector_gtest.cpp
@@ -185,6 +186,7 @@ set_target_properties( rocblas-test PROPERTIES
   IMPORT_SUFFIX ".lib"
   LINKER_LANGUAGE CXX
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+  ENABLE_EXPORTS ON
 )
 
 file(GLOB yaml_files "${CMAKE_CURRENT_SOURCE_DIR}/*.yaml")
@@ -240,7 +242,8 @@ if(ROCBLAS_HAS_CTEST_CATEGORIES)
     rocblas-test
     "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
     "${PROJECT_BINARY_DIR}/staging"
-    "${ROCBLAS_CTEST_INSTALL_FILE}"
+    INSTALL_TEST_FILE "${ROCBLAS_CTEST_INSTALL_FILE}"
+    USE_RTEST_DRIVER
   )
 elseif(BUILD_CLIENTS_TESTS AND NOT ROCBLAS_ENABLE_CTEST)
   message(STATUS "rocBLAS: ROCBLAS_ENABLE_CTEST=OFF (CTest category labels not applied)")

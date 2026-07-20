@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeA: 21
   DataInitTypeB: 21
@@ -29,8 +29,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True
@@ -50,8 +50,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -69,8 +69,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]
@@ -106,8 +106,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       Activation:    True
@@ -127,8 +127,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -146,8 +146,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]
@@ -183,8 +183,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True
@@ -204,8 +204,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -223,8 +223,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]
@@ -260,8 +260,8 @@ BenchmarkProblems:
       DestDataType: F8N
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       Activation:    True
@@ -281,8 +281,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -300,8 +300,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]
@@ -337,8 +337,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True
@@ -358,8 +358,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -377,8 +377,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]
@@ -414,8 +414,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True
@@ -435,8 +435,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -454,8 +454,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]
@@ -491,8 +491,8 @@ BenchmarkProblems:
       DestDataType: F8N
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       Activation:    True
@@ -513,8 +513,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -532,8 +532,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]
@@ -569,8 +569,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation:    True
@@ -590,8 +590,8 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
         - DepthU: [ 64 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - GlobalSplitU: [0]
@@ -609,8 +609,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]

@@ -26,7 +26,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
@@ -45,7 +47,7 @@ struct BlockDefs {
     RegKeyMap<StinkyInstruction*> lastDef;
 };
 
-std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo) {
+std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo, bool includePseudo) {
     const unsigned N = rpo.size();
     std::vector<BlockDefs> info(N);
 
@@ -56,7 +58,7 @@ std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo) {
             if (isPseudoInst(inst)) continue;
 
             for (const auto& dest : inst->getDestRegs()) {
-                if (!dest.isRegister() || isPseudoReg(dest)) continue;
+                if (!dest.isRegister() || (!includePseudo && isPseudoReg(dest))) continue;
                 for (unsigned d = 0; d < dest.reg.num; ++d) {
                     RegKey key = toRegKey(dest, d);
                     info[i].keys.insert(key);
@@ -77,7 +79,7 @@ std::vector<BlockDefs> gatherDefs(const std::vector<BasicBlock*>& rpo) {
 // no PHIs — they would be dead on arrival.
 //----------------------------------------------------------------------
 
-RegKeySet gatherUsedRegs(const std::vector<BasicBlock*>& rpo) {
+RegKeySet gatherUsedRegs(const std::vector<BasicBlock*>& rpo, bool includePseudo) {
     RegKeySet used;
     for (BasicBlock* bb : rpo) {
         for (IRBase& ir : *bb) {
@@ -85,7 +87,7 @@ RegKeySet gatherUsedRegs(const std::vector<BasicBlock*>& rpo) {
             auto* inst = cast<StinkyInstruction>(&ir);
             if (isPseudoInst(inst)) continue;
             for (const auto& src : inst->getSrcRegs()) {
-                if (!src.isRegister() || isPseudoReg(src)) continue;
+                if (!src.isRegister() || (!includePseudo && isPseudoReg(src))) continue;
                 for (unsigned s = 0; s < src.reg.num; ++s) used.insert(toRegKey(src, s));
             }
         }
@@ -109,7 +111,7 @@ std::vector<RegKeySet> computePhiSites(const std::vector<BlockDefs>& blockDefs,
     defSites.reserve(usedRegs.size());
     for (unsigned i = 0; i < N; ++i)
         for (const auto& key : blockDefs[i].keys)
-            if (usedRegs.count(key)) defSites[key].push_back(i);
+            if (usedRegs.contains(key)) defSites[key].push_back(i);
 
     std::vector<RegKeySet> sites(N);
 
@@ -204,8 +206,10 @@ class InsertPhiPass : public Pass {
         return &InsertPhiPass::ID;
     }
 
-    void run(Function& func, PassContext&) override {
-        insertPhiInstructions(func, true);
+    PreservedAnalyses run(Function& func, PassContext&, AnalysisManager& AM) override {
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        insertPhiInstructions(func, domInfo, true);
+        return preserveCFGAnalyses();
     }
 };
 
@@ -216,31 +220,29 @@ char InsertPhiPass::ID = 0;
 namespace stinkytofu {
 // Time: O(N*E + R*(N + F) + I), N = blocks, E = CFG edges,
 //       R = register keys, F = Sigma|DF[i]|, I = instructions.
-void insertPhiInstructions(Function& func, bool clearExisting) {
+void insertPhiInstructions(Function& func, const DominanceInfo& domInfo, bool clearExisting,
+                           bool includePseudo) {
     if (func.empty()) return;
 
     if (clearExisting) removeExistingPhis(func);
 
-    // --- 1. Dominance analysis ---
-
-    DominanceInfo domInfo = computeDominanceInfo(func);
     const auto& rpo = domInfo.rpo;
     const unsigned N = rpo.size();
     if (N == 0) return;
 
-    // --- 2. Per-block register definitions ---
+    // --- 1. Per-block register definitions ---
 
-    auto blockDefs = gatherDefs(rpo);
+    auto blockDefs = gatherDefs(rpo, includePseudo);
 
-    // --- 3. Globally-used registers (semi-pruned SSA) ---
+    // --- 2. Globally-used registers (semi-pruned SSA) ---
 
-    auto usedRegs = gatherUsedRegs(rpo);
+    auto usedRegs = gatherUsedRegs(rpo, includePseudo);
 
-    // --- 4. PHI-placement sites (iterated DF, only for used registers) ---
+    // --- 3. PHI-placement sites (iterated DF, only for used registers) ---
 
     auto phiSites = computePhiSites(blockDefs, domInfo.df, usedRegs, N);
 
-    // --- 5. Create PHI instructions (operands initially nullptr) ---
+    // --- 4. Create PHI instructions (operands initially nullptr) ---
 
     std::vector<RegKeyMap<StinkyInstruction*>> phiInsts(N);
 
@@ -258,11 +260,11 @@ void insertPhiInstructions(Function& func, bool clearExisting) {
         }
     }
 
-    // --- 6. Reaching definitions at block exits ---
+    // --- 5. Reaching definitions at block exits ---
 
     auto reachOut = computeReachOut(rpo, domInfo.idom, blockDefs, phiInsts);
 
-    // --- 7. Resolve PHI operands from predecessor reaching defs ---
+    // --- 6. Resolve PHI operands from predecessor reaching defs ---
 
     for (unsigned i = 0; i < N; ++i) {
         if (phiInsts[i].empty()) continue;
@@ -282,6 +284,12 @@ void insertPhiInstructions(Function& func, bool clearExisting) {
             }
         }
     }
+}
+
+void insertPhiInstructions(Function& func, bool clearExisting, bool includePseudo) {
+    if (func.empty()) return;
+    DominanceInfo domInfo = computeDominanceInfo(func);
+    insertPhiInstructions(func, domInfo, clearExisting, includePseudo);
 }
 
 std::unique_ptr<Pass> createInsertPhiPass() {

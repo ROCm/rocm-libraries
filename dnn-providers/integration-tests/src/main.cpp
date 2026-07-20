@@ -3,7 +3,10 @@
 
 #include <argparse.hpp>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -14,11 +17,17 @@
 #include <string>
 #include <vector>
 
+#include "common/Utilities.hpp"
 #include "harness/SharedHandle.hpp"
+#include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
 {
+
+using hipdnn_integration_tests::getEngineInfo;
 
 bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 {
@@ -30,48 +39,8 @@ bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 
     for(size_t i = 0; i < numEngines; ++i)
     {
-        // Two-call pattern: first call queries required buffer sizes
-        size_t engineNameLen = 0;
-        size_t pluginNameLen = 0;
-        size_t versionLen = 0;
-        size_t typeLen = 0;
-        int64_t engineId = 0;
-        hipdnnGetEngineInfo_ext(handle,
-                                i,
-                                &engineId,
-                                nullptr,
-                                &engineNameLen,
-                                nullptr,
-                                &pluginNameLen,
-                                nullptr,
-                                &versionLen,
-                                nullptr,
-                                &typeLen);
-
-        // Second call: ALL four string buffers must be non-null
-        std::string engineName(engineNameLen, '\0');
-        std::string pluginName(pluginNameLen, '\0');
-        std::string version(versionLen, '\0');
-        std::string type(typeLen, '\0');
-        hipdnnGetEngineInfo_ext(handle,
-                                i,
-                                &engineId,
-                                engineName.data(),
-                                &engineNameLen,
-                                pluginName.data(),
-                                &pluginNameLen,
-                                version.data(),
-                                &versionLen,
-                                type.data(),
-                                &typeLen);
-
-        // Trim null terminator
-        if(!engineName.empty() && engineName.back() == '\0')
-        {
-            engineName.pop_back();
-        }
-
-        if(engineName == targetEngineName)
+        auto info = getEngineInfo(handle, i);
+        if(info.engineName == targetEngineName)
         {
             return true;
         }
@@ -83,6 +52,17 @@ bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 
 int main(int argc, char** argv) noexcept
 {
+    // Shared hipdnn handle + HIP stream are created below before any fixture
+    // runs, so per-fixture SKIP_IF_NO_DEVICES is too late. Bail early on a
+    // no-GPU runner so ctest reports PASS.
+    int deviceCount = 0;
+    auto deviceStatus = hipGetDeviceCount(&deviceCount);
+    if(deviceStatus == hipErrorNoDevice || deviceCount == 0)
+    {
+        std::cout << "No HIP devices available; skipping " << argv[0] << "\n";
+        return 0;
+    }
+
     try
     {
         // Parse custom arguments before InitGoogleTest to avoid unknown flag warnings
@@ -105,6 +85,32 @@ int main(int argc, char** argv) noexcept
                   "without executing or validating the graph");
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
+        parser.add_argument("--reference-executor")
+            .help("Reference executor for validation: 'cpu' (default) or 'gpu'. "
+                  "Can also be set via HIPDNN_TEST_REFERENCE_EXECUTOR env var.");
+        parser.add_argument("--generate-support-matrix")
+            .default_value(std::string("support_matrix.md"))
+            .implicit_value(std::string("support_matrix.md"))
+            .help("Generate a markdown support matrix file (default: support_matrix.md).");
+        parser.add_argument("--allow-bundles")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Enable golden reference bundle test registration. "
+                  "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=1 env var.");
+        parser.add_argument("--gd", "--golden-data-dir")
+            .help("Path to the integration test bundle data directory. "
+                  "Defaults to <exe>/../lib/integration_test_bundles/. "
+                  "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
+        // --verification-mode governs BUNDLE tests (how the engine's output is
+        // verified). It is independent of --reference-executor, which governs the
+        // parameterized tests (which ref executor is exercised as the SUT).
+        parser.add_argument("--vm", "--verification-mode")
+            .help("How bundle engine output is verified: 'auto' (default; golden -> "
+                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. "
+                  "Can also be set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+        parser.add_argument("--capture-bundles")
+            .help("Capture C++ graph tests as JSON bundles into the given directory. "
+                  "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -142,6 +148,73 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --reference-executor argument (case-insensitive)
+        std::optional<hipdnn_integration_tests::ReferenceExecutorType> refExecType;
+        if(parser.is_used("--reference-executor"))
+        {
+            auto val = parser.get<std::string>("--reference-executor");
+            std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if(val == "gpu")
+            {
+                refExecType = hipdnn_integration_tests::ReferenceExecutorType::GPU;
+            }
+            else if(val == "cpu")
+            {
+                refExecType = hipdnn_integration_tests::ReferenceExecutorType::CPU;
+            }
+            else
+            {
+                std::cerr << "Error: --reference-executor must be 'cpu' or 'gpu'\n";
+                return 1;
+            }
+        }
+
+        // Parse --allow-bundles, --golden-data-dir, --verification-mode
+        auto allowBundles = parser.get<bool>("--allow-bundles");
+
+        std::optional<std::filesystem::path> goldenDataDir;
+        if(parser.is_used("--golden-data-dir"))
+        {
+            goldenDataDir = parser.get<std::string>("--golden-data-dir");
+            if(!std::filesystem::exists(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir path does not exist: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
+            if(!std::filesystem::is_directory(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir is not a directory: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
+        }
+
+        // Parse --verification-mode (case-insensitive); invalid value -> exit 1.
+        std::optional<hipdnn_integration_tests::VerificationMode> verificationMode;
+        if(parser.is_used("--verification-mode"))
+        {
+            try
+            {
+                verificationMode = hipdnn_integration_tests::parseVerificationMode(
+                    parser.get<std::string>("--verification-mode"));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
+        }
+
+        // Parse --capture-bundles argument
+        std::optional<std::filesystem::path> captureDir;
+        if(parser.is_used("--capture-bundles"))
+        {
+            captureDir = parser.get<std::string>("--capture-bundles");
+        }
+
         // Parse --test-article argument and load explicit plugin if provided
         std::optional<std::filesystem::path> articlePath;
         if(parser.is_used("--test-article"))
@@ -169,11 +242,26 @@ int main(int argc, char** argv) noexcept
             }
         }
 
-        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
-                                                         std::move(engineName),
-                                                         failOnUnsupported,
-                                                         skipGraphValidation,
-                                                         std::move(configPath));
+        // Enable support matrix generation if requested
+        if(parser.is_used("--generate-support-matrix"))
+        {
+            auto outputFile = parser.get<std::string>("--generate-support-matrix");
+            hipdnn_integration_tests::SupportMatrixCollector::get().setEnabled(true);
+            hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
+        }
+
+        hipdnn_integration_tests::TestConfigOptions opts;
+        opts.articlePath = std::move(articlePath);
+        opts.engineName = std::move(engineName);
+        opts.failOnUnsupported = failOnUnsupported;
+        opts.skipGraphValidation = skipGraphValidation;
+        opts.configPath = std::move(configPath);
+        opts.referenceExecutorType = refExecType;
+        opts.allowBundles = allowBundles;
+        opts.goldenDataDir = std::move(goldenDataDir);
+        opts.verificationMode = verificationMode;
+        opts.captureDir = std::move(captureDir);
+        hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -214,6 +302,7 @@ int main(int argc, char** argv) noexcept
         if(hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS)
         {
             std::cerr << "Failed to set stream on shared handle\n";
+            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
@@ -224,10 +313,44 @@ int main(int argc, char** argv) noexcept
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
                       << "' is not loaded. Check the plugin path.\n";
+            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
+        hipdnn_integration_tests::bundle::registerBundleTests();
+
         const int result = RUN_ALL_TESTS();
+
+        // Print bundles that ended without a verdict (no oracle / reference bug).
+        // Informational only — these SKIP, so they do not affect `result`.
+        hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+
+        // Generate support matrix if requested
+        if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
+        {
+            std::vector<std::string> allEngineNames;
+
+            if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
+            {
+                allEngineNames.emplace_back(
+                    hipdnn_integration_tests::TestConfig::get().getEngineName());
+            }
+            else
+            {
+                // Enumerate all loaded engines from the handle
+                size_t numEngines = 0;
+                if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
+                {
+                    for(size_t i = 0; i < numEngines; ++i)
+                    {
+                        auto info = getEngineInfo(handle, i);
+                        allEngineNames.push_back(std::move(info.engineName));
+                    }
+                }
+            }
+
+            hipdnn_integration_tests::SupportMatrixCollector::get().writeMarkdown(allEngineNames);
+        }
 
         // Clean up shared handle and stream
         static_cast<void>(hipStreamDestroy(stream));

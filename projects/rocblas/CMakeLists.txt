@@ -74,7 +74,7 @@ get_os_id(OS_ID)
 message (STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "5.4.0" )
+set ( VERSION_STRING "5.6.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -159,7 +159,10 @@ option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
 set( HIPBLASLT_VERSION 1.2.2 CACHE STRING "The version of HipBLASLt to be used" )
 
-if( NOT BUILD_WITH_TENSILE )
+if( BUILD_WITH_HIPBLASLT_ONLY )
+  set( BUILD_WITH_HIPBLASLT ON )
+  set( BUILD_WITH_TENSILE OFF )
+elseif( NOT BUILD_WITH_TENSILE )
   set( BUILD_WITH_HIPBLASLT OFF )
 endif()
 

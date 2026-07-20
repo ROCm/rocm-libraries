@@ -31,6 +31,8 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <>
@@ -250,3 +252,4 @@ namespace std
     };
 
 } // namespace std
+

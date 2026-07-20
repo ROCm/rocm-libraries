@@ -12,8 +12,8 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFro
 {
     // Create a valid batchnorm graph with variance
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the batchnorm node and attributes
     const auto& node = graph.getNode(0);
@@ -23,7 +23,7 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFro
     // Expect that params construction doesn't throw
     EXPECT_NO_THROW(BatchnormFwdInferenceWithVarianceParams(*attrs, graph.getTensorMap()));
 
-    BatchnormFwdInferenceWithVarianceParams params(*attrs, graph.getTensorMap());
+    const BatchnormFwdInferenceWithVarianceParams params(*attrs, graph.getTensorMap());
     // verify activation optional params are null when no activation is specified
     EXPECT_EQ(params.optActivation(), std::nullopt);
     EXPECT_EQ(params.activationOut(), std::nullopt);
@@ -35,8 +35,8 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams, InitializesAllTensorsFro
     EXPECT_NO_THROW(params.bias());
     EXPECT_NO_THROW(params.estMean());
     EXPECT_NO_THROW(params.variance());
-    EXPECT_NO_THROW(params.epsilonValue());
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NO_THROW(params.epsilonValue(nullptr, 0));
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
@@ -45,8 +45,8 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
     // Create a valid batchnorm graph with variance and activation
     auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceActivGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the batchnorm node and attributes
     const auto& node = graph.getNode(0);
@@ -62,7 +62,7 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
     EXPECT_NO_THROW(
         BatchnormFwdInferenceWithVarianceParams(*attrs, *activAttrs, graph.getTensorMap()));
 
-    BatchnormFwdInferenceWithVarianceParams params(*attrs, *activAttrs, graph.getTensorMap());
+    const BatchnormFwdInferenceWithVarianceParams params(*attrs, *activAttrs, graph.getTensorMap());
 
     // verify activation optional params are present
     EXPECT_NE(params.optActivation(), std::nullopt);
@@ -75,6 +75,6 @@ TEST(TestMiopenBatchnormFwdInferenceWithVarianceParams,
     EXPECT_NO_THROW(params.bias());
     EXPECT_NO_THROW(params.estMean());
     EXPECT_NO_THROW(params.variance());
-    EXPECT_NO_THROW(params.epsilonValue());
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NO_THROW(params.epsilonValue(nullptr, 0));
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }

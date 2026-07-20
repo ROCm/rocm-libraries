@@ -33,6 +33,8 @@
 
 #include <cstddef>
 
+#include <tensilelitehost/export.h>
+
 LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(rocisa::DataType)
 LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(TensileLite::ActivationType)
 
@@ -312,3 +314,4 @@ namespace llvm
             "fdsa");
     } // namespace yaml
 } // namespace llvm
+

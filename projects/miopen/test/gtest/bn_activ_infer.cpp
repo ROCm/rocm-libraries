@@ -47,9 +47,9 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            const float activ_gamma,
                            const miopen::TensorDescriptor& xDesc,
                            ConstData_t x,
-                           const miopen::TensorDescriptor& yDesc,
+                           const miopen::TensorDescriptor& /*yDesc*/,
                            Data_t y,
-                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
+                           const miopen::TensorDescriptor& /*bnScaleBiasMeanVarDesc*/,
                            ConstData_t bnScale,
                            ConstData_t bnBias,
                            ConstData_t estimatedMean,
@@ -61,9 +61,9 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
 
     // Setup the kernel launch parameters
-    bool is_layout_NHWC = (xDesc.GetLayout_t() == miopenTensorNHWC);
-    size_t read_len     = (bn_mode == miopenBNSpatial) ? (is_layout_NHWC ? c : h * w) : c * h * w;
-    size_t read_unit    = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+    const bool is_layout_NHWC = (xDesc.GetLayoutEnum() == miopenTensorNHWC);
+    size_t read_len  = (bn_mode == miopenBNSpatial) ? (is_layout_NHWC ? c : h * w) : c * h * w;
+    size_t read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
     // For vectorized r/rw of the input/output data
     std::string READ_TYPE = (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(read_unit);
     size_t max_localsize  = 256;
@@ -319,6 +319,17 @@ std::vector<miopenActivationMode_t> ActivationConfigs()
             miopenActivationELU};
 }
 
+// Activation subsets for the tiered instantiations. The full mode list stays in
+// ActivationConfigs() (used by the Full instantiations).
+std::vector<miopenActivationMode_t> ActivationConfigsSmoke() { return {miopenActivationRELU}; }
+
+std::vector<miopenActivationMode_t> ActivationConfigsStandard()
+{
+    // Cover all activation modes at PR level (the Standard tier still trims the
+    // shape and layout cross product). Identical to ActivationConfigs().
+    return ActivationConfigs();
+}
+
 } // namespace BatchNormActivInfer
 using namespace BatchNormActivInfer;
 
@@ -382,45 +393,36 @@ TEST_P(GPU_bn_activ_infer_per_act_BFP16, PortTest)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_spatial_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_per_act_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_spatial_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_per_act_FP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_spatial_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_activ_infer_per_act_BFP16,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNInferTestConfigs<bfloat16>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),
-    TestNameGenerator());
+// Tiered instantiation: Smoke (pre-commit) and Standard (per-CI) run small
+// representative subsets; Full (comprehensive/nightly) runs the complete
+// activation x shape x layout cross product so no coverage is lost.
+#define BN_ACTIV_INFER_TIERS(SUITE, T, MODE)                                                       \
+    INSTANTIATE_TEST_SUITE_P(Smoke,                                                                \
+                             SUITE,                                                                \
+                             testing::Combine(testing::ValuesIn(ActivationConfigsSmoke()),         \
+                                              testing::ValuesIn(BNInferTestConfigsSmoke<T>(MODE)), \
+                                              testing::Values(miopenTensorNCHW)),                  \
+                             TestNameGenerator());                                                 \
+    INSTANTIATE_TEST_SUITE_P(                                                                      \
+        Standard,                                                                                  \
+        SUITE,                                                                                     \
+        testing::Combine(testing::ValuesIn(ActivationConfigsStandard()),                           \
+                         testing::ValuesIn(BNInferTestConfigsStandard<T>(MODE)),                   \
+                         testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
+        TestNameGenerator());                                                                      \
+    INSTANTIATE_TEST_SUITE_P(                                                                      \
+        Full,                                                                                      \
+        SUITE,                                                                                     \
+        testing::Combine(testing::ValuesIn(ActivationConfigs()),                                   \
+                         testing::ValuesIn(BNInferTestConfigsFull<T>(MODE)),                       \
+                         testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
+        TestNameGenerator());
+
+BN_ACTIV_INFER_TIERS(GPU_bn_activ_infer_spatial_FP32, float, miopenBNSpatial)
+BN_ACTIV_INFER_TIERS(GPU_bn_activ_infer_per_act_FP32, float, miopenBNPerActivation)
+BN_ACTIV_INFER_TIERS(GPU_bn_activ_infer_spatial_FP16, half_float::half, miopenBNSpatial)
+BN_ACTIV_INFER_TIERS(GPU_bn_activ_infer_per_act_FP16, half_float::half, miopenBNPerActivation)
+BN_ACTIV_INFER_TIERS(GPU_bn_activ_infer_spatial_BFP16, bfloat16, miopenBNSpatial)
+BN_ACTIV_INFER_TIERS(GPU_bn_activ_infer_per_act_BFP16, bfloat16, miopenBNPerActivation)
+
+#undef BN_ACTIV_INFER_TIERS

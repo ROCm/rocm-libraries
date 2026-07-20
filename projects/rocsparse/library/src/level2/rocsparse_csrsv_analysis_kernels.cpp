@@ -39,7 +39,7 @@ rocsparse_status launch_csrsv_analysis_upper_kernel(rocsparse_handle    handle,
                                                     void* __restrict__ diag_ind,
                                                     int32_t* __restrict__ done_array,
                                                     void* __restrict__ max_nnz,
-                                                    void* __restrict__ zero_pivot,
+                                                    void*                zero_pivot,
                                                     rocsparse_index_base idx_base,
                                                     rocsparse_diag_type  diag_type)
 {
@@ -74,7 +74,7 @@ rocsparse_status launch_csrsv_analysis_lower_kernel(rocsparse_handle    handle,
                                                     void* __restrict__ diag_ind,
                                                     int32_t* __restrict__ done_array,
                                                     void* __restrict__ max_nnz,
-                                                    void* __restrict__ zero_pivot,
+                                                    void*                zero_pivot,
                                                     rocsparse_index_base idx_base,
                                                     rocsparse_diag_type  diag_type)
 {
@@ -168,7 +168,7 @@ rocsparse_status rocsparse::launch_csrsv_analysis_kernel(rocsparse_handle    han
                                                          void* __restrict__ diag_ind,
                                                          int32_t* __restrict__ done_array,
                                                          void* __restrict__ max_nnz,
-                                                         void* __restrict__ zero_pivot,
+                                                         void*                zero_pivot,
                                                          rocsparse_index_base idx_base,
                                                          rocsparse_diag_type  diag_type,
                                                          rocsparse_fill_mode  fill_mode)

@@ -14,10 +14,19 @@
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
+
+// placeholder type if we want to opt-out a tensor view parameter
+struct null_tensor_view
+{
+    CK_TILE_HOST_DEVICE constexpr auto get_buffer_view() const { return null_buffer_view{}; }
+
+    CK_TILE_HOST_DEVICE constexpr auto get_buffer_view() { return null_buffer_view{}; }
+};
 
 /*
  * tensor_view
@@ -39,7 +48,8 @@ namespace ck_tile {
  */
 template <typename BufferView_,
           typename TensorDesc_,
-          memory_operation_enum DstInMemOp_ = memory_operation_enum::set>
+          memory_operation_enum DstInMemOp_ = memory_operation_enum::set,
+          bool LargeTensor_                 = false>
 struct tensor_view
 {
     using buffer_view = remove_reference_t<BufferView_>;
@@ -48,11 +58,21 @@ struct tensor_view
     using TensorDesc  = remove_cvref_t<TensorDesc_>;
     using TensorIndex = array<index_t, TensorDesc::get_num_of_top_dimension()>;
     using TensorCoord = decltype(make_tensor_coordinate(TensorDesc{}, TensorIndex{}));
-    static constexpr auto DstInMemOp    = DstInMemOp_;
-    static constexpr index_t PackedSize = ck_tile::numeric_traits<DataType_>::PackedSize;
+    static constexpr auto DstInMemOp  = DstInMemOp_;
+    static constexpr bool LargeTensor = LargeTensor_;
+    using OffsetType                  = std::conditional_t<LargeTensor, long_index_t, index_t>;
+    static constexpr OffsetType PackedSize =
+        static_cast<OffsetType>(ck_tile::numeric_traits<DataType_>::PackedSize);
 
     template <typename T>
     using vector_scalar_t = typename vector_traits<remove_cvref_t<T>>::scalar_type;
+
+    template <typename OffsetArg, typename LinearOffsetArg>
+    static constexpr void assert_offset_type()
+    {
+        static_assert(std::is_same_v<std::remove_const_t<OffsetArg>, OffsetType> &&
+                      std::is_same_v<LinearOffsetArg, OffsetType>);
+    }
 
     CK_TILE_HOST_DEVICE constexpr tensor_view() = default;
 
@@ -78,6 +98,7 @@ struct tensor_view
     // X is vector of DataType.
     // "coord" is coordinate of DataType, not X. "coord" should be aligned to X
     template <typename X,
+              index_t static_offset      = 0,
               bool oob_conditional_check = true,
               typename std::enable_if<
                   std::is_same_v<typename vector_traits<remove_cvref_t<X>>::scalar_type,
@@ -85,17 +106,21 @@ struct tensor_view
                   bool>::type = false>
     CK_TILE_HOST_DEVICE constexpr remove_cvref_t<X>
     get_vectorized_elements(const TensorCoord& coord,
-                            index_t linear_offset,
+                            OffsetType linear_offset,
                             bool_constant<oob_conditional_check> = {}) const
     {
-        return buf_.template get<X>(
-            coord.get_offset() / PackedSize,
+        const OffsetType offset = coord.get_offset();
+        assert_offset_type<decltype(offset), decltype(linear_offset)>();
+        return buf_.template get<X, OffsetType, static_offset / PackedSize>(
+            offset / PackedSize,
             linear_offset / PackedSize,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
-            bool_constant<oob_conditional_check>{});
+            bool_constant<oob_conditional_check>{},
+            bool_constant<LargeTensor>{});
     }
 
     template <typename X,
+              index_t static_offset      = 0,
               bool oob_conditional_check = true,
               typename std::enable_if<
                   std::is_same_v<typename vector_traits<remove_cvref_t<X>>::scalar_type,
@@ -103,14 +128,18 @@ struct tensor_view
                   bool>::type = false>
     CK_TILE_HOST_DEVICE constexpr remove_cvref_t<X>
     get_vectorized_elements(const TensorCoord& coord,
-                            index_t linear_offset,
+                            OffsetType linear_offset,
                             bool is_valid_element, // flag
                             bool_constant<oob_conditional_check> = {}) const
     {
-        return buf_.template get<X>(coord.get_offset() / PackedSize,
-                                    linear_offset / PackedSize,
-                                    is_valid_element,
-                                    bool_constant<oob_conditional_check>{});
+        const OffsetType offset = coord.get_offset();
+        assert_offset_type<decltype(offset), decltype(linear_offset)>();
+        return buf_.template get<X, OffsetType, static_offset / PackedSize>(
+            offset / PackedSize,
+            linear_offset / PackedSize,
+            is_valid_element,
+            bool_constant<oob_conditional_check>{},
+            bool_constant<LargeTensor>{});
     }
 
     // X is vector of DataType.
@@ -167,6 +196,7 @@ struct tensor_view
     async_get_vectorized_elements(CK_TILE_LDS_ADDR DataType_* smem,
                                   index_t offset,
                                   index_t wave_offset,
+                                  bool is_valid,
                                   number<IMM>                          = {},
                                   bool_constant<oob_conditional_check> = {}) const
     {
@@ -174,7 +204,7 @@ struct tensor_view
                                           offset / PackedSize,
                                           wave_offset,
                                           number<IMM / PackedSize>{},
-                                          true,
+                                          is_valid,
                                           bool_constant<oob_conditional_check>{});
     }
 
@@ -192,9 +222,29 @@ struct tensor_view
             smem,
             coord.get_offset() / PackedSize + linear_offset / PackedSize,
             0,
-            0, // linear_offset need to be imm and is not supported currently
+            number<0>{}, // linear_offset need to be imm and is not supported currently
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             bool_constant<oob_conditional_check>{});
+    }
+
+    template <typename X,
+              bool oob_conditional_check = true,
+              index_t IMM                = 0,
+              typename                   = std::enable_if_t<
+                                    std::is_same_v<typename vector_traits<remove_cvref_t<X>>::scalar_type,
+                                                   typename vector_traits<DataType_>::scalar_type>>>
+    CK_TILE_HOST_DEVICE constexpr void
+    async_get_vectorized_elements(CK_TILE_LDS_ADDR DataType_* smem,
+                                  const TensorCoord& coord,
+                                  index_t linear_offset,
+                                  number<IMM>,
+                                  bool_constant<oob_conditional_check> = {}) const
+    {
+        return buf_.template async_get<X>(smem,
+                                          coord.get_offset() / PackedSize,
+                                          linear_offset / PackedSize,
+                                          number<IMM / PackedSize>{},
+                                          bool_constant<oob_conditional_check>{});
     }
 
     template <typename X,
@@ -211,8 +261,8 @@ struct tensor_view
     {
         return buf_.template async_get<X>(smem,
                                           coord.get_offset() / PackedSize,
-                                          0,
                                           linear_offset / PackedSize,
+                                          number<0>{},
                                           is_valid_element,
                                           bool_constant<oob_conditional_check>{});
     }
@@ -316,12 +366,15 @@ struct tensor_view
                   bool>::type = false>
     CK_TILE_HOST_DEVICE constexpr void
     set_vectorized_elements(const TensorCoord& coord,
-                            index_t linear_offset,
+                            OffsetType linear_offset,
                             const X& x,
                             bool_constant<oob_conditional_check> = {})
     {
-        buf_.template set<X, oob_conditional_check>(
-            coord.get_offset() / PackedSize,
+        const OffsetType offset = coord.get_offset();
+        assert_offset_type<decltype(offset), decltype(linear_offset)>();
+
+        buf_.template set<X, OffsetType, oob_conditional_check, LargeTensor>(
+            offset / PackedSize,
             linear_offset / PackedSize,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             x);
@@ -335,13 +388,16 @@ struct tensor_view
                   bool>::type = false>
     CK_TILE_HOST_DEVICE constexpr void
     set_vectorized_elements(const TensorCoord& coord,
-                            index_t linear_offset,
+                            OffsetType linear_offset,
                             bool is_valid_element,
                             const X& x,
                             bool_constant<oob_conditional_check> = {})
     {
-        buf_.template set<X, oob_conditional_check>(
-            coord.get_offset(), linear_offset, is_valid_element, x);
+        const OffsetType offset = coord.get_offset();
+        assert_offset_type<decltype(offset), decltype(linear_offset)>();
+
+        buf_.template set<X, OffsetType, oob_conditional_check, LargeTensor>(
+            offset / PackedSize, linear_offset / PackedSize, is_valid_element, x);
     }
 
     template <typename X,
@@ -390,12 +446,15 @@ struct tensor_view
                   bool>::type = false>
     CK_TILE_HOST_DEVICE constexpr void
     update_vectorized_elements(const TensorCoord& coord,
-                               index_t linear_offset,
+                               OffsetType linear_offset,
                                const X& x,
                                bool_constant<oob_conditional_check> = {})
     {
-        buf_.template update<DstInMemOp, X, oob_conditional_check>(
-            coord.get_offset() / PackedSize,
+        const OffsetType offset = coord.get_offset();
+        assert_offset_type<decltype(offset), decltype(linear_offset)>();
+
+        buf_.template update<DstInMemOp, X, OffsetType, LargeTensor, oob_conditional_check>(
+            offset / PackedSize,
             linear_offset / PackedSize,
             coordinate_has_valid_offset_assuming_top_index_is_valid(desc_, coord),
             x);
@@ -409,13 +468,16 @@ struct tensor_view
                   bool>::type = false>
     CK_TILE_HOST_DEVICE constexpr void
     update_vectorized_elements(const TensorCoord& coord,
-                               index_t linear_offset,
+                               OffsetType linear_offset,
                                bool is_valid_element,
                                const X& x,
                                bool_constant<oob_conditional_check> = {})
     {
-        buf_.template update<DstInMemOp, X, oob_conditional_check>(
-            coord.get_offset() / PackedSize, linear_offset / PackedSize, is_valid_element, x);
+        const OffsetType offset = coord.get_offset();
+        assert_offset_type<decltype(offset), decltype(linear_offset)>();
+
+        buf_.template update<DstInMemOp, X, OffsetType, LargeTensor, oob_conditional_check>(
+            offset / PackedSize, linear_offset / PackedSize, is_valid_element, x);
     }
 
     // X is vector of DataType.
@@ -460,22 +522,89 @@ struct tensor_view
             coord.get_offset() / PackedSize, linear_offset / PackedSize, is_valid_element, x);
     }
 
+    template <typename TDMConfig_,
+              typename BoxDim_,
+              index_t num_tensor_dims,
+              typename DimTuple_,
+              typename GatherIndexView_   = null_tensor_view,
+              index_t gather_index_offset = -1>
+    CK_TILE_DEVICE constexpr void
+    get_tdm_elements(const TDMConfig_& tdm_config,
+                     CK_TILE_LDS_ADDR remove_cvref_t<DataType>* smem,
+                     const TensorCoord& coord,
+                     DimTuple_& tensor_dims,
+                     DimTuple_& global_strides,
+                     number<num_tensor_dims>                   = {},
+                     const GatherIndexView_& gather_index_view = null_tensor_view{},
+                     number<gather_index_offset>               = {})
+    {
+        if constexpr(std::is_same_v<GatherIndexView_, null_tensor_view>)
+        {
+            return buf_.template tdm_get<TDMConfig_,
+                                         DimTuple_,
+                                         BoxDim_,
+                                         num_tensor_dims,
+                                         null_buffer_view,
+                                         gather_index_offset>(tdm_config,
+                                                              smem,
+                                                              coord.get_offset() / PackedSize,
+                                                              tensor_dims,
+                                                              global_strides,
+                                                              number<num_tensor_dims>{},
+                                                              null_buffer_view{},
+                                                              number<gather_index_offset>{});
+        }
+        else
+        {
+            auto buffer_view = gather_index_view.get_buffer_view();
+            return buf_.template tdm_get<TDMConfig_,
+                                         DimTuple_,
+                                         BoxDim_,
+                                         num_tensor_dims,
+                                         decltype(buffer_view),
+                                         gather_index_offset>(tdm_config,
+                                                              smem,
+                                                              coord.get_offset() / PackedSize,
+                                                              tensor_dims,
+                                                              global_strides,
+                                                              number<num_tensor_dims>{},
+                                                              buffer_view,
+                                                              number<gather_index_offset>{});
+        }
+    }
+
+    template <typename TDMConfig_, typename BoxDim_, index_t num_tensor_dims, typename DimTuple_>
+    CK_TILE_DEVICE constexpr void
+    store_tdm_elements(const TDMConfig_& tdm_config,
+                       CK_TILE_LDS_ADDR remove_cvref_t<DataType>* smem,
+                       const TensorCoord& coord,
+                       DimTuple_& tensor_dims,
+                       DimTuple_& global_strides,
+                       number<num_tensor_dims> = {})
+    {
+        return buf_.template tdm_store<TDMConfig_, DimTuple_, BoxDim_, num_tensor_dims>(
+            tdm_config,
+            smem,
+            coord.get_offset() / PackedSize,
+            tensor_dims,
+            global_strides,
+            number<num_tensor_dims>{});
+    }
+
     // member
     buffer_view buf_;
     TensorDesc desc_;
-};
-
-// placeholder type if we want to opt-out a tile view parameter
-struct null_tensor_view
-{
 };
 
 template <typename T>
 struct is_tensor_view : std::false_type
 {
 };
-template <typename BufferView, typename TensorDesc, memory_operation_enum DstInMemOp>
-struct is_tensor_view<tensor_view<BufferView, TensorDesc, DstInMemOp>> : std::true_type
+template <typename BufferView,
+          typename TensorDesc,
+          memory_operation_enum DstInMemOp,
+          bool LargeTensor>
+struct is_tensor_view<tensor_view<BufferView, TensorDesc, DstInMemOp, LargeTensor>> : std::true_type
 {
 };
 template <>
@@ -488,6 +617,7 @@ inline constexpr bool is_tensor_view_v = is_tensor_view<T>::value;
 template <address_space_enum BufferAddressSpace = address_space_enum::generic,
           memory_operation_enum DstInMemOp      = memory_operation_enum::set,
           amd_buffer_coherence_enum Coherence   = amd_buffer_coherence_enum::coherence_default,
+          bool LargeTensor                      = false,
           typename DataType,
           typename... Ts>
 CK_TILE_HOST_DEVICE constexpr auto make_tensor_view(DataType* __restrict__ p,
@@ -496,12 +626,14 @@ CK_TILE_HOST_DEVICE constexpr auto make_tensor_view(DataType* __restrict__ p,
     auto buffer_view =
         make_buffer_view<BufferAddressSpace, Coherence>(p, desc.get_element_space_size());
 
-    return tensor_view<decltype(buffer_view), decltype(desc), DstInMemOp>{buffer_view, desc};
+    return tensor_view<decltype(buffer_view), decltype(desc), DstInMemOp, LargeTensor>{buffer_view,
+                                                                                       desc};
 }
 
 template <address_space_enum BufferAddressSpace = address_space_enum::generic,
           memory_operation_enum DstInMemOp      = memory_operation_enum::set,
           amd_buffer_coherence_enum Coherence   = amd_buffer_coherence_enum::coherence_default,
+          bool LargeTensor                      = false,
           typename DataType,
           typename... Lengths,
           typename... Strides,
@@ -523,7 +655,8 @@ make_naive_tensor_view(DataType* __restrict__ p,
     auto buffer_view =
         make_buffer_view<BufferAddressSpace, Coherence>(p, desc.get_element_space_size());
 
-    return tensor_view<decltype(buffer_view), decltype(desc), DstInMemOp>{buffer_view, desc};
+    return tensor_view<decltype(buffer_view), decltype(desc), DstInMemOp, LargeTensor>{buffer_view,
+                                                                                       desc};
 }
 
 template <address_space_enum BufferAddressSpace = address_space_enum::generic,
@@ -561,7 +694,8 @@ CK_TILE_HOST_DEVICE constexpr auto transform_tensor_view(const OldTensorView& ol
 
     return tensor_view<typename OldTensorView::buffer_view,
                        remove_cvref_t<decltype(new_desc)>,
-                       remove_cvref_t<OldTensorView>::DstInMemOp>{old_tensor_view.buf_, new_desc};
+                       remove_cvref_t<OldTensorView>::DstInMemOp,
+                       remove_cvref_t<OldTensorView>::LargeTensor>{old_tensor_view.buf_, new_desc};
 }
 
 template <typename TensorView,
@@ -608,4 +742,6 @@ pad_tensor_view(const TensorView& tensor_view, const TileLengths& tile_lengths, 
 }
 
 } // namespace ck_tile
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

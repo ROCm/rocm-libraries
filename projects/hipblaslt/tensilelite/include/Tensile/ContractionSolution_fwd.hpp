@@ -26,8 +26,11 @@
 
 #pragma once
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     class ContractionSolution;
     struct SizeMapping;
 }
+

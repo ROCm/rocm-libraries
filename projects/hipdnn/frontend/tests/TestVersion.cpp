@@ -22,3 +22,18 @@ TEST(TestVersion, PositiveVersion)
     EXPECT_GE(version.minor, 0);
     EXPECT_GE(version.patch, 0);
 }
+
+TEST(TestVersion, MacrosMatchVersionString)
+{
+    Version version;
+    ASSERT_NO_THROW(version = Version(std::string_view{HIPDNN_FRONTEND_VERSION_STRING}));
+
+    EXPECT_EQ(version.major, HIPDNN_FRONTEND_VERSION_MAJOR);
+    EXPECT_EQ(version.minor, HIPDNN_FRONTEND_VERSION_MINOR);
+    EXPECT_EQ(version.patch, HIPDNN_FRONTEND_VERSION_PATCH);
+}
+
+TEST(TestVersion, TweakNonEmpty)
+{
+    EXPECT_FALSE(std::string_view{HIPDNN_FRONTEND_VERSION_TWEAK}.empty());
+}

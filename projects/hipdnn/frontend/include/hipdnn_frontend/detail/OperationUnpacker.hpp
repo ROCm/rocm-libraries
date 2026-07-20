@@ -20,11 +20,14 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
+#include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <memory>
@@ -119,11 +122,23 @@ namespace hipdnn_frontend::detail
                 {}};
     case HIPDNN_OPERATION_TYPE_RMSNORM_EXT:
         return {std::make_shared<graph::RMSNormNode>(graph::RMSNormAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT:
+        return {std::make_shared<graph::RMSNormBackwardNode>(graph::RMSNormBackwardAttributes{},
+                                                             graphAttrs),
+                {}};
     case HIPDNN_OPERATION_TYPE_SDPA_BACKWARD_EXT:
         return {std::make_shared<graph::SdpaBwdNode>(graph::SdpaBackwardAttributes{}, graphAttrs),
                 {}};
     case HIPDNN_OPERATION_TYPE_SDPA_FORWARD_EXT:
         return {std::make_shared<graph::SdpaFwdNode>(graph::SdpaAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_RESAMPLE_FWD:
+        return {
+            std::make_shared<graph::ResampleFwdNode>(graph::ResampleFwdAttributes{}, graphAttrs),
+            {}};
+    case HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD_EXT:
+        return {std::make_shared<graph::LayernormBackwardNode>(graph::LayernormBackwardAttributes{},
+                                                               graphAttrs),
+                {}};
     default:
         return {nullptr,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,

@@ -93,6 +93,12 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
             return static_cast<TargetType>(val->value());
         }
         break;
+    case data_objects::DataType::BOOLEAN:
+        if(auto val = tensorAttr.value.AsBoolValue())
+        {
+            return static_cast<TargetType>(val->value());
+        }
+        break;
     case data_objects::DataType::UINT8:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
@@ -116,6 +122,20 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& te
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
             auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2::from_bits(val->value());
+            return static_cast<TargetType>(static_cast<float>(bfp8));
+        }
+        break;
+    case data_objects::DataType::FP8_E4M3_FNUZ:
+        if(auto val = tensorAttr.value.AsFloat8Value())
+        {
+            auto fp8 = hipdnn_data_sdk::types::fp8_e4m3_fnuz::from_bits(val->value());
+            return static_cast<TargetType>(static_cast<float>(fp8));
+        }
+        break;
+    case data_objects::DataType::FP8_E5M2_FNUZ:
+        if(auto val = tensorAttr.value.AsFloat8Value())
+        {
+            auto bfp8 = hipdnn_data_sdk::types::fp8_e5m2_fnuz::from_bits(val->value());
             return static_cast<TargetType>(static_cast<float>(bfp8));
         }
         break;
@@ -153,6 +173,45 @@ inline double extractDoubleFromTensorValue(const data_objects::TensorAttributes*
                                            const char* paramName)
 {
     return extractValueFromTensorValue<double>(tensorAttr, paramName);
+}
+
+/// @brief Reads the runtime pass-by-value flag off a serialized tensor table.
+inline bool isTensorRuntimePassByValue(const data_objects::TensorAttributes* tensor)
+{
+    return tensor != nullptr && tensor->is_runtime_pass_by_value();
+}
+
+/// True if `tensor` is a pass-by-value scalar in ANY state (compile-time
+/// constant, runtime-with-default, or pure runtime user-supplied)
+inline bool isPassByValueTensor(const data_objects::TensorAttributes* tensor)
+{
+    return tensor != nullptr
+           && (tensor->is_runtime_pass_by_value()
+               || tensor->value_type() != data_objects::TensorValue::NONE);
+}
+
+/// @brief Reads the runtime pass-by-value flag off a mutable tensor object.
+inline bool isTensorRuntimePassByValue(const data_objects::TensorAttributesT* tensor)
+{
+    return tensor != nullptr && tensor->is_runtime_pass_by_value;
+}
+
+/// @brief True if any tensor obtained by applying `project` to an element of
+/// `range` is a runtime pass-by-value scalar. `project` maps an element to a
+/// tensor pointer accepted by isTensorRuntimePassByValue, so the same flag
+/// semantics are shared across the mutable-object graph (GraphDescriptor) and
+/// the serialized-table graph (EnginePluginResourceManager).
+template <typename Range, typename Project>
+bool anyTensorIsRuntimePassByValue(const Range& range, Project project)
+{
+    for(const auto& element : range)
+    {
+        if(isTensorRuntimePassByValue(project(element)))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 }

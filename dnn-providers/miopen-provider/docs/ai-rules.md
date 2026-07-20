@@ -66,7 +66,7 @@ cmake --build build
 
 This uses the `miopen-provider` preset which builds both hipDNN and miopen-provider together. Other available presets: `hipdnn` (hipDNN only), `hipblaslt-provider` (hipDNN + hipblaslt-provider).
 
-In the superbuild, targets are prefixed (e.g., `miopen-provider-check`, `miopen-provider-unit-check`). See `projects/hipdnn/docs/Superbuild.md` for full details.
+In the superbuild, targets are prefixed and YAML category-driven (e.g., `miopen-provider-check`, `miopen-provider-quick-check`). See `projects/hipdnn/docs/Superbuild.md` for full details.
 
 **Standalone build** (requires hipDNN installed):
 ```bash
@@ -129,17 +129,17 @@ Rules apply to the TestSuite name (first param of `TEST` / `TEST_F` / `TEST_P`).
 
 **Composition (left → right):**
 
-1. Optional `Integration` prefix (only for integration tests, always first)
-2. Optional `Gpu` (immediately after `Integration` if both apply, otherwise first)
+1. Required `Test` (unit tests) or `Integration` (integration tests) prefix, always first
+2. Optional `Gpu` immediately after `Test`/`Integration` if the test needs GPU support
 3. Core Feature / Subject under test (PascalCase, no underscores)
 4. Optional Datatype token: `Bfp16`, `Fp16`, `Fp32`
 
-Omit any position that does not apply.
+Omit any optional position that does not apply.
 
-**Unit tests**: Mirror the class under test — `TestMyClass` or `GpuTestMyClass` if GPU is required.
+**Unit tests**: Mirror the class under test — `TestMyClass` or `TestGpuMyClass` if GPU is required.
 
 **Valid examples:**
 ```
-IntegrationGpuConvolutionFwdFp32   GpuTestMiopenEngineFp32
+IntegrationGpuConvolutionFwdFp32   TestGpuMiopenEngineFp32
 TestMiopenEngineManager            TestConvolutionPlanBuilder
 ```
