@@ -213,11 +213,19 @@ inline Error
                                                isVirtual,
                                                "tensor is_virtual"));
 
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
-                                               HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
-                                               HIPDNN_TYPE_INT64,
-                                               tensor->get_alignment(),
-                                               "tensor byte alignment"));
+    // Only send the byte-alignment attribute when the tensor carries a
+    // non-default alignment. Sending it unconditionally would break lowering against
+    // a pre-1.3.0 backend that doesn't recognize HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT.
+    // Source of truth: tensor_attributes.fbs -> `alignment: long = 16`.
+    static constexpr int64_t K_DEFAULT_TENSOR_ALIGNMENT = 16;
+    if(tensor->get_alignment() != K_DEFAULT_TENSOR_ALIGNMENT)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   tensor->get_alignment(),
+                                                   "tensor byte alignment"));
+    }
 
     // Link the ragged-offset aux tensor by UID so the lowered graph carries the
     // ragged-tensor relationship. The aux tensor is gathered alongside node I/O
