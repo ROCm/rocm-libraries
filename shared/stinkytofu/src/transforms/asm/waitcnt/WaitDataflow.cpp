@@ -57,8 +57,13 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         // CK_DS: ds_read / ds_write / ds_atomic; every consumer drains.
         {[](const StinkyInstruction& i) { return isDSRead(i) || isDSWrite(i) || isDSAtomic(i); },
          [](const StinkyInstruction&) { return true; }},
-        // CK_Buffer: vector global/buffer load+store; every consumer drains.
-        {[](const StinkyInstruction& i) { return isBufferMemLoad(i) || isBufferMemStore(i); },
+        // CK_Buffer: vector global/buffer load+store, plus returning MUBUF/FLAT/
+        // GLOBAL atomics (their result completes on the same loadcnt counter as
+        // an ordinary load -- see isReturningAtomic() in StinkyAsmIR.hpp for why
+        // scalar-memory atomics are excluded); every consumer drains.
+        {[](const StinkyInstruction& i) {
+             return isBufferMemLoad(i) || isBufferMemStore(i) || isReturningAtomic(i);
+         },
          [](const StinkyInstruction&) { return true; }},
         // CK_KM: SMRD scalar loads (s_load_*); every consumer drains.
         {[](const StinkyInstruction& i) { return isSMemLoad(i); },

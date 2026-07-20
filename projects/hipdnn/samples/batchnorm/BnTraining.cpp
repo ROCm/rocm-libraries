@@ -37,15 +37,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         std::cout << " [BATCH_STATS_ONLY mode]...\n";
     }
 
-    const int64_t n = 16; // BATCH SIZE
-    const int64_t c = 16; // CHANNELS (FEATURES)
-    const int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    const int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    // Input dimensions
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    setPreferredEngine(graph, config);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
@@ -62,24 +65,20 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::shared_ptr<graph::TensorAttributes> prevRunningVar;
 
     const double momentumVal = 0.1;
-
     // Conditionally setup running statistics inputs
     if(config.useRunningStats)
     {
         prevRunningMean = createTensor({1, c, 1, 1}, intermediateType);
         prevRunningVar = createTensor({1, c, 1, 1}, intermediateType);
-
         // Momentum: use pass-by-value with double (matches MIOpen API)
         auto momentum = std::make_shared<graph::TensorAttributes>();
         momentum->set_value(momentumVal);
 
         bnAttributes.set_previous_running_stats(prevRunningMean, prevRunningVar, momentum);
     }
-
     // API always returns 5 values regardless of whether running stats are used
     auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
         = graph->batchnorm(x, scale, bias, bnAttributes);
-
     // Configure output tensors (always needed for BATCH_STATS_ONLY mode)
     y->set_output(true);
     savedMean->set_output(true).set_data_type(intermediateType);
@@ -92,6 +91,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
+
     std::cout << "Graph build successful.\n";
 
     // Allocate tensors for BATCH_STATS_ONLY mode
@@ -202,8 +202,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             auto tolerance
                 = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
             auto floatTolerance = static_cast<float>(tolerance);
+
             auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
                 tolerance, tolerance);
+
             auto statsValidator
                 = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                     static_cast<IntermediateType>(tolerance),
@@ -275,8 +277,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             auto tolerance
                 = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
             auto floatTolerance = static_cast<float>(tolerance);
+
             auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
                 tolerance, tolerance);
+
             auto statsValidator
                 = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                     static_cast<IntermediateType>(tolerance),
@@ -312,11 +316,13 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << static_cast<float>(yHostPtr[i]) << " ";
     }
+
     std::cout << "\nFirst 10 saved_mean values: ";
     for(int i = 0; i < 10; ++i)
     {
         std::cout << static_cast<float>(savedMeanHostPtr[i]) << " ";
     }
+
     std::cout << "\nFirst 10 saved_inv_variance values: ";
     for(int i = 0; i < 10; ++i)
     {
@@ -333,15 +339,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         {
             std::cout << static_cast<float>(nextMeanHostPtr[i]) << " ";
         }
+
         std::cout << "\nFirst 10 next_running_variance values: ";
         for(int i = 0; i < 10; ++i)
         {
             std::cout << static_cast<float>(nextVarHostPtr[i]) << " ";
         }
     }
+
     std::cout << '\n';
     std::cout << "\nBatch normalization training graph execution complete for " << inputType
               << ".\n\n";
+
     return validationPassed;
 }
 
