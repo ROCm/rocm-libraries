@@ -607,6 +607,7 @@ std::string realcomplex_even_transpose_rtc_kernel_name(const RealComplexEvenTran
         throw std::runtime_error("invalid realcomplex even transpose rtc scheme");
     }
 
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
     kernel_name += "_tile" + std::to_string(specs.TileX()) + "x" + std::to_string(specs.TileY());
 
     kernel_name += rtc_precision_name(specs.precision);
@@ -695,9 +696,6 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     func.arguments.append(gridY);
     func.arguments.append(gridZ);
 
-    func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
-                              "following variables to recover block indices in a 3-D fashion:"};
-
     Variable old_blockIdx_x{"old_blockIdx_x", "unsigned int"};
     Variable old_blockIdx_y{"old_blockIdx_y", "unsigned int"};
     Variable old_blockIdx_z{"old_blockIdx_z", "unsigned int"};
@@ -706,6 +704,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     // if a 1-D grid was provided because creating a natural 3-D grid exceeded allowed limits, then remap it to a 3-D grid.
     if(!specs.grid3D)
     {
+        func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
+                                  "following variables to recover block indices in a 3-D fashion:"};
         func.body += Declaration{old_blockIdx_x, Literal{"blockIdx.x"} / (gridY * gridZ)};
         func.body += Declaration{remaining, Literal{"blockIdx.x"} % (gridY * gridZ)};
         func.body += Declaration{old_blockIdx_y, (remaining / gridZ)};
@@ -717,15 +717,32 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable input_batch_start{"input_batch_start", "size_t"};
     Variable output_batch_start{"output_batch_start", "size_t"};
 
-    if(specs.grid3D)
+    const auto kernel_bidx_z = specs.grid3D ? "blockIdx.z" : "old_blockIdx_z";
+    if(specs.lensz > specs.dim)
     {
-        func.body += Declaration{input_batch_start, idist * Literal{"blockIdx.z"}};
-        func.body += Declaration{output_batch_start, odist * Literal{"blockIdx.z"}};
+        Variable dim_batch_idx{"dim_batch_idx", "size_t"};
+        func.body += Declaration{dim_batch_idx, kernel_bidx_z};
+        func.body += Declaration{input_batch_start, 0};
+        func.body += Declaration{output_batch_start, 0};
+        Variable len_dim{"len_dim", "size_t"};
+        func.body += For{len_dim,
+                         Literal{specs.dim},
+                         len_dim < Literal{specs.lensz},
+                         1,
+                         {If{lengths[len_dim] > 1,
+                             {AddAssign(input_batch_start,
+                                        inStride[len_dim] * (dim_batch_idx % lengths[len_dim])),
+                              AddAssign(output_batch_start,
+                                        outStride[len_dim] * (dim_batch_idx % lengths[len_dim])),
+                              DivideAssign(dim_batch_idx, lengths[len_dim])}}}};
+
+        func.body += AddAssign(input_batch_start, idist * dim_batch_idx);
+        func.body += AddAssign(output_batch_start, odist * dim_batch_idx);
     }
     else
     {
-        func.body += Declaration{input_batch_start, idist * Literal{"old_blockIdx_z"}};
-        func.body += Declaration{output_batch_start, odist * Literal{"old_blockIdx_z"}};
+        func.body += Declaration{input_batch_start, idist * Literal{kernel_bidx_z}};
+        func.body += Declaration{output_batch_start, odist * Literal{kernel_bidx_z}};
     }
 
     Variable leftTile{"leftTile", "__shared__ scalar_type", false, false, tileX};
@@ -766,8 +783,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Expression row_end_init{""};
     if(isR2C)
     {
-        func.body += CommentLines{
-            "take fastest dimension and partition it into lengths that will go into each tile"};
+        func.body += CommentLines{"take fastest dimension and partition it into lengths "
+                                  "that will go into each tile"};
         len_row_init   = lengths[0];
         tile_size_init = Ternary{(len_row - 1) / 2 < tileX, (len_row - 1) / 2, tileX};
         row_limit_init = Ternary{dim == 2, lengths[1], lengths[1] * lengths[2]};
@@ -787,9 +804,9 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     }
     else
     {
-        func.body += CommentLines{
-            "take middle dimension and partition it into lengths that will go into each tile",
-            "note that last row effectively gets thrown away"};
+        func.body += CommentLines{"take middle dimension and partition it into lengths "
+                                  "that will go into each tile",
+                                  "note that last row effectively gets thrown away"};
         len_row_init   = Ternary{dim == 2, lengths[1] - 1, lengths[2] - 1};
         tile_size_init = Ternary{(len_row - 1) / 2 < tileY, (len_row - 1) / 2, tileY};
         row_limit_init = Ternary{dim == 2, lengths[0], lengths[0] * lengths[1]};
