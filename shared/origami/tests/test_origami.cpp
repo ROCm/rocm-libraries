@@ -1288,6 +1288,8 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
       REQUIRE(capped_mt.n == 192);
     }
   }
+}
+
 TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   using origami::hardware_t;
   const auto c_def = hardware_t::get_gfx950_arch_constants(std::nullopt);
