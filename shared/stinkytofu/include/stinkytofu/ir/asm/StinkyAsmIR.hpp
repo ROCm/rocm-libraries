@@ -328,6 +328,25 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return create(&execGroupMCID, insertBefore);
     }
 
+    /// Creates a cluster-barrier placeholder pseudo-instruction (emits no assembly).
+    /// It is inserted before the DAG scheduler carrying dependency operands so the
+    /// scheduler keeps it ordered relative to its anchor, and is expanded into the
+    /// concrete s_barrier_signal/wait -3 sequence (described by
+    /// PseudoClusterBarrierData) by the post-DAG expansion pass.
+    /// See docs/developer/pseudo-cluster-barrier-plan.md.
+    ///
+    /// No IF_HasSideEffect flag: the scheduler must treat it as an ordinary,
+    /// movable node whose ordering comes solely from its def-use operands.
+    StinkyInstruction* createPseudoClusterBarrier(
+        PseudoClusterBarrierData::Kind kind = PseudoClusterBarrierData::Kind::SignalWait) {
+        static const HwInstDesc pseudoClusterBarrierMCID{
+            GFX::PSEUDO_CLUSTER_BARRIER, GFX::PSEUDO_CLUSTER_BARRIER, 0, 0, 0,
+            "PSEUDO_CLUSTER_BARRIER",    makeFlagSet({})};
+        StinkyInstruction* inst = create(&pseudoClusterBarrierMCID);
+        inst->addModifier<PseudoClusterBarrierData>(PseudoClusterBarrierData{kind});
+        return inst;
+    }
+
     /// Creates and inserts a PHI instruction at the beginning of the block.
     /// The PHI defines one DWORD register and has one placeholder srcReg per
     /// predecessor. sources and users are NOT initialized — the caller
@@ -436,13 +455,21 @@ inline bool isExecMaskGroup(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::EXEC_GROUP;
 }
 
-/// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE, or
-/// FUNCTION_ASM_PLACEMENT_MARKER) that should be skipped for def-use chain
-/// processing of "real" instructions.
+/// Check if instruction is a cluster-barrier placeholder pseudo-instruction.
+/// Emits no assembly; expanded into concrete s_barrier_signal/wait -3 by the
+/// post-DAG expansion pass. See docs/developer/pseudo-cluster-barrier-plan.md.
+inline bool isPseudoClusterBarrier(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::PSEUDO_CLUSTER_BARRIER;
+}
+
+/// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE,
+/// FUNCTION_ASM_PLACEMENT_MARKER, or PSEUDO_CLUSTER_BARRIER) that should be
+/// skipped for def-use chain processing of "real" instructions.
 inline bool isPseudoInst(const StinkyInstruction* inst) {
     return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI ||
            inst->getUnifiedOpcode() == GFX::FENCE ||
-           inst->getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
+           inst->getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER ||
+           inst->getUnifiedOpcode() == GFX::PSEUDO_CLUSTER_BARRIER;
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {

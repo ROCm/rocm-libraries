@@ -2096,6 +2096,10 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
     // Pseudo: function ASM placement marker for FlattenCalleesPass (never emitted).
     unifiedList.push_back("FUNCTION_ASM_PLACEMENT_MARKER");
     unifiedList.push_back("EXEC_GROUP");
+    // Pseudo: cluster-barrier placeholder inserted before the DAG scheduler and
+    // expanded into concrete s_barrier_signal/wait -3 sequences afterwards
+    // (see docs/developer/pseudo-cluster-barrier-plan.md). Never emitted.
+    unifiedList.push_back("PSEUDO_CLUSTER_BARRIER");
     unifiedList.push_back("INVALID");
     std::unordered_map<std::string, int> unifiedOpcodeMap;
     for (size_t i = 0; i < unifiedList.size(); ++i)

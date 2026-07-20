@@ -313,6 +313,7 @@ struct Modifier {
         WMMA_POOL_INDEX,
         CALL_TARGETS,
         EXEC_GROUP,
+        PSEUDO_CLUSTER_BARRIER,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1098,6 +1099,28 @@ struct ExecGroupData : public TypedModifier<ExecGroupData> {
 
     explicit ExecGroupData(std::vector<StinkyInstruction*> children)
         : TypedModifier<ExecGroupData>(), children(std::move(children)) {}
+};
+
+/// Describes how a PSEUDO_CLUSTER_BARRIER placeholder should be materialized by
+/// the post-DAG expansion pass. The placeholder itself emits no assembly; it is
+/// inserted before the scheduler (carrying dependency operands so it stays
+/// ordered relative to its anchor) and expanded into concrete cluster-barrier
+/// (`s_barrier_signal/wait -3`) instructions afterwards.
+/// See docs/developer/pseudo-cluster-barrier-plan.md.
+struct PseudoClusterBarrierData : public TypedModifier<PseudoClusterBarrierData> {
+    static constexpr Modifier::Type Type = Modifier::Type::PSEUDO_CLUSTER_BARRIER;
+
+    /// Which concrete cluster-barrier instructions the expansion pass emits.
+    enum class Kind : uint8_t {
+        SignalWait,  ///< s_barrier_signal -3 followed by s_barrier_wait -3
+        SignalOnly,  ///< s_barrier_signal -3 only
+        WaitOnly,    ///< s_barrier_wait -3 only
+    };
+
+    Kind kind = Kind::SignalWait;
+
+    explicit PseudoClusterBarrierData(Kind kind = Kind::SignalWait)
+        : TypedModifier<PseudoClusterBarrierData>(), kind(kind) {}
 };
 
 }  // namespace stinkytofu
