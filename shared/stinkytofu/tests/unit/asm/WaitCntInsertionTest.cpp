@@ -95,14 +95,6 @@ class WaitCntInsertionTest : public ::testing::Test {
         return count;
     }
 
-    int countAsyncWaitCnt(BasicBlock& bb) {
-        int count = 0;
-        for (auto& irBase : bb) {
-            if (static_cast<StinkyInstruction&>(irBase).getModifier<SWaitAsyncCntData>()) count++;
-        }
-        return count;
-    }
-
     std::vector<WaitCntInfo> getAllWaitCnts(BasicBlock& bb) {
         std::vector<WaitCntInfo> waitcnts;
         int position = 0;
@@ -166,8 +158,7 @@ class WaitCntInsertionTest : public ::testing::Test {
         while (true) {
             StinkyInstruction& prevInst = static_cast<StinkyInstruction&>(*prevIt);
             if (SWaitCntData* wait = prevInst.getModifier<SWaitCntData>()) return wait;
-            if (prevInst.getModifier<SWaitTensorCntData>() ||
-                prevInst.getModifier<SWaitAsyncCntData>()) {
+            if (prevInst.getModifier<SWaitTensorCntData>()) {
                 if (prevIt == bb.begin()) return nullptr;
                 --prevIt;
                 continue;
@@ -194,36 +185,6 @@ class WaitCntInsertionTest : public ::testing::Test {
             StinkyInstruction& prevInst = static_cast<StinkyInstruction&>(*prevIt);
             if (SWaitTensorCntData* tw = prevInst.getModifier<SWaitTensorCntData>()) return tw;
             if (prevInst.getModifier<SWaitCntData>()) {
-                if (prevIt == bb.begin()) return nullptr;
-                --prevIt;
-                continue;
-            }
-            return nullptr;
-        }
-    }
-
-    // Find the s_wait_asynccnt immediately preceding `target`, skipping over
-    // any other wait kinds (SWaitCntData / SWaitTensorCntData) that the pass
-    // may have emitted at the same anchor.
-    SWaitAsyncCntData* findAsyncWaitCntBefore(BasicBlock& bb, StinkyInstruction* target) {
-        BasicBlock::iterator targetIt = bb.end();
-        for (auto it = bb.begin(); it != bb.end(); ++it) {
-            if (&static_cast<StinkyInstruction&>(*it) == target) {
-                targetIt = it;
-                break;
-            }
-        }
-
-        if (targetIt == bb.end() || targetIt == bb.begin()) return nullptr;
-
-        auto prevIt = targetIt;
-        --prevIt;
-
-        while (true) {
-            StinkyInstruction& prevInst = static_cast<StinkyInstruction&>(*prevIt);
-            if (SWaitAsyncCntData* aw = prevInst.getModifier<SWaitAsyncCntData>()) return aw;
-            if (prevInst.getModifier<SWaitCntData>() ||
-                prevInst.getModifier<SWaitTensorCntData>()) {
                 if (prevIt == bb.begin()) return nullptr;
                 --prevIt;
                 continue;
@@ -1625,83 +1586,4 @@ st.func @test_barrier_anchor_missing_tokens() {
     EXPECT_EQ(waitBeforeBarrier->dlcnt, 0);
 
     EXPECT_EQ(countWaitCnt(entryBB), 1);
-}
-
-// ============================================================================
-// Test Suite 7: Async store (asynccnt) LDS write-after-read
-//
-// global_store_async_from_lds_* reads an LDS buffer asynchronously (tracked by
-// asynccnt / s_wait_asynccnt) and has no register dest, so the SSA chain never
-// orders a later LDS writer after it. A tensor_load_to_lds that refills a
-// buffer an async store is still reading is a WAR hazard that must drain
-// asynccnt first.
-// ============================================================================
-
-/**
- * @brief Two LDS buffers, two (tensor_load -> async store) pairs, then reuse.
- *
- * IR (tokens 0 and 1 are two disjoint LDS buffers):
- *   tensor_load_to_lds  tok0        ; fill buffer 0
- *   tensor_load_to_lds  tok1        ; fill buffer 1
- *   global_store_async_from_lds_b64 tok0   ; SA0: read buffer 0  -> async q [SA0]
- *   global_store_async_from_lds_b64 tok1   ; SA1: read buffer 1  -> async q [SA0,SA1]
- *   tensor_load_to_lds  tok0        ; reuse buffer 0: WAR vs SA0
- *   tensor_load_to_lds  tok1        ; reuse buffer 1: WAR vs SA1
- *
- * The async FIFO holds [SA0, SA1] when the reuse writers are reached. The
- * first reuse (buffer 0) must wait until SA0 completes: SA0 is at index 0 of a
- * depth-2 queue, so asynccnt = 2 - 0 - 1 = 1 (drain until only SA1 remains).
- * The second reuse (buffer 1) must wait until SA1 completes: asynccnt = 0.
- *
- * NumWaves defaults to 0 here; the async WAR drain is driven by the LDS
- * anti-dependency scan, independent of the tensor-counter NumWaves policy.
- */
-TEST_F(WaitCntInsertionTest, AsyncStore_LdsWar_TwoBuffersTwoPairs) {
-    std::string irString = R"(
-st.func @test_async_lds_war_two_buffers() {
-^entry:
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
-  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-  "st.global_store_async_from_lds_b64"(v[4:5], v6, s[32:33]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
-}
-)";
-    StinkyIRConverter converter(getArch());
-    auto* func = parseIR(irString, converter);
-    ASSERT_NE(func, nullptr);
-
-    runInsertionPass(*func);
-
-    BasicBlock& entryBB = *func->begin();
-
-    // The reuse writers are the 3rd and 4th tensor_load_to_lds (indices 2, 3).
-    StinkyInstruction* reuseBuf0 = findNthInst(entryBB, GFX::tensor_load_to_lds, 2);
-    StinkyInstruction* reuseBuf1 = findNthInst(entryBB, GFX::tensor_load_to_lds, 3);
-    ASSERT_NE(reuseBuf0, nullptr);
-    ASSERT_NE(reuseBuf1, nullptr);
-
-    // Buffer 0 reuse drains asynccnt down to 1 (SA0 must finish; SA1 may stay).
-    SWaitAsyncCntData* waitBeforeReuse0 = findAsyncWaitCntBefore(entryBB, reuseBuf0);
-    ASSERT_NE(waitBeforeReuse0, nullptr)
-        << "tensor_load refilling buffer 0 must wait on the async store reading it";
-    EXPECT_EQ(waitBeforeReuse0->asynccnt, 1);
-
-    // Buffer 1 reuse drains asynccnt down to 0 (SA1 must finish).
-    SWaitAsyncCntData* waitBeforeReuse1 = findAsyncWaitCntBefore(entryBB, reuseBuf1);
-    ASSERT_NE(waitBeforeReuse1, nullptr)
-        << "tensor_load refilling buffer 1 must wait on the async store reading it";
-    EXPECT_EQ(waitBeforeReuse1->asynccnt, 0);
-
-    // Exactly two async waits, one per reuse writer.
-    EXPECT_EQ(countAsyncWaitCnt(entryBB), 2);
-
-    // The initial two fills target fresh buffers with nothing in flight, so
-    // they need no async wait; the async stores themselves consume the fills
-    // via the tensor counter, not asynccnt.
-    StinkyInstruction* fillBuf0 = findNthInst(entryBB, GFX::tensor_load_to_lds, 0);
-    StinkyInstruction* fillBuf1 = findNthInst(entryBB, GFX::tensor_load_to_lds, 1);
-    EXPECT_EQ(findAsyncWaitCntBefore(entryBB, fillBuf0), nullptr);
-    EXPECT_EQ(findAsyncWaitCntBefore(entryBB, fillBuf1), nullptr);
 }

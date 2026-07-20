@@ -591,38 +591,28 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         }
     }
 
-    // WAR/RAW/WAW on LDS across the async counter. asynccnt is one shared FIFO
-    // for the whole async memory family: today global_store_async_from_lds_*
-    // (an LDS reader), later an async-load-to-LDS would be an LDS writer on the
-    // same counter. The SSA chain orders an async op after the producer of the
-    // LDS it names, but not a *later* op reusing the same buffer. Mirror
-    // scanDsAntiDeps on the async queue: overlap by MemTokenData, direction by
-    // instruction class. Two pure reads never conflict; any pairing where
-    // either side writes LDS does. Extend writesLds as new LDS-writing async /
-    // tensor / ds ops are added.
-    {
-        auto writesLds = [](const StinkyInstruction& i) {
-            return isTensorLoad(i) || isDSWrite(i) || isDSAtomic(i) || isBarrier(i);
-        };
-        const bool anchorTouchesLds =
-            writesLds(*inst) || isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst);
-        if (anchorTouchesLds) {
-            const auto* tk = inst->getModifier<MemTokenData>();
-            for (const auto& q : state.queues[CK_Async]) {
-                const int qsize = static_cast<int>(q.ops.size());
-                for (int idx = 0; idx < qsize; ++idx) {
-                    StinkyInstruction* op = q.ops[idx];
-                    if (op == inst) continue;
-                    if (!writesLds(*inst) && !writesLds(*op)) continue;  // read vs read
-                    const auto* opTokens = op->getModifier<MemTokenData>();
-                    // Untagged anchor or op: cannot prove disjoint -> conflict.
-                    bool overlap = (tk == nullptr) || (opTokens == nullptr) ||
-                                   hasTokenOverlap(opTokens->tokens, tk->tokens);
-                    if (!overlap) continue;
-                    tightenRequired(CK_Async, qsize - idx - 1);
-                }
+    // WAR-on-LDS for the async counter, mirroring scanDsAntiDeps. asynccnt
+    // tracks global_store_async_from_lds_*, an LDS reader with no register dest;
+    // an LDS writer (tensor_load / ds_write) or barrier reusing a buffer it is
+    // still reading must drain asynccnt first.
+    auto scanAsyncAntiDeps = [&](const std::vector<int>& anchorTokens) {
+        for (const auto& q : state.queues[CK_Async]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                StinkyInstruction* op = q.ops[idx];
+                if (op == inst) continue;
+                auto* opTokens = op->getModifier<MemTokenData>();
+                bool overlap =
+                    (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
+                if (!overlap) continue;
+                tightenRequired(CK_Async, qsize - idx - 1);
             }
         }
+    };
+
+    if (isLdsWriterAnchor(*inst) || isBarrier(*inst)) {
+        const auto* tk = inst->getModifier<MemTokenData>();
+        if (tk != nullptr) scanAsyncAntiDeps(tk->tokens);
     }
 
     // Conservative MemTokenData fallbacks. An untagged anchor or
@@ -631,6 +621,10 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
         anyOpInFlight(CK_Tensor)) {
         required[CK_Tensor] = 0;
+    }
+    if ((isLdsWriterAnchor(*inst) || isBarrier(*inst)) &&
+        inst->getModifier<MemTokenData>() == nullptr && anyOpInFlight(CK_Async)) {
+        required[CK_Async] = 0;
     }
     if (isLdsWriterAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
         anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {

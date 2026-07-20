@@ -1,0 +1,19 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): async WAR-on-LDS negative test.
+# Two async stores read token 1; a following tensor_load_to_lds writes token 0.
+# The writer shares no token with the in-flight async readers, so the async WAR
+# set is empty and NO s_wait_asynccnt is emitted.
+#
+# CHECK-LABEL: @waitcnt_insertion_async_war_disjoint_tokens
+# CHECK: global_store_async_from_lds_b64
+# CHECK-NEXT: global_store_async_from_lds_b64
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_asynccnt
+
+st.func @waitcnt_insertion_async_war_disjoint_tokens() {
+^entry:
+  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { mod.memtoken = { tokens = [1] } }
+  "st.global_store_async_from_lds_b64"(v[4:5], v6, s[32:33]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+}

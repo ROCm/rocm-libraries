@@ -978,43 +978,25 @@ def collect_war_deps(
     return deps
 
 
-def _writes_lds(inst: Instruction) -> bool:
-    # LDS-writing ops for async-counter hazard detection. Barrier acts as a
-    # full LDS fence. Mirrors writesLds in WaitDataflow.cpp.
-    return (
-        inst.opcode == "tensor_load_to_lds"
-        or is_ds_write(inst)
-        or is_ds_atomic(inst)
-        or is_barrier(inst)
-    )
-
-
 def collect_async_war_deps(
     inst: Instruction, state: CounterState
 ) -> List[Tuple[Instruction, CK]]:
-    # WAR/RAW/WAW on LDS across the shared async counter. Mirrors
-    # scanAsyncAntiDeps in WaitDataflow.cpp: an LDS-touching anchor must drain
-    # any in-flight async LDS op it conflicts with (overlapping token, and at
-    # least one side writes; two pure reads never conflict).
-    anchor_touches_lds = (
-        _writes_lds(inst) or is_ds_read(inst) or _is_async_producer(inst.opcode)
-    )
-    if not anchor_touches_lds:
+    # WAR-on-LDS for the async counter, mirroring scanAsyncAntiDeps in
+    # WaitDataflow.cpp. asynccnt tracks global_store_async_from_lds_*, an LDS
+    # reader; an LDS writer (tensor_load / ds_write) or barrier reusing a buffer
+    # it is still reading must drain asynccnt first.
+    if not is_lds_writer_anchor(inst) and not is_barrier(inst):
         return []
     anchor_tokens = inst.memtokens()
+    if not anchor_tokens:
+        return []
     deps: List[Tuple[Instruction, CK]] = []
     seen: Set[int] = set()
     for op in state.iter_ops(CK.ASYNC):
         if op.uid == inst.uid:
             continue
-        if not _writes_lds(inst) and not _writes_lds(op):
-            continue
         op_tokens = op.memtokens()
-        overlap = (
-            not anchor_tokens
-            or not op_tokens
-            or has_token_overlap(anchor_tokens, op_tokens)
-        )
+        overlap = (not op_tokens) or has_token_overlap(op_tokens, anchor_tokens)
         if not overlap:
             continue
         if op.uid in seen:
@@ -1048,6 +1030,13 @@ def collect_conservative_deps(
         for prod in state.iter_ops(CK.TENSOR):
             if not prod.memtokens() and state.count_from(CK.TENSOR, prod) > 0:
                 deps.append((prod, CK.TENSOR))
+    # Untagged LDS writer / barrier cannot be proven disjoint from any in-flight
+    # async LDS reader, so drain asynccnt fully.
+    if (is_lds_writer_anchor(inst) or is_barrier(inst)) and not inst.memtokens():
+        if state.in_flight(CK.ASYNC):
+            for prod in state.iter_ops(CK.ASYNC):
+                if state.count_from(CK.ASYNC, prod) > 0:
+                    deps.append((prod, CK.ASYNC))
     return deps
 
 

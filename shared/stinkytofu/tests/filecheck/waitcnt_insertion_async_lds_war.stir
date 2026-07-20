@@ -1,0 +1,38 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): async-store (asynccnt) LDS
+# write-after-read hazard across two LDS buffers.
+#
+# global_store_async_from_lds_* reads an LDS buffer asynchronously (tracked by
+# asynccnt / s_wait_asynccnt) and has no register dest, so nothing in the SSA
+# chain orders a later LDS writer after it. Two buffers (tokens 0 and 1) are
+# each filled by a tensor_load_to_lds, then read by an async store, then
+# refilled by a second tensor_load_to_lds. Each refill is a WAR hazard on the
+# async store still reading the same buffer.
+#
+# The async FIFO holds [SA0(tok0), SA1(tok1)] at the first refill. Refilling
+# buffer 0 must wait until SA0 completes: SA0 is at index 0 of the depth-2
+# queue, so asynccnt = 2 - 0 - 1 = 1. Refilling buffer 1 must then wait until
+# SA1 completes: asynccnt = 0.
+#
+# CHECK-LABEL: @waitcnt_insertion_async_lds_war
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK: global_store_async_from_lds_b64
+# CHECK-NEXT: global_store_async_from_lds_b64
+# CHECK-NEXT: s_wait_asynccnt
+# CHECK-SAME: asynccnt = 1
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: s_wait_asynccnt
+# CHECK-SAME: asynccnt = 0
+# CHECK-NEXT: tensor_load_to_lds
+
+st.func @waitcnt_insertion_async_lds_war() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { mod.memtoken = { tokens = [1] } }
+  "st.global_store_async_from_lds_b64"(v[0:1], v2, s[30:31]) { mod.memtoken = { tokens = [0] } }
+  "st.global_store_async_from_lds_b64"(v[4:5], v6, s[32:33]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { mod.memtoken = { tokens = [1] } }
+}
