@@ -13,6 +13,21 @@ namespace hipdnn_test_sdk::utilities
 class MockGraph : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
 {
 public:
+    MockGraph()
+    {
+        // Default: a graph with override shapes disabled, so isApplicable()
+        // guards checking is_override_shape_enabled() don't require every
+        // existing test to separately stub getGraph(). Tests that specifically
+        // exercise override-shape behavior override this via ON_CALL/EXPECT_CALL.
+        _defaultGraphBuilder = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+            _defaultGraphBuffer, "mock_graph");
+        _defaultGraphBuffer.Finish(_defaultGraphBuilder);
+        ON_CALL(*this, getGraph())
+            .WillByDefault(::testing::ReturnRef(
+                *flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
+                    _defaultGraphBuffer.GetBufferPointer())));
+    }
+
     MOCK_METHOD(const hipdnn_flatbuffers_sdk::data_objects::Graph&,
                 getGraph,
                 (),
@@ -45,6 +60,10 @@ public:
                 (const, override));
 
     ~MockGraph() override = default;
+
+private:
+    flatbuffers::FlatBufferBuilder _defaultGraphBuffer;
+    flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Graph> _defaultGraphBuilder;
 };
 
 }
