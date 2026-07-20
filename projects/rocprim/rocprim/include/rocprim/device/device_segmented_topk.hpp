@@ -120,6 +120,12 @@ hipError_t topk_segmented_impl(void*                                 temporary_s
         // K should be >= 0.
         return hipErrorInvalidValue;
     }
+
+    if (K == size)
+    {
+        
+        return hipSuccess;
+    }
     
     // Naive segmented top-k:
     // * Radix-sortable types only

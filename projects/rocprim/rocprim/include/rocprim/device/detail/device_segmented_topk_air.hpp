@@ -609,13 +609,13 @@ struct device_segmented_topk_air_impl : BaseType
                 {
                     N_this_iteration = storage.N;
                     K_this_iteration = storage.K;
-
-                    // Return earlier
-                    if(static_cast<common_size_t>(K_this_iteration)
-                       == static_cast<common_size_t>(N_this_iteration))
-                    {
-                        return; // All threads return no divergence
-                    }
+                }
+                
+                // Return earlier
+                if(static_cast<common_size_t>(K_this_iteration)
+                   == static_cast<common_size_t>(N_this_iteration))
+                {
+                    return; // All threads return no divergence
                 }
 
                 // The size of valid bins in the histogram or current iteration
