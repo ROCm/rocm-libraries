@@ -595,8 +595,7 @@ struct device_segmented_topk_air_impl : BaseType
                 SizeOut K_this_iteration;
 
                 if constexpr(Iteration == 0) // First iteration
-                { // If K_this_iteration == N_this_iteration, kernel will be reject from the host
-                    // so here we don't need to check and return like other iterations
+                {
                     N_this_iteration = num_segment_items;
                     K_this_iteration = K;
 
@@ -844,16 +843,6 @@ public:
         const auto target_config  = most_common_config<Targets>(current_target);
 
         hipError_t ret = hipSuccess;
-        // Targets::for_each(
-        //     [&](auto candidate)
-        //     {
-        //         if(target{candidate} == target_config)
-        //         {
-        //             using ArchConfig
-        //                 = rocprim::detail::target_config<Config, Selector, decltype(candidate)>;
-        //             ret = invoke_impl<ArchConfig>(size, args);
-        //         }
-        //     });
         if constexpr(std::is_same_v<Config, rocprim::default_config>)
         {
             Targets::for_each(
