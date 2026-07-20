@@ -132,7 +132,7 @@ jobs:
           fi
 
       - name: Prepare coverage profile directory
-        if: ${{ inputs.coverage }}
+        if: ${{ inputs.coverage_enabled }}
         run: |
           # Raw profiles are collected under ${PROFILE_DIR}/profraw. The coverage build
           # overrides PROFILE_DIR to ${GITHUB_WORKSPACE}/coverage-report (a container path
