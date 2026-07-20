@@ -30,6 +30,8 @@ struct SdpaFwdParams
                   bool topLeftAlignment,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
                   = nullptr,
+                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleAttributes
+                  = nullptr,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes
                   = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
@@ -43,6 +45,9 @@ struct SdpaFwdParams
         , attnMaskTensor(attnMaskAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*attnMaskAttributes))
                              : std::nullopt)
+        , scaleTensor(scaleAttributes != nullptr
+                          ? std::make_optional(unpackTensorAttributes(*scaleAttributes))
+                          : std::nullopt)
         , lseTensor(lseAttributes != nullptr
                         ? std::make_optional(unpackTensorAttributes(*lseAttributes))
                         : std::nullopt)
@@ -58,6 +63,7 @@ struct SdpaFwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
 };
 
@@ -105,12 +111,20 @@ public:
                                                           variantPack.at(_params.lseTensor->uid));
         }
 
+        std::optional<float> effectiveScale = _params.attnScaleValue;
+        if(_params.scaleTensor.has_value())
+        {
+            effectiveScale
+                = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
+                    _params.scaleTensor.value(), variantPack, "SDPA scale");
+        }
+
         utilities::CpuFpReferenceSdpa::forward<QDataType, KDataType, VDataType, ODataType, float>(
             *shallowQTensor,
             *shallowKTensor,
             *shallowVTensor,
             *shallowOTensor,
-            _params.attnScaleValue,
+            effectiveScale,
             shallowAttnMaskTensor.get(),
             _params.leftBound,
             _params.rightBound,
@@ -241,6 +255,10 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
+        const auto* scalePtr = nodeAttributes->scale_tensor_uid().has_value()
+                                   ? tensorMap.at(nodeAttributes->scale_tensor_uid().value())
+                                   : nullptr;
+
         const auto* lsePtr = nodeAttributes->stats_tensor_uid().has_value()
                                  ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
                                  : nullptr;
@@ -258,6 +276,7 @@ public:
                           rightBound,
                           isTopLeft,
                           attnMaskPtr,
+                          scalePtr,
                           lsePtr));
     }
 };

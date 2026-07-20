@@ -28,7 +28,8 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                       std::optional<int64_t> rightBound = std::nullopt,
                       hipdnn_frontend::DiagonalAlignment diagonalAlignment
                       = hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
-                      bool alibiMask = false)
+                      bool alibiMask = false,
+                      float* runtimeScaleHostPtr = nullptr)
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
@@ -69,6 +70,21 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
         sdpaAttrs.set_diagonal_band_right_bound(rightBound.value());
     }
 
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> scaleTensorAttr;
+    if(runtimeScaleHostPtr != nullptr)
+    {
+        // Pure runtime pass-by-value scale: FLOAT scalar, no baked value; the
+        // host value is delivered through the variant pack at execute.
+        scaleTensorAttr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        scaleTensorAttr->set_uid(uid++)
+            .set_name("ScaleTensor")
+            .set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_dim({1})
+            .set_stride({1})
+            .set_as_runtime_parameter();
+        sdpaAttrs.set_attn_scale(scaleTensorAttr);
+    }
+
     auto [oTensorAttr, statsAttr] = graph->sdpa(qTensorAttr, kTensorAttr, vTensorAttr, sdpaAttrs);
 
     if(!oTensorAttr->has_uid())
@@ -85,6 +101,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     auto variantPack
         = tensorBundle.createVariantPack(*qTensorAttr, *kTensorAttr, *vTensorAttr, *oTensorAttr);
+    if(scaleTensorAttr)
+    {
+        variantPack[scaleTensorAttr->get_uid()] = runtimeScaleHostPtr;
+    }
 
     return std::make_tuple(graph, variantPack);
 }
