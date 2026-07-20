@@ -46,6 +46,20 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
+if(ENABLE_HIP_FLASH2_ENGINE)
+    # Precompiled-kernel engine: compile the host-side engine/plan sources into the
+    # provider object library. HipFlash2FwdPlan.hip is intentionally excluded (it is
+    # the offline source for the shipped .co files and needs rocWMMA headers).
+    target_sources(hip_kernel_provider_impl PRIVATE
+        engines/hip_flash2_engine/HipFlash2Engine.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlan.cpp
+        engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.cpp)
+    target_compile_definitions(hip_kernel_provider_impl PRIVATE
+        HIPDNN_ENGINE_HIP_FLASH2
+        HIP_FLASH2_KERNEL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels")
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_FLASH2=1)
+endif()
+
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
