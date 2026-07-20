@@ -200,7 +200,7 @@ struct unrolled
     __device__
     void       operator()(EngineState* state, T* ptr) const
     {
-        static_assert(n >= 1, "Generator must produce at least 1 element!");
+        static_assert(n == 1 || n == 2 || n == 4, "Generator must produce 1, 2, or 4 element(s)!");
         const auto v = gen(state);
         if constexpr(n == 1)
         {
