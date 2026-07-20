@@ -46,7 +46,7 @@ endfunction()
 
 # Add code coverage flags to a library target, if enabled
 function( rocfft_add_coverage_flags target )
-  if( ROCFFT_ENABLE_COVERAGE )
+  if( BUILD_CODE_COVERAGE )
     target_compile_options( ${target} PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping )
     target_link_options( ${target} INTERFACE -fprofile-instr-generate )
   endif()
@@ -421,7 +421,7 @@ endif()
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link
 # stage on Windows)
-if( NOT WIN32 AND NOT ROCFFT_ENABLE_COVERAGE )
+if( NOT WIN32 AND NOT BUILD_CODE_COVERAGE )
   target_compile_options( rocfft PRIVATE -fgpu-rdc )
   target_link_options( rocfft PRIVATE -fgpu-rdc )
 endif()

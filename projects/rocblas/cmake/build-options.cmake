@@ -64,7 +64,7 @@ if (BUILD_OFFLOAD_COMPRESS)
 endif()
 
 # FOR OPTIONAL CODE COVERAGE
-option(ROCBLAS_ENABLE_COVERAGE "Build rocBLAS with code coverage enabled" OFF)
+option(BUILD_CODE_COVERAGE "Build rocBLAS with code coverage enabled" OFF)
 
 # FOR OPTIONAL ADDRESS SANITIZER
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)

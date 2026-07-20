@@ -60,7 +60,7 @@ You can install rocFFT using pre-built packages or building from source.
     | `rocfft-bench` | `-DBUILD_CLIENTS_BENCH=on` | hipRAND |
     | `rocfft-test` | `-DBUILD_CLIENTS_TESTS=on` | hipRAND, FFTW, GoogleTest |
     | samples | `-DBUILD_CLIENTS_SAMPLES=on` | None |
-    | coverage | `-DROCFFT_ENABLE_COVERAGE=ON` | clang, llvm-cov |
+    | coverage | `-DBUILD_CODE_COVERAGE=ON` | clang, llvm-cov |
 
     Clients are not built by default. To build them, use `-DBUILD_CLIENTS=on`. The build process
     downloads and builds GoogleTest and FFTW if they are not already installed.
@@ -84,7 +84,7 @@ You can install rocFFT using pre-built packages or building from source.
 
     You can generate a test coverage report with the following:
     ```bash
-    cmake -DCMAKE_CXX_COMPILER=amdclang++ -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DROCFFT_ENABLE_COVERAGE=ON <optional: -DCOVERAGE_TEST_OPTIONS="cmdline args to pass to rocfft-test (default: --smoketest)"> ..
+    cmake -DCMAKE_CXX_COMPILER=amdclang++ -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CODE_COVERAGE=ON <optional: -DCOVERAGE_TEST_OPTIONS="cmdline args to pass to rocfft-test (default: --smoketest)"> ..
     make -j coverage
     ```
     The above will output the coverage report to the terminal and also save an html coverage report to `$PWD/coverage-report`.

@@ -60,7 +60,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_generator,
                                generator_prng_offset_tests,
                                lfsr113_generator_prng_offset_tests_types);
 
-#ifdef ROCRAND_ENABLE_COVERAGE
+#ifdef CODE_COVERAGE_ENABLED
 #include "test_rocrand_host_prng.hpp"
 
 using rocrand_impl::host::lfsr113_generator_host;
@@ -87,7 +87,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_host_generator,
 INSTANTIATE_TYPED_TEST_SUITE_P(lfsr113_host_generator,
                                generator_prng_offset_host_tests,
                                lfsr113_generator_prng_offset_host_tests_types);
-#endif //ROCRAND_ENABLE_COVERAGE
+#endif //CODE_COVERAGE_ENABLED
 
 // lfsr113-specific generator API tests
 template<class Params>

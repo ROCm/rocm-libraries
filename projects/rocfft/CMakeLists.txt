@@ -334,3 +334,5 @@ rocm_create_package(
     LDCONFIG
     LDCONFIG_DIR ${ROCFFT_CONFIG_DIR}
 )
+
+option(BUILD_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
