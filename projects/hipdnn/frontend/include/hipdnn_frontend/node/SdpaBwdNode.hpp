@@ -153,15 +153,7 @@ public:
                                   + std::to_string(numHeads)
                                   + ", num_heads_v=" + std::to_string(numHeadsV));
 
-        // Rule 6: K and V must have the same head count
-        HIPDNN_RETURN_IF_NE(numHeadsK,
-                            numHeadsV,
-                            ErrorCode::INVALID_VALUE,
-                            "SdpaBwdNode: K and V must have the same head count. num_heads_k="
-                                + std::to_string(numHeadsK)
-                                + ", num_heads_v=" + std::to_string(numHeadsV));
-
-        // Rule 7: dO must match O shape [batch, num_heads, seq_q, head_dim_v]
+        // Rule 6: dO must match O shape [batch, num_heads, seq_q, head_dim_v]
         const auto& oDims = o->get_dim();
         if(!oDims.empty())
         {
@@ -192,7 +184,7 @@ public:
             }
         }
 
-        // Rule 8: Optional attention mask validation
+        // Rule 7: Optional attention mask validation
         const auto attnMask = attributes.get_bias();
         if(attnMask)
         {
@@ -224,7 +216,7 @@ public:
             }
         }
 
-        // Rule 9: Optional dropout mask validation
+        // Rule 8: Optional dropout mask validation
         // Shape must be rank-4 (B or 1, H_q or 1, S_q, S_kv) — last two dims are exact,
         // first two dims may broadcast (1 allowed).
         const auto dropoutMask = attributes.get_dropout_mask();
@@ -264,7 +256,7 @@ public:
                                     + std::to_string(dmDims[3]));
         }
 
-        // Rule 10: Padding mask — when padding_mask=true, seq_len_q and seq_len_kv must
+        // Rule 9: Padding mask — when padding_mask=true, seq_len_q and seq_len_kv must
         // be provided as rank-4 tensors with shape (B, 1, 1, 1) and INT32 data type.
         if(attributes.padding_mask)
         {
@@ -347,7 +339,7 @@ public:
                                               "type"));
         }
 
-        // Rule 11: Optional attention scale must be a scalar tensor
+        // Rule 10: Optional attention scale must be a scalar tensor
         const auto scale = attributes.get_attn_scale();
         if(scale)
         {
