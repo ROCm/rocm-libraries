@@ -24,7 +24,7 @@ template <typename InputDataType,
           typename OutputDataType,
           typename ComputeDataType,
           unsigned int localSize>
-inline std::vector<std::string> buildRMSNormDefines()
+inline std::vector<std::string> buildRMSNormFwdDefines()
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<InputDataType>::VALUE);
@@ -57,11 +57,11 @@ public:
     {
         validateInput(input, scale, output, invRms, bias);
 
-        auto defines = detail::buildRMSNormDefines<InputDataType,
-                                                   ScaleDataType,
-                                                   OutputDataType,
-                                                   ComputeDataType,
-                                                   BLOCK_SIZE>();
+        auto defines = detail::buildRMSNormFwdDefines<InputDataType,
+                                                      ScaleDataType,
+                                                      OutputDataType,
+                                                      ComputeDataType,
+                                                      BLOCK_SIZE>();
 
         launchFprop(input.memory().deviceData(),
                     input.dims(),
@@ -321,11 +321,21 @@ private:
 
     // Computes the number of elements in the outer dimensions [0, ..., normalizeDim-1]
     // of the input tensor i.e. number of independent groups that will be normalized separately.
-    static int64_t getOuterSize(const std::vector<int64_t>& inputDims, size_t normalizeDim)
+    // Channel size is not included in the outer size if there is a stride (channel-last layout)
+    // since the channel dimension is interleaved with the inner dimensions and hence not
+    // independent across the outer groups. The overall outer size is set during kernel launch
+    // to outerSize * stride to account for the interleaved channel dimension.
+    static int64_t
+        getOuterSize(const std::vector<int64_t>& inputDims, size_t normalizeDim, int64_t stride)
     {
         int64_t outerSize = 1;
         for(size_t i = 0; i < normalizeDim; ++i)
         {
+            // Add channel size only if there is no stride
+            if(i == 1 && stride != 1)
+            {
+                continue;
+            }
             outerSize *= inputDims[i];
         }
         return outerSize;
