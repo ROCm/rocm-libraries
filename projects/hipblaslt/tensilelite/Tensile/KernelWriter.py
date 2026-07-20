@@ -9699,6 +9699,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["InnerUnroll"] >= self.states.numReadsIterCoalescedMXSB:
           numMXSB //= self.states.numReadsIterCoalescedMXSB
 
+      # TileSpan MXS scale wave-split collapses each 2-block group into a single ds_load
+      # (partner block read via matrix_{a,b}_scale from the upper half-wave), halving the
+      # emitted MX scale local-read count. numReadsPerIterMXS* must match this or the
+      # s_wait_dscnt (dscnt) waitcount is over-counted, the wait no-ops, and the WMMA
+      # consumes not-yet-loaded scale/data registers (-> -nan). Mirrors the numVgprValu
+      # halving done in the valu-footprint setup above.
+      def _mxsTileSpanActive(tc):
+        if not (self.states.asmCaps.get("HasWMMA_V3", False)
+                and kernel.get("MXScaleFormat") == "InMemorySwizzle"):
+          return False
+        tile01 = 1 if kernel["ProblemType"]["Index01%s" % tc] else 0
+        return Component.LocalRead.find(self).getMxsTileSpanInfo(kernel, tc, tile01) is not None
+      if kernel["ProblemType"]["MXBlockA"] and numMXSA > 0 and _mxsTileSpanActive("MXSA"):
+        numMXSA //= 2
+      if kernel["ProblemType"]["MXBlockB"] and numMXSB > 0 and _mxsTileSpanActive("MXSB"):
+        numMXSB //= 2
+
     else: # mac instruction
       if kernel["UseDotInstruction"]:
         # dot2: InnerUnroll are used for wider local read
