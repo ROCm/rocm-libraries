@@ -170,8 +170,15 @@ macro(dapper_add_sharded_test)
     # (MIOPEN_GTEST_SHARDS); the remaining tests are defined in the parent test/ directory, which is
     # fully processed before this subdirectory is added (add_subdirectory(gtest) is its last
     # statement), so the parent's TESTS directory property is complete and safe to read here.
+    # Also depend on the tests registered in THIS directory so far (the shards and the
+    # separately-registered ${TEST_NAME}_hip_graph_serial), not just the parent directory --
+    # otherwise hip_graph_serial can run after the dapper analysis and bury its summary.
+    # (TheRock-only category suites are added later by apply_test_category_labels and do not
+    # run in MICI, so they are intentionally not required here.)
     get_property(_dapper_parent_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/.. PROPERTY TESTS)
-    set(_dapper_predecessors ${_dapper_parent_tests} ${MIOPEN_GTEST_SHARDS})
+    get_property(_dapper_curdir_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)
+    set(_dapper_predecessors
+        ${_dapper_parent_tests} ${_dapper_curdir_tests} ${MIOPEN_GTEST_SHARDS})
     # dapper_tests_generate is already ordered before dapper via dapper_tests_fixture; exclude it and
     # dapper itself from the dependency list.
     list(REMOVE_ITEM _dapper_predecessors miopen_gtest_sharded_dapper dapper_tests_generate)
@@ -180,6 +187,7 @@ macro(dapper_add_sharded_test)
             DEPENDS "${_dapper_predecessors}")
     endif()
     unset(_dapper_parent_tests)
+    unset(_dapper_curdir_tests)
     unset(_dapper_predecessors)
 
     # CMake target equivalent to miopen_gtest_sharded_dapper
