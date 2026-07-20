@@ -2518,11 +2518,12 @@ struct FmhaFwdKernel
                     // calculate_offset(unit_vec) walks the full chain and
                     // returns an XOR-polluted offset (e.g. stride_q + alignQ
                     // = 136 instead of 128) which then drives the box-copy
-                    // to read garbage rows. Returning q_dram_pad here mirrors
-                    // the kQLoadOnce=false branch below.
+                    // to read garbage rows. Returning the affine naive view
+                    // (no head-dim pad) keeps get_lengths()[hdim] at the true
+                    // head-dim so the TDM box clamp zero-fills the OOB tail.
                     if constexpr(kPipelineName == "qr_tdm")
                     {
-                        return q_dram_pad;
+                        return q_dram_naive;
                     }
                     else
                     {
@@ -2654,11 +2655,12 @@ struct FmhaFwdKernel
                 // TDM box-major DMA can't honor software XOR'd dram views,
                 // the unmerge/xor/merge_v3 chain below is dead code for TDM,
                 // and calculate_offset(unit_vec) would otherwise produce an
-                // XOR-polluted stride. Return the affine pad-only view so
-                // the box copy reads the right rows.
+                // XOR-polluted stride. Return the affine naive view (no
+                // head-dim pad) so get_lengths()[hdim] stays at the true
+                // head-dim and the TDM box clamp zero-fills the OOB tail.
                 if constexpr(kPipelineName == "qr_tdm")
                 {
-                    return k_dram_pad;
+                    return k_dram_naive;
                 }
                 else
                 {

@@ -46,13 +46,12 @@ void BatchnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<in
     for(const auto& id : tensorIds)
     {
         auto attr = _tensorMap.at(id);
-        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(attr))
         {
             tensors.emplace_back(attr);
         }
     }
 
-    validateConsistentDimensions(tensors);
     validatePackedTensors(tensors);
     validateConsistentLayouts(tensors);
 }
@@ -143,17 +142,126 @@ void BatchnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
             "At least one IO tensor must be provided for batchnorm.");
     }
 
+    // Validate consistent dimensions for IO and stat tensors (affine tensors can have fewer dimensions due to broadcasting)
+    std::vector<TensorDescriptor> ioStatTensors;
+    ioStatTensors.reserve(ioTensorIds.size() + statTensorIds.size());
+    for(const auto& tensorId : ioTensorIds)
+    {
+        const auto& tensorAttr = _tensorMap.at(tensorId);
+        ioStatTensors.emplace_back(tensorAttr);
+    }
+    for(const auto& tensorId : statTensorIds)
+    {
+        const auto& tensorAttr = _tensorMap.at(tensorId);
+        ioStatTensors.emplace_back(tensorAttr);
+    }
+    validateConsistentDimensions(ioStatTensors);
+
     const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioTensorAttr.dims()->begin(), ioTensorAttr.dims()->end());
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for batchnorm must have the same shape.");
 
+    // Check that scale and bias tensors must have the same shape
+    if(!affineTensorIds.empty())
+    {
+        const auto& referenceAffineAttr
+            = core::utils::findTensorAttributes(_tensorMap, affineTensorIds[0]);
+        const std::vector<int64_t> referenceAffineDims(referenceAffineAttr.dims()->begin(),
+                                                       referenceAffineAttr.dims()->end());
+
+        validateConsistentShapes(affineTensorIds,
+                                 referenceAffineDims,
+                                 "Scale and bias tensors for batchnorm must have the same shape.");
+    }
+
+    // Checks if the affine tensor shape is valid for broadcasting to the IO tensor shape as per
+    // NumPy broadcasting rules with the constraint that the channel dimension must match.
+    const auto isValidAffineShapeForIo
+        = [&](const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& affineTensorAttr) {
+              const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
+                                                    affineTensorAttr.dims()->end());
+
+              const size_t affineRank = affineDims.size();
+              const size_t ioRank = ioDims.size();
+
+              if(affineRank < 1 || affineRank > ioRank)
+              {
+                  return false;
+              }
+
+              const int64_t numChannels = ioDims[1];
+              const bool ioIsChannelLast = core::utils::isChannelLastLayout(&ioTensorAttr);
+
+              // Checking against the IO tensor's layout implicitly rejects affine tensors
+              // whose dimensions don't satisfy the IO layout's expected channel position.
+              if(ioIsChannelLast)
+              {
+                  // For channel-last, C is at index 0 for reduced rank or index 1 for full rank
+                  const size_t channelDimIndex = affineRank == ioRank ? 1 : 0;
+
+                  if(affineDims[channelDimIndex] != numChannels)
+                  {
+                      return false;
+                  }
+
+                  for(size_t i = 0; i < affineRank; ++i)
+                  {
+                      if(i != channelDimIndex && affineDims[i] != 1)
+                      {
+                          return false;
+                      }
+                  }
+              }
+              else
+              {
+                  // For channel-first, only full rank or reduced rank are allowed
+                  if(affineRank != ioRank && affineRank != ioRank - 1)
+                  {
+                      return false;
+                  }
+
+                  // C is at index 1 for full rank and index 0 for reduced rank
+                  const size_t channelDimIndex = affineRank == ioRank ? 1 : 0;
+
+                  if(affineDims[channelDimIndex] != numChannels)
+                  {
+                      return false;
+                  }
+
+                  for(size_t i = 0; i < affineRank; ++i)
+                  {
+                      if(i != channelDimIndex && affineDims[i] != 1)
+                      {
+                          return false;
+                      }
+                  }
+              }
+
+              return true;
+          };
+
+    // Check that scale and bias tensors have any broadcastable shape with same number of channels as IO tensors
+    for(const auto& tensorId : affineTensorIds)
+    {
+        const auto& tensorAttr = core::utils::findTensorAttributes(_tensorMap, tensorId);
+
+        if(!isValidAffineShapeForIo(tensorAttr))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "BatchNorm affine tensor shape "
+                    + hipdnn_data_sdk::utilities::vecToString(
+                        std::vector<int64_t>(tensorAttr.dims()->begin(), tensorAttr.dims()->end()))
+                    + " is incompatible with the IO tensor shape "
+                    + hipdnn_data_sdk::utilities::vecToString(ioDims)
+                    + ". The affine tensor shape must be broadcastable to the IO tensor shape with "
+                      "matching channel dimension.");
+        }
+    }
+
     const auto derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(ioDims);
-    validateConsistentShapes(affineTensorIds,
-                             derivedDims,
-                             "Scale and bias tensors for batchnorm must have shape "
-                             "derived from IO tensor shape.");
     validateConsistentShapes(statTensorIds,
                              derivedDims,
                              "Mean and variance tensors for batchnorm must have shape "

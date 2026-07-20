@@ -16,7 +16,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 
-from rocke.core.arch import ArchTarget, known_arches, normalize_dtype
+from rocke.core.arch import ArchTarget, known_arches, normalize_dtype, validate_arch
 from rocke.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
 
 _ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
@@ -112,6 +112,26 @@ class TestArchTarget(unittest.TestCase):
         self.assertEqual(normalize_dtype("half"), "fp16")
         self.assertEqual(normalize_dtype("bf16"), "bf16")
         self.assertEqual(normalize_dtype("f32"), "fp32")
+
+    def test_validate_arch_none(self):
+        """`validate_arch` should raise ValueError when arch is None."""
+        with self.assertRaises(ValueError) as ctx:
+            validate_arch(None)
+        self.assertIn("Could not detect", str(ctx.exception))
+        self.assertIn("Pass in an explicit", str(ctx.exception))
+
+    def test_validate_arch_unknown(self):
+        """`validate_arch` should raise ValueError for unknown arch."""
+        with self.assertRaises(ValueError) as ctx:
+            validate_arch("gfx9999")
+        self.assertIn("Unknown GPU architecture", str(ctx.exception))
+        self.assertIn("Known architectures include", str(ctx.exception))
+
+    def test_validate_arch_valid(self):
+        """`validate_arch` should not raise for known arches."""
+        for arch in known_arches():
+            # Should not raise
+            validate_arch(arch)
 
 
 class TestMmaCatalog(unittest.TestCase):
@@ -488,8 +508,21 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
     def test_get_device_arch_importable(self):
         from rocke.runtime.hip_module import get_device_arch
 
-        v = get_device_arch()  # None off-GPU, "gfxNNN" on a device — never raises
+        v = get_device_arch()
         self.assertTrue(v is None or (isinstance(v, str) and v.startswith("gfx")))
+
+    def test_get_device_name_importable(self):
+        from rocke.runtime.hip_module import get_device_name
+
+        v = get_device_name()
+        self.assertTrue(v is None or (isinstance(v, str) and len(v) > 0))
+
+    def test_get_device_count_importable(self):
+        from rocke.runtime.hip_module import get_device_count
+
+        v = get_device_count()
+        self.assertIsInstance(v, int)
+        self.assertGreaterEqual(v, 0)
 
     def test_fusion_gemm_atoms_are_catalog_legal_per_arch(self):
         # The GemmEpilogueLowerer must pick warp-tile K from the target's MMA
@@ -538,6 +571,63 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
                         ),
                         {(16, 16, 32), (32, 32, 16)},
                     )
+
+
+class TestDeviceQueryParsing(unittest.TestCase):
+    """Field extraction for the HIP device queries, pinned without a GPU.
+
+    Uses a synthetic hipDeviceProp_t buffer so the parsing is deterministic: the
+    marketing ``name`` is the char[256] at offset 0; ``gcnArchName`` carries the gfx
+    token further in and may carry ``:sramecc+:xnack-`` feature suffixes to strip.
+    """
+
+    @staticmethod
+    def _props(name: bytes, gcn_arch: bytes | None) -> bytes:
+        buf = bytearray(4096)
+        buf[0 : len(name)] = name  # name[256] at offset 0, NUL-terminated
+        if gcn_arch is not None:
+            buf[256 : 256 + len(gcn_arch)] = gcn_arch
+        return bytes(buf)
+
+    def test_arch_strips_feature_flags(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx000:sramecc+:xnack-")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_arch(0), "gfx000")
+
+    def test_arch_keeps_letter_suffix(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx00a:sramecc+:xnack-")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_arch(0), "gfx00a")
+
+    def test_name_read_from_offset_zero_to_nul(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx000")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_name(0), "Marketing Name")
+
+    def test_no_gfx_token_yields_none_arch(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", None)
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertIsNone(hip_module.get_device_arch(0))
+
+    def test_missing_props_yields_none(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        with mock.patch.object(hip_module, "_device_props", return_value=None):
+            self.assertIsNone(hip_module.get_device_arch(0))
+            self.assertIsNone(hip_module.get_device_name(0))
 
 
 class TestArchitecturalIsolation(unittest.TestCase):

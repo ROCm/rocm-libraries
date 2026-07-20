@@ -24,7 +24,8 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SAddU64, SAndB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
+    SNop, SOrB32, SSubI32, SXorB32,
     SCBranchSCC1, SCmpEQU32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
@@ -41,7 +42,7 @@ from .SubtileScaleEmit import emitScaleGRLDSSwap
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
-from ...Common import INDEX_CHARS
+from ...Common import INDEX_CHARS, clusterEnabled
 from ...Common.DataType import DataType
 
 
@@ -1108,8 +1109,7 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   # OR the per-tensor broadcast mask into the descriptor for TDM multicast.
   # Subtile loads both A and B on every wave, so it uses split masks
   # (MulticastMask{tc}), not the non-subtile single parity mask.
-  enableCluster = (kernel["ClusterDim"][0] * kernel["ClusterDim"][1]) != 1
-  if kernel["Multicast"] and enableCluster:
+  if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
     mod.add(comp.setMulticastMask(descSgprName(1), f"MulticastMask{tc}", writer))
 
   with writer.allocTmpSgpr(1) as tmpSgprRes:
@@ -1150,33 +1150,64 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
 
   sizeShifterTile = sizeShifter
   mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, writer, sizeShifterTile))
-  mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, writer))
+
+  # Clamp each wave's Tile1 (free-dim-1) load extent to the valid remainder.
+  # tdmGlobalOffsetSubtile bases wave w at row w*(mt//numWaves), but the
+  # descriptor Dim1 does not bound the walk, so an edge tile (free dim < mt)
+  # reads past the tensor. setTensorTile1 takes a compile-time int, so write its
+  # field (+4[15:0]) with a runtime clamp. No-op when the tile fits.
+  perWaveRows = sizeTile1 // numWaves
+  if numWaves > 1:
+    with writer.allocTmpSgpr(2) as tileClampRes:
+      validRows = tileClampRes.idx
+      waveRowStart = tileClampRes.idx + 1
+      mod.add(VReadfirstlaneB32(sgpr(waveRowStart), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveRowStart), ceil(log2(wavelen)), sgpr(waveRowStart),
+              "wId = fTid // wavelen"))
+      mod.add(SMulI32(sgpr(waveRowStart), sgpr(waveRowStart), perWaveRows,
+              f"waveGlobalRowStart = wId * {perWaveRows}"))
+      mod.add(SSubI32(dst=sgpr(validRows), src0=sgpr(sizeRefName(ti)), src1=sgpr(waveRowStart),
+              comment="Size_free - waveGlobalRowStart"))
+      mod.add(SMaxI32(dst=sgpr(validRows), src0=sgpr(validRows), src1=0,
+              comment="saturate negative remainder to 0"))
+      mod.add(SMinU32(dst=sgpr(validRows), src0=sgpr(validRows), src1=perWaveRows,
+              comment=f"clamp to per-wave rows ({perWaveRows})"))
+      mod.add(SAndB32(sgpr(f"{descSgprName(1)}+4"), sgpr(f"{descSgprName(1)}+4"),
+              hex(0xFFFF0000), "clear tile1 field"))
+      mod.add(SOrB32(sgpr(f"{descSgprName(1)}+4"), sgpr(f"{descSgprName(1)}+4"),
+              sgpr(validRows), "set tile1 = clamped validRows"))
+  else:
+    mod.add(comp.setTensorTile1(descSgprName(1), perWaveRows, writer))
   mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile))
   return mod
 
 
 def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
-  """Assert StreamKLocalStart == 0 for subtile TDM path.
+  """Apply the StreamK K-offset to the subtile TDM descriptor.
 
-  StreamK=3 (Two-Tile) aligns WG iteration ranges to tile boundaries,
-  so StreamKLocalStart is always 0.  The TDM descriptor is already
-  initialized with the correct Address{tc} and does not need updating.
-
-  If a future StreamK mode breaks this invariant, Address{tc} would need
-  to be offset and the TDM descriptor synced (s_mov_b64 + s_or_b32).
+  StreamK=3 DP-partial work items have a nonzero StreamKLocalStart and must read
+  their own K-slice. Advance Address{tc} by StreamKLocalStart unroll iterations
+  (inc = ti.depthUBytes, matching _emitGRPtrUpdate_TLU0's per-iteration advance)
+  and re-sync the descriptor. No-op when StreamKLocalStart == 0.
   """
   tc = tP["tensorChar"]
+  ti = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+  inc = int(ti.depthUBytes)  # per-unroll TDM advance; same source as _emitGRPtrUpdate_TLU0
+  group0 = f"tdm{tc}Group0"
   mod = Module(f"TDM StreamK K-offset subtile {tc}")
-  # Assert StreamKLocalStart == 0 at runtime
-  mod.addComment0(f"Assert: StreamKLocalStart == 0 (subtile TDM {tc})")
-  mod.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
-                    comment="subtile TDM requires tile-aligned WG starts"))
-  assertLabel = Label(f"SK_Assert_OK_{tc}", "")
-  mod.add(SCBranchSCC1(labelName=assertLabel.getLabelName(),
-                       comment="OK: StreamKLocalStart == 0"))
-  # Trap if invariant violated
-  mod.add(SEndpgm(comment=f"FATAL: StreamKLocalStart != 0 for subtile TDM {tc}"))
-  mod.add(assertLabel)
+  with writer.allocTmpSgpr(2, alignment=2, tag="tdmSkOffset") as tmpSgprRes:
+    o = tmpSgprRes.idx
+    mod.add(SMulI32(dst=sgpr(o), src0=sgpr("StreamKLocalStart"), src1=inc,
+                    comment=f"SK K-start * depthU*bpe ({inc})"))
+    mod.add(SMovB32(dst=sgpr(o + 1), src=0, comment="SK K-start offset hi = 0"))
+    mod.add(SAddU32(dst=sgpr(f"Address{tc}+0"), src0=sgpr(f"Address{tc}+0"), src1=sgpr(o),
+                    comment="Address += SK K-start offset (lo)"))
+    mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=sgpr(o + 1),
+                     comment="Address += SK K-start offset (hi, carry)"))
+  mod.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tc}", 2),
+                  comment="sync descriptor global addr"))
+  mod.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=hex(2 << 30),
+                 comment="restore descriptor type field"))
   return mod
 
 ##################################################
