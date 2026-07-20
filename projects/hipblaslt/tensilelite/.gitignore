@@ -24,3 +24,8 @@ coverage.xml
 unit_tests.xml
 common_tests.xml
 MatchTable.yaml
+
+# FFM runtime artifacts (generated at client runtime; not source)
+hsakmt_counters.csv
+hierarchy_runtime_params.conf
+out_runtime_params.conf

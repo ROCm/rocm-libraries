@@ -712,6 +712,15 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
+    # Test filter standardization config consumed by TheRock's pytest_runner.py
+    # to drive quick/standard/comprehensive/full categories from the installed tree.
+    install(
+        FILES "${_tensilelite_src}/test_categories.yaml"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+        OPTIONAL
+    )
+
     if(TENSILELITE_ENABLE_CLIENT)
         install(
             TARGETS tensilelite-client
