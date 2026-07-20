@@ -863,7 +863,6 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 return false;
             }
         }
-
         if(!ck::is_xdl_supported())
         {
             return false;

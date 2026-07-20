@@ -571,9 +571,8 @@ struct DeviceGroupedGemmMultipleDXdlCShuffleTileLoop
         // The oversubscription factor for the number of blocks that can simultaneously reside on
         // GPU.
         static constexpr int BLOCK_SUBSCRIPTION_FACTOR = 1;
-        static constexpr int WaveSize_  = 64; // gfx9 warp size
-        static constexpr int BLOCK_WAVES = BlockSize / WaveSize_;
-        static constexpr int CU_SIMDS    = 4;
+        static constexpr int BLOCK_WAVES               = BlockSize / get_warp_size();
+        static constexpr int CU_SIMDS                  = 4;
         // Assume we want to have at most 2 waves per SIMD
         static constexpr int CU_BLOCKS = math::integer_divide_floor(2 * CU_SIMDS, BLOCK_WAVES);
     };

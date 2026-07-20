@@ -579,6 +579,7 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffle
         const std::array<index_t, NDimSpatial>& conv_filter_strides_;
         const std::array<index_t, NDimSpatial>& input_left_pads_;
         const std::array<index_t, NDimSpatial>& input_right_pads_;
+        const index_t k_batch_;
         bool stride_overflow;
     };
 
