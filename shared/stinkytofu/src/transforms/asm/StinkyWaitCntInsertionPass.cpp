@@ -175,6 +175,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitTensorCntData d;
             d.tlcnt = spec.tensorCount;
             w->addModifier<SWaitTensorCntData>(d);
+            // Tag the wait with the drained loads' memory tokens so downstream passes
+            // (e.g. TDMLoadWaveSyncPass) can identify the drained wait group. The
+            // tlcnt above is what the hardware waits on.
+            if (!spec.tensorTokens.empty()) {
+                w->addModifier<MemTokenData>(MemTokenData{spec.tensorTokens});
+            }
         }
     }
 

@@ -61,6 +61,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
@@ -260,6 +261,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createInsertVgprMsbPass(), nullptr);
     EXPECT_NE(createLongBranchLoweringPass(), nullptr);
     EXPECT_NE(createInsertClusterBarrierPass(true, 1, 1), nullptr);
+    EXPECT_NE(createTDMLoadWaveSyncPass(), nullptr);
     EXPECT_NE(createRemoveWaitAluPass(), nullptr);
     EXPECT_NE(createInsertWaitAluPass(), nullptr);
 }

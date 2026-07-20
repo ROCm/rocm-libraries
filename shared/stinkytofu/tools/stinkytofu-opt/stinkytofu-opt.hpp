@@ -55,6 +55,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 using namespace stinkytofu;
 
@@ -141,6 +142,7 @@ const std::vector<PassInfo> availablePasses = {
                                                getArgInt("PrefetchGlobalRead", 1),
                                                getArgInt("PrefetchLocalRead", 1));
      }},
+    {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},
     {"RegionClonePass",

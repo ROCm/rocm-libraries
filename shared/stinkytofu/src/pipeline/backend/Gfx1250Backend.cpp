@@ -57,6 +57,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -166,6 +167,17 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
     // inherit the loop's src C MSB).
     pm.addPass(createCFGBuilderPass());
+
+    // TDM load wave-sync barrier insertion (kernel scope). Must run after tensorcnt
+    // insertion (StinkyWaitCntInsertionPass, in the region adaptor above), so the
+    // s_wait_tensorcnt structure it keys on exists, and after this CFGBuilderPass,
+    // so predecessors are populated for the backward scan. Before RegionClone so
+    // cloned regions carry the barrier too. Inserts a workgroup barrier between an
+    // urgent and a deferrable tensor_load group. Off by default.
+    if (moduleOptions.TDMLoadWaveSync) {
+        pm.addPass(createTDMLoadWaveSyncPass());
+    }
+
     pm.addPass(createRegionClonePass(moduleOptions.CloneList));
     // Pass the whole-kernel function list so MSB is materialized for the entry function and
     // every callable function (each function owns its VGPR MSB hardware state).
