@@ -202,6 +202,71 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    template <uint32_t COOMVN_DIM, typename T, typename I, typename A, typename X, typename Y>
+    static rocsparse_status coomv_aos_segmented_launch(rocsparse_handle     handle,
+                                                       int64_t              nnz,
+                                                       const T*             alpha_device_host,
+                                                       const A*             coo_val,
+                                                       const I*             coo_ind,
+                                                       const X*             x,
+                                                       Y*                   y,
+                                                       rocsparse_index_base base)
+    {
+        hipStream_t stream = handle->stream;
+
+        int maxthreads = handle->properties.maxThreadsPerBlock;
+        int nprocs     = 2 * handle->properties.multiProcessorCount;
+        int maxblocks  = (nprocs * maxthreads - 1) / COOMVN_DIM + 1;
+
+        I minblocks = (nnz - 1) / COOMVN_DIM + 1;
+        I nblocks   = maxblocks < minblocks ? maxblocks : minblocks;
+        I nloops    = (nnz - 1) / (COOMVN_DIM * nblocks) + 1;
+
+        // Buffer
+        char* ptr = reinterpret_cast<char*>(handle->buffer);
+        ptr += 256;
+
+        // row block reduction buffer
+        I* row_block_red = reinterpret_cast<I*>(ptr);
+        ptr += ((sizeof(I) * nblocks - 1) / 256 + 1) * 256;
+
+        // val block reduction buffer
+        T* val_block_red = reinterpret_cast<T*>(ptr);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::coomvn_aos_segmented_loops<COOMVN_DIM>),
+            dim3(nblocks),
+            dim3(COOMVN_DIM),
+            0,
+            stream,
+            nnz,
+            nloops,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            coo_ind,
+            coo_val,
+            x,
+            y,
+            row_block_red,
+            val_block_red,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::coomvn_segmented_loops_reduce<COOMVN_DIM>),
+            dim3(1),
+            dim3(COOMVN_DIM),
+            0,
+            stream,
+            nblocks,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            row_block_red,
+            val_block_red,
+            y,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        return rocsparse_status_success;
+    }
+
     template <typename T, typename I, typename A, typename X, typename Y>
     rocsparse_status coomv_aos_segmented_dispatch(rocsparse_handle          handle,
                                                   rocsparse_operation       trans,
@@ -218,9 +283,6 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Stream
-        hipStream_t stream = handle->stream;
-
         const I ysize = (trans == rocsparse_operation_none) ? m : n;
 
         // Scale y with beta
@@ -231,57 +293,22 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-#define COOMVN_DIM 256
-            int maxthreads = handle->properties.maxThreadsPerBlock;
-            int nprocs     = 2 * handle->properties.multiProcessorCount;
-            int maxblocks  = (nprocs * maxthreads - 1) / COOMVN_DIM + 1;
-
-            I minblocks = (nnz - 1) / COOMVN_DIM + 1;
-            I nblocks   = maxblocks < minblocks ? maxblocks : minblocks;
-            I nloops    = (nnz - 1) / (COOMVN_DIM * nblocks) + 1;
-
-            // Buffer
-            char* ptr = reinterpret_cast<char*>(handle->buffer);
-            ptr += 256;
-
-            // row block reduction buffer
-            I* row_block_red = reinterpret_cast<I*>(ptr);
-            ptr += ((sizeof(I) * nblocks - 1) / 256 + 1) * 256;
-
-            // val block reduction buffer
-            T* val_block_red = reinterpret_cast<T*>(ptr);
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_aos_segmented_loops<COOMVN_DIM>),
-                dim3(nblocks),
-                dim3(COOMVN_DIM),
-                0,
-                stream,
-                nnz,
-                nloops,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                coo_ind,
-                coo_val,
-                x,
-                y,
-                row_block_red,
-                val_block_red,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_segmented_loops_reduce<COOMVN_DIM>),
-                dim3(1),
-                dim3(COOMVN_DIM),
-                0,
-                stream,
-                nblocks,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                row_block_red,
-                val_block_red,
-                y,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-#undef COOMVN_DIM
+            // RDNA4 (wave32) launch tuning: the segmented COO (AOS) matvec uses a
+            // 256-thread block by default. On wave32 (gfx12), a 128-thread block
+            // improves throughput for large problems, while small problems keep 256.
+            // Gate on TOTAL nnz (not nnz/row). The crossover was measured on gfx1201
+            // (RX 9070): 128 regresses below ~2M nnz but wins (+1..+5%) at and above
+            // ~2.2M across low/medium/high nnz-per-row shapes, so gate at 2.2M.
+            if(handle->wavefront_size == 32 && nnz >= 2200000)
+            {
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_aos_segmented_launch<128>(
+                    handle, nnz, alpha_device_host, coo_val, coo_ind, x, y, descr->base)));
+            }
+            else
+            {
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_aos_segmented_launch<256>(
+                    handle, nnz, alpha_device_host, coo_val, coo_ind, x, y, descr->base)));
+            }
             break;
         }
         case rocsparse_operation_transpose:
