@@ -77,6 +77,7 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
         throw std::runtime_error(
             "IsValidValue of PerformanceConfigPooling2d<OpType> is called, but it is not "
             "implemented.");
+        return false; // unreachable; silences -Werror,-Wmissing-noreturn on this bool virtual
     }
     bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
     bool operator==(const PerformanceConfigPooling2d& other) const;
@@ -147,12 +148,14 @@ struct PerformanceConfigPoolingNd : PerfConfigBase<PerformanceConfigPoolingNd<Op
         throw std::runtime_error(
             "SetNextValue of PerformanceConfigPoolingNd<OpType> is called, but it is not "
             "implemented.");
+        return false; // unreachable; silences -Werror,-Wmissing-noreturn on this bool virtual
     }
     virtual bool IsValidValue() const
     {
         throw std::runtime_error(
             "IsValidValue of PerformanceConfigPoolingNd<OpType> is called, but it is not "
             "implemented.");
+        return false; // unreachable; silences -Werror,-Wmissing-noreturn on this bool virtual
     }
     bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
     bool operator==(const PerformanceConfigPoolingNd& other) const;
