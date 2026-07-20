@@ -75,7 +75,7 @@ static bool rocke_env_forces_off(const char* name)
         ++env;
     }
     /* copy + case-fold up to the first trailing-whitespace / capacity bound */
-    char   buf[16];
+    char buf[16];
     size_t n = 0;
     for(; env[n] != '\0' && n + 1 < sizeof(buf); ++n)
     {
@@ -85,8 +85,8 @@ static bool rocke_env_forces_off(const char* name)
     buf[n] = '\0';
     /* trim trailing whitespace */
     while(n > 0
-          && (buf[n - 1] == ' ' || buf[n - 1] == '\t' || buf[n - 1] == '\n'
-              || buf[n - 1] == '\r' || buf[n - 1] == '\v' || buf[n - 1] == '\f'))
+          && (buf[n - 1] == ' ' || buf[n - 1] == '\t' || buf[n - 1] == '\n' || buf[n - 1] == '\r'
+              || buf[n - 1] == '\v' || buf[n - 1] == '\f'))
     {
         buf[--n] = '\0';
     }
