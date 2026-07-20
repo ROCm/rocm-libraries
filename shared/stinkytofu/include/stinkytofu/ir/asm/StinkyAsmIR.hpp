@@ -458,6 +458,53 @@ inline bool isGlobalMemStore(const StinkyInstruction& inst) {
     return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst);
 }
 
+/// A destination register is implicit (not printed) when it was added solely
+/// for dependency tracking. Shared between the assembly emitter (decides
+/// whether to print `th:TH_ATOMIC_RETURN`) and the waitcnt dataflow (decides
+/// whether an atomic's destination is a trackable value) so both agree on
+/// exactly the same "does this atomic return a value" answer.
+inline bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& inst) {
+    if (reg.dataType != StinkyRegister::Type::Register) return false;
+
+    RegType t = reg.reg.type;
+
+    if (t == RegType::SCC) {
+        assert(inst.is(InstFlag::IF_ImplicitWriteSCC) &&
+               "SCC should always be an implicit dest or src");
+        return true;
+    }
+
+    if ((t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI) &&
+        inst.is(InstFlag::IF_ImplicitWriteEXEC)) {
+        return true;
+    }
+
+    return false;
+}
+
+/// True iff `inst` is a returning MUBUF/FLAT/GLOBAL atomic -- i.e. one whose
+/// destination is a real (non-pseudo, non-implicit) register that a later
+/// instruction can consume, as opposed to a fire-and-forget atomic with no
+/// usable result. Scalar-memory atomics (IF_SMemAtomic) signal their return
+/// via `glc`, not `th:`, and are excluded here; they are also not currently
+/// reachable through any StinkyTofu-enabled architecture.
+///
+/// NOTE: this class of instruction is deliberately NOT modeled through
+/// MemTokenData/pseudo-register dependency edges the way LDS ops are --
+/// its destination is a plain, real register, so ordinary SSA def-use
+/// already connects a returning atomic to its consumers. `classifyMemOp`
+/// (see WaitDataflow.cpp) still needs to bucket it into a counter so the
+/// waitcnt dataflow can compute -- and safely regenerate -- the wait that
+/// guards that register.
+inline bool isReturningAtomic(const StinkyInstruction& inst) {
+    if (!isMUBUFAtomic(inst) && !isFLATAtomic(inst) && !isGLOBALAtomic(inst)) return false;
+
+    for (const StinkyRegister& d : inst.getDestRegs()) {
+        if (!isPseudoReg(d) && !isImplicitDest(d, inst)) return true;
+    }
+    return false;
+}
+
 inline bool isTensorLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_TENSORLoadToLds);
 }
