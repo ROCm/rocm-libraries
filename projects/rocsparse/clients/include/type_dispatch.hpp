@@ -977,10 +977,6 @@ auto rocsparse_iabct_sddmm_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         DISPATCH_TEST(int32_t);
