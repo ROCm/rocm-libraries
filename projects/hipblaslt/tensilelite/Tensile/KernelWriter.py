@@ -10569,7 +10569,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier):
+        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]:
+          # Pass-2 rebuilds only workgroup-scope barriers from token-state
+          # transitions, so only those are cleared here. Cluster-scope split
+          # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
+          # prologue arrive, are placed deliberately by other components and
+          # carry no LDS token, so preserve them rather than dropping a half of
+          # a cluster handshake.
           removedCount += 1
           continue
         else:

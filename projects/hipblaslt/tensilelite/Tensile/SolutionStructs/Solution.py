@@ -231,6 +231,108 @@ def _validateStreamKForceDPOnly(state, printRejectionReason):
   return True
 
 
+def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
+  """Validate the gfx1250 StreamK DP cooperative cluster-load fast path.
+
+  StreamKMulticast co-locates C consecutive StreamK DP workgroups in a 1-D
+  cluster (ClusterDim = [C, 1]); those M-adjacent tiles share the same B over
+  full K, so B is TDM-multicast to the cluster while A stays per-workgroup.
+  Solution-level requirements are rejected here at build time; the runtime
+  nWG0 % C "multiple-of-cluster-size" requirement is enforced by the
+  ClusterDimCheck predicate at selection time (not a silent fallback).
+  See docs/design/cluster-load-component-and-streamk-multicast.md.
+
+  StreamKMulticast is auto-derived for StreamK=3 + ClusterDim != [1, 1] in
+  assignProblemIndependentDerivedParameters -- the bare index-only StreamK
+  cluster state was collapsed into this cooperative-load path. When such an
+  auto-derived config cannot meet the requirements below (e.g. TDMInst != 3),
+  the rejects here are the "reject an unusable cluster" behavior, not a
+  rejection of an explicit user opt-in.
+  """
+  if not state.get("StreamKMulticast", 0):
+    return True
+
+  # StreamKMulticast is auto-enabled by ClusterDim on SK3, but the multicast mask
+  # SGPRs are gated on the (derived) Multicast flag while the mask predicate /
+  # boundary-clear emitters are gated on StreamKMulticast. An effective
+  # Multicast=off (force-off 0) therefore leaves MulticastMaskA/B undeclared while
+  # still being referenced -> broken codegen. Reject rather than emit it.
+  if not state.get("Multicast", 0):
+    reject(state, printRejectionReason,
+           "StreamKMulticast (auto-enabled by ClusterDim on SK3) is incompatible "
+           "with Multicast=0; use Multicast=-1 or 1, or remove ClusterDim.")
+    return False
+
+  # SK3 (StreamKTwoTileDPFirst) only: the DP schedule + skIndexToWG addressing
+  # the mask derivation relies on are SK3-specific.
+  if state["StreamK"] != 3:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires StreamK=3 (two-tile DP-first)")
+    return False
+
+  # The atomic path skips the workspace/tile DP structure the cooperative loads
+  # rely on.
+  if state["StreamKAtomic"]:
+    reject(state, printRejectionReason,
+           "StreamKMulticast is not supported with StreamKAtomic")
+    return False
+
+  # The DP cooperative multicast path currently supports single-buffered global
+  # prefetch only.
+  if state["PrefetchGlobalRead"] > 1:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires PrefetchGlobalRead <= 1")
+    return False
+
+  # StreamKXCCMapping remap is bypassed under clustering and XCC=3 overflows the
+  # SGPR budget alongside the cluster coords; require the default (no remap).
+  if state["StreamKXCCMapping"] != 0:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires StreamKXCCMapping=0 (WGM/XCC remap is bypassed under clustering)")
+    return False
+
+  # 1-D cluster [C, 1] with C a power of two in [2, 16]. ClusterDim[1] == 1
+  # because the StreamK grid is effectively 1-D along x and consecutive-WG
+  # clustering is what produces M-adjacent (shared-B) DP tiles.
+  clusterDim = state["ClusterDim"]
+  c = clusterDim[0]
+  if clusterDim[1] != 1:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires ClusterDim = [C, 1] (got %s)" % clusterDim)
+    return False
+  if c < 2 or c > 16 or (c & (c - 1)) != 0:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires ClusterDim[0] a power of two in [2, 16] (got %d)" % c)
+    return False
+
+  # gfx1250 with TDM multicast loads (multicast is a TDM feature).
+  isa = tuple(state["ISA"])
+  if isa != (12, 5, 0):
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires gfx1250 ISA (12, 5, 0)")
+    return False
+  if not isaInfoMap[isa].asmCaps.get("HasTDM", False):
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires asmCap HasTDM")
+    return False
+  # The cluster-scope barrier handshake that keeps the C multicast peers in
+  # lockstep around each tensor_load_to_lds needs the HasClusterBarrier asm cap.
+  if not isaInfoMap[isa].asmCaps.get("HasClusterBarrier", False):
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires asmCap HasClusterBarrier (cluster-scope "
+           "barrier handshake around the multicast loads)")
+    return False
+  # ClusterLoadTDM (the component that emits/applies the multicast masks) matches
+  # only TDMInst == 3, so TDMInst in {1, 2} would produce no multicast component
+  # and silently drop the masks. Require TDMInst == 3.
+  if state["TDMInst"] != 3:
+    reject(state, printRejectionReason,
+           "StreamKMulticast requires TDMInst == 3 (TDM multicast loads on A and B)")
+    return False
+
+  return True
+
+
 # _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
 # Tensile/Common/ValidParameters.py to keep the registry and its derived
 # type map co-located (and to keep the Common -> Solution import direction).
@@ -1052,26 +1154,71 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
     state["ClusterBarrier"] = False
+    # StreamKMulticast is a DERIVED-ONLY internal state key (not a valid/benchmark
+    # parameter -- see ValidParameters.py). Seed it off here (mirroring the
+    # ClusterBarrier default above) so it is always present on state; the collapse
+    # below is the ONLY place it is turned on.
+    state["StreamKMulticast"] = 0
+    # Collapse the bare StreamK cluster state: on StreamK=3 a non-[1,1] ClusterDim
+    # AUTO-ENABLES the DP cooperative B-multicast path. A StreamK cluster with no
+    # cooperative loads no longer exists -- "ClusterDim without cluster loads" is
+    # not a supported state. StreamKMulticast is derived-only (no user/YAML
+    # opt-in): this collapse is its sole enable site.
+    #
+    # If the resulting cooperative-load config cannot be satisfied (e.g. TDMInst!=3
+    # or non-gfx1250), _validateStreamKMulticast (called later in
+    # assignDerivedParameters) rejects it at build time rather than silently
+    # degrading to a no-op cluster -- an unusable cluster is a hard reject.
+    #
+    # Scope note: the TDM B-multicast fast path is StreamK=3-only, so there is
+    # nothing to auto-enable for the dynamic (SK4) / hybrid (SK5) queue modes.
+    # SK4/SK5 with a non-[1,1] ClusterDim is rejected later in
+    # assignDerivedParameters (no cluster-load impl for those modes).
+    # ClusterDim is tested first so this (like the legacy Multicast auto branch
+    # below) never dereferences StreamK for the common non-clustered state, which
+    # some partial-state derivation call sites construct without a StreamK key.
+    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
+      state["StreamKMulticast"] = 1
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
     # that omits Multicast is byte-identical.
     mc = state.get("Multicast", -1)
     if mc == 1:
+      # Force-on requires a matching ClusterLoadTDM (TDMInst==3 on gfx1250 with
+      # HasTDM); without it the multicast masks are never emitted or applied, so
+      # reject rather than silently generate a degenerate kernel.
+      isa = tuple(state["ISA"])
+      if state["TDMInst"] != 3 or isa != (12, 5, 0) \
+         or not isaInfoMap[isa].asmCaps.get("HasTDM", False):
+        reject(state, printRejectionReason,
+               "Multicast=1 requires TDMInst=3 on gfx1250 (HasTDM); "
+               "no cluster-load multicast component matches otherwise")
       state["Multicast"] = 1
     elif mc == 0:
       state["Multicast"] = 0
+    elif state.get("StreamKMulticast", 0):
+      # StreamKMulticast (auto-derived above from StreamK=3 + ClusterDim) drives
+      # TDM B-multicast through the ClusterLoad component (its [C,1] cluster is
+      # spatial DP peers, not the legacy subtile coupling). The C co-resident
+      # peers must stay in lockstep around each multicast tensor_load_to_lds, so
+      # the cluster-scope barrier handshake is required (enabled below).
+      state["Multicast"] = 1
     else:  # -1 auto (legacy)
       # A legacy broadcast targets a fixed physical cluster position, which
       # Stream-K tile remapping would send to the wrong partner, so auto-multicast
-      # is off for ALL Stream-K. Non-Stream-K clustered paths are unchanged, so
-      # this reproduces develop's exact behavior for every YAML that omits Multicast.
+      # is off for ALL Stream-K here; the derived StreamKMulticast is the one
+      # exception (branch above). Non-Stream-K clustered paths are unchanged.
       state["Multicast"] = int(state["ClusterDim"] != [1, 1]
                                and state["StreamK"] == 0)
-    # ClusterBarrier applies only to the non-Stream-K clustered (legacy/subtile)
-    # path; keyed off "StreamK == 0" so it excludes the StreamK cluster paths
-    # (which imply StreamK != 0). A forced-off Multicast also keeps it off.
-    if state["ClusterDim"] != [1, 1] and state["StreamK"] == 0 \
-       and state["Multicast"] and state["TDMInst"] != 0 \
+    # The cluster-scope barrier handshake (s_barrier_signal/wait -3, inserted by
+    # StinkyTofu's InsertClusterBarrierPass around each multicast tensor_load_to_lds)
+    # keeps the C cluster peers in lockstep on the multicast loads. It applies to
+    # both clustered multicast paths: the legacy/subtile clustered multicast
+    # (StreamK == 0) and the StreamK DP cooperative multicast (StreamKMulticast).
+    # A forced-off Multicast keeps it off.
+    if state["ClusterDim"] != [1, 1] and state["Multicast"] \
+       and state["TDMInst"] != 0 \
+       and (state["StreamK"] == 0 or state.get("StreamKMulticast", 0)) \
        and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
       state["ClusterBarrier"] = True
 
@@ -1712,11 +1859,16 @@ class Solution(collections.abc.Mapping):
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if state["ClusterDim"] != [1, 1]:
-        # Only SK3 (two-tile DP-first) is cluster-aware; SK4 (dynamic per-XCD
-        # work queues) and SK5 (hybrid) have no cluster WG-id decode support.
+        # WG-cluster support is StreamK==3-only. The [C,1] cluster feature is the
+        # SK3 DP cooperative B-multicast (StreamKMulticast, auto-derived above);
+        # there is no cluster-load implementation for the dynamic (SK4) or hybrid
+        # (SK5) work-queue modes, so a ClusterDim there would only decode a
+        # cluster WG-id that no feature consumes. Reject outright rather than emit
+        # an unusable cluster kernel.
         if state["StreamK"] in (4, 5):
           reject(state, printRejectionReason,
-                 "Stream-K modes 4 and 5 do not support ClusterDim != [1, 1]")
+                 "StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim "
+                 "(cluster support is SK3-only)")
         # Stream-K launches a 1-D grid in X, so StreamKIdx = WorkGroup0 = cluster_x*nwg_x
         # + wg_x must stay a unique linear index. A Y-extent > 1 collides WorkGroup0 across
         # WGs that differ only in Y, so restrict clustering to the X dimension.
@@ -1747,6 +1899,7 @@ class Solution(collections.abc.Mapping):
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
       _validateStreamKForceDPOnly(state, printRejectionReason)
+      _validateStreamKMulticast(state, printRejectionReason, isaInfoMap)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
@@ -1813,6 +1966,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKAtomic"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
+      state["StreamKMulticast"] = 0
       state["DebugStreamK"] = 0
       state["PrefetchAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False

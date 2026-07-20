@@ -48,6 +48,14 @@ class ClusterLoadTDM(ClusterLoad):
         masks in that case. This is the single source of truth for the
         combined-vs-split decision used by declare/undeclare/computeMasks.
         """
+        # StreamK DP cooperative multicast needs the SPLIT A/B masks: A is
+        # loaded per-workgroup (MulticastMaskA = self bit) while B is broadcast
+        # across the [C,1] cluster (MulticastMaskB = all-C bits). The combined
+        # single-parity mask instead selects maskA on even waves / maskB on odd
+        # waves (for the wave-separated A-even/B-odd load split), which is wrong
+        # here, so force split whenever StreamKMulticast is on. Inert otherwise.
+        if kernel.get("StreamKMulticast", 0):
+            return False
         tdmA: bool = kernel["enableTDMA"]
         tdmB: bool = kernel["enableTDMB"]
         return tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl")
@@ -63,6 +71,15 @@ class ClusterLoadTDM(ClusterLoad):
             chars; subtile only ever passes ``A``/``B`` so the strip is a
             no-op there).
         """
+        # StreamK DP cooperative multicast always uses the split A/B masks
+        # (usesCombinedMask() returns False for it). The wave-separated dense
+        # apply site would otherwise resolve to the combined "MulticastMask"
+        # name, which is never declared on this path -> the B descriptor would
+        # OR an undefined SGPR. Force the split name so A binds MulticastMaskA
+        # (self) and B binds MulticastMaskB (broadcast).
+        if kernel.get("StreamKMulticast", 0):
+            string = tc.removeprefix("MXS") if tc.startswith("MXS") else tc
+            return f"MulticastMask{string}"
         if waveSeparated and not subtile:
             return "MulticastMask"
         string = tc.removeprefix("MXS") if tc.startswith("MXS") else tc

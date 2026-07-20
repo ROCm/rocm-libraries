@@ -3190,6 +3190,20 @@ namespace TensileLite
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
             }
+
+            // Keep the StreamK cluster launch grid a multiple of the cluster size C
+            // even if a workspace/DP fallback above changed sk.grid, so the clustered
+            // launch (gridDimX % C == 0) stays valid. In the common case sk.grid is
+            // already ceil(tiles/C)*C (multicast) -- a multiple of C -- so this is a
+            // no-op; when a fallback fired (e.g. sk.grid = tiles), per-tile
+            // correctness on any partially-filled cluster is handled by the kernel's
+            // clusterMulticastValid runtime guard + the normal (non-cooperative) load
+            // fallback.
+            if(sizeMapping.streamKMulticast && sizeMapping.clusterDim.x > 1)
+            {
+                size_t c = sizeMapping.clusterDim.x;
+                sk.grid  = ((sk.grid + c - 1) / c) * c;
+            }
         }
 
         GSUSettings gsuSettings;
@@ -4062,6 +4076,21 @@ namespace TensileLite
                 {
                     skGrid = tiles;
                 }
+            }
+
+            // StreamKMulticast (gfx1250): DP cooperative B-multicast. The multicast
+            // cluster is SPATIAL: the C peers of a cluster process C DISTINCT,
+            // M-adjacent tiles and share the B (N-block) tile. v1 is single-round, so
+            // the launched grid is `tiles` rounded UP to a multiple of C = clusterDim.x.
+            // Rounding up keeps every launched HW cluster full while giving each WG one
+            // tile in the single DP round; a trailing partial cluster (tiles % C != 0)
+            // has idle-but-present tail WGs whose cluster is disabled by the kernel's
+            // clusterMulticastValid runtime predicate (so a masked target is never left
+            // without a matching load). See docs/design/cluster-load-component-and-streamk-multicast.md.
+            if(self.sizeMapping.streamKMulticast && self.sizeMapping.clusterDim.x > 1)
+            {
+                size_t c = self.sizeMapping.clusterDim.x;
+                skGrid   = ((tiles + c - 1) / c) * c;
             }
 
             return skGrid;

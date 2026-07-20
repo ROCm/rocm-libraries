@@ -5,7 +5,7 @@
 # Unit tests for the decoupled tri-state Multicast solution parameter.
 #
 # Multicast used to be a derived-only state var, unconditionally forced on for
-# ClusterDim != [1,1] (except StreamK cluster reduction). It is now an explicit
+# ClusterDim != [1,1] (except Stream-K). It is now an explicit
 # tri-state control:
 #   -1 = auto (legacy coupling), 0 = force off, 1 = force on.
 # Default -1 reproduces the historic derivation exactly. These tests pin:
@@ -35,7 +35,7 @@ _DESIGNED = os.path.join(
     TENSILE_ROOT, "Tensile", "Tests", "unit", "characterization",
     "_codegen", "data", "test_data", "_designed", "gfx1250")
 _XCCREMAP = os.path.join(_DESIGNED, "xccremap.yaml")
-_STREAMK_CLUSTER = os.path.join(_DESIGNED, "streamk_cluster.yaml")
+_STREAMK_CLUSTER = os.path.join(_DESIGNED, "streamk_cluster_coop_load.yaml")
 
 
 # --- registration ----------------------------------------------------------
@@ -104,14 +104,22 @@ class TestDerivation:
         assert all(st["Multicast"] == 1 for st in states), (
             [st["Multicast"] for st in states])
 
-    def test_legacy_auto_streamk_reduction_off(self, tmp_path):
-        # -1 (omitted) + StreamKClusterReduction=1 -> Multicast stays off
-        # (the legacy StreamK cluster interaction is preserved).
-        cfg = _write_variant(tmp_path, _STREAMK_CLUSTER, "sk_legacy.yaml")
+    def test_streamk_cluster_auto_multicast(self, tmp_path):
+        # Collapse: -1 (omitted Multicast) + StreamK=3 + ClusterDim != [1,1] now
+        # AUTO-ENABLES the cooperative-load path. StreamKMulticast is derived to
+        # 1 and Multicast to True -- the bare index-only StreamK cluster state no
+        # longer exists.
+        cfg = _write_variant(tmp_path, _STREAMK_CLUSTER, "sk_auto_mc.yaml")
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution"
-        assert all(st["Multicast"] == 0 for st in states), (
+        assert all(st["StreamKMulticast"] == 1 for st in states), (
+            [st.get("StreamKMulticast") for st in states])
+        assert all(st["Multicast"] == 1 for st in states), (
             [st["Multicast"] for st in states])
+        # The cooperative multicast now pairs the masks with the cluster-scope
+        # barrier handshake, so ClusterBarrier is derived on.
+        assert all(st["ClusterBarrier"] is True for st in states), (
+            [st["ClusterBarrier"] for st in states])
 
 
 if __name__ == "__main__":

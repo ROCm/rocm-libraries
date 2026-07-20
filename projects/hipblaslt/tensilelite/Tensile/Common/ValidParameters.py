@@ -837,6 +837,16 @@ validParameters = { # we need to make sure this matches develop
     # 0: use linear reduction
     # 1: use tree reduction
     "StreamKFixupTreeReduction": [0, 1],
+    # NOTE: StreamKMulticast (the gfx1250 StreamK DP cooperative cluster-load /
+    # TDM B-multicast fast path) is intentionally NOT a valid/benchmark
+    # parameter. It is a DERIVED-ONLY internal state key (see the ClusterBarrier
+    # precedent): Solution.assignProblemIndependentDerivedParameters auto-enables
+    # it for StreamK==3 + ClusterDim != [1,1] (the "bare StreamK cluster"
+    # collapse), and _validateStreamKMulticast then hard-rejects any cluster
+    # config that cannot satisfy its constraints. It must not be user/YAML-
+    # settable, so it has no entry here (checkParametersAreValid would otherwise
+    # accept it as a fork/constant param). It still serializes to C++ via
+    # Contractions.SizeMapping (streamKMulticast, read with d.get()).
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code
