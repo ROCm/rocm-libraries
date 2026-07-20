@@ -29,6 +29,7 @@
 #define ROCSPARSE_AUXILIARY_H
 
 #include "rocsparse-types.h"
+#include "rocsparse-version.h"
 #include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus
@@ -54,6 +55,48 @@ extern "C" {
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+/*! \ingroup aux_module
+ *  \brief Create a rocSPARSE handle on a user-defined stream.
+ *
+ *  \details
+ *  \p rocsparse_handle_create associates the handle with the user-provided \p stream
+ *  before performing any setup work. All device memory allocation and initialization are
+ *  enqueued on \p stream using stream-ordered operations, so handle creation is
+ *  asynchronous with respect to the host: it returns to the caller without blocking the
+ *  calling CPU thread or any GPU stream.
+ *
+ *  \note
+ *  This routine is not compatible with HIP graph stream capture. It performs
+ *  stream-ordered device allocations and a warm-up kernel launch, so it must not be
+ *  called while \p stream (or any other stream) is being captured into a HIP graph.
+ *
+ *  \note
+ *  The handle is fully initialized for operations submitted on \p stream (stream
+ *  ordering guarantees correctness). If the handle must be used on a different stream
+ *  before \p stream has finished executing, the caller must first synchronize \p stream
+ *  (e.g. via \p hipStreamSynchronize or a HIP event dependency).
+ *
+ *  The handle should be destroyed at the end using \ref rocsparse_handle_destroy or
+ *  \ref rocsparse_destroy_handle.
+ *
+ *  @param[out]
+ *  handle  the pointer to the handle to the rocSPARSE library context.
+ *  @param[in]
+ *  stream   the user-defined stream to associate with the handle and to use for
+ *           all stream-ordered setup work during creation.
+ *  @param[out]
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the initialization succeeded.
+ *  \retval rocsparse_status_invalid_pointer \p handle pointer is invalid.
+ *  \retval rocsparse_status_internal_error an internal error occurred.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status
+    rocsparse_handle_create(rocsparse_handle* handle, hipStream_t stream, rocsparse_error* p_error);
+#endif
+
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
  *
@@ -70,6 +113,26 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
+
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+/*! \ingroup aux_module
+ *  \brief Destroy a rocSPARSE handle.
+ *
+ *  \details
+ *  \p rocsparse_handle_destroy destroys the rocSPARSE library context and releases
+ *  all resources used by the rocSPARSE library.
+ *
+ *  @param[in]
+ *  handle   the handle to the rocSPARSE library context, which can be a null pointer.
+ *  @param[out]
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_internal_error an internal error occurred.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_handle_destroy(rocsparse_handle handle, rocsparse_error* p_error);
+#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE error descriptor.
