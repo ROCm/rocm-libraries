@@ -58,6 +58,15 @@ constexpr int kCdna5GlobalReadPerWmma = 1;
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
 // -------------------------------------------------------------------------
 
+// Register-file-aware key for the data-ready (RAW) and elapse-touch maps. These maps
+// were keyed on reg.idx alone, which conflates register files: e.g. a WMMA writing its
+// accumulator v[12:20) would stamp indices 12..19 and falsely gate a later SALU that
+// reads s14/s15 (same indices, different file). Fold the register type into the key so
+// vector, scalar, and accumulator registers of the same index never collide.
+static inline int regDepKey(RegType type, uint32_t idx) {
+    return (static_cast<int>(type) << 20) | static_cast<int>(idx & 0xFFFFF);
+}
+
 // Scheduling rule (2): simulate producer completion over [blockBegin, regionStart) —
 // outstanding data-ready latencies decrease by each instruction's issueCycles; each
 // producer overwrites its dest VGPRs with that op's latencyCycles. Remaining counts seed
@@ -94,7 +103,7 @@ static void seedWmmaDsLatencyFromPrefix(IRList::iterator blockBegin, IRList::ite
         for (const StinkyRegister& dstReg : inst.getDestRegs()) {
             if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
             for (unsigned off = 0; off < dstReg.reg.num; ++off)
-                pending[dstReg.reg.idx + off] = inst.latencyCycles;
+                pending[regDepKey(dstReg.reg.type, dstReg.reg.idx + off)] = inst.latencyCycles;
         }
     }
 
@@ -466,7 +475,7 @@ void CDNA5ReadyQueue::stampDataReady(const StinkyInstruction& inst) {
     for (const StinkyRegister& dst : inst.getDestRegs()) {
         if (!dst.isRegister() || isPseudoReg(dst)) continue;
         for (unsigned off = 0; off < dst.reg.num; ++off)
-            regDataReadyCounters[dst.reg.idx + off] = inst.latencyCycles;
+            regDataReadyCounters[regDepKey(dst.reg.type, dst.reg.idx + off)] = inst.latencyCycles;
     }
 }
 
@@ -475,11 +484,13 @@ void CDNA5ReadyQueue::stampDataReady(const StinkyInstruction& inst) {
 void CDNA5ReadyQueue::touchOperands(const StinkyInstruction& inst) {
     for (const StinkyRegister& dst : inst.getDestRegs()) {
         if (!dst.isRegister() || isPseudoReg(dst)) continue;
-        for (unsigned off = 0; off < dst.reg.num; ++off) regLastTouch_[dst.reg.idx + off] = clock_;
+        for (unsigned off = 0; off < dst.reg.num; ++off)
+            regLastTouch_[regDepKey(dst.reg.type, dst.reg.idx + off)] = clock_;
     }
     for (const StinkyRegister& src : inst.getSrcRegs()) {
         if (!src.isRegister() || isPseudoReg(src)) continue;
-        for (unsigned off = 0; off < src.reg.num; ++off) regLastTouch_[src.reg.idx + off] = clock_;
+        for (unsigned off = 0; off < src.reg.num; ++off)
+            regLastTouch_[regDepKey(src.reg.type, src.reg.idx + off)] = clock_;
     }
 }
 
@@ -490,7 +501,7 @@ int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
     for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
         if (!srcReg.isRegister()) continue;
         for (unsigned off = 0; off < srcReg.reg.num; ++off) {
-            auto it = regDataReadyCounters.find(srcReg.reg.idx + off);
+            auto it = regDataReadyCounters.find(regDepKey(srcReg.reg.type, srcReg.reg.idx + off));
             if (it != regDataReadyCounters.end() && it->second > maxLat) maxLat = it->second;
         }
     }
@@ -528,7 +539,7 @@ int CDNA5ReadyQueue::nodeElapseKey(DAGNode* node) const {
     auto consider = [&](const StinkyRegister& r) {
         if (!r.isRegister() || isPseudoReg(r)) return;
         for (unsigned off = 0; off < r.reg.num; ++off) {
-            auto it = regLastTouch_.find(r.reg.idx + off);
+            auto it = regLastTouch_.find(regDepKey(r.reg.type, r.reg.idx + off));
             const int elapse = (it == regLastTouch_.end()) ? INT_MAX : (clock_ - it->second);
             if (elapse < minElapse) minElapse = elapse;
         }
