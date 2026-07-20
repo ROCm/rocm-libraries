@@ -1393,6 +1393,23 @@ void common_inst(nb::module_ m_common)
             return new rocisa::_VMulPKF32(self);
         });
 
+    nb::class_<rocisa::VPkFmaF32, rocisa::CommonInstruction>(m_common, "VPkFmaF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("src2"),
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VPkFmaF32& self, nb::dict&) {
+            return new rocisa::VPkFmaF32(self);
+        });
+
     nb::class_<rocisa::VMulPKF32, rocisa::CompositeInstruction>(m_common, "VMulPKF32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

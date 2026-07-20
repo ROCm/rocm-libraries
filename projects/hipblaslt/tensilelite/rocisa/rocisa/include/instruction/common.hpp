@@ -24,6 +24,8 @@
 #include "enum.hpp"
 #include "instruction.hpp"
 
+#include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -4395,6 +4397,78 @@ namespace rocisa
 
     private:
         std::optional<VOP3PModifiers> vop3;
+    };
+
+    // v_pk_fma_f32 (VOP3P, op 0x1f). The FMHA kernel needs this with an SGPR src1
+    // (the softmax scale s[102:103]), a form amdclang REFUSES to assemble from
+    // mnemonic text ("invalid op_sel operand") even though the raw encoding is valid
+    // hardware. So toString() conditionally emits the raw .long encoding when src1 is
+    // an SGPR, and the normal mnemonic otherwise. This lets the emitter author a typed
+    // instruction node (no bare RawNode) while still producing an assemblable object.
+    // Fixed modifier pattern for this kernel: neg_lo:[0,0,1] neg_hi:[0,0,1]
+    // (word0 |= 0x4400, word1 |= 0x9C000000), mirroring vop_encode.pk_fma_f32.
+    struct VPkFmaF32 : public CommonInstruction
+    {
+        VPkFmaF32(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const InstructionInput&           src2,
+                  std::optional<VOP3PModifiers>     vop3    = std::nullopt,
+                  const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F32, dst, {src0, src1, src2}, std::nullopt, std::nullopt, vop3, comment)
+        {
+            setInst("v_pk_fma_f32");
+        }
+
+        VPkFmaF32(const VPkFmaF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPkFmaF32>(*this);
+        }
+
+        // VOP3/VOP3P src field value: VGPR n -> 256 + n, SGPR n -> n.
+        static int srcField(const InstructionInput& in)
+        {
+            auto reg = std::get<std::shared_ptr<Container>>(in);
+            auto rc  = std::dynamic_pointer_cast<RegisterContainer>(reg);
+            return rc->regType == "v" ? 256 + rc->regIdx : rc->regIdx;
+        }
+
+        static bool isSgpr(const InstructionInput& in)
+        {
+            if(!std::holds_alternative<std::shared_ptr<Container>>(in))
+            {
+                return false;
+            }
+            auto rc = std::dynamic_pointer_cast<RegisterContainer>(
+                std::get<std::shared_ptr<Container>>(in));
+            return rc && rc->regType == "s";
+        }
+
+        std::string toString() const override
+        {
+            // SGPR src1 packed fma is not assemblable from mnemonic text; emit the raw
+            // two-word encoding directly (byte-identical to the golden .long the POC uses).
+            if(srcs.size() == 3 && isSgpr(srcs[1]))
+            {
+                auto dstRc = std::dynamic_pointer_cast<RegisterContainer>(dst);
+                uint32_t d  = static_cast<uint32_t>(dstRc->regIdx);
+                uint32_t s0 = static_cast<uint32_t>(srcField(srcs[0]));
+                uint32_t s1 = static_cast<uint32_t>(srcField(srcs[1]));
+                uint32_t s2 = static_cast<uint32_t>(srcField(srcs[2]));
+                uint32_t word0 = 0xCC1F0000u | 0x4400u | d;
+                uint32_t word1 = 0x9C000000u | s0 | (s1 << 9) | (s2 << 18);
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "    .long 0x%08x\n    .long 0x%08x", word0, word1);
+                return formatWithComment(std::string(buf));
+            }
+            return CommonInstruction::toString();
+        }
     };
 
     struct VMulLOU32 : public CommonInstruction
