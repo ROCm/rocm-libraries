@@ -59,6 +59,13 @@ project(hipRAND CXX)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(HIPRAND_ENABLE_COVERAGE "Build with code coverage enabled" OFF)
+# Fallback trigger: TheRock's superbuild does not reliably forward the
+# -DHIPRAND_ENABLE_COVERAGE cache variable to this sub-project (ROCm/TheRock#6572),
+# but environment variables DO propagate into the sub-project configure. Honor an
+# env var of the same name so coverage CI can force instrumentation on regardless.
+if(NOT HIPRAND_ENABLE_COVERAGE AND DEFINED ENV{HIPRAND_ENABLE_COVERAGE})
+  set(HIPRAND_ENABLE_COVERAGE ON)
+endif()
 option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
@@ -245,6 +252,7 @@ else()
 endif()
 
 if(HIPRAND_ENABLE_COVERAGE)
+  message(STATUS "hipRAND: code coverage instrumentation ENABLED (libhiprand)")
   target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(hiprand PUBLIC -fprofile-instr-generate)
 endif()

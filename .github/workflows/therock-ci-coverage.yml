@@ -92,6 +92,15 @@ jobs:
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks ${{ contains(inputs.cmake_options, 'THEROCK_ENABLE_IREE_LIBS=ON') && '--include-iree-libs' || '' }}
 
+      - name: Enable coverage instrumentation for sub-project
+        run: |
+          # TheRock does not reliably forward -D<PROJECT>_ENABLE_COVERAGE to the
+          # sub-project (ROCm/TheRock#6572). Environment variables DO propagate through
+          # TheRock's sub-project sandbox (only ROCM_PATH/ROCM_DIR/HIP_PATH/HIP_DIR are
+          # unset), so export it for the configure + build steps; the component CMake
+          # honors $ENV{<PROJECT>_ENABLE_COVERAGE} as a fallback trigger.
+          echo "${{ inputs.project_name }}_ENABLE_COVERAGE=ON" >> "$GITHUB_ENV"
+
       - name: Configure coverage build
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
@@ -111,6 +120,24 @@ jobs:
 
       - name: Build therock-artifacts and therock-dist
         run: cmake --build TheRock/build-coverage --target therock-artifacts therock-dist -- -k 0
+
+      - name: Verify coverage instrumentation
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e  # diagnostic only; never fail the build
+          proj="$(echo '${{ inputs.project_name }}' | tr '[:upper:]' '[:lower:]')"
+          nm="$(find TheRock/build-coverage -type f -name llvm-nm -path '*/llvm/bin/*' 2>/dev/null | head -1)"
+          echo "== coverage instrumentation self-check (lib${proj}.so) =="
+          echo "llvm-nm: ${nm:-<not found>}"
+          found=0
+          for so in $(find TheRock/build-coverage -type f -name "lib${proj}.so" 2>/dev/null); do
+            found=1
+            cnt="$("${nm}" "${so}" 2>/dev/null | grep -c __llvm_profile)"
+            echo "  ${cnt} __llvm_profile symbols : ${so}"
+          done
+          [ "${found}" -eq 0 ] && echo "  (no lib${proj}.so found under TheRock/build-coverage)"
+          echo "=========================================="
 
       - name: Report
         if: ${{ !cancelled() }}
