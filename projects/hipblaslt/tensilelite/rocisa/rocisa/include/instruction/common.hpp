@@ -4762,6 +4762,58 @@ namespace rocisa
         }
     };
 
+    // v_add_nc_i32 / v_sub_nc_i32 (VOP3, op 0x26 / 0x25). Unlike VAddI32/VSubI32, whose
+    // _nc-vs-plain lowering is gated on getAsmBugs()["ExplicitNC"] (set only by the
+    // in-container amdclang probe, NOT on the login node), these emit the _nc mnemonic
+    // UNCONDITIONALLY so the render is deterministic host-vs-container. The FMHA mask
+    // band-arith needs this exact form; with an SGPR/inline-const src the assembler uses
+    // VOP3 e64, disasm-identical to the golden.
+    struct VAddNCI32 : public CommonInstruction
+    {
+        VAddNCI32(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_I32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_add_nc_i32");
+        }
+
+        VAddNCI32(const VAddNCI32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VAddNCI32>(*this);
+        }
+    };
+
+    struct VSubNCI32 : public CommonInstruction
+    {
+        VSubNCI32(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_I32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_sub_nc_i32");
+        }
+
+        VSubNCI32(const VSubNCI32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VSubNCI32>(*this);
+        }
+    };
+
     struct VSubU32 : public CommonInstruction
     {
         VSubU32(const std::shared_ptr<Container>& dst,
