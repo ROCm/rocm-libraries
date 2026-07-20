@@ -38,8 +38,23 @@ jobs:
       
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y g++ cmake git python3-venv
+        # These deps are normally already present on the self-hosted runner.
+        # Only install what's actually missing, and never let an unrelated
+        # broken package sink the job: `apt-get install` implicitly runs
+        # `dpkg --configure -a`, which retries any half-configured packages
+        # (e.g. amdgpu-dkms failing to build against a freshly-pulled HWE
+        # kernel) — a machine-level issue independent of hipThreads.
+        missing=""
+        for pkg in g++ cmake git python3-venv; do
+          dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
+        done
+        if [ -n "$missing" ]; then
+          sudo apt-get update
+          sudo apt-get install -y $missing \
+            || echo "::warning::apt-get reported errors (likely pre-existing broken packages on the runner); continuing"
+        else
+          echo "All system dependencies already installed; skipping apt-get."
+        fi
         
     - name: Setup Python venv
       run: |
