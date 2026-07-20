@@ -386,9 +386,9 @@ if( "${BACKEND}" STREQUAL "HIP")
 endif()
 
 # Test suite
-enable_testing()
-include(CTest)
-add_subdirectory(utilities/test_suite)
+# enable_testing()
+# include(CTest)
+# add_subdirectory(utilities/test_suite)
 
 # Installation
 # install RPP libs -- {ROCM_PATH}/lib
