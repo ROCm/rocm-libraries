@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <tensilelitehost/export.h>
+
 #define TENSILE_USE_MX_SCALE
 
 #ifdef TENSILE_USE_MX_SCALE
@@ -163,3 +165,4 @@ namespace std
 } // namespace std
 
 #endif // TENSILE_USE_MX_SCALE
+

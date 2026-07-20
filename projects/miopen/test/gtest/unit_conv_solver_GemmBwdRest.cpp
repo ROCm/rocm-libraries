@@ -54,7 +54,7 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
         // clang-format off
         if(!miopen::StartsWith(name, "gfx1151"))
         {
-            // Regression test for https://github.com/ROCm/MIOpen/issues/1956            
+            // Regression test for https://github.com/ROCm/MIOpen/issues/1956
             cases.emplace_back(TestCase{{2, 64, 128, 128, 128}, {32, 64, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, miopenHalf});
         }
         else

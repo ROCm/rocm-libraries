@@ -33,6 +33,8 @@
 
 #include <Tensile/Debug.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
 /**
@@ -128,3 +130,4 @@ private:
     }
 };
 }  // namespace TensileLite
+

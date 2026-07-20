@@ -17,9 +17,10 @@
 
 #define DEBUG_LOG 0
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -35,7 +36,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Even>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_multi_d_b_preshuffle(typename GridwiseGemm::Argument karg)
@@ -79,7 +80,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Even>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_multi_d_b_preshuffle_2lds(typename GridwiseGemm::Argument karg)
@@ -277,11 +278,19 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
     static constexpr auto BlockSizeNumber = Number<BlockSize>{};
 
     static constexpr auto lcm_AK1_BK1 = math::lcm(AK1Number, BK1Number);
+    // On gfx1250, selecting non-single-rate MFMA for f8_t picks wmma_f32_16x16x128_f8f8_gfx125
+    // (k_per_blk=64, KPackPerGroup=32, NkSwizzle=1024), which mismatches the preShuffleBuffer
+    // layout (KPack=16, NkSwizzle=512). Force single-rate on gfx125 to use the compatible
+    // wmma_f32_16x16x64_f8f8_gfx125 (k_per_blk=32, KPackPerGroup=16, NkSwizzle=512).
     static constexpr bool is_single_rate_mfma =
+#if defined(__gfx125__)
+        (is_same<ComputeTypeA, f8_t>::value || is_same<ComputeTypeA, bf8_t>::value) ? true :
+#endif
         (((is_same<ComputeTypeA, half_t>::value || is_same<ComputeTypeA, bhalf_t>::value) &&
           lcm_AK1_BK1 <= 4) ||
          (is_same<ComputeTypeA, int8_t>::value && KPerBlock < 128) ||
-         (is_same<ComputeTypeA, f8_t>::value && KPerBlock < 128))
+         (is_same<ComputeTypeA, f8_t>::value && KPerBlock < 128) ||
+         (is_same<ComputeTypeA, bf8_t>::value && KPerBlock < 128))
             ? true
             : false;
     static constexpr auto is_scale_mfma = false;
@@ -293,21 +302,22 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
                                                        is_scale_mfma>{};
     static constexpr index_t KPack      = math::max(lcm_AK1_BK1, mfma.selected_mfma.k_per_blk);
     static constexpr index_t KGroup     = []() {
-        if constexpr(is_same_v<remove_cvref_t<BDataType>, f8_t>)
-            // On gfx950, we have a mfma that required 32 f8 elements as input,
-            // splited into 2 groups of 16 f8 elements.
-            // the 2 groups is not contiguous in the B preshuffed layout.
-            // and we do not want it to be contiguous in the B preshuffled layout
-            // because a memory instruction can only read 16 f8 elements at a time.
-            return mfma.selected_mfma.k_per_blk == 32 ? 2 : 1;
-        else
-            return 1;
+        // A memory instruction can only read 16 bytes at a time. If K1PerXdlops *
+        // sizeof(ComputeDataType) > 16, memory read will not conitnues in a wave in B preshuffle
+        // mode. So, we need split K into mutiple groups.
+        return mfma.GetK1PerXdlops() * sizeof(ComputeTypeA) > 16 ? 2 : 1;
     }();
     static constexpr index_t KLane         = mfma.GetKPerXdlops() / mfma.GetK1PerXdlops();
     static constexpr index_t KPackPerGroup = KPack / KGroup;
     static constexpr index_t KRepeat       = KPerBlock / KLane / KPackPerGroup;
     static constexpr index_t NLane         = NPerXdl;
     static constexpr index_t NWave         = NPerBlock / NPerXdl / NXdlPerWave;
+
+#if defined(__gfx125__)
+    static constexpr bool TransposeC = true;
+#else
+    static constexpr bool TransposeC = false;
+#endif
 
     static constexpr auto MakeDsGridPointer()
     {
@@ -814,7 +824,9 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
                  NPerXdl,
                  MXdlPerWave,
                  NXdlPerWave,
-                 KPack>())>;
+                 KPack,
+                 false,
+                 TransposeC>())>;
 
     template <
         InMemoryDataOperationEnum CGlobalMemoryDataOperation_ = InMemoryDataOperationEnum::Set>
@@ -1254,7 +1266,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, false, false>(
+        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, TransposeC, false>(
             blockwise_gemm_pipeline,
             ds_grid_desc_mblock_mperblock_nblock_nperblock,
             c_grid_desc_mblock_mperblock_nblock_nperblock,
@@ -1462,7 +1474,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, false, false>(
+        Base::template RunMultiDEpilogue<CGlobalMemoryDataOperation, false, TransposeC, false>(
             blockwise_gemm_pipeline,
             ds_grid_desc_mblock_mperblock_nblock_nperblock,
             c_grid_desc_mblock_mperblock_nblock_nperblock,
@@ -1478,4 +1490,6 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
 
 } // namespace ck
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

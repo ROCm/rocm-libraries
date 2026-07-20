@@ -26,6 +26,8 @@
 
 namespace rocisa
 {
+    using ParamVariant = std::variant<std::shared_ptr<rocisa::Container>, int, std::string>;
+
     DataType instTypeToDataType(InstType instType);
 
     bool is8bitFloat(DataType value);
@@ -43,7 +45,7 @@ namespace rocisa
            && matrixInstB == 1)
         {
             if(dataType == DataType::Half || dataType == DataType::BFloat16
-               || dataType == DataType::Int8 || is8bitFloat(dataType))
+               || dataType == DataType::Int8 || is8bitFloat(dataType) || numBytes < 1)
             {
                 mi_divisor     = 4;
                 miIssueLatency = 1;
@@ -73,8 +75,11 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> acc;
         std::shared_ptr<RegisterContainer> a;
         std::shared_ptr<RegisterContainer> b;
-        std::shared_ptr<RegisterContainer> acc2;
+        std::optional<InstructionInput>    acc2;
+        int                                acc2_imm=0;
         bool                               neg;
+        bool                               reuseA = false;
+        bool                               reuseB = false;
 
         MFMAInstruction(InstType                                  instType,
                         InstType                                  accType,
@@ -83,9 +88,11 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& acc,
                         const std::shared_ptr<RegisterContainer>& a,
                         const std::shared_ptr<RegisterContainer>& b,
-                        const std::shared_ptr<RegisterContainer>& acc2    = nullptr,
+                        const std::optional<InstructionInput>&    acc2    = std::nullopt,
                         bool                                      neg     = false,
-                        const std::string&                        comment = "")
+                        const std::string&                        comment = "",
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false)
             : Instruction(instType, comment)
             , accType(accType)
             , variant(variant)
@@ -93,8 +100,38 @@ namespace rocisa
             , acc(acc)
             , a(a)
             , b(b)
-            , acc2(acc2 ? acc2 : acc)
+            , acc2(acc2.has_value() ? acc2.value() : InstructionInput(acc))
+            , acc2_imm(0)
             , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+        {
+        }
+
+        MFMAInstruction(InstType                                  instType,
+                        InstType                                  accType,
+                        const std::vector<int>&                   variant,
+                        bool                                      mfma1k,
+                        const std::shared_ptr<RegisterContainer>& acc,
+                        const std::shared_ptr<RegisterContainer>& a,
+                        const std::shared_ptr<RegisterContainer>& b,
+                        int                                       acc2_imm,
+                        bool                                      neg     = false,
+                        const std::string&                        comment = "",
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false)
+            : Instruction(instType, comment)
+            , accType(accType)
+            , variant(variant)
+            , mfma1k(mfma1k)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(std::nullopt)
+            , acc2_imm(acc2_imm)
+            , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -106,8 +143,10 @@ namespace rocisa
             , acc(other.acc ? other.acc->clone2() : nullptr)
             , a(other.a ? other.a->clone2() : nullptr)
             , b(other.b ? other.b->clone2() : nullptr)
-            , acc2(other.acc2 ? other.acc2->clone2() : nullptr)
+            , acc2(other.acc2.has_value() ? copyInstructionInput(other.acc2.value()) : std::optional<InstructionInput>(std::nullopt))
             , neg(other.neg)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
         {
         }
 
@@ -194,7 +233,7 @@ namespace rocisa
         {
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
-            return {acc, a, b, acc2, negStr};
+            return {acc, a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm), negStr};
         }
 
         std::vector<InstructionInput> getDstParams() const override
@@ -204,7 +243,13 @@ namespace rocisa
 
         std::vector<InstructionInput> getSrcParams() const override
         {
-            return {a, b, acc2};
+            if(forceScaledWMMA())
+            {
+                // Keep operand model consistent with emitted assembly:
+                // v_wmma_scale_* requires two explicit scale operands.
+                return {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm), 0, 0};
+            }
+            return {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm)};
         }
 
         std::string preStr() const override
@@ -245,16 +290,55 @@ namespace rocisa
                 switch(instType)
                 {
                 case InstType::INST_F8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:0 blgp:0" : "";
+                    inputPermuteStr = " cbsz:0 blgp:0";
                     break;
                 case InstType::INST_BF8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:1 blgp:1" : "";
+                    inputPermuteStr = " cbsz:1 blgp:1";
                     break;
                 case InstType::INST_F8_BF8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:0 blgp:1" : "";
+                    inputPermuteStr = " cbsz:0 blgp:1";
                     break;
                 case InstType::INST_BF8_F8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:1 blgp:0" : "";
+                    inputPermuteStr = " cbsz:1 blgp:0";
+                    break;
+                case InstType::INST_F6:
+                    inputPermuteStr = " cbsz:2 blgp:2";
+                    break;
+                case InstType::INST_BF6:
+                    inputPermuteStr = " cbsz:3 blgp:3";
+                    break;
+                case InstType::INST_F4:
+                    inputPermuteStr = " cbsz:4 blgp:4";
+                    break;
+                case InstType::INST_F8_F6:
+                    inputPermuteStr = " cbsz:0 blgp:2";
+                    break;
+                case InstType::INST_F6_F8:
+                    inputPermuteStr = " cbsz:2 blgp:0";
+                    break;
+                case InstType::INST_F8_F4:
+                    inputPermuteStr = " cbsz:0 blgp:4";
+                    break;
+                case InstType::INST_F4_F8:
+                    inputPermuteStr = " cbsz:4 blgp:0";
+                    break;
+                case InstType::INST_F6_B6:
+                    inputPermuteStr = " cbsz:2 blgp:3";
+                    break;
+                case InstType::INST_B6_F6:
+                    inputPermuteStr = " cbsz:3 blgp:2";
+                    break;
+                case InstType::INST_F6_F4:
+                    inputPermuteStr = " cbsz:2 blgp:4";
+                    break;
+                case InstType::INST_F4_F6:
+                    inputPermuteStr = " cbsz:4 blgp:2";
+                    break;
+                case InstType::INST_B6_F4:
+                    inputPermuteStr = " cbsz:3 blgp:4";
+                    break;
+                case InstType::INST_F4_B6:
+                    inputPermuteStr = " cbsz:4 blgp:3";
                     break;
                 default:
                     break;
@@ -424,8 +508,15 @@ namespace rocisa
                     scaleStr = ", 0, 0";
                 }
             }
+            // Matrix-reuse hints: cache the A/B source from the previous identical WMMA.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + acc2->toString() + scaleStr + negStr + inputPermuteStr;
+                   + (!acc2.has_value() ? std::to_string(acc2_imm) : InstructionInputToString(acc2.value()))
+                   + scaleStr + negStr + inputPermuteStr + reuseStr;
         }
 
         std::string toString() const override
@@ -433,7 +524,7 @@ namespace rocisa
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {a, b, acc2}, acc);
+            setMsb(kStr, {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm)}, acc);
             return kStr;
         }
 
@@ -456,23 +547,31 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> a;
         std::shared_ptr<RegisterContainer> b;
         std::shared_ptr<RegisterContainer> acc2;
+        int                                acc2_imm=0;
         std::shared_ptr<RegisterContainer> mxsa;
         std::shared_ptr<RegisterContainer> mxsb;
+        std::optional<VOP3PModifiers>      vop3;
         int                                block;
+        // gfx1250 WMMA matrix-reuse hints (see MFMAInstruction).
+        bool                               reuseA = false;
+        bool                               reuseB = false;
 
         MXMFMAInstruction(InstType                                  instType,
                           InstType                                  accType,
-                          InstType                                  mxScaleAType,
-                          InstType                                  mxScaleBType,
                           const std::vector<int>&                   variant,
                           const std::shared_ptr<RegisterContainer>& acc,
                           const std::shared_ptr<RegisterContainer>& a,
                           const std::shared_ptr<RegisterContainer>& b,
-                          const std::shared_ptr<RegisterContainer>& acc2,
-                          const std::shared_ptr<RegisterContainer>& mxsa,
-                          const std::shared_ptr<RegisterContainer>& mxsb,
-                          int                                       block,
-                          const std::string&                        comment = "")
+                          const std::shared_ptr<RegisterContainer>& acc2         = nullptr,
+                          const std::shared_ptr<RegisterContainer>& mxsa         = nullptr,
+                          const std::shared_ptr<RegisterContainer>& mxsb         = nullptr,
+                          const std::optional<VOP3PModifiers>&      vop3         = std::nullopt,
+                          InstType                                  mxScaleAType = InstType::INST_F32,
+                          InstType                                  mxScaleBType = InstType::INST_F32,
+                          int                                       block        = 0,
+                          const std::string&                        comment      = "",
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false)
             : Instruction(instType, comment)
             , accType(accType)
             , mxScaleAType(mxScaleAType)
@@ -481,10 +580,49 @@ namespace rocisa
             , acc(acc)
             , a(a)
             , b(b)
-            , acc2(acc2)
+            , acc2(acc2 ? acc2 : acc)
+            , acc2_imm(0)
             , mxsa(mxsa)
             , mxsb(mxsb)
+            , vop3(vop3)
             , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+        {
+        }
+
+        MXMFMAInstruction(InstType                                  instType,
+                          InstType                                  accType,
+                          const std::vector<int>&                   variant,
+                          const std::shared_ptr<RegisterContainer>& acc,
+                          const std::shared_ptr<RegisterContainer>& a,
+                          const std::shared_ptr<RegisterContainer>& b,
+                          int                                       acc2_imm = 0,
+                          const std::shared_ptr<RegisterContainer>& mxsa         = nullptr,
+                          const std::shared_ptr<RegisterContainer>& mxsb         = nullptr,
+                          const std::optional<VOP3PModifiers>&      vop3         = std::nullopt,
+                          InstType                                  mxScaleAType = InstType::INST_F32,
+                          InstType                                  mxScaleBType = InstType::INST_F32,
+                          int                                       block        = 0,
+                          const std::string&                        comment      = "",
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false)
+            : Instruction(instType, comment)
+            , accType(accType)
+            , mxScaleAType(mxScaleAType)
+            , mxScaleBType(mxScaleBType)
+            , variant(variant)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(nullptr)
+            , acc2_imm(acc2_imm)
+            , mxsa(mxsa)
+            , mxsb(mxsb)
+            , vop3(vop3)
+            , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -500,7 +638,10 @@ namespace rocisa
             , acc2(other.acc2 ? other.acc2->clone2() : nullptr)
             , mxsa(other.mxsa ? other.mxsa->clone2() : nullptr)
             , mxsb(other.mxsb ? other.mxsb->clone2() : nullptr)
+            , vop3(other.vop3)
             , block(other.block)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
         {
         }
 
@@ -517,6 +658,8 @@ namespace rocisa
 
         std::vector<InstructionInput> getParams() const override
         {
+            if(getAsmCaps()["HasMFMA"])
+                return {acc, a, b, acc2, mxsa, mxsb};
             return {acc, a, b, acc2, mxsa, mxsb, block};
         }
 
@@ -528,18 +671,76 @@ namespace rocisa
         std::vector<InstructionInput> getSrcParams() const override
         {
             // ignore block parameter since it's not an operand in mxmfma instruction.
-            return {a, b, acc2, mxsa, mxsb};
+            return {a, b, (acc2 ? InstructionInput(acc2) : InstructionInput(acc2_imm)), mxsa, mxsb};
         }
 
         std::string preStr() const override
         {
             std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
                                      + "x" + std::to_string(variant[2]);
-            std::string blkStr = (block == 16) ? "16" : "";
-            return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert();
+            if(getAsmCaps()["HasMFMA"])
+            {
+                return "v_mfma_scale_f32_" + variantStr + "_f8f6f4";
+            }
+            else
+            {
+                std::string blkStr = (block == 16) ? "16" : "";
+                return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert();
+            }
         }
 
-        std::string getArgStr() const
+        std::string mfmaInputPermuteStr() const
+        {
+            if(getAsmCaps()["HasMFMA_f8f6f4"] && variant[2] > 32)
+            {
+                switch(instType)
+                {
+                case InstType::INST_F8:
+                    return " cbsz:0 blgp:0";
+                case InstType::INST_BF8:
+                    return " cbsz:1 blgp:1";
+                case InstType::INST_F8_BF8:
+                    return " cbsz:0 blgp:1";
+                case InstType::INST_BF8_F8:
+                    return " cbsz:1 blgp:0";
+                case InstType::INST_F6:
+                    return " cbsz:2 blgp:2";
+                case InstType::INST_BF6:
+                    return " cbsz:3 blgp:3";
+                case InstType::INST_F4:
+                    return " cbsz:4 blgp:4";
+                case InstType::INST_F8_F6:
+                    return " cbsz:0 blgp:2";
+                case InstType::INST_F6_F8:
+                    return " cbsz:2 blgp:0";
+                case InstType::INST_F8_F4:
+                    return " cbsz:0 blgp:4";
+                case InstType::INST_F4_F8:
+                    return " cbsz:4 blgp:0";
+                case InstType::INST_F6_B6:
+                    return " cbsz:2 blgp:3";
+                case InstType::INST_B6_F6:
+                    return " cbsz:3 blgp:2";
+                case InstType::INST_F6_F4:
+                    return " cbsz:2 blgp:4";
+                case InstType::INST_F4_F6:
+                    return " cbsz:4 blgp:2";
+                case InstType::INST_B6_F4:
+                    return " cbsz:3 blgp:4";
+                case InstType::INST_F4_B6:
+                    return " cbsz:4 blgp:3";
+                case InstType::INST_B8_F4:
+                    return " cbsz:1 blgp:4";
+                case InstType::INST_F4_B8:
+                    return " cbsz:4 blgp:1";
+                default:
+                    break;
+                }
+            }
+            return "";
+        }
+
+        std::string wmmaInputPermuteStr() const
         {
             constexpr size_t f4_t = 32;
             std::string inputPermuteStr = "";
@@ -700,8 +901,39 @@ namespace rocisa
                 break;
             }
 
-            return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + acc2->toString() + ", " + mxsa->toString() + ", " + mxsb->toString() + inputPermuteStr;
+            return inputPermuteStr;
+        }
+
+        std::string getArgStr() const
+        {
+            // Matrix-reuse hints (gfx1250): trailing assembler keyword modifiers.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
+            if(getAsmCaps()["HasMFMA"])
+            {
+                std::string mxsaStr = mxsa ? mxsa->toString() : "";
+                std::string mxsbStr = mxsb ? mxsb->toString() : "";
+                // op_sel/op_sel_hi must appear before cbsz/blgp for the assembler
+                std::string result  = acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
+                                    + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
+                                    + mxsaStr + ", " + mxsbStr;
+                if(vop3)
+                {
+                    result += vop3->toString();
+                }
+                result += mfmaInputPermuteStr();
+                result += reuseStr;
+                return result;
+            }
+            else
+            {
+                return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
+                       + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
+                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr() + reuseStr;
+            }
         }
 
         std::string toString() const override
@@ -710,6 +942,14 @@ namespace rocisa
             std::string kStr       = newInstStr + " " + getArgStr();
             setMsb(kStr, {a, b, acc2}, acc);
             return formatWithComment(kStr);
+        }
+
+        int getIssueLatency() const override
+        {
+            auto dataType                  = instTypeToDataType(instType);
+            auto [issueLatency, miLatency] = getMFMAIssueLatency<false>(
+                dataType, variant[0], variant.size() > 3 ? variant[3] : 1);
+            return issueLatency;
         }
     };
 

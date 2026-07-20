@@ -3,9 +3,38 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.0.0
+
+### Added
+* Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
+* Added `rocsparse_sddmm` batched support to ELL format.
+
+### Resolved issues
+* Fixed an issue with `rocsparse_spmm`, which produced incorrect results for the Blocked ELL sparse format.
+
+### Removed
+* The deprecated `rocsparse_indextype_u16` enum.
+
+## rocSPARSE 4.7.0 for ROCm 7.14
+
+### Added
+* Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
+
+### Changed
+* `rocsparse_spmm` with CSR/CSC and the default algorithm (`rocsparse_spmm_alg_default` or `rocsparse_spmm_alg_csr`) now automatically selects a load-balanced (nnz-split) kernel for strongly skewed matrices (those containing a single very long row for CSR, or column for transposed CSC). Behavior is unchanged for non-skewed matrices and for explicit algorithm choices (`rocsparse_spmm_alg_csr_row_split`, `rocsparse_spmm_alg_csr_nnz_split`, `rocsparse_spmm_alg_csr_merge_path`).
+
+### Upcoming changes
+* Deprecated the `rocsparse_indextype_u16` index type. It is  no longer supported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
+
+### Known issues
+* The HIP graph capture/launch path for the factorization routines `bsric0`, `bsrilu0`, `csric0` and `csrilu0` can fail with `hipErrorOutOfMemory` at `hipGraphLaunch` on memory-constrained GPUs such as the gfx110X family. The corresponding `graph_test` cases are marked `known_bug` and excluded from the standard test suites until the fix lands.
+
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added
+* Added `rocsparse_handle_create` to create a handle associated with a user-provided stream. All internal device memory allocation and initialization are stream-ordered on that stream, so handle creation never blocks the calling thread or other GPU streams.
+* Added `rocsparse_handle_destroy` to destroy a handle created by `rocsparse_handle_create`, with an optional error descriptor argument.
+* Added the `rocsparse_create_const_bsr_descr` routine for creating a const sparse BSR matrix descriptor.
 * Added the `rocsparse_spic0` and `rocsparse_spilu0` routines for incomplete factorizations, with strided batched computations enabled.
 * Added the `rocsparse_sptrsv_descr_create` and the `rocsparse_sptrsv_descr_destroy` routines.
 * Added the `rocsparse_singularity` enumeration.
@@ -19,8 +48,12 @@ Documentation for rocSPARSE is available at
 ### Resolved issues
 * Fixed incorrect usage of `__syncthreads` in `bsrmm`, `csrmm` (row_split), and `csritilu0x`
 * Fixed incorrect usage of `__syncthreads` in `csx2dense`, `dense2csx`, `prune_dense2csr`, `csrcolor`, and `csrmm` (nnz_split)
-* Fix `rocsparse_[s|d|c|z]csric0` where `rocsparse_status_invalid_value` was being returned when the maximum number of non-zeros in any row is between 513 and 1024.
-* Fix compilation when using `--rocsparse_ILP64`
+* Fixed `rocsparse_[s|d|c|z]csric0` where `rocsparse_status_invalid_value` was being returned when the maximum number of non-zeros in any row is between 513 and 1024.
+* Fixed compilation when using `--rocsparse_ILP64`
+* Fixed off-by-one heap-buffer-overflow in temporary buffer allocation for `rocsparse_csrsort`, `rocsparse_check_matrix_csr`, and `rocsparse_check_matrix_gebsr` (and their delegating routines `rocsparse_cscsort`, `rocsparse_coosort`, `rocsparse_check_matrix_csc`, and `rocsparse_check_matrix_gebsc`) where the `shift_offsets_kernel` temp buffer was sized for `m` elements instead of `m+1`.
+* Fixed incorrect usage of `rocsparse_conj` in `bsric0` for complex matrices
+* Fixed double-free and use-after-free in `rocsparse_copy_mat_info` for `csritsv` info, where the owned `ptr_end` device buffer was copied shallowly and the pivot/position metadata was copied using the destination's (invalid) index type instead of the source's.
+* Fixed the `--memstat` build, where tracked allocation call sites passing typed `T**` pointers (for example `csrmv` `wg_flags` and the HYB index buffers) failed to compile against the `void**` allocation entry points.
 
 ### Removed
 * The deprecated C++14 support, which is no longer supported by the rocPRIM dependency.

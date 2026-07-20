@@ -102,13 +102,15 @@ namespace rocisa
 
     struct FLATModifiers : public Container
     {
-        FLATModifiers(int        offset12 = 0,
-                      bool       glc      = false,
-                      bool       slc      = false,
-                      bool       dlc      = false,
-                      CacheScope scope    = CacheScope::SCOPE_NONE,
-                      bool       lds      = false,
-                      bool       isStore  = false)
+        FLATModifiers(int          offset12 = 0,
+                      bool         glc      = false,
+                      bool         slc      = false,
+                      bool         dlc      = false,
+                      bool         lds      = false,
+                      bool         isStore  = false,
+                      CacheScope   scope    = CacheScope::SCOPE_NONE,
+                      TemporalHint th       = TemporalHint::TH_NONE,
+                      NonVolatile  nv       = NonVolatile::NV_NONE)
             : Container()
             , offset12(offset12)
             , glc(glc)
@@ -117,6 +119,8 @@ namespace rocisa
             , scope(scope)
             , lds(lds)
             , isStore(isStore)
+            , th(th)
+            , nv(nv)
         {
         }
 
@@ -129,6 +133,8 @@ namespace rocisa
             , scope(other.scope)
             , lds(other.lds)
             , isStore(other.isStore)
+            , th(other.th)
+            , nv(other.nv)
         {
         }
 
@@ -141,6 +147,8 @@ namespace rocisa
         {
             auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
             auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
+            auto        hasTHModifier    = rocIsa::getInstance().getAsmCaps()["HasTHModifier"];
+            auto        hasNVModifier    = rocIsa::getInstance().getAsmCaps()["HasNVModifier"];
             std::string kStr;
             if(offset12 != 0)
             {
@@ -162,6 +170,14 @@ namespace rocisa
             {
                 kStr += " scope:" + ::rocisa::toString(scope);
             }
+            if(hasTHModifier && hasTemporalHint(th))
+            {
+                kStr += " th:" + ::rocisa::toString(th, isStore);
+            }
+            if(hasNVModifier && nv != NonVolatile::NV_NONE)
+            {
+                kStr += " " + ::rocisa::toString(nv);
+            }
             if(lds)
             {
                 kStr += " lds";
@@ -169,26 +185,53 @@ namespace rocisa
             return kStr;
         }
 
-        int        offset12;
-        bool       glc;
-        bool       slc;
-        bool       dlc;
-        CacheScope scope;
-        bool       lds;
-        bool       isStore;
+        int          offset12;
+        bool         glc;
+        bool         slc;
+        bool         dlc;
+        CacheScope   scope;
+        bool         lds;
+        bool         isStore;
+        TemporalHint th;
+        NonVolatile  nv;
     };
 
+    // Modifiers for global_* memory ops: the immediate offset (offset:N) plus the
+    // temporal hint / cache scope used by global_prefetch_b8 (gfx1250 gl2-prefetch).
+    // Offset-only ops leave th/scope at their defaults (TH_NONE / SCOPE_NONE), which
+    // are not printed.
     struct GLOBALModifiers : public Container
     {
-        GLOBALModifiers(int offset = 0)
+        GLOBALModifiers(int        offset  = 0,
+                        bool       glc     = false,
+                        bool       slc     = false,
+                        bool       dlc     = false,
+                        CacheScope scope   = CacheScope::SCOPE_NONE,
+                        bool       lds     = false,
+                        bool       isStore = false,
+                        TemporalHint th     = TemporalHint::TH_NONE)
             : Container()
             , offset(offset)
+            , glc(glc)
+            , slc(slc)
+            , dlc(dlc)
+            , scope(scope)
+            , lds(lds)
+            , isStore(isStore)
+            , th(th)
         {
         }
 
         GLOBALModifiers(const GLOBALModifiers& other)
             : Container()
             , offset(other.offset)
+            , glc(other.glc)
+            , slc(other.slc)
+            , dlc(other.dlc)
+            , scope(other.scope)
+            , lds(other.lds)
+            , isStore(other.isStore)
+            , th(other.th)
         {
         }
 
@@ -199,28 +242,63 @@ namespace rocisa
 
         std::string toString() const override
         {
+            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
+            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             std::string kStr;
             if(offset != 0)
             {
                 kStr += " offset:" + std::to_string(offset);
             }
+            if(glc)
+            {
+                kStr += " " + getGlcBitName();
+            }
+            if(slc)
+            {
+                kStr += " " + getSlcBitName();
+            }
+            if(hasDLCModifier && dlc)
+            {
+                kStr += " dlc";
+            }
+            if(hasSCOPEModifier && scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            if(lds)
+            {
+                kStr += " lds";
+            }
+            if(hasTemporalHint(th))
+            {
+                kStr += " th:" + rocisa::toString(th, false);
+            }
             return kStr;
         }
 
-        int offset;
+        int        offset;
+        bool       glc;
+        bool       slc;
+        bool       dlc;
+        CacheScope scope;
+        bool       lds;
+        bool       isStore;
+        TemporalHint th;
     };
 
     struct MUBUFModifiers : public Container
     {
-        MUBUFModifiers(bool       offen    = false,
-                       int        offset12 = 0,
-                       bool       glc      = false,
-                       bool       slc      = false,
-                       bool       dlc      = false,
-                       CacheScope scope    = CacheScope::SCOPE_NONE,
-                       bool       nt       = false,
-                       bool       lds      = false,
-                       bool       isStore  = false)
+        MUBUFModifiers(bool         offen    = false,
+                       int          offset12 = 0,
+                       bool         glc      = false,
+                       bool         slc      = false,
+                       bool         dlc      = false,
+                       bool         nt       = false,
+                       bool         lds      = false,
+                       bool         isStore  = false,
+                       CacheScope   scope    = CacheScope::SCOPE_NONE,
+                       TemporalHint th       = TemporalHint::TH_NONE,
+                       NonVolatile  nv       = NonVolatile::NV_NONE)
             : Container()
             , offen(offen)
             , offset12(offset12)
@@ -231,6 +309,8 @@ namespace rocisa
             , nt(nt)
             , lds(lds)
             , isStore(isStore)
+            , th(th)
+            , nv(nv)
         {
         }
 
@@ -245,6 +325,8 @@ namespace rocisa
             , nt(other.nt)
             , lds(other.lds)
             , isStore(other.isStore)
+            , th(other.th)
+            , nv(other.nv)
         {
         }
 
@@ -255,9 +337,12 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
-            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
-            auto        hasNTModifier    = rocIsa::getInstance().getAsmCaps()["HasNTModifier"];
+            auto        asmCaps          = rocIsa::getInstance().getAsmCaps();
+            auto        hasDLCModifier   = asmCaps["HasDLCModifier"];
+            auto        hasSCOPEModifier = asmCaps["HasSCOPEModifier"];
+            auto        hasNTModifier    = asmCaps["HasNTModifier"];
+            auto        hasTHModifier    = asmCaps["HasTHModifier"];
+            auto        hasNVModifier    = asmCaps["HasNVModifier"];
             std::string kStr;
             if(offen)
             {
@@ -279,9 +364,17 @@ namespace rocisa
             {
                 kStr += " scope:" + ::rocisa::toString(scope);
             }
-            if(hasNTModifier && nt)
+            if(hasTHModifier && hasTemporalHint(th))
+            {
+                kStr += " th:" + ::rocisa::toString(th, isStore);
+            }
+            else if(hasNTModifier && nt)
             {
                 kStr += " nt";
+            }
+            if(hasNVModifier && nv != NonVolatile::NV_NONE)
+            {
+                kStr += " " + ::rocisa::toString(nv);
             }
             if(lds)
             {
@@ -290,30 +383,36 @@ namespace rocisa
             return kStr;
         }
 
-        bool       offen;
-        int        offset12;
-        bool       glc;
-        bool       slc;
-        bool       dlc;
-        CacheScope scope;
-        bool       nt;
-        bool       lds;
-        bool       isStore;
+        bool         offen;
+        int          offset12;
+        bool         glc;
+        bool         slc;
+        bool         dlc;
+        CacheScope   scope;
+        bool         nt;
+        bool         lds;
+        bool         isStore;
+        TemporalHint th;
+        NonVolatile  nv;
     };
 
     struct SMEMModifiers : public Container
     {
-        SMEMModifiers(bool       glc    = false,
-                      bool       dlc    = false,
-                      CacheScope scope  = CacheScope::SCOPE_NONE,
-                      bool       nv     = false,
-                      int        offset = 0)
+        SMEMModifiers(bool         glc     = false,
+                      bool         dlc     = false,
+                      int          offset  = 0,
+                      bool         isStore = false,
+                      CacheScope   scope   = CacheScope::SCOPE_NONE,
+                      TemporalHint th      = TemporalHint::TH_NONE,
+                      NonVolatile  nv      = NonVolatile::NV_NONE)
             : Container()
             , glc(glc)
             , dlc(dlc)
             , scope(scope)
             , nv(nv)
             , offset(offset) // 20u 21s shaes the same
+            , th(th)
+            , isStore(isStore)
         {
         }
 
@@ -324,6 +423,8 @@ namespace rocisa
             , scope(other.scope)
             , nv(other.nv)
             , offset(other.offset)
+            , th(other.th)
+            , isStore(other.isStore)
         {
         }
 
@@ -336,6 +437,8 @@ namespace rocisa
         {
             auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
             auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
+            auto        hasTHModifier    = rocIsa::getInstance().getAsmCaps()["HasTHModifier"];
+            auto        hasNVModifier    = rocIsa::getInstance().getAsmCaps()["HasNVModifier"];
             std::string kStr;
             if(offset != 0)
             {
@@ -353,18 +456,24 @@ namespace rocisa
             {
                 kStr += " scope:" + ::rocisa::toString(scope);
             }
-            if(nv)
+            if(hasTHModifier && hasTemporalHint(th))
             {
-                kStr += " nv";
+                kStr += " th:" + ::rocisa::toString(th, isStore);
+            }
+            if(hasNVModifier && nv != NonVolatile::NV_NONE)
+            {
+                kStr += " " + ::rocisa::toString(nv);
             }
             return kStr;
         }
 
-        bool       glc;
-        bool       dlc;
-        CacheScope scope;
-        bool       nv;
-        int        offset;
+        bool         glc;
+        bool         dlc;
+        CacheScope   scope;
+        NonVolatile  nv;
+        int          offset;
+        TemporalHint th;
+        bool         isStore;
     };
 
     struct SDWAModifiers : public Container
@@ -418,14 +527,19 @@ namespace rocisa
     // dot2: for WaveSplitK reduction. Only a subset of DPP modifiers are used here
     struct DPPModifiers : public Container
     {
-        int row_shr;
-        int row_bcast;
-        int bound_ctrl;
+        int              row_shr;
+        int              row_bcast;
+        int              bound_ctrl;
+        std::vector<int> quad_perm;
 
-        DPPModifiers(int row_shr = -1, int row_bcast = -1, int bound_ctrl = -1)
+        DPPModifiers(int                      row_shr    = -1,
+                     int                      row_bcast  = -1,
+                     int                      bound_ctrl = -1,
+                     const std::vector<int>&  quad_perm  = {})
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
+            , quad_perm(quad_perm)
         {
         }
 
@@ -443,7 +557,24 @@ namespace rocisa
                 kStr += " row_bcast:" + std::to_string(row_bcast);
             if(bound_ctrl != -1)
                 kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
+            if(!quad_perm.empty())
+                kStr += " quad_perm:" + vectorToString(quad_perm);
             return kStr;
+        }
+
+        std::string vectorToString(const std::vector<int>& vec) const
+        {
+            std::string result = "[";
+            for(size_t i = 0; i < vec.size(); ++i)
+            {
+                result += std::to_string(vec[i]);
+                if(i < vec.size() - 1)
+                {
+                    result += ",";
+                }
+            }
+            result += "]";
+            return result;
         }
     };
 
@@ -573,6 +704,52 @@ namespace rocisa
         }
 
         bool setHi;
+    };
+
+    struct EXECLO : public Container
+    {
+        EXECLO()
+            : Container()
+        {
+        }
+
+        EXECLO(const EXECLO& other)
+            : Container()
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<EXECLO>(*this);
+        }
+
+        std::string toString() const override
+        {
+            return "exec_lo";
+        }
+    };
+
+    struct EXECHI : public Container
+    {
+        EXECHI()
+            : Container()
+        {
+        }
+
+        EXECHI(const EXECHI& other)
+            : Container()
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<EXECHI>(*this);
+        }
+
+        std::string toString() const override
+        {
+            return "exec_hi";
+        }
     };
 
     struct VCC : public Container
@@ -1021,7 +1198,7 @@ namespace rocisa
                 else
                 {
                     return minusStr + regType + "[" + macroSlash + regType + "gpr"
-                           + regName->toString() + msbStr + ":" + regType + "gpr" + regName->toString() + msbStr + "+"
+                           + regName->toString() + msbStr + ":" + macroSlash + regType + "gpr" + regName->toString() + msbStr + "+"
                            + std::to_string(regNum - 1) + "]" + absStr;
                 }
             }
@@ -1284,7 +1461,7 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer>
-        sgpr(const std::string& name, float regNum = 1.f, bool isMacro = false);
+        sgpr(const std::string& name, float regNum = 1.f, bool isMacro = false, bool isOff = false);
     std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> accvgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> accvgpr(const std::string& name, float regNum = 1.f);

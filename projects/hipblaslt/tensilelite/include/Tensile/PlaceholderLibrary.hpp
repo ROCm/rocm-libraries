@@ -35,6 +35,8 @@
 #include <algorithm>
 #include <map>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     // Which placeholder libraries should be initialized at start
@@ -361,3 +363,4 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
+

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "hipblaslt_arguments.hpp"
+#include "benchmark_stats.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
@@ -42,8 +43,10 @@ void Arguments::init()
     category[0]            = 0;
     known_bug_platforms[0] = 0;
 
-    alpha = 1.0;
-    beta  = 0.0;
+    alpha  = 1.0;
+    alphai = 0.0;
+    beta   = 0.0;
+    betai  = 0.0;
 
     memset(stride_a, 0, sizeof(int64_t) * MAX_SUPPORTED_NUM_PROBLEMS);
     memset(stride_b, 0, sizeof(int64_t) * MAX_SUPPORTED_NUM_PROBLEMS);
@@ -67,6 +70,20 @@ void Arguments::init()
 
     iters      = 10;
     cold_iters = 2;
+
+    // Adaptive timing: off by default (gated on `adaptive`); the per-knob values are
+    // the preset defaults, used when `adaptive` is enabled.
+    warmup_time      = hipblaslt_bench::adaptive_defaults::warmup_time;
+    sample_time      = hipblaslt_bench::adaptive_defaults::sample_time;
+    measure_time     = hipblaslt_bench::adaptive_defaults::measure_time;
+    max_measure_time = hipblaslt_bench::adaptive_defaults::max_measure_time;
+    noise_threshold  = hipblaslt_bench::adaptive_defaults::noise_threshold;
+    min_iters        = hipblaslt_bench::adaptive_defaults::min_iters;
+    max_iters        = hipblaslt_bench::adaptive_defaults::max_iters;
+    stability_threshold = hipblaslt_bench::adaptive_defaults::stability_threshold;
+    stability_window    = hipblaslt_bench::adaptive_defaults::stability_window;
+    stability_interval  = hipblaslt_bench::adaptive_defaults::stability_interval;
+    adaptive            = false;
 
     algo                   = 0;
     solution_index         = -1;
@@ -96,6 +113,7 @@ void Arguments::init()
     norm_check     = 0;
     allclose_check = 0;
     unit_check     = 1;
+    ulp_check      = 0;
     timing         = 0;
 
     transA = '*';

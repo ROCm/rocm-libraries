@@ -34,6 +34,8 @@
 #include <set>
 #include <type_traits>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -136,3 +138,4 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+

@@ -15,7 +15,7 @@ Runtime Compilation):
 
 | Dependency | Purpose | Notes |
 |---|---|---|
-| CMake >= 3.20 | Build system | |
+| CMake >= 3.25 | Build system | |
 | C++17 compiler | GCC/G++ or MSVC | No GPU compiler needed at build time |
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | `hipStream_t`, `hipMalloc`, HIPRTC APIs |
 | hipDNN (installed) | Plugin SDK, data SDK, frontend library | Typically installed at `/opt/rocm` (Linux) |
@@ -260,7 +260,7 @@ contains nodes (operations) with typed attributes and tensor metadata.
 
 #### GraphWrapper and NodeWrapper
 
-The data SDK provides wrapper classes in `hipdnn_data_sdk/flatbuffer_utilities/`
+The FlatBuffers SDK provides wrapper classes in `hipdnn_flatbuffers_sdk/flatbuffer_utilities/`
 that simplify working with the serialized graph data:
 
 - **`GraphWrapper`** -- wraps the serialized graph buffer. It validates the buffer on
@@ -307,7 +307,7 @@ checks `dilation()` for `nullptr` before iterating.
 ```
 Kernel Source File (e.g., kernels/relu/ReluForward.cpp)
         │
-        ▼  CMake configure time
+        ▼  Using the CMake configure function (at build time)
 Embedded as C++ string literal (kernel_sources.cpp.in template)
         │
         ▼  Plan::compile() at runtime
@@ -606,6 +606,7 @@ prefix. These are the `ExampleProvider`-prefixed files from the
 | `example_provider_sample` | `your_name_provider_sample` |
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `YOURNAMEPROVIDER_BUILD_UNIT_TESTS` |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `YOURNAMEPROVIDER_BUILD_SAMPLE` |
+| `EXAMPLEPROVIDER_ENABLE_CLANG_TIDY` | `YOURNAMEPROVIDER_ENABLE_CLANG_TIDY` |
 | `example_provider_version_file_dir` (function) | `your_name_provider_version_file_dir` |
 | `example_provider_setup_version` (function) | `your_name_provider_setup_version` |
 | `example_provider_generate_version_header` (function) | `your_name_provider_generate_version_header` |
@@ -624,7 +625,7 @@ changed. They are the same for every plugin:
 | `HIPDNN_PLUGIN_NAME`, `HIPDNN_PLUGIN_VERSION`, `HIPDNN_PLUGIN_CONTAINER_TYPE`, `HIPDNN_PLUGIN_HANDLE_TYPE`, `HIPDNN_PLUGIN_CONTEXT_TYPE` | Macro names expected by `EnginePluginImpl.inl` (values are plugin-specific) |
 | `EnginePluginImpl.inl` | Plugin SDK header that generates C entry points |
 | `IPlan`, `EngineManager` | Plugin SDK types |
-| `IGraph`, `IEngineConfig` | Data SDK types |
+| `IGraph`, `IEngineConfig` | FlatBuffers SDK types |
 
 ## Testing Your Plugin
 

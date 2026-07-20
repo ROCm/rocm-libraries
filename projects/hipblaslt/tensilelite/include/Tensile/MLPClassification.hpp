@@ -32,6 +32,8 @@
 
 #include "DataTypes_Half.hpp"
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -115,3 +117,4 @@ namespace TensileLite
 
     } // namespace MLPClassification
 } // namespace TensileLite
+

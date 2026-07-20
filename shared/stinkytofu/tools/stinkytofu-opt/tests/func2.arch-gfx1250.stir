@@ -62,7 +62,7 @@ st.func @temp() {
   "st.ds_store_b128"(v11, v[58:61]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 16384, gds = false } }
   "st.ds_store_b128"(v11, v[62:65]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 18944, gds = false } }
   "st.s_wait_dscnt"(8) { issueCycles = 1, latencyCycles = 1 }
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[16:23], v[34:41], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[16:23], v[34:41], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
   "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1 }
   "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
   "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1 }
@@ -71,7 +71,7 @@ st.func @temp() {
   v[34:37] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16384, gds = false } }
   v[38:41] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16416, gds = false } }
   "st.s_wait_dscnt"(8) { issueCycles = 1, latencyCycles = 1 }
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[24:31], v[42:49], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[24:31], v[42:49], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
   s0, SCC0 = "st.s_sub_u32"(s0, 1) { issueCycles = 1, latencyCycles = 1 }
   SCC0 = "st.s_cmp_eq_i32"(s0, 0x1) { issueCycles = 1, latencyCycles = 1 }
   "st.s_cbranch_scc1"(label_LoopEndL_oddexit) { issueCycles = 1, latencyCycles = 1 }
@@ -117,7 +117,7 @@ st.func @temp() {
   "st.ds_store_b128"(v11, v[58:61]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false } }
   "st.ds_store_b128"(v11, v[62:65]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 2560, gds = false } }
   "st.s_wait_dscnt"(8) { issueCycles = 1, latencyCycles = 1 }
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[16:23], v[34:41], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[16:23], v[34:41], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
   "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1 }
   "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
   "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1 }
@@ -126,7 +126,7 @@ st.func @temp() {
   v[34:37] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
   v[38:41] = "st.ds_load_b128"(v13) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false } }
   "st.s_wait_dscnt"(8) { issueCycles = 1, latencyCycles = 1 }
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[24:31], v[42:49], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { inputPermute = "", scaleStr = "", negStr = "", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false } }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[24:31], v[42:49], v[0:7]) { issueCycles = 1, latencyCycles = 16, mod.mfma = { reuseA = false, reuseB = false } }
   s0, SCC0 = "st.s_sub_u32"(s0, 1) { issueCycles = 1, latencyCycles = 1 }
   SCC0 = "st.s_cmp_eq_i32"(s0, 0x1) { issueCycles = 1, latencyCycles = 1 }
   "st.s_cbranch_scc0"(label_LoopBeginL) { issueCycles = 1, latencyCycles = 1 }

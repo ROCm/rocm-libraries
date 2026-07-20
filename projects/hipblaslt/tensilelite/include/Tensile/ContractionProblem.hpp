@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ namespace TensileLite
  * @{
  */
     // These are parameters that are used in predicate, and also are kernel arguments.
-    class TENSILE_API ContractionProblemParameters
+    class TENSILELITEHOST_EXPORT ContractionProblemParameters
     {
     public:
         void setGSU(int16_t gsu)
@@ -155,6 +155,33 @@ namespace TensileLite
             return m_fallbackStatus;
         }
 
+        // StreamK=5 hybrid-mode toggle. Forwarded by the host into
+        // StreamKSettings::streamKTileSchedulingMode at solve time. Values:
+        //   0 = OFF  (default; SK3 static unless smCountTarget() > 0, then
+        //             the origami hybrid heuristic runs like AUTO),
+        //   1 = ON   (SK4 dynamic per-XCD work-queue),
+        //   2 = AUTO (always delegate to origami::streamk::select_hybrid_mode).
+        // Ignored when the chosen solution is not a StreamK=5 hybrid kernel.
+        void setStreamKTileSchedulingMode(int streamKTileSchedulingMode)
+        {
+            m_streamKTileSchedulingMode = streamKTileSchedulingMode;
+        }
+
+        int streamKTileSchedulingMode() const
+        {
+            return m_streamKTileSchedulingMode;
+        }
+
+        void setSmCountTarget(int smCountTarget)
+        {
+            m_smCountTarget = smCountTarget;
+        }
+
+        int smCountTarget() const
+        {
+            return m_smCountTarget;
+        }
+
     private:
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
@@ -166,13 +193,15 @@ namespace TensileLite
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
         bool             m_fallbackStatus = false; // default value
+        int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
+        int              m_smCountTarget = 0;
     };
 
     /**
      * \addtogroup Problem
      * @{
      */
-    class TENSILE_API ContractionProblemGemm;
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm;
 
     struct ConstantDescriptor
     {
@@ -180,7 +209,7 @@ namespace TensileLite
         rocisa::DataType dataType;
     };
 
-    class ContractionProblem : public Problem
+    class TENSILELITEHOST_EXPORT ContractionProblem : public Problem
     {
     public:
         ContractionProblem(size_t size, size_t workspaceSize = 0);
@@ -297,7 +326,7 @@ namespace TensileLite
      * summations, etc. This is decoupled from any particular pointers, which
      * are provided in ContractionInputs objects.
      */
-    class ContractionProblemGemm : public ContractionProblem
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm : public ContractionProblem
     {
     public:
         enum TENSOR : int
@@ -331,11 +360,17 @@ namespace TensileLite
             CONST_COUNT
         };
 
+        enum BATCHMODE : int
+        {
+            STRIDED = 0,
+            POINTER_ARRAY = 1,
+            BATCHMODE_COUNT
+        };
         using Solution = ContractionSolution;
         using Inputs   = ContractionInputs;
 
         ContractionProblemGemm()
-            : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT){};
+            : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT) {};
 
         /**
          * Represents a pair of free indices in a tensor contraction.
@@ -367,7 +402,7 @@ namespace TensileLite
                 : a(xa)
                 , b(xb)
                 , aMirror(aMirror)
-                , bMirror(bMirror){};
+                , bMirror(bMirror) {};
             size_t a, b; //! positions in a or b tensor
             bool   aMirror, bMirror;
         };
@@ -414,6 +449,30 @@ namespace TensileLite
                                            double beta,
                                            bool   unused,
                                            size_t batchCount);
+
+        static ContractionProblemGemm GEMM_Strides(bool             transA,
+                                                   bool             transB,
+                                                   rocisa::DataType aType,
+                                                   rocisa::DataType bType,
+                                                   rocisa::DataType cType,
+                                                   rocisa::DataType dType,
+                                                   size_t           m,
+                                                   size_t           n,
+                                                   size_t           k,
+                                                   size_t           batchSize,
+                                                   size_t           lda,
+                                                   size_t           aStride,
+                                                   size_t           ldb,
+                                                   size_t           bStride,
+                                                   size_t           ldc,
+                                                   size_t           cStride,
+                                                   size_t           ldd,
+                                                   size_t           dStride,
+                                                   double           beta,
+                                                   TensorOps const& aOps,
+                                                   TensorOps const& bOps,
+                                                   TensorOps const& cOps,
+                                                   TensorOps const& dOps);
 
         /**
          * Create a ContractionProblemGemm representing a batched SGEMM, with
@@ -593,8 +652,9 @@ namespace TensileLite
                                TensorOps const&        dOps,
                                size_t                  workspaceSize = 0
                                );
-
-        //! Returns size given original index assignment (in range
+        
+        
+         //! Returns size given original index assignment (in range
         //! 0..NumIndicesC+boundSizes)
         size_t size(size_t idx) const;
 
@@ -899,6 +959,16 @@ namespace TensileLite
             return m_stridedBatched;
         }
 
+        void setBatchMode(ContractionProblemGemm::BATCHMODE value)
+        {
+            batch_Mode = value;
+        }
+
+        ContractionProblemGemm::BATCHMODE batchMode() const
+        {
+            return batch_Mode;
+        }
+
         void setGroupedGemm(bool value)
         {
             m_groupedGemm = value;
@@ -1031,6 +1101,26 @@ namespace TensileLite
             return m_activationNoGuard;
         }
 
+        void setAOps(TensorOps const& newAOps)
+        {
+            m_aOps = newAOps; 
+        }
+
+        void setBOps(TensorOps const& newBOps)
+        {
+            m_bOps = newBOps; 
+        }
+
+        void setCOps(TensorOps const& newCOps)
+        {
+            m_cOps = newCOps; 
+        }
+
+        void setDOps(TensorOps const& newDOps)
+        {
+            m_dOps = newDOps; 
+        }
+
         // Get/set ContractionProblem parameters
         ContractionProblemParameters& setParams()
         {
@@ -1048,24 +1138,14 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {});
-
-        size_t mxBlockA() const
-        {
-            return m_mxBlockA;
-        }
+        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {});
-
-        size_t mxBlockB() const
-        {
-            return m_mxBlockB;
-        }
+        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
 
         rocisa::DataType mxTypeB() const
         {
@@ -1090,6 +1170,16 @@ namespace TensileLite
         void setSwizzleTensorB(bool swizzle)
         {
             m_swizzleTensorB = swizzle;
+        }
+
+        size_t mxBlockA() const
+        {
+            return m_mxBlockA;
+        }
+
+        size_t mxBlockB() const
+        {
+            return m_mxBlockB;
         }
 
         /// Allocated elements excluding batch dimensions
@@ -1313,13 +1403,17 @@ namespace TensileLite
                                  std::vector<rocisa::DataType>& biasDataTypeWhiteList,
                                  std::vector<int>&              biasSrcWhiteList,
                                  bool                           isGroupedGemm,
-                                 size_t                         maxWorkspaceBytes);
+                                 size_t                         maxWorkspaceBytes,
+                                 TensorOps const&               aOps,
+                                 TensorOps const&               bOps,
+                                 TensorOps const&               cOps,
+                                 TensorOps const&               dOps);
 
     private:
-        TensorOps        m_aOps;
-        TensorOps        m_bOps;
-        TensorOps        m_cOps;
-        TensorOps        m_dOps;
+        TensorOps m_aOps;
+        TensorOps m_bOps;
+        TensorOps m_cOps;
+        TensorOps m_dOps;
 
         std::string m_sumNames;
         std::string m_operationIdentifier;
@@ -1412,13 +1506,14 @@ namespace TensileLite
 
         std::string getOperationIdentifier() const;
         std::string getOperationDescription() const;
+        ContractionProblemGemm::BATCHMODE batch_Mode = ContractionProblemGemm::BATCHMODE::STRIDED;        
     };
 
     class ContractionProblemGroupedGemm : public ContractionProblem
     {
     public:
         ContractionProblemGroupedGemm()
-            : ContractionProblem(0){};
+            : ContractionProblem(0) {};
         std::vector<ContractionProblemGemm> gemms;
         virtual std::string                 description() const
         {
@@ -1430,7 +1525,7 @@ namespace TensileLite
         }
     };
 
-    struct TENSILE_API ContractionInputs : public ProblemInputs
+    struct TENSILELITEHOST_EXPORT ContractionInputs : public ProblemInputs
     {
         ContractionInputs();
         virtual ~ContractionInputs();
@@ -1488,8 +1583,8 @@ namespace TensileLite
         void const* mxsa          = nullptr;
         void const* mxsb          = nullptr;
 
-        unsigned char const* metadata = nullptr;
-        void const* compressed        = nullptr;
+        unsigned char const* metadata   = nullptr;
+        void const*          compressed = nullptr;
 
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);
@@ -1497,15 +1592,15 @@ namespace TensileLite
         std::vector<ConstantVariant> activationArgs;
 
         // Workspace
-        void*                ws           = nullptr;
-        void*                Synchronizer = nullptr;
+        void* ws           = nullptr;
+        void* Synchronizer = nullptr;
 
         std::vector<size_t> maxElements;
         size_t              workspaceSize;
         bool                gpu = false;
     };
 
-    struct TENSILE_API ContractionGroupedInputs : public ProblemInputs
+    struct TENSILELITEHOST_EXPORT ContractionGroupedInputs : public ProblemInputs
     {
         std::vector<ContractionInputs> grouped;
         void*                          ws = nullptr;
@@ -1522,21 +1617,21 @@ namespace TensileLite
     {
     };
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                 stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                 stream,
                                          ContractionProblemGemm const& contraction);
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                            stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                            stream,
                                          ContractionProblemGemm::FreeIndex const& free);
-    TENSILE_API std::ostream& operator<<(std::ostream&                             stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                             stream,
                                          ContractionProblemGemm::BatchIndex const& batch);
-    TENSILE_API std::ostream& operator<<(std::ostream&                             stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                             stream,
                                          ContractionProblemGemm::BoundIndex const& bound);
 
-    TENSILE_API std::istream& operator>>(std::istream&                      stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                      stream,
                                          ContractionProblemGemm::FreeIndex& free);
-    TENSILE_API std::istream& operator>>(std::istream&                       stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                       stream,
                                          ContractionProblemGemm::BatchIndex& batch);
-    TENSILE_API std::istream& operator>>(std::istream&                       stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                       stream,
                                          ContractionProblemGemm::BoundIndex& bound);
 
     /**

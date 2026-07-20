@@ -227,8 +227,7 @@ All targets support parallel builds with ninja.
 |--------|-------------|
 | \<no target\> | Build all components |
 | `check` or `check-verbose` | Build and run all tests (see [Testing](./Testing.md)) |
-| `unit-check` or `unit-check-verbose` | Build and run exclusively the unit tests and API tests (minimal version of `check`) |
-| `integration-check` or `integration-check-verbose` | Build and run exclusively the E2E integration tests (this is the bulk of the testing time) |
+| `<category>-check` or `<category>-check-verbose` | Build and run tests labeled by a category from `test_categories.yaml`; current categories include `quick`, `standard`, `comprehensive`, `full`, `unit`, and `integration` |
 | `install` | Install libraries and headers |
 | `format` | Auto-format all C++ source files |
 | `check_format` | Check code formatting compliance |
@@ -237,7 +236,7 @@ All targets support parallel builds with ninja.
 | `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
-| `generate_hipdnn_data_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
+| `generate_hipdnn_flatbuffers_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
 
 The following example build commands are equivalent (depending on which generator was used) and will build the `check` target, to build and run all tests.
 
@@ -454,7 +453,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 
 * **Docker GPU access issues**
    - Ensure ROCm is installed on the host system
-   - Verify GPU is visible: `rocm-smi` or `rocminfo`
+   - Verify GPU is visible: `amd-smi` or `rocminfo`
    - Check user is in `video` and `render` groups:
      ```bash
      sudo usermod -a -G video,render $USER

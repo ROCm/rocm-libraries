@@ -27,6 +27,7 @@
 
 #include "gtest_common.hpp"
 #include "compare_helper.hpp"
+#include "gtest_desc_guard.hpp"
 #include "../dropout_util.hpp"
 #include "get_handle.hpp"
 
@@ -237,7 +238,6 @@ struct verify_rnn_api_base
         case miopenRNNRELU: ss << " relu "; break;
         case miopenLSTM: ss << " lstm "; break;
         case miopenGRU: ss << " gru "; break;
-        default: break;
         }
 
         auto& inLens = input.desc.GetLengths();
@@ -363,7 +363,7 @@ struct rnn_ref
                           std::vector<T>& workSpace,
                           bool nohx) const = 0;
 
-    virtual ~rnn_ref(){};
+    virtual ~rnn_ref() {};
 };
 
 template <class T>
@@ -1758,6 +1758,11 @@ protected:
         miopen::DropoutDescriptor dropoutDesc{};
 
         size_t statesSizeInBytes = 0;
+        void* dropout_state_buf  = nullptr;
+
+        // See DestroyInternalRnnDropoutDesc — frees the descriptor allocated
+        // by RNNDescriptor's default constructor that the upcoming Set* will leak.
+        DestroyInternalRnnDropoutDesc(&rnnDesc);
 
         if(useDropout != 0)
         {
@@ -1765,7 +1770,6 @@ protected:
             unsigned long long dropout_seed = 0ULL;
             miopenDropoutGetStatesSize(&handle, &statesSizeInBytes);
 
-            void* dropout_state_buf;
             (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(&dropoutDesc,
@@ -1818,7 +1822,7 @@ protected:
         seqTensor<T> dy(output);
 
         const auto num_hidden_layers = numLayers * ((dirMode != 0) ? 2 : 1);
-        tensor<T> hx                 = [=]() {
+        tensor<T> hx                 = [=, this]() {
             if(pytorchTensorDescriptorFormat)
                 return tensor<T>(std::vector{num_hidden_layers, batchSize, hiddenSize, 1, 1});
             else
@@ -1879,6 +1883,17 @@ protected:
                    "iterations like this will also be skipped"
                 << std::endl;
             inference_dropout_issue_notified = true;
+        }
+
+        // Free the DropoutDescriptor that miopenSetRNNDescriptor just allocated.
+        // In the dropout path, the internal pointer aliases the user-owned stack
+        // `dropoutDesc` — freeing it would double-free.
+        if(useDropout == 0)
+            DestroyInternalRnnDropoutDesc(&rnnDesc);
+
+        if(useDropout != 0)
+        {
+            (void)hipFree(dropout_state_buf);
         }
     }
 

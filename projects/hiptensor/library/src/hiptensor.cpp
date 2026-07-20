@@ -395,6 +395,9 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
     (*desc)->mOpC         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescD       = nullptr;
     (*desc)->mModeD       = {};
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = HIPTENSOR_OP_IDENTITY;
     (*desc)->mOpABC       = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescCompute = descCompute;
@@ -438,6 +441,9 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
     (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = opAC;
     (*desc)->mOpABC       = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescCompute = descCompute;
@@ -485,6 +491,9 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
     (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = opAB;
     (*desc)->mOpABC       = opABC;
     (*desc)->mDescCompute = descCompute;
@@ -528,6 +537,9 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
     (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
+    (*desc)->mDescE       = nullptr;
+    (*desc)->mModeE       = {};
     (*desc)->mOpAC        = opReduce;
     (*desc)->mOpABC       = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescCompute = descCompute;
@@ -625,6 +637,11 @@ hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t           
                                               const hiptensorPlanPreference_t      planPref,
                                               const hiptensorWorksizePreference_t  workspacePref,
                                               uint64_t* workspaceSizeEstimate);
+hiptensorStatus_t contractionTrinaryGetWorkspaceSize(const hiptensorHandle_t              handle,
+                                                     const hiptensorOperationDescriptor_t desc,
+                                                     const hiptensorPlanPreference_t      planPref,
+                                                     const hiptensorWorksizePreference_t  workspacePref,
+                                                     uint64_t* workspaceSizeEstimate);
 hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t              handle,
                                                  const hiptensorOperationDescriptor_t desc,
                                                  const hiptensorPlanPreference_t      planPref,
@@ -636,6 +653,11 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
         return contractionGetWorkspaceSize(
             handle, desc, planPref, workspacePref, workspaceSizeEstimate);
     }
+    if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
+    {
+        return contractionTrinaryGetWorkspaceSize(
+            handle, desc, planPref, workspacePref, workspaceSizeEstimate);
+    }
     *workspaceSizeEstimate = 0u;
     return HIPTENSOR_STATUS_SUCCESS;
 }
@@ -645,6 +667,11 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
                                       const hiptensorOperationDescriptor_t desc,
                                       const hiptensorPlanPreference_t      pref,
                                       uint64_t                             workspaceSizeLimit);
+hiptensorStatus_t contractionTrinaryInitPlan(const hiptensorHandle_t              handle,
+                                             hiptensorPlan_t                      plan,
+                                             const hiptensorOperationDescriptor_t desc,
+                                             const hiptensorPlanPreference_t      pref,
+                                             uint64_t                             workspaceSizeLimit);
 hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handle,
                                       hiptensorPlan_t*                     plan,
                                       const hiptensorOperationDescriptor_t desc,
@@ -672,12 +699,17 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
     {
         newPlan->mOwnedDescD = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescD);
     }
+    if(desc->mDescE)
+    {
+        newPlan->mOwnedDescE = std::make_unique<hiptensorTensorDescriptor>(*desc->mDescE);
+    }
 
     newPlan->mOwnedOpDesc  = std::make_unique<hiptensorOperationDescriptor>(*desc);
     newPlan->mOwnedOpDesc->mDescA = newPlan->mOwnedDescA.get();
     newPlan->mOwnedOpDesc->mDescB = newPlan->mOwnedDescB.get();
     newPlan->mOwnedOpDesc->mDescC = newPlan->mOwnedDescC.get();
     newPlan->mOwnedOpDesc->mDescD = newPlan->mOwnedDescD.get();
+    newPlan->mOwnedOpDesc->mDescE = newPlan->mOwnedDescE.get();
 
     newPlan->mOwnedPref = std::make_unique<hiptensorPlanPreference>(*pref);
 
@@ -687,6 +719,10 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
     if(desc->mOperationType == HIPTENSOR_CONTRACTION)
     {
         return contractionInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
+    }
+    if(desc->mOperationType == HIPTENSOR_CONTRACTION_TRINARY)
+    {
+        return contractionTrinaryInitPlan(handle, newPlan, newPlan->mOpDesc, newPlan->mPref, workspaceSizeLimit);
     }
     return HIPTENSOR_STATUS_SUCCESS;
 }

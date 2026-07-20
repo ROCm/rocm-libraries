@@ -104,6 +104,13 @@ and :doc:`Performance database <../conceptual/perfdb>`.
       - | 1: Enable
         | 0 or unset: Disable
 
+    * - | ``MIOPEN_NAIVE_DISABLE_IF_ALT``
+        | Skips naive convolution solvers during find when at least one
+        | non-naive solver succeeds across any algorithm. Naive solvers
+        | are still used as a fallback when no non-naive solver succeeds.
+      - | 1 or unset: Enable (default)
+        | 0: Disable
+
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
       - | 1: Disable FindDb
@@ -185,15 +192,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_OPENCL_CONVOLUTIONS``
-        | Controls OpenCL-written convolution kernels.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP``
-        | Controls OpenCL Wave64 without workgroup behavior.
-      - | 0: Disable
-        | 1: Enable
 
 Solution selection
 ==================
@@ -263,38 +261,18 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD11X11``
-        | Controls ConvOclDirectFwd11x11 direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD11X11``
+        | Controls ConvHipDirectFwd11x11 direct solution.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWDGEN``
-        | Controls ConvOclDirectFwdGen direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD``
+        | Controls ConvHipDirectFwd direct solution.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD``
-        | Controls ConvOclDirectFwd direct solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD1X1``
-        | Controls ConvOclDirectFwd1x1 direct solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW2``
-        | Controls ConvOclBwdWrW2<n> (n={1,2,4,8,16}) and ConvOclBwdWrW2NonTunable solutions.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53``
-        | Controls ConvOclBwdWrW53 direct solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW1X1``
-        | Controls ConvOclBwdWrW1x1 direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53``
+        | Controls ConvHipBwdWrW53 direct solution.
       - | 0: Disable
         | 1: Enable
 
@@ -383,6 +361,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
 
     * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2``
         | Controls Winograd Fury RxS F(3,2) solution.
+      - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3``
+        | Controls Winograd Rage RxS F(2,3) solution.
       - | 0: Disable
         | 1: Enable
 
@@ -863,13 +846,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
         | Prefers older CO format when both v2 and v3 are supported.
       - | 1, "yes", "true", "enable", "enabled": Prefer v2 over v3
         | 0, "no", "false", "disable", "disabled": Use newer format
-
-    * - | ``MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION``
-        | Enforces CO format for OpenCL kernels (HIP backend only).
-      - | Unset: Auto-detect CO version (default)
-        | 2: Always build to v2 CO
-        | 3: Always build to v3 CO
-        | 4: Always build to v4 CO
 
 RNN control
 ===========

@@ -26,6 +26,8 @@
 #include <optional>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -83,14 +85,14 @@ class PeepholeOptimizationPassImpl : public Pass {
         return &PeepholeOptimizationPassImpl::ID;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         GfxArchID arch =
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
         int totalFusions = 0;
 
-        // TODO: use analysis pass to get def-use chains.
-        buildUseDefChain(func, true);
+        const auto& domInfo = AM.getResult<DominanceAnalysis>(func);
+        buildUseDefChain(func, domInfo, true);
 
         // Apply patterns iteratively until no more patterns match.
         // Rebuild def-use chains once per iteration over the whole function
@@ -110,6 +112,7 @@ class PeepholeOptimizationPassImpl : public Pass {
         }
 
         std::cout << "Peephole Optimization: Applied " << totalFusions << " fusion(s)\n";
+        return preserveCFGAnalyses();
     }
 
    private:
@@ -146,6 +149,7 @@ class PeepholeOptimizationPassImpl : public Pass {
             // Try all patterns in order (first match wins)
             for (auto& pattern : patternMatchers) {
                 // Try matching with original operand order
+                // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                 if (auto result = pattern->tryMatchAndRewrite(inst, context)) {
                     std::cout << "  [Peephole] Applied " << pattern->getName() << "\n";
 
@@ -166,6 +170,7 @@ class PeepholeOptimizationPassImpl : public Pass {
                     inst->setSrcReg(1, temp);
 
                     // Try matching again with swapped operands
+                    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                     if (auto result = pattern->tryMatchAndRewrite(inst, context)) {
                         std::cout << "  [Peephole] Applied " << pattern->getName()
                                   << " (commutative match)\n";

@@ -24,7 +24,7 @@ from rocisa.code import Label, Module
 from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData
 from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
-  VMulF32, VMulF64, VMulLOU32, VMulPKF16
+  VMovRelsD2B32, VMulF32, VMulF64, VMulLOU32, VMulPKF16
 from rocisa.functions import BranchIfNotZero
 
 from Tensile.Common.DataType import DataType
@@ -140,7 +140,7 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
         if asmCaps["SeparateVscnt"]:
             imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
-        elif kernel["ScheduleIterAlg"] == 2 \
+        elif kernel["_ScheduleIterAlg"] == 2 \
           or kernel["PrefetchGlobalRead"] >= 2 \
           or skipForceWaitcnt0:
             imod.addComment("Skip force waitcnt0")
@@ -148,8 +148,8 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
             imod.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="force waitcnt0"))
 
         _barrier = SBarrier(comment=comment)
-        if memoryToken != None:
-            _barrier.setMemToken(MemTokenData([memoryToken]))
+        if memoryToken is not None:
+            _barrier.setMemToken(MemTokenData(memoryToken))
         imod.add(_barrier)
     else:
         imod.addComment("Skip barrier: NumThreads=%s"%(kernel["NumThreads"]) + \
@@ -204,6 +204,29 @@ def accToArchMapper(kernel):
                 arch2acc[dst] = src
   return acc2arch, arch2acc
 
+##############################################################################
+# hasSequentialValuC
+# Check if WMMA/MFMA output is already in sequential order (no reorder needed)
+# When True, we can skip the reorder and use alpha directly in conversion.
+##############################################################################
+def hasSequentialValuC(kernel):
+  """
+  Returns True if valuC registers are already in sequential order after WMMA/MFMA.
+  Returns False for non-MFMA/WMMA kernels (EnableMatrixInstruction=False).
+  """
+  # Non-MFMA/WMMA kernels don't have MatrixInstM/MatrixInstN parameters
+  # which are required by accToArchMapper to compute the register mapping.
+  # For these kernels, the concept of "sequential MFMA output" doesn't apply.
+  if not kernel["EnableMatrixInstruction"]:
+    return False
+
+  acc2arch, _ = accToArchMapper(kernel)
+
+  for i in range(len(acc2arch)):
+    if acc2arch[i] != i:
+      return False
+  return True
+
 def accVgprImagNumOffset(kernel):
   acc2arch, _ = accToArchMapper(kernel)
   return len(acc2arch) * kernel["MIRegPerOut"]
@@ -212,7 +235,7 @@ def accVgprImagNumOffset(kernel):
 # MapAcctoArch
 # function to map MFMA Acc  Registers to Arch VGPR register
 ##############################################################################
-def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
+def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
   acc2arch, _ = accToArchMapper(kernel)
 
   complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
@@ -231,13 +254,23 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
               return accvgpr(idx)
           accStr = gprfunc(srcIdx)
           if srcIdx >= maxAgpr:
+            # Spilled accumulator: lives in an arch vgpr, not an accvgpr.
+            # For subtile kernels the spilled D-tile vgprs are allocated from
+            # the pool at spilledVgprBase (not at ValuC+N), so reference them
+            # directly.  For non-subtile kernels spilledVgprBase is None and
+            # the legacy "ValuC+N" addressing is used (vgprValuC == 0 there).
+            spill_offset = srcIdx - maxAgpr
+            if spilledVgprBase is not None:
+              spilledVgpr = vgpr(spilledVgprBase + spill_offset)
+            else:
+              spilledVgpr = vgpr("ValuC+%u" % spill_offset)
             if write:
-              itemList[destIdx] = VMovB32(dst=vgpr("ValuC+%u"%(srcIdx-maxAgpr)),
+              itemList[destIdx] = VMovB32(dst=spilledVgpr,
                                              src=vgpr(Holder(name="ValuC")),
                                              comment="copy vreg[%u] to MI out reg" % destIdx)
             else:
               itemList[destIdx] = VMovB32(dst=vgpr(Holder(name="ValuC")),
-                                              src=vgpr("ValuC+%u"%(srcIdx-maxAgpr)),
+                                              src=spilledVgpr,
                                               comment="copy MI out reg to vreg[%u]" % destIdx)
           else:
             if write:
@@ -253,6 +286,14 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False):
             itemList[destIdx] = VMovB32(dst=vgpr("ValuC+%u"%srcIdx),
                                              src=vgpr(Holder(name="ValuC")),
                                              comment="copy vreg[%u] to MI out reg" % destIdx)
+          elif kernel.get("CompactLoopStore", False):
+            # CompactLoopStore: use v_movrelsd_2_b32 so the dst VGPR index is offset
+            # by M0 at runtime. The CLS countdown loop (later commit) drives M0 per
+            # iter so one "copy MI out reg" body covers multiple MI accumulator
+            # slices. Non-CLS keeps v_mov_b32 verbatim.
+            itemList[destIdx] = VMovRelsD2B32(dst=vgpr(Holder(name="ValuC")),
+                                             src=vgpr("ValuC+%u"%srcIdx),
+                                             comment="copy MI out reg to vreg[%u]" % destIdx)
           else:
             itemList[destIdx] = VMovB32(dst=vgpr(Holder(name="ValuC")),
                                              src=vgpr("ValuC+%u"%srcIdx),
