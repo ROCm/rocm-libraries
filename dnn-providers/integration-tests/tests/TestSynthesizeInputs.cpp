@@ -11,9 +11,10 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
-#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/input-init/SynthesizeInputs.hpp"
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -193,78 +194,11 @@ GraphResult buildConvBiasReluGraph()
 // ── Batchnorm training with runtime PBV scalars ─────────────────────────────
 GraphResult buildBatchnormTrainingRuntimePbvGraph()
 {
-    GraphResult r;
-    auto& b = r.builder;
-    const std::vector<int64_t> scalarDims(K_BATCHNORM_TENSOR_EPSILON_DIMS.begin(),
-                                          K_BATCHNORM_TENSOR_EPSILON_DIMS.end());
-    const std::vector<int64_t> scalarStrides(K_BATCHNORM_TENSOR_EPSILON_STRIDES.begin(),
-                                             K_BATCHNORM_TENSOR_EPSILON_STRIDES.end());
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(
-        b, K_BATCHNORM_TENSOR_X_UID, "x", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(
-        b, K_BATCHNORM_TENSOR_SCALE_UID, "scale", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(
-        b, K_BATCHNORM_TENSOR_BIAS_UID, "bias", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b,
-                                                   K_BATCHNORM_TENSOR_EPSILON_UID,
-                                                   "epsilon",
-                                                   DataType::FLOAT,
-                                                   &scalarStrides,
-                                                   &scalarDims,
-                                                   false,
-                                                   TensorValue::NONE,
-                                                   0,
-                                                   true));
-    tensors.push_back(CreateTensorAttributesDirect(b,
-                                                   K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
-                                                   "prev_mean",
-                                                   DataType::FLOAT,
-                                                   &kStrides,
-                                                   &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b,
-                                                   K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
-                                                   "prev_variance",
-                                                   DataType::FLOAT,
-                                                   &kStrides,
-                                                   &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b,
-                                                   K_BATCHNORM_TENSOR_MOMENTUM_UID,
-                                                   "momentum",
-                                                   DataType::FLOAT,
-                                                   &scalarStrides,
-                                                   &scalarDims,
-                                                   false,
-                                                   TensorValue::NONE,
-                                                   0,
-                                                   true));
-    tensors.push_back(CreateTensorAttributesDirect(
-        b, K_BATCHNORM_TENSOR_Y_UID, "y", DataType::FLOAT, &kStrides, &kDims));
-
-    const auto batchnorm
-        = CreateBatchnormAttributesDirect(b,
-                                          K_BATCHNORM_TENSOR_X_UID,
-                                          K_BATCHNORM_TENSOR_SCALE_UID,
-                                          K_BATCHNORM_TENSOR_BIAS_UID,
-                                          K_BATCHNORM_TENSOR_EPSILON_UID,
-                                          nullptr,
-                                          K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
-                                          K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
-                                          K_BATCHNORM_TENSOR_MOMENTUM_UID,
-                                          K_BATCHNORM_TENSOR_Y_UID);
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(b,
-                                     "batchnorm_training",
-                                     DataType::FLOAT,
-                                     NodeAttributes::BatchnormAttributes,
-                                     batchnorm.Union()));
-
-    const auto graph = CreateGraphDirect(
-        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
-    b.Finish(graph);
-    r.graph = GetGraph(b.GetBufferPointer());
-    return r;
+    GraphResult result;
+    result.builder
+        = hipdnn_test_sdk::utilities::createBatchnormFwdTrainingRuntimePbvGraph(kDims, kStrides);
+    result.graph = GetGraph(result.builder.GetBufferPointer());
+    return result;
 }
 
 InputTensorMap makeTensorsFromGraph(const GraphResult& gr, const std::vector<int64_t>& uids)
@@ -502,6 +436,8 @@ TEST(TestSynthesizeInputs, ConvPlusBiasPlusReluFused)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
+// Unit seam: verify the synthesis policy itself. Epsilon is the fixed-value
+// path; momentum is the seeded random path and must reproduce across runs.
 TEST(TestSynthesizeInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 {
     const auto graph = buildBatchnormTrainingRuntimePbvGraph();

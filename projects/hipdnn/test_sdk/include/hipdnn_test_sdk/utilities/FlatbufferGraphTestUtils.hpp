@@ -11,6 +11,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/reduction_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -776,6 +777,77 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt,
         overrideShapeEnabled);
     builder.Finish(graphOffset);
+    return builder;
+}
+
+// Batchnorm training graph for testing execute-time runtime PBV inputs.
+// Epsilon and momentum intentionally have no baked value.
+inline flatbuffers::FlatBufferBuilder
+    createBatchnormFwdTrainingRuntimePbvGraph(const std::vector<int64_t>& dims = {2, 3},
+                                              const std::vector<int64_t>& strides = {3, 1})
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using namespace hipdnn_tests::constants;
+
+    const std::vector<int64_t> scalarDims(K_BATCHNORM_TENSOR_EPSILON_DIMS.begin(),
+                                          K_BATCHNORM_TENSOR_EPSILON_DIMS.end());
+    const std::vector<int64_t> scalarStrides(K_BATCHNORM_TENSOR_EPSILON_STRIDES.begin(),
+                                             K_BATCHNORM_TENSOR_EPSILON_STRIDES.end());
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    const auto addDataTensor = [&](int64_t uid, const char* name) {
+        tensors.push_back(
+            CreateTensorAttributesDirect(builder, uid, name, DataType::FLOAT, &strides, &dims));
+    };
+    const auto addRuntimeScalar = [&](int64_t uid, const char* name) {
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       uid,
+                                                       name,
+                                                       DataType::FLOAT,
+                                                       &scalarStrides,
+                                                       &scalarDims,
+                                                       false,
+                                                       TensorValue::NONE,
+                                                       0,
+                                                       true));
+    };
+
+    addDataTensor(K_BATCHNORM_TENSOR_X_UID, "x");
+    addDataTensor(K_BATCHNORM_TENSOR_SCALE_UID, "scale");
+    addDataTensor(K_BATCHNORM_TENSOR_BIAS_UID, "bias");
+    addRuntimeScalar(K_BATCHNORM_TENSOR_EPSILON_UID, "epsilon");
+    addDataTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID, "prev_mean");
+    addDataTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID, "prev_variance");
+    addRuntimeScalar(K_BATCHNORM_TENSOR_MOMENTUM_UID, "momentum");
+    addDataTensor(K_BATCHNORM_TENSOR_Y_UID, "y");
+
+    const auto attributes
+        = CreateBatchnormAttributesDirect(builder,
+                                          K_BATCHNORM_TENSOR_X_UID,
+                                          K_BATCHNORM_TENSOR_SCALE_UID,
+                                          K_BATCHNORM_TENSOR_BIAS_UID,
+                                          K_BATCHNORM_TENSOR_EPSILON_UID,
+                                          nullptr,
+                                          K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
+                                          K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
+                                          K_BATCHNORM_TENSOR_MOMENTUM_UID,
+                                          K_BATCHNORM_TENSOR_Y_UID);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "batchnorm_training",
+                                     DataType::FLOAT,
+                                     NodeAttributes::BatchnormAttributes,
+                                     attributes.Union()));
+
+    const auto graph = CreateGraphDirect(builder,
+                                         "runtime_pbv_synthesis",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
+    builder.Finish(graph);
     return builder;
 }
 

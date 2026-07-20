@@ -32,6 +32,7 @@
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -214,69 +215,7 @@ protected:
 
 std::shared_ptr<IntegrationTestBundle> makeRuntimePbvSynthesisBundle()
 {
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    const std::vector<int64_t> dataDims = {2, 3};
-    const std::vector<int64_t> dataStrides = {3, 1};
-    const std::vector<int64_t> scalarDims(K_BATCHNORM_TENSOR_EPSILON_DIMS.begin(),
-                                          K_BATCHNORM_TENSOR_EPSILON_DIMS.end());
-    const std::vector<int64_t> scalarStrides(K_BATCHNORM_TENSOR_EPSILON_STRIDES.begin(),
-                                             K_BATCHNORM_TENSOR_EPSILON_STRIDES.end());
-
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    const auto addDataTensor = [&](int64_t uid, const char* name) {
-        tensors.push_back(CreateTensorAttributesDirect(
-            builder, uid, name, DataType::FLOAT, &dataStrides, &dataDims));
-    };
-    const auto addRuntimeScalar = [&](int64_t uid, const char* name) {
-        tensors.push_back(CreateTensorAttributesDirect(builder,
-                                                       uid,
-                                                       name,
-                                                       DataType::FLOAT,
-                                                       &scalarStrides,
-                                                       &scalarDims,
-                                                       false,
-                                                       TensorValue::NONE,
-                                                       0,
-                                                       true));
-    };
-
-    addDataTensor(K_BATCHNORM_TENSOR_X_UID, "x");
-    addDataTensor(K_BATCHNORM_TENSOR_SCALE_UID, "scale");
-    addDataTensor(K_BATCHNORM_TENSOR_BIAS_UID, "bias");
-    addRuntimeScalar(K_BATCHNORM_TENSOR_EPSILON_UID, "epsilon");
-    addDataTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID, "prev_mean");
-    addDataTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID, "prev_variance");
-    addRuntimeScalar(K_BATCHNORM_TENSOR_MOMENTUM_UID, "momentum");
-    addDataTensor(K_BATCHNORM_TENSOR_Y_UID, "y");
-
-    const auto batchnorm
-        = CreateBatchnormAttributesDirect(builder,
-                                          K_BATCHNORM_TENSOR_X_UID,
-                                          K_BATCHNORM_TENSOR_SCALE_UID,
-                                          K_BATCHNORM_TENSOR_BIAS_UID,
-                                          K_BATCHNORM_TENSOR_EPSILON_UID,
-                                          nullptr,
-                                          K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
-                                          K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
-                                          K_BATCHNORM_TENSOR_MOMENTUM_UID,
-                                          K_BATCHNORM_TENSOR_Y_UID);
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(builder,
-                                     "batchnorm_training",
-                                     DataType::FLOAT,
-                                     NodeAttributes::BatchnormAttributes,
-                                     batchnorm.Union()));
-    const auto graph = CreateGraphDirect(builder,
-                                         "runtime_pbv_synthesis",
-                                         DataType::FLOAT,
-                                         DataType::FLOAT,
-                                         DataType::FLOAT,
-                                         &tensors,
-                                         &nodes);
-    builder.Finish(graph);
-
+    auto builder = hipdnn_test_sdk::utilities::createBatchnormFwdTrainingRuntimePbvGraph();
     auto bundle = std::make_shared<IntegrationTestBundle>();
     bundle->graphBuffer = builder.Release();
     bundle->outputTensorUids = {K_BATCHNORM_TENSOR_Y_UID};
@@ -346,6 +285,8 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
 }
 } // namespace
 
+// Full harness seam: start with graph metadata only, then prove allocation,
+// fixed/random synthesis, and host-pointer delivery all happen before execute.
 TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreSynthesizedEndToEnd)
 {
     const auto runHarness = [&](float& epsilon, float& momentum) {
