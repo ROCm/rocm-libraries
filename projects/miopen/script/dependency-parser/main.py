@@ -154,6 +154,11 @@ def main():
         "shas",
         help="Retrieve sha for merge-base and feature branch and storing in miopen_gtest_shas.txt.",
     )
+    parser_shas.add_argument(
+        "--use-cached",
+        action="store_true",
+        help="Reuse the existing shas file if present (skip); error if it is missing.",
+    )
 
     # Dependency parsing
     parser_parse = subparsers.add_parser(
@@ -172,6 +177,11 @@ def main():
         help="Comma-separated additive attribution bridges to run after the "
         "ninja-deps mapping (e.g. 'stem', 'symbol'). Empty = none. If 'symbol' "
         "is listed it supersedes 'stem'.",
+    )
+    parser_parse.add_argument(
+        "--use-cached",
+        action="store_true",
+        help="Reuse the existing mapping JSON if present (skip parse); error if missing.",
     )
 
     # Selective testing
@@ -228,8 +238,29 @@ def main():
     shas_file = "miopen_dapper_shas.txt"
 
     if args.command == "shas":
+        if args.use_cached:
+            if os.path.isfile(shas_file):
+                print(f"dapper(cached): using existing {shas_file}")
+                return
+            sys.exit(
+                f"dapper(cached): {shas_file} not found. MIOPEN_DAPPER_USE_CACHED reuses "
+                "existing dapper inputs; reconfigure once with -DMIOPEN_DAPPER_USE_CACHED=OFF "
+                "to generate them."
+            )
         write_shas_file("MAIN SHAS: ", shas_file)
     elif args.command == "parse":
+        mapping_json = os.path.join(
+            os.path.dirname(args.build_ninja) or ".", "miopen_dapper_mapping.json"
+        )
+        if args.use_cached:
+            if os.path.isfile(mapping_json):
+                print(f"dapper(cached): using existing {mapping_json}")
+                return
+            sys.exit(
+                f"dapper(cached): {mapping_json} not found. MIOPEN_DAPPER_USE_CACHED reuses "
+                "existing dapper inputs; reconfigure once with -DMIOPEN_DAPPER_USE_CACHED=OFF "
+                "to generate them."
+            )
         if not os.path.isfile(shas_file):
             write_shas_file("MAIN PARSE: ", shas_file)
         run_dependency_parser(
