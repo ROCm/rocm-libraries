@@ -33,18 +33,13 @@ CDNA3_PLUS_ARCH = ArchTrait(
     preprocessor_check="defined(__gfx94__) || defined(__gfx950__)",
 )
 
-
-def _arch_host_predicate(arch_require: Optional[str]) -> str:
-    """Translate a tile's device-only F_arch_require gate (e.g.
-    'defined(__gfx942__)') into an equivalent host-side predicate over the
-    runtime device_name. Returns "true" (arch-agnostic) when no gate is set.
-    ck_tile::get_device_name() returns the normalized arch (e.g. "gfx942")."""
-    if arch_require is None:
-        return "true"
-    names = re.findall(r"__(gfx[0-9a-z]+)__", arch_require)
-    if not names:
-        return "true"
-    return " || ".join(f'device_name == "{n}"' for n in names)
+# Architecture trait for tiles that are only valid / only wanted on gfx942
+# (e.g. MI308). Used to gate a tile's device-side compilation so it is skipped
+# on other archs
+GFX942_ARCH = ArchTrait(
+    "gfx942",
+    preprocessor_check="defined(__gfx942__)",
+)
 
 DTYPE_BITS = {
     "fp32": 32,
@@ -571,11 +566,11 @@ class FmhaFwdTileSize:
     F_wk1: int  # gemm1 warp size along k
     F_occupancy: int  # occupancy, -1 will let pipeline decide the occupancy, other value will overwrite occupancy
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
-    # Extra device-side preprocessor guard AND-ed into this tile's arch gate.
-    # Restricts the tile to the arch(es) where it is valid, excluding any whose
-    # async load width makes it degenerate (e.g. bn0=32 yields NumIssues=0 on
-    # gfx950 where async K-load is dwordx4).
-    F_arch_require: str = None
+    # Optional compile-time arch guard for this tile's device code. When set,
+    # the kernel body is only instantiated during the device pass for matching
+    # archs (host pass always keeps it so the host symbol still exists). This is
+    # independent from F_constraint, which is a runtime dispatch predicate.
+    F_arch: Optional[ArchTrait] = None
 
     @property
     def name(self) -> str:
@@ -659,8 +654,19 @@ class FmhaFwdKernel:
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
-            F_arch_check=self.arch_check,
+            F_arch_check=self._arch_check(),
         )
+
+    def _arch_check(self) -> str:
+        # Combine any arch guards that apply to this kernel.
+        checks = []
+        if self.F_use_global_load:
+            checks.append(CDNA3_PLUS_ARCH.preprocessor_check)
+        if self.F_tile.F_arch is not None:
+            checks.append(self.F_tile.F_arch.preprocessor_check)
+        if not checks:
+            return "true"
+        return " && ".join(f"({c})" for c in checks)
 
     @property
     def name(self) -> str:
@@ -717,28 +723,17 @@ class KernelComponentFactory:
             return {
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
                 256 : [
-                    # MI308X (gfx942, num_cus<128) bf16 d256 tile from #8492.
-                    # Allow-listed to gfx942 only: bn0=32 requires an async K-load
-                    # narrow enough that NumIssues = 32/(LaneGroups*NumWarps) > 0.
-                    # On archs with a wider async K-load (e.g. gfx950 dwordx4) this
-                    # yields NumIssues = 32/128 = 0 and an empty LDS descriptor
-                    # (space_filling_curve static_assert). Opt new archs in only
-                    # after confirming the tile does not degenerate there.
-                    # F_arch_require is a device-only #if gate. Without a matching
-                    # host predicate, a num_cus<128 gfx950 partition would select
-                    # this bn0=32 arm on the host while its gfx950 device image was
-                    # elided -> hipErrorInvalidDeviceFunction at launch. The host
-                    # dispatch therefore mirrors F_arch_require via _arch_host_
-                    # predicate() (device_name == "gfx942"), so such a partition
-                    # falls through to the arch-agnostic bn0=128 arm instead.
-                    FmhaFwdTileSize(128,  32, 16, 256, 16,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16, 2, CppConstraint("num_cus < 128"), F_arch_require="defined(__gfx942__)"),
+                    FmhaFwdTileSize(128,  32, 16, 256, 16,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16, 2, CppConstraint("num_cus < 128"), GFX942_ARCH),
                     FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
                 ],
             }  # fmt: skip
         elif dtype in ["fp8bf16"]:
             return {
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
-                256 : [FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
+                256 : [
+                    FmhaFwdTileSize(128,  64, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  2, CppConstraint("num_cus < 128"), GFX942_ARCH),
+                    FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
+                ],
             }  # fmt: skip
         else:
             return None

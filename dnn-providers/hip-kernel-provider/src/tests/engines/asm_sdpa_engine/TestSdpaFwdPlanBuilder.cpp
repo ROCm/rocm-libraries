@@ -55,7 +55,8 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         bool withStats = false,
                         bool alibiMask = false,
                         bool paddingMask = false,
-                        bool causalMask = false)
+                        bool causalMask = false,
+                        bool overrideShapeEnabled = false)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -79,7 +80,26 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         withStats,
         alibiMask,
         paddingMask,
-        causalMask);
+        causalMask,
+        overrideShapeEnabled);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAvailableKernels)
