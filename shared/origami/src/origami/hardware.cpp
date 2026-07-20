@@ -11,6 +11,22 @@
 
 namespace origami {
 
+// Resolve the number of CUs to model against.
+//   requested_num_cus: caller's CU budget. Signed so non-positive values are
+//                      handled without a caller-side clamp: 0 means "use all
+//                      CUs" and a negative (invalid) value is treated the same.
+//                      A positive value caps the budget.
+//   hardware_num_cus:  physical CU count (hardware_t::N_CU), the upper bound.
+// Returns the requested budget when it is positive and below the physical
+// count; otherwise the full physical count.
+std::size_t resolve_num_cus(std::int64_t requested_num_cus, std::size_t hardware_num_cus) {
+  if (requested_num_cus > 0
+      && static_cast<std::size_t>(requested_num_cus) < hardware_num_cus) {
+    return static_cast<std::size_t>(requested_num_cus);
+  }
+  return hardware_num_cus;
+}
+
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
