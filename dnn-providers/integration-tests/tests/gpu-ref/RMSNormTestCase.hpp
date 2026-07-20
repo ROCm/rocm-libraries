@@ -4,8 +4,8 @@
 #pragma once
 
 #include <gtest/gtest.h>
+#include <hipdnn-gpu-ref/GpuFpReferenceValidation.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 
 #include <cstdint>
 #include <ostream>
@@ -38,7 +38,7 @@ void assertAllClose(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     hipdnn_data_sdk::utilities::TensorBase<T>& actual,
                     float tolerance)
 {
-    auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<T>(tolerance, 0.0f);
+    auto validator = hipdnn_gpu_ref::GpuFpReferenceValidation<T>(tolerance, 0.0f);
     ASSERT_TRUE(validator.allClose(expected, actual));
 }
 
