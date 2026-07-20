@@ -4,10 +4,16 @@
 set(GEMM_UNIVERSAL_DATATYPE "fp8;fp16" CACHE STRING "List of datatypes for GEMM Universal (semicolon-separated)")
 set(GEMM_UNIVERSAL_LAYOUT "rcr;rrr;crr;ccr" CACHE STRING "List of layout for GEMM Universal (semicolon-separated)")
 set(GEMM_UNIVERSAL_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
+set(GEMM_UNIVERSAL_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 option(ENABLE_CCACHE_GEMM_UNIVERSAL "Enable ccache for GEMM Universal ops compilation" OFF)
 
 # Store the directory path for use in functions
 set(GEMM_UNIVERSAL_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
+
+# Sweep config JSONs live at the op root (shared single source of truth with
+# the dispatcher GEMM bridge). Old-TE reads the same files the bridge sweeps.
+set(GEMM_UNIVERSAL_CONFIG_DIR "${CMAKE_CURRENT_LIST_DIR}/../configs"
+    CACHE PATH "Directory holding gemm sweep config JSONs")
 
 # Function to create individual GEMM Universal targets
 function(create_individual_gemm_universal_target datatype layout trait tile_config config_json)
@@ -124,15 +130,15 @@ function(build_individual_gemm_universal_targets datatype layout)
     # Check environment variable first
     if(DEFINED ENV{GEMM_UNIVERSAL_CONFIG_FILE} AND NOT "$ENV{GEMM_UNIVERSAL_CONFIG_FILE}" STREQUAL "")
         set(config_filename "$ENV{GEMM_UNIVERSAL_CONFIG_FILE}")
-        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${config_filename}")
+        set(json_blob "${GEMM_UNIVERSAL_CONFIG_DIR}/${config_filename}")
         message(VERBOSE "  Using config from environment variable: ${config_filename}")
     elseif(NOT "${GEMM_UNIVERSAL_CONFIG_FILE}" STREQUAL "")
         # Use CMake variable if set
-        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${GEMM_UNIVERSAL_CONFIG_FILE}")
+        set(json_blob "${GEMM_UNIVERSAL_CONFIG_DIR}/${GEMM_UNIVERSAL_CONFIG_FILE}")
         message(VERBOSE "  Using custom config: ${GEMM_UNIVERSAL_CONFIG_FILE}")
     else()
         # Use default config for all layouts
-        set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
+        set(json_blob "${GEMM_UNIVERSAL_CONFIG_DIR}/default_config.json")
         message(VERBOSE "  Using default config for layout ${layout}")
     endif()
 
@@ -171,6 +177,19 @@ function(build_individual_gemm_universal_targets datatype layout)
                 --gpu_target ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels ")
 
+    # Build optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${GEMM_UNIVERSAL_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_UNIVERSAL_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # First, just list the kernels (fast operation)
     message(VERBOSE "  Listing kernel configurations...")
     execute_process(
@@ -180,7 +199,8 @@ function(build_individual_gemm_universal_targets datatype layout)
                 --layout ${layout}
                 --config_json ${json_blob}
                 --gpu_target ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}
-                --list_kernels  
+                --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -299,6 +319,20 @@ else()
     foreach(scheduler IN LISTS GEMM_UNIVERSAL_SCHEDULERS)
         add_custom_target(benchmark_gemm_universal_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${GEMM_UNIVERSAL_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_UNIVERSAL_DATATYPE _gu_n_dt)
+        list(LENGTH GEMM_UNIVERSAL_LAYOUT _gu_n_lay)
+        math(EXPR _gu_n_combos "${_gu_n_dt} * ${_gu_n_lay}")
+        if(_gu_n_combos GREATER 0)
+            math(EXPR GEMM_UNIVERSAL_MAX_INSTANCES
+                "${GEMM_UNIVERSAL_MAX_INSTANCES} / ${_gu_n_combos}")
+            message(STATUS "  gemm_universal: per-combo budget = ${GEMM_UNIVERSAL_MAX_INSTANCES} (${_gu_n_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_UNIVERSAL_DATATYPE)

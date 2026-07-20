@@ -49,16 +49,24 @@ option(ENABLE_CLANG_CPP_CHECKS "Enables clang tidy, cppcheck" ON)
 option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
 option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(CK_EXPERIMENTAL_BUILDER "Enable experimental builder" OFF)
+option(CK_TILE_DISPATCHER "Use CK Tile Dispatcher for profiler convolution kernels" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
+option(CK_EXPERIMENTAL_GEMM_BENCHMARK "Enable experimental gemm benchmark for gfx1250" OFF)
 option(FORCE_DISABLE_XDL "Skip compiling XDL specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
 option(FORCE_DISABLE_WMMA "Skip compiling WMMA specific instances (even if supported GPUs are included in GPU_TARGETS)" OFF)
-option(BUILD_CK_TILE_ENGINE "Build the tile_engine subdirectory" ON)
+option(BUILD_CK_TILE_ENGINE "Build the tile_engine subdirectory" OFF)
 option(BUILD_CK_EXAMPLES "Build the example subdirectory" ON)
 option(BUILD_CK_TUTORIALS "Build the tutorial subdirectory" ON)
+option(CK_ENABLE_ROCM_CK "Build rocm_ck API" OFF)
 
 if(CK_EXPERIMENTAL_BUILDER)
     add_definitions(-DCK_EXPERIMENTAL_BUILDER)
     include_directories(${PROJECT_SOURCE_DIR}/experimental/builder/include)
+endif()
+
+if(CK_TILE_DISPATCHER)
+    add_definitions(-DCK_TILE_DISPATCHER)
+    include_directories(${PROJECT_SOURCE_DIR}/dispatcher/include)
 endif()
 
 # Usage: for customized Python location cmake -DCK_USE_ALTERNATIVE_PYTHON="/opt/Python-3.8.13/bin/python3.8"
@@ -128,11 +136,97 @@ else()
     set(CK_ENABLE_BF8 "ON")
 endif()
 
+# ---------------------------------------------------------------------------
+# Map GPU target strings to hex amdgcn_target_id values (arch.hpp).
+# Builds a -DCK_CMAKE_GPU_TARGET_IDS=0xHHHH,... definition that host-side
+# test code can consume without launching a device kernel.
+# ---------------------------------------------------------------------------
+function(_ck_gpu_target_string_to_id TARGET_STR OUT_VAR)
+    string(TOLOWER "${TARGET_STR}" _tgt)
+    string(REGEX REPLACE ":.*" "" _tgt "${_tgt}")
+    # GFX9
+    if(_tgt STREQUAL "gfx908")
+        set(${OUT_VAR} "0x0908" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx90a")
+        set(${OUT_VAR} "0x090A" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx942")
+        set(${OUT_VAR} "0x0942" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx950")
+        set(${OUT_VAR} "0x0950" PARENT_SCOPE)
+    # GFX10.3
+    elseif(_tgt STREQUAL "gfx1030")
+        set(${OUT_VAR} "0x1030" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1031")
+        set(${OUT_VAR} "0x1031" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1032")
+        set(${OUT_VAR} "0x1032" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1033")
+        set(${OUT_VAR} "0x1033" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1034")
+        set(${OUT_VAR} "0x1034" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1035")
+        set(${OUT_VAR} "0x1035" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1036")
+        set(${OUT_VAR} "0x1036" PARENT_SCOPE)
+    elseif(_tgt MATCHES "^gfx10-3-generic$")
+        set(${OUT_VAR} "0x103F" PARENT_SCOPE)
+    # GFX11
+    elseif(_tgt STREQUAL "gfx1100")
+        set(${OUT_VAR} "0x1100" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1101")
+        set(${OUT_VAR} "0x1101" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1102")
+        set(${OUT_VAR} "0x1102" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1103")
+        set(${OUT_VAR} "0x1103" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1150")
+        set(${OUT_VAR} "0x1150" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1151")
+        set(${OUT_VAR} "0x1151" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1152")
+        set(${OUT_VAR} "0x1152" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1153")
+        set(${OUT_VAR} "0x1153" PARENT_SCOPE)
+    elseif(_tgt MATCHES "^gfx11-generic$")
+        set(${OUT_VAR} "0x11FF" PARENT_SCOPE)
+    # GFX12
+    elseif(_tgt STREQUAL "gfx1200")
+        set(${OUT_VAR} "0x1200" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1201")
+        set(${OUT_VAR} "0x1201" PARENT_SCOPE)
+    elseif(_tgt MATCHES "^gfx12-generic$")
+        set(${OUT_VAR} "0x12FF" PARENT_SCOPE)
+    elseif(_tgt STREQUAL "gfx1250")
+        set(${OUT_VAR} "0x1250" PARENT_SCOPE)
+    else()
+        message(WARNING "_ck_gpu_target_string_to_id: unknown GPU target '${TARGET_STR}', skipping")
+        set(${OUT_VAR} "" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Inject a macro CK_CMAKE_GPU_TARGET_IDS containing all configure-level GPU targets into all source files.
+set(_ck_hex_ids)
+foreach(_tgt IN LISTS GPU_TARGETS)
+    _ck_gpu_target_string_to_id("${_tgt}" _ck_hex)
+    if(_ck_hex AND NOT _ck_hex STREQUAL "0x0000")
+        list(APPEND _ck_hex_ids "${_ck_hex}")
+    endif()
+endforeach()
+list(JOIN _ck_hex_ids "," _ck_hex_str)
+if(_ck_hex_str)
+    add_compile_definitions(CK_CMAKE_GPU_TARGET_IDS=${_ck_hex_str})
+endif()
+
 #for f8/bf8_t type
 add_compile_options(-Wno-bit-int-extension)
 add_compile_options(-Wno-pass-failed)
 add_compile_options(-Wno-switch-default)
 add_compile_options(-Wno-unique-object-duplication)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options(-Wno-unknown-warning-option)
+else()
+    add_compile_options(-Wno-unknown-pragmas)
+endif()
 
 # Increase the number of max elements in fold expressions
 add_compile_options(-fbracket-depth=1024)
@@ -151,6 +245,8 @@ if(NOT DISABLE_DL_KERNELS AND GPU_TARGETS MATCHES "gfx101|gfx103|gfx10-1|gfx10-3
     set(DL_KERNELS "ON")
     set(CK_ENABLE_DL_KERNELS "ON")
 endif()
+message(STATUS "Disabling DPP kernels by default")
+option(DISABLE_DPP_KERNELS "Disable DPP kernels by default" ON)
 if(NOT DISABLE_DPP_KERNELS)
     add_definitions(-DDPP_KERNELS)
     set(DPP_KERNELS "ON")
@@ -171,8 +267,48 @@ endif()
 include(getopt)
 
 # CK version file to record release version as well as git commit hash
-find_package(Git REQUIRED)
-execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD OUTPUT_VARIABLE COMMIT_ID OUTPUT_STRIP_TRAILING_WHITESPACE)
+# identifying the CK source tree.
+#
+# NOTE: execute_process() runs in the build directory by default, so we must
+# pin WORKING_DIRECTORY to the source tree -- otherwise out-of-source builds
+# (where the build dir is not inside a git checkout) would silently produce
+# an empty CK_COMMIT_ID. We use `git log -1 -- .` (the last commit touching
+# CK's sources) rather than `git rev-parse HEAD` so unrelated changes
+# elsewhere in a containing monorepo (e.g. rocm-libraries) do not bump the
+# CK identity. RESULT_VARIABLE/ERROR_QUIET also let us degrade gracefully
+# when building from a release tarball without a .git directory.
+find_package(Git)
+set(COMMIT_ID "unknown")
+set(CK_PARENT_COMMIT_ID "unknown")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" log -1 --format=%H -- .
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE GIT_COMMIT_ID
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE GIT_LOG_RESULT
+        ERROR_QUIET
+    )
+    if(GIT_LOG_RESULT EQUAL 0 AND GIT_COMMIT_ID)
+        set(COMMIT_ID "${GIT_COMMIT_ID}")
+    endif()
+
+    # Containing-repo HEAD. Captures the surrounding repository's exact
+    # snapshot, including shared infrastructure that lives outside CK
+    # (e.g. rocm-libraries top-level CMake/codegen helpers). When CK is
+    # built standalone, this is just CK's own HEAD.
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE GIT_REPO_HEAD
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE GIT_REV_PARSE_RESULT
+        ERROR_QUIET
+    )
+    if(GIT_REV_PARSE_RESULT EQUAL 0 AND GIT_REPO_HEAD)
+        set(CK_PARENT_COMMIT_ID "${GIT_REPO_HEAD}")
+    endif()
+endif()
 configure_file(include/ck/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/ck/version.h)
 
 set(ROCM_SYMLINK_LIBS OFF)
@@ -210,6 +346,21 @@ else()
     set(USER_GPU_TARGETS 0)
 endif()
 
+#Unsupported GPU targets to be filtered from the list:
+set(CK_UNSUPPORTED_GPU_TARGETS "gfx900;gfx906;gfx90c")
+
+#If only one of the unsupported targets is requested, generate dummy target and exit here.
+if("${GPU_TARGETS}" IN_LIST CK_UNSUPPORTED_GPU_TARGETS)
+    add_custom_target(ck_dummy_target)
+    message("CK is not supported for target ${GPU_TARGETS}")
+    return()
+endif()
+
+#If multiple targets are requested, filter out any targets currently on the unsupported list:
+message(STATUS "Filtering out unsupported targets: ${CK_UNSUPPORTED_GPU_TARGETS}")
+list(REMOVE_ITEM GPU_TARGETS ${CK_UNSUPPORTED_GPU_TARGETS})
+list(REMOVE_ITEM GPU_ARCHS ${CK_UNSUPPORTED_GPU_TARGETS})
+
 find_package(hip REQUIRED)
 enable_language(HIP)
 
@@ -232,8 +383,10 @@ if(NOT ENABLE_ASAN_PACKAGING)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600400000 AND ${hip_VERSION_FLAT} LESS 600443483)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950")
-    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483)
+    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483 AND ${hip_VERSION_FLAT} LESS 700200000)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic")
+    elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 700200000)
+        set(CK_GPU_TARGETS "")
     endif()
 else()
     #build CK only for xnack-supported targets when using ASAN
@@ -285,6 +438,9 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx10")
     add_definitions(-DCK_GFX1030_SUPPORT)
 endif()
 
+# new macro CK_TILE_USE_WMMA in order to separately compile examples for MFMA/WMMA
+set(CK_TILE_USE_WMMA 0)
+
 if ((SUPPORTED_GPU_TARGETS MATCHES "gfx11" OR SUPPORTED_GPU_TARGETS MATCHES "gfx12") AND NOT FORCE_DISABLE_WMMA)
     message(STATUS "Enabling WMMA instances")
     add_definitions(-DCK_USE_WMMA)
@@ -303,6 +459,8 @@ endif()
 if (SUPPORTED_GPU_TARGETS MATCHES "gfx12" OR SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     add_definitions(-DCK_USE_OCP_FP8)
     set(CK_USE_OCP_FP8 "ON")
+    add_definitions(-DCK_TILE_USE_OCP_FP8)
+    set(CK_TILE_USE_OCP_FP8 "ON")
 endif()
 if (SUPPORTED_GPU_TARGETS MATCHES "gfx90a" OR SUPPORTED_GPU_TARGETS MATCHES "gfx94")
     add_definitions(-DCK_USE_FNUZ_FP8)
@@ -313,6 +471,16 @@ if (SUPPORTED_GPU_TARGETS MATCHES "gfx950")
     set(CK_USE_NATIVE_MX_SUPPORT "ON")
     add_definitions(-DCK_GFX950_SUPPORT)
     set(CK_GFX950_SUPPORT "ON")
+endif()
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+    add_definitions(-DCK_USE_GFX1250)
+    add_definitions(-DCK_USE_NATIVE_MX_SUPPORT)
+    set(CK_USE_NATIVE_MX_SUPPORT "ON")
+    add_definitions(-DCK_GFX1250_SUPPORT)
+    set(CK_GFX1250_SUPPORT "ON")
+endif()
+if (SUPPORTED_GPU_TARGETS MATCHES "gfx12")
+    add_definitions(-DCK_GFX12_SUPPORT)
 endif()
 
 if ((SUPPORTED_GPU_TARGETS MATCHES "gfx942" OR SUPPORTED_GPU_TARGETS MATCHES "gfx95") AND CK_ENABLE_TF32)
@@ -395,6 +563,7 @@ endif()
 option(USE_BITINT_EXTENSION_INT4 "Whether to enable clang's BitInt extension to provide int4 data type." OFF)
 option(ENABLE_ASM_DUMP "Whether to enable assembly dump for kernels." OFF)
 option(ENABLE_JSON_DUMP "Whether to enable json dump for examples." OFF)
+option(CK_TEST_DISABLE_GPU_VALIDATION "Whether to disable GPU validation in CK tests." OFF )
 
 if(USE_BITINT_EXTENSION_INT4)
     add_compile_definitions(CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4)
@@ -411,6 +580,10 @@ endif()
 if (ENABLE_JSON_DUMP)
     add_compile_definitions(CK_ENABLE_JSON_DUMP)
     message("CK compiled with ENABLE_JSON_DUMP set to ${ENABLE_JSON_DUMP}")
+endif()
+
+if (CK_TEST_DISABLE_GPU_VALIDATION)
+    add_compile_definitions(CK_TEST_DISABLE_GPU_VALIDATION)
 endif()
 
 ## Threads
@@ -651,6 +824,10 @@ SET(BUILD_DEV ON CACHE BOOL "BUILD_DEV")
 if(BUILD_DEV)
     add_compile_options(-Werror)
     add_compile_options(-Weverything)
+    add_compile_options(-Wno-lifetime-safety-intra-tu-suggestions)
+    add_compile_options(-Wno-lifetime-safety-cross-tu-suggestions)
+    add_compile_options(-Wno-lifetime-safety-lifetimebound-violation)
+    add_compile_options(-Wno-unknown-warning-option)
 endif()
 message(STATUS "CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
 
@@ -671,8 +848,6 @@ if(NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
 endif()
 
 
-option(MIOPEN_REQ_LIBS_ONLY "Build only the MIOpen required libraries" OFF)
-option(HIPTENSOR_REQ_LIBS_ONLY "Build only the HipTensor required libraries" OFF)
 option(DISABLE_OFFLOAD_COMPRESS "Disable offload compress compiler flag when building instances" OFF)
 option(BUILD_MHA_LIB "Build the static library for flash attention" OFF)
 option(BUILD_CK_DEVICE_INSTANCES "Build device operation instances in library/" ON)
@@ -732,7 +907,6 @@ endif()
 
 if (CK_EXPERIMENTAL_BUILDER)
   add_subdirectory(experimental/builder)
-  add_subdirectory(experimental/grouped_convolution_tile_instances)
 endif()
 
 if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)
@@ -754,6 +928,12 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTE
    if(BUILD_CK_TILE_ENGINE)
        add_subdirectory(tile_engine)
    endif()
+   if(CK_ENABLE_ROCM_CK)
+       add_subdirectory(rocm_ck)
+       if(TARGET check)
+           add_dependencies(check build-smoke-rocm-ck)
+       endif()
+   endif()
    if(BUILD_TESTING)
        rocm_package_setup_component(tests
             LIBRARY_NAME composablekernel
@@ -771,6 +951,10 @@ if(BUILD_CK_PROFILER)
         )
         add_subdirectory(profiler)
     endif()
+endif()
+
+if (CK_EXPERIMENTAL_GEMM_BENCHMARK)
+  add_subdirectory(experimental/gemm_benchmark)
 endif()
 
 if(CK_USE_CODEGEN AND (SUPPORTED_GPU_TARGETS MATCHES "gfx9" OR GPU_ARCHS))

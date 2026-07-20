@@ -208,9 +208,11 @@ struct FmhaFwdTypeConfig<FmhaFwdMxFp4>
     using LSEDataType           = float; // data type for lse(logsumexp L_j = max_j + log(l_j))
     using SaccDataType          = float; // data type for first gemm accumulation
     using SMPLComputeDataType   = float; // data type for reduction, softmax
-    using PDataType             = ck_tile::pk_fp4_t; // data type for A matrix of second gemm
-    using OaccDataType          = float;             // data type for second gemm accumulation
-    using ODataType             = float;
+    using PDataType =
+        ck_tile::pk_fp6x16_t; // data type for A matrix of second gemm (pk_fp4_t or pk_fp6x16_t, use
+                              // pk_fp6x16_t for higher precision for free)
+    using OaccDataType = float; // data type for second gemm accumulation
+    using ODataType    = float;
 
     using QScaleDataType = ck_tile::e8m0_t;
     using KScaleDataType = ck_tile::e8m0_t;
@@ -673,6 +675,59 @@ struct fmha_batch_prefill_args
     ck_tile::index_t nhead_stride_kv_block_descale  = 0; // Stride along num_kv_head dimension
 };
 
+// Selects the KV-cache load mode for a batch-prefill dispatch arm.
+//   GLOBAL_LOAD_LDS: required when (a) the page is smaller than one K/V tile
+//     so per-page SRD is impossible, AND (b) the SRD voffset arithmetic would
+//     overflow for either K or V. The hardware computes
+//       addr = (base[63:32] << 32) | ((base[31:0] + voffset) & 0xFFFFFFFF)
+//     and the voffset chain in ck_tile is signed int32 (index_t), so it wraps
+//     once base[31:0] + max_voffset exceeds INT32_MAX (0x7FFFFFFF, ~2GB) - NOT
+//     0xFFFFFFFF - even when the KV pool itself is well under 2GB. K and V are
+//     independently allocated, so each is checked separately; either one
+//     crossing the bound forces GLOBAL_LOAD_LDS.
+//   BUFFER_LOAD: every other case - the SGPR-resident SRD path is fastest.
+// k_base_ptr/v_base_ptr are the VAs of the first elements of the K and V caches;
+// the low 32 bits of each determine whether the voffset addition wraps.
+inline ck_tile::BlockAttentionKVCacheLoadModeEnum
+fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
+                                       ck_tile::index_t kN0,
+                                       ck_tile::index_t num_total_pages,
+                                       ck_tile::index_t batch_stride_k,
+                                       ck_tile::index_t batch_stride_v,
+                                       ck_tile::index_t element_bytes,
+                                       const void* k_base_ptr,
+                                       const void* v_base_ptr)
+{
+    if(page_block_size >= kN0)
+        return ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+
+    // Maximum byte offsets that buffer_load will add to K/V base pointers.
+    // Each page is addressed as page_id * batch_stride * element_bytes.
+    const auto k_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_k) *
+                              static_cast<uint64_t>(element_bytes);
+    const auto v_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_v) *
+                              static_cast<uint64_t>(element_bytes);
+
+    // Low 32 bits of each base VA. K and V are independently allocated and may
+    // have different low-32 values, so both are checked. Compare against
+    // INT32_MAX (not UINT32_MAX): the low32 bits themselves are unsigned, but the
+    // voffset they are added to is signed int32, so the effective address is
+    // already wrong once base[31:0] + pool crosses 0x7FFFFFFF. A sum in the
+    // (2GB, 4GB] range still fits in 32 unsigned bits but has passed the signed
+    // wrap point - that is exactly the band this check must route to global load.
+    const auto k_lo32 =
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(k_base_ptr)) & 0xFFFFFFFFULL;
+    const auto v_lo32 =
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(v_base_ptr)) & 0xFFFFFFFFULL;
+    const bool srd_would_overflow =
+        (k_lo32 + k_pool_bytes) > INT32_MAX || (v_lo32 + v_pool_bytes) > INT32_MAX;
+
+    return srd_would_overflow ? ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS
+                              : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+}
+
 template <typename FmhaKernel>
 auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 {
@@ -847,7 +902,7 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.q_descale_ptr,
                                          args.k_descale_ptr,
                                          args.v_descale_ptr,
-                                         nullptr, // lse_ptr
+                                         args.lse_ptr,
                                          args.o_ptr,
                                          args.seqstart_q_ptr,
                                          args.seqstart_k_ptr,
@@ -866,7 +921,7 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.nhead_stride_q,
                                          args.nhead_stride_k,
                                          args.nhead_stride_v,
-                                         0, // nhead_stride_lse
+                                         args.nhead_stride_lse,
                                          args.nhead_stride_o,
                                          args.window_size_left,
                                          args.window_size_right,
@@ -883,7 +938,7 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.q_descale_ptr,
                                          args.k_descale_ptr,
                                          args.v_descale_ptr,
-                                         nullptr, // lse_ptr
+                                         args.lse_ptr,
                                          args.o_ptr,
                                          args.seqlen_q,
                                          args.seqlen_k,
@@ -900,12 +955,12 @@ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
                                          args.nhead_stride_q,
                                          args.nhead_stride_k,
                                          args.nhead_stride_v,
-                                         0, // nhead_stride_lse
+                                         args.nhead_stride_lse,
                                          args.nhead_stride_o,
                                          args.batch_stride_q,
                                          args.batch_stride_k,
                                          args.batch_stride_v,
-                                         0, // batch_stride_lse
+                                         args.batch_stride_lse,
                                          args.batch_stride_o,
                                          args.window_size_left,
                                          args.window_size_right,
@@ -1457,7 +1512,9 @@ template <ck_tile::index_t HDim_,
           ck_tile::BlockAttentionKVCacheMemoryLayoutEnum kKVMemoryLayout_ =
               ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT,
           ck_tile::BlockAttentionKVCacheLookupTableEnum kKVLookupTable_ =
-              ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D>
+              ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D,
+          ck_tile::BlockAttentionKVCacheLoadModeEnum kKVLoadMode_ =
+              ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD>
 struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
                                                                 DataType_,
                                                                 kIsGroupMode_,
@@ -1486,6 +1543,7 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
     static constexpr auto kKVMemoryLayout            = kKVMemoryLayout_;
     static constexpr auto kKVLookupTable             = kKVLookupTable_;
     static constexpr ck_tile::index_t kPageBlockSize = kPageBlockSize_;
+    static constexpr auto kKVLoadMode                = kKVLoadMode_;
     static_assert(kIsVLayoutRowMajor_, "Batch prefill only supports row-major V layout");
 };
 

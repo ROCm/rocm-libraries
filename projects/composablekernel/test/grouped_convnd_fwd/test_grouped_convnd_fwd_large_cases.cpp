@@ -24,6 +24,14 @@ class TestGroupedConvndFwd : public ::testing::Test
     template <ck::index_t NDimSpatial>
     void Run()
     {
+        if constexpr(std::is_same_v<DataType, float>)
+        {
+            if(ck::is_wmma_supported())
+            {
+                GTEST_SKIP() << "Skipping test: WMMA architecture doesn't support FP32";
+            }
+        }
+
         EXPECT_FALSE(conv_params.empty());
         bool pass = true;
         for(auto& param : conv_params)
@@ -38,7 +46,7 @@ class TestGroupedConvndFwd : public ::testing::Test
                                                                        DataType,
                                                                        DataType,
                                                                        IndexType>(
-                               true,  // do_verification
+                               2,     // do_verification
                                1,     // init_method: integer value
                                false, // do_log
                                false, // time_kernel
@@ -52,8 +60,7 @@ using namespace ck::tensor_layout::convolution;
 
 using KernelTypes2d = ::testing::Types<std::tuple<float, NHWGC, GKYXC, NHWGK>,
                                        std::tuple<ck::half_t, NHWGC, GKYXC, NHWGK>,
-                                       std::tuple<ck::bhalf_t, NHWGC, GKYXC, NHWGK>,
-                                       std::tuple<int8_t, NHWGC, GKYXC, NHWGK>>;
+                                       std::tuple<ck::bhalf_t, NHWGC, GKYXC, NHWGK>>;
 
 using KernelTypes3d = ::testing::Types<std::tuple<float, NDHWGC, GKZYXC, NDHWGK>,
                                        std::tuple<ck::half_t, NDHWGC, GKZYXC, NDHWGK>,

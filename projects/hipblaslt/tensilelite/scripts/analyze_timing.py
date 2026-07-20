@@ -53,9 +53,12 @@ TIMING_HIERARCHY = {
             "python_kernel_build_co": {},
             "python_kernel_build_src_co": {
                 "python_kernel_build_src_co.setup": {},
+                "python_kernel_build_src_co.cache_check": {},
+                "python_kernel_build_src_co.cache_hit": {},
                 "python_kernel_build_src_co.compile": {},
                 "python_kernel_build_src_co.unbundle": {},
                 "python_kernel_build_src_co.move": {},
+                "python_kernel_build_src_co.cache_populate": {},
             },
             "python_kernel_bench_postprocess": {
                 "python_benchpost_naming": {},
@@ -71,6 +74,8 @@ TIMING_HIERARCHY = {
                 "python_wsol_prepare_cache": {},
                 "python_wsol_prepare_nocache": {},
             },
+            "python_wsol_header": {},
+            "python_wsol_dump": {},
         },
         "python_client_execution": {
             "hip_initialization": {},
@@ -92,6 +97,7 @@ TIMING_HIERARCHY = {
                 "validate_gpu_sync": {},
                 "validate_gpu_readback": {},
                 "validate_element_comparison": {},
+                "validate_mismatch_printing": {},
             },
             "gpu_input_preparation": {},
             "gpu_input_reset": {},
@@ -100,8 +106,9 @@ TIMING_HIERARCHY = {
             "pre_solution": {},
             "kernel_solving": {},
             "warmup_runs": {},
-            "benchmark_runs": {},
-            "gpu_kernel_execution": {},
+            "benchmark_runs": {
+                "gpu_kernel_execution": {},
+            },
             "post_solution": {
                 "post_solution_perf_calc": {},
                 "post_solution_reporting": {},
@@ -114,6 +121,8 @@ TIMING_HIERARCHY = {
             },
             "post_problem": {},
             "finalize_report": {},
+            "timing_overhead": {},
+            "flush_timing_buffer": {},
         },
     },
     "python_library_logic": {
@@ -153,10 +162,13 @@ CPP_PHASE_GROUPS = {
         "kernel_solving",
         "warmup_runs",
         "benchmark_runs",
-        "gpu_kernel_execution",
         "post_solution",
         "post_problem",
         "finalize_report",
+    ],
+    "Timing Overhead": [
+        "timing_overhead",
+        "flush_timing_buffer",
     ],
 }
 
@@ -220,26 +232,71 @@ class PhaseNode:
     children: List['PhaseNode']
 
 
-def _build_node(name: str, children_dict: Dict, timings: Dict[str, List[float]]) -> Optional['PhaseNode']:
+# Categories that represent instrumentation overhead measurements, not actual work.
+OVERHEAD_CATEGORIES = {'timing_overhead'}
+
+
+def _count_descendant_invocations(children_dict: Dict, timings: Dict[str, List[float]]) -> int:
+    """Count total timer invocations across all descendants in the hierarchy."""
+    count = 0
+    for child_name, grandchildren in children_dict.items():
+        count += len(timings.get(child_name, []))
+        count += _count_descendant_invocations(grandchildren, timings)
+    return count
+
+
+def _compute_per_call_overhead(timings: Dict[str, List[float]]) -> float:
+    """Compute per-call instrumentation overhead from the C++ timing_overhead record.
+
+    The C++ client emits a timing_overhead record containing the total estimated
+    overhead across all ScopedTimer invocations (calibrated at startup).  Dividing
+    by total invocations gives the average overhead each timer call adds to its
+    parent's measurement.
+
+    Note: Python-side timing_context overhead is not tracked or adjusted here.
+    Python has only ~a dozen calls per run, so the overhead is negligible.
+    """
+    total_overhead_ms = sum(timings.get('timing_overhead', []))
+    if total_overhead_ms <= 0:
+        return 0.0
+    total_invocations = sum(
+        len(vals) for cat, vals in timings.items()
+        if cat not in OVERHEAD_CATEGORIES
+    )
+    if total_invocations == 0:
+        return 0.0
+    return total_overhead_ms / total_invocations
+
+
+def _build_node(name: str, children_dict: Dict, timings: Dict[str, List[float]],
+                per_call_overhead_ms: float = 0) -> Optional['PhaseNode']:
     """Build a PhaseNode recursively from the hierarchy dict.
 
     Args:
         name: The timing category name.
         children_dict: Dict of {child_name: grandchildren_dict} from TIMING_HIERARCHY.
         timings: Raw timing data from analyze_timing_file.
+        per_call_overhead_ms: Per-invocation overhead to subtract from parent totals
+            based on descendant invocation count.
     """
     if name not in timings:
         return None
     values = timings[name]
     count = len(values)
-    total_ms = sum(values)
+    raw_total_ms = sum(values)
+
+    # Subtract estimated overhead from descendant timer invocations.
+    # Each descendant invocation adds ~per_call_overhead_ms to this node's
+    # raw measurement via context-manager / RAII bookkeeping.
+    desc_invocations = _count_descendant_invocations(children_dict, timings)
+    total_ms = max(0, raw_total_ms - desc_invocations * per_call_overhead_ms)
     mean_ms = total_ms / count if count > 0 else 0
 
     children = []
     if children_dict:
         child_sum = 0.0
         for child_name, grandchildren in children_dict.items():
-            child_node = _build_node(child_name, grandchildren, timings)
+            child_node = _build_node(child_name, grandchildren, timings, per_call_overhead_ms)
             if child_node:
                 children.append(child_node)
                 child_sum += child_node.total_ms
@@ -284,10 +341,15 @@ def _get_display_children(node: PhaseNode) -> List[PhaseNode]:
 
 
 def build_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
-    """Build the phase hierarchy from raw timings, sorted by total time descending."""
+    """Build the phase hierarchy from raw timings, sorted by total time descending.
+
+    Automatically adjusts parent totals by subtracting estimated per-call
+    instrumentation overhead based on descendant invocation counts.
+    """
+    per_call_overhead_ms = _compute_per_call_overhead(timings)
     top_nodes = []
     for phase, children_dict in TIMING_HIERARCHY.items():
-        node = _build_node(phase, children_dict, timings)
+        node = _build_node(phase, children_dict, timings, per_call_overhead_ms)
         if node:
             top_nodes.append(node)
     top_nodes.sort(key=lambda n: n.total_ms, reverse=True)
@@ -369,15 +431,7 @@ def print_visual_breakdown(nodes: List[PhaseNode], wall_clock_ms: float):
     print("TIME BREAKDOWN (visual, % of wall clock)")
     print("-" * TABLE_WIDTH)
 
-    def _max_label_width(node_list, depth=0):
-        widest = 0
-        for n in node_list:
-            w = 2 + 2 * depth + len(n.name)
-            widest = max(widest, w)
-            widest = max(widest, _max_label_width(_get_display_children(n), depth + 1))
-        return widest
-
-    label_width = max(42, _max_label_width(nodes) + 2)
+    label_width = 42
 
     def bar_line(indent: int, name: str, ms: float):
         pct = ms / wall_clock_ms * 100
@@ -465,18 +519,7 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
     # -- Hierarchical table --------------------------------------------------
 
-    nodes = build_hierarchy(timings)
-
-    def _max_cat_width(node_list, depth=0):
-        """Walk the node tree to find the widest category label."""
-        widest = 0
-        for n in node_list:
-            w = 2 + 2 * depth + len(n.name)  # "  " prefix + "  "*depth + name
-            widest = max(widest, w)
-            widest = max(widest, _max_cat_width(_get_display_children(n), depth + 1))
-        return widest
-
-    COL_CAT = max(44, _max_cat_width(nodes) + 2)  # +2 for padding
+    COL_CAT = 44
     COL_CNT = 8
     COL_TOT = 14
     COL_MEAN = 14
@@ -538,6 +581,8 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
         for i, child in enumerate(_get_display_children(node)):
             render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+
+    nodes = build_hierarchy(timings)
 
     for top_idx, node in enumerate(nodes):
         if top_idx > 0:
@@ -629,24 +674,21 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
             reverse=True,
         )[:10]
 
-        # Compute column widths from data
-        headers = ["M", "N", "K", "Batch", "TypeA", "TypeD", "CPU Ref (ms)", "GPU (ms)"]
-        rows = []
+        print(
+            f"  {'M':>8} {'N':>8} {'K':>8} {'Batch':>8}"
+            f" {'TypeA':>10} {'TypeD':>10}"
+            f" {'CPU Ref (ms)':>12} {'GPU (ms)':>10}"
+        )
+        print(f"  {'-' * (TABLE_WIDTH - 2)}")
         for p in sorted_problems:
             ctx = p.context
-            rows.append([
-                ctx.get('M', '?'), ctx.get('N', '?'),
-                ctx.get('K', '?'), ctx.get('batch', '?'),
-                ctx.get('typeA', '?'), ctx.get('typeD', '?'),
-                f"{p.cpu_reference_gemm_ms:.2f}", f"{p.gpu_kernel_execution_ms:.2f}",
-            ])
-        col_widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
-
-        hdr = "  " + " ".join(f"{h:>{w}}" for h, w in zip(headers, col_widths))
-        print(hdr)
-        print(f"  {'-' * (TABLE_WIDTH - 2)}")
-        for row in rows:
-            print("  " + " ".join(f"{v:>{w}}" for v, w in zip(row, col_widths)))
+            print(
+                f"  {ctx.get('M', '?'):>8} {ctx.get('N', '?'):>8}"
+                f" {ctx.get('K', '?'):>8} {ctx.get('batch', '?'):>8}"
+                f" {ctx.get('typeA', '?'):>10} {ctx.get('typeD', '?'):>10}"
+                f" {p.cpu_reference_gemm_ms:>12.2f}"
+                f" {p.gpu_kernel_execution_ms:>10.2f}"
+            )
         print()
 
 

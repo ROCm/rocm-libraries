@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
+#include "ck_tile/core/config.hpp"
+
+#include <type_traits>
+
 namespace ck_tile::core::arch::mma {
 
 /**
@@ -14,7 +18,16 @@ enum struct MmaOpFamily
     DENSE,
     SPARSE,
     SCALE,
+    SCALE16,
 };
+
+/**
+ * @brief Helper to check if an op family is any of the scale families.
+ */
+CK_TILE_HOST_DEVICE constexpr bool is_scale_op_family(MmaOpFamily f)
+{
+    return f == MmaOpFamily::SCALE || f == MmaOpFamily::SCALE16;
+}
 
 /**
  * @class is_ctrl_fis_mma_op_of_familylag_of_family
@@ -44,5 +57,19 @@ struct is_mma_op_of_family<Family, MmaOp, std::enable_if_t<Family == MmaOp::OpFa
  */
 template <MmaOpFamily Family, typename MmaOp>
 static constexpr bool is_mma_op_of_family_v = is_mma_op_of_family<Family, MmaOp>::value;
+
+// to_string methods for enum classes
+CK_TILE_HOST_DEVICE constexpr const char* to_string(MmaOpFamily opFamily)
+{
+    switch(opFamily)
+    {
+    case MmaOpFamily::UNDEFINED: return "UNDEFINED";
+    case MmaOpFamily::DENSE: return "DENSE";
+    case MmaOpFamily::SPARSE: return "SPARSE";
+    case MmaOpFamily::SCALE: return "SCALE";
+    case MmaOpFamily::SCALE16: return "SCALE16";
+    }
+    __builtin_unreachable();
+}
 
 } // namespace ck_tile::core::arch::mma

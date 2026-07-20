@@ -28,6 +28,8 @@
 
 #include <SolutionLibrary.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <typename MyProblem, typename MySolution, typename>
@@ -35,3 +37,4 @@ namespace TensileLite
     {
     };
 } // namespace TensileLite
+

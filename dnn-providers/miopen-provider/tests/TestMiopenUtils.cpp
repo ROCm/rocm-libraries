@@ -12,25 +12,6 @@
 using namespace miopen_plugin;
 using namespace miopen_utils;
 
-TEST(TestMiopenUtils, FindDeviceBufferReturnsCorrectBuffer)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers
-        = {{42, reinterpret_cast<void*>(0x1234)}, {99, reinterpret_cast<void*>(0x5678)}};
-
-    auto result = miopen_utils::findDeviceBuffer(99, buffers.data(), 2);
-    EXPECT_EQ(result.uid, 99);
-    EXPECT_EQ(result.ptr, reinterpret_cast<void*>(0x5678));
-}
-
-TEST(TestMiopenUtils, FindDeviceBufferThrowsIfNotFound)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, reinterpret_cast<void*>(0x1111)}};
-
-    EXPECT_THROW(
-        miopen_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),
-        hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
 TEST(TestMiopenUtils, TensorDataTypeToMiopenDataType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -86,7 +67,7 @@ TEST(TestMiopenUtils, FindTensorAttributesThrowsIfNotFound)
 
 TEST(TestMiopenUtils, GetSpatialDimCountReturnsCorrectValue)
 {
-    std::vector<int64_t> dims = {1, 1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 1, 1, 1, 1};
 
     flatbuffers::FlatBufferBuilder builder;
     auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -101,7 +82,7 @@ TEST(TestMiopenUtils, GetSpatialDimCountReturnsCorrectValue)
 
 TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
 {
-    std::vector<int64_t> dims = {1, 1};
+    const std::vector<int64_t> dims = {1, 1};
 
     flatbuffers::FlatBufferBuilder builder;
     auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -118,8 +99,8 @@ TEST(TestMiopenUtils, GetSpatialDimCountThrowsOnInvalidDims)
 TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
 {
     // 4D NCHW tensor should pass through unchanged
-    std::vector<int64_t> dims = {2, 3, 14, 14};
-    std::vector<int64_t> strides = {588, 196, 14, 1};
+    const std::vector<int64_t> dims = {2, 3, 14, 14};
+    const std::vector<int64_t> strides = {588, 196, 14, 1};
 
     flatbuffers::FlatBufferBuilder builder;
     auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -163,8 +144,8 @@ TEST(TestMiopenUtils, CreateBatchnormTensor4dPassthrough)
 TEST(TestMiopenUtils, CreateBatchnormTensor5dPassthrough)
 {
     // 5D NCDHW tensor should pass through unchanged
-    std::vector<int64_t> dims = {2, 3, 4, 14, 14};
-    std::vector<int64_t> strides = {2352, 784, 196, 14, 1};
+    const std::vector<int64_t> dims = {2, 3, 4, 14, 14};
+    const std::vector<int64_t> strides = {2352, 784, 196, 14, 1};
 
     flatbuffers::FlatBufferBuilder builder;
     auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -211,8 +192,8 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNclPadsToNchw)
 {
     // NCL (channels-first): dims [N, C, L], strides [C*L, L, 1]
     // C stride (14) > L stride (1) = channels-first
-    std::vector<int64_t> dims = {1, 3, 14};
-    std::vector<int64_t> strides = {42, 14, 1};
+    const std::vector<int64_t> dims = {1, 3, 14};
+    const std::vector<int64_t> strides = {42, 14, 1};
 
     flatbuffers::FlatBufferBuilder builder;
     auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -252,8 +233,8 @@ TEST(TestMiopenUtils, CreateBatchnormTensor3dNlcPadsToNhwc)
 {
     // NLC (channels-last): dims [N, C, L], strides [C*L, 1, C]
     // C stride (1) < L stride (3) = channels-last
-    std::vector<int64_t> dims = {1, 3, 14};
-    std::vector<int64_t> strides = {42, 1, 3};
+    const std::vector<int64_t> dims = {1, 3, 14};
+    const std::vector<int64_t> strides = {42, 1, 3};
 
     flatbuffers::FlatBufferBuilder builder;
     auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -601,7 +582,7 @@ class TestGpuScopedTuningPolicy : public test_common::MiopenHandleFixture
 TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)
 {
     {
-        ScopedTuningPolicy guard(_miopenHandle, true);
+        const ScopedTuningPolicy guard(_miopenHandle, true);
 
         miopenTuningPolicy_t currentPolicy;
         auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
@@ -613,7 +594,7 @@ TEST_F(TestGpuScopedTuningPolicy, SetsSearchPolicyWhenBenchmarkingEnabled)
 TEST_F(TestGpuScopedTuningPolicy, SetsNonePolicyWhenBenchmarkingDisabled)
 {
     {
-        ScopedTuningPolicy guard(_miopenHandle, false);
+        const ScopedTuningPolicy guard(_miopenHandle, false);
 
         miopenTuningPolicy_t currentPolicy;
         auto status = miopenGetTuningPolicy(_miopenHandle, &currentPolicy);
@@ -629,7 +610,7 @@ TEST_F(TestGpuScopedTuningPolicy, RestoresOriginalPolicyOnDestruction)
     ASSERT_EQ(preSetStatus, miopenStatusSuccess);
 
     {
-        ScopedTuningPolicy guard(_miopenHandle, true);
+        const ScopedTuningPolicy guard(_miopenHandle, true);
 
         // Verify it was changed during scope
         miopenTuningPolicy_t duringPolicy;
@@ -650,7 +631,7 @@ TEST_F(TestGpuScopedTuningPolicy, RestoresToNoneWhenOriginalWasNone)
     miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone);
 
     {
-        ScopedTuningPolicy guard(_miopenHandle, true);
+        const ScopedTuningPolicy guard(_miopenHandle, true);
     }
 
     miopenTuningPolicy_t afterPolicy;
@@ -664,14 +645,14 @@ TEST_F(TestGpuScopedTuningPolicy, NestedScopesRestoreCorrectly)
     miopenSetTuningPolicy(_miopenHandle, miopenTuningPolicyNone);
 
     {
-        ScopedTuningPolicy outerGuard(_miopenHandle, true);
+        const ScopedTuningPolicy outerGuard(_miopenHandle, true);
 
         miopenTuningPolicy_t afterOuterSet;
         miopenGetTuningPolicy(_miopenHandle, &afterOuterSet);
         EXPECT_EQ(afterOuterSet, miopenTuningPolicySearch);
 
         {
-            ScopedTuningPolicy innerGuard(_miopenHandle, false);
+            const ScopedTuningPolicy innerGuard(_miopenHandle, false);
 
             miopenTuningPolicy_t afterInnerSet;
             miopenGetTuningPolicy(_miopenHandle, &afterInnerSet);

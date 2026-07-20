@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
+
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -8,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -19,8 +22,14 @@ using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 class TestMiopenBatchnormFwdTrainingPlanBuilder : public ::testing::Test
 {
 protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
+    }
+
     MiopenBatchnormFwdTrainingPlanBuilder _planBuilder;
-    HipdnnMiopenHandle _dummyHandle;
+    std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
 };
 
 // ============================================================================
@@ -30,31 +39,47 @@ protected:
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForValidSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_TRUE(applicable);
+}
+
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
+       IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*withMeanVariance=*/true,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+
+    EXPECT_FALSE(applicable);
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForValidTwoNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_TRUE(applicable);
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)
 {
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(3));
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
 }
@@ -63,7 +88,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWro
 {
     // Create a graph with wrong node type
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
@@ -86,17 +111,17 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWro
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
 {
-    flatbuffers::FlatBufferBuilder builder
+    const flatbuffers::FlatBufferBuilder builder
         = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
 
     auto mutableGraph
@@ -104,9 +129,9 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForUns
     mutableGraph->mutable_nodes()->GetMutableObject(1)->mutate_compute_data_type(
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
-    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================
@@ -118,10 +143,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForNon
     // Create a graph with unsupported activation (e.g., SIGMOID_FWD)
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         false, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -130,7 +155,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWro
 {
     // Create a graph with 2 nodes but in wrong order (activation -> batchnorm)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
@@ -161,10 +186,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWro
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -176,10 +201,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {1, 3, 14, 14};
-    std::vector<int64_t> dims = {1, 3, 14, 14};
-    std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
-    std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+    const std::vector<int64_t> strides = {1, 3, 14, 14};
+    const std::vector<int64_t> dims = {1, 3, 14, 14};
+    const std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
@@ -214,7 +239,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -288,10 +313,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -303,10 +328,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {1, 3, 14, 14};
-    std::vector<int64_t> dims = {1, 3, 14, 14};
-    std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
-    std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+    const std::vector<int64_t> strides = {1, 3, 14, 14};
+    const std::vector<int64_t> dims = {1, 3, 14, 14};
+    const std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
@@ -333,7 +358,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -405,10 +430,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -419,10 +444,11 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, GetWorkspaceSizeReturnsZero)
 {
-    MockGraph mockGraph;
+    const MockGraph mockGraph;
 
-    HipdnnMiopenSettings settings;
-    size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings);
+    const HipdnnMiopenSettings settings;
+    const size_t workspaceSize
+        = _planBuilder.getMaxWorkspaceSize(*_dummyHandle, mockGraph, settings);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -430,24 +456,24 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, GetWorkspaceSizeReturnsZero)
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     HipdnnMiopenContext ctx;
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidTwoNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     HipdnnMiopenContext ctx;
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
 
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
@@ -455,7 +481,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanThrowsForUnsupportedN
 {
     // Create a graph with 3 nodes (unsupported)
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
 
@@ -480,12 +506,12 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanThrowsForUnsupportedN
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     HipdnnMiopenContext ctx;
-    MockEngineConfig mockEngineConfig;
+    const MockEngineConfig mockEngineConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }
@@ -501,10 +527,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides3D = {1, 3, 14}; // 3D instead of 4D/5D
-    std::vector<int64_t> dims3D = {1, 3, 14};
-    std::vector<int64_t> derivedStrides = {1, 3, 1};
-    std::vector<int64_t> derivedDims = {1, 3, 1};
+    const std::vector<int64_t> strides3D = {1, 3, 14}; // 3D instead of 4D/5D
+    const std::vector<int64_t> dims3D = {1, 3, 14};
+    const std::vector<int64_t> derivedStrides = {1, 3, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
@@ -535,7 +561,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -582,10 +608,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -597,10 +623,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {588, 196, 14, 1};
-    std::vector<int64_t> dims = {1, 3, 14, 14};
-    std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
-    std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+    const std::vector<int64_t> strides = {588, 196, 14, 1};
+    const std::vector<int64_t> dims = {1, 3, 14, 14};
+    const std::vector<int64_t> derivedStrides = {3, 1, 1, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::INT32, &strides, &dims));
@@ -621,7 +647,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Int32Value epsilonVal(1);
+    const hipdnn_flatbuffers_sdk::data_objects::Int32Value epsilonVal(1);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -668,10 +694,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -683,10 +709,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {588, 196, 14, 1};
-    std::vector<int64_t> dims = {1, 3, 14, 14};
-    std::vector<int64_t> wrongStrides = {5, 1, 1, 1}; // Wrong channel count
-    std::vector<int64_t> wrongDims = {1, 5, 1, 1};
+    const std::vector<int64_t> strides = {588, 196, 14, 1};
+    const std::vector<int64_t> dims = {1, 3, 14, 14};
+    const std::vector<int64_t> wrongStrides = {5, 1, 1, 1}; // Wrong channel count
+    const std::vector<int64_t> wrongDims = {1, 5, 1, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
@@ -707,7 +733,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
         &wrongStrides,
         &wrongDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -754,10 +780,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForInv
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -769,10 +795,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForNon
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> nonPackedStrides = {1000, 3, 14, 14}; // Non-packed strides
-    std::vector<int64_t> dims = {1, 3, 14, 14};
-    std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
-    std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+    const std::vector<int64_t> nonPackedStrides = {1000, 3, 14, 14}; // Non-packed strides
+    const std::vector<int64_t> dims = {1, 3, 14, 14};
+    const std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder,
@@ -803,7 +829,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForNon
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -850,10 +876,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForNon
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -866,10 +892,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> strides = {3, 1}; // Only N and C dimensions
-    std::vector<int64_t> dims = {1, 3};
-    std::vector<int64_t> derivedStrides = {3, 1};
-    std::vector<int64_t> derivedDims = {1, 3};
+    const std::vector<int64_t> strides = {3, 1}; // Only N and C dimensions
+    const std::vector<int64_t> dims = {1, 3};
+    const std::vector<int64_t> derivedStrides = {3, 1};
+    const std::vector<int64_t> derivedDims = {1, 3};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
@@ -890,7 +916,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -937,10 +963,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }
@@ -952,12 +978,12 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    std::vector<int64_t> stridesNCHW = {588, 196, 14, 1}; // NCHW
-    std::vector<int64_t> dimsNCHW = {1, 3, 14, 14};
-    std::vector<int64_t> stridesNHWC = {3, 14L * 14L * 3L, 14L * 3L, 3}; // NHWC
-    std::vector<int64_t> dimsNHWC = {1, 3, 14, 14};
-    std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
-    std::vector<int64_t> derivedDims = {1, 3, 1, 1};
+    const std::vector<int64_t> stridesNCHW = {588, 196, 14, 1}; // NCHW
+    const std::vector<int64_t> dimsNCHW = {1, 3, 14, 14};
+    const std::vector<int64_t> stridesNHWC = {3, 14L * 14L * 3L, 14L * 3L, 3}; // NHWC
+    const std::vector<int64_t> dimsNHWC = {1, 3, 14, 14};
+    const std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
+    const std::vector<int64_t> derivedDims = {1, 3, 1, 1};
 
     // Input in NCHW
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -990,7 +1016,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
         &derivedStrides,
         &derivedDims));
 
-    hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributes(
         builder,
         5,
@@ -1037,10 +1063,10 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
         &nodes);
     builder.Finish(graphOffset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
-    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
 
     EXPECT_FALSE(applicable);
 }

@@ -54,6 +54,15 @@ private:
     // Preferred engine ID, empty when unset.
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
+    // Opt-in flag for overridable tensor shapes (RFC 0008).
+    bool _isOverrideShapeEnabled = false;
+
+    // Cached "graph has a runtime pass-by-value tensor" flag, derived from
+    // min_required_engine_api_version whenever _graphSerializedBuffer is
+    // (re)built (see buildSerializedGraph()/deserializeGraph()) so
+    // isRuntimePassByValueEnabled() is O(1) instead of rescanning every tensor.
+    bool _isRuntimePassByValueEnabled = false;
+
     // Optional human-readable name for the graph, empty when unset.
     std::string _name;
 
@@ -134,6 +143,9 @@ public:
         createFromJsonGraph(GraphDescriptor& desc, const char* jsonGraph, size_t jsonByteSize);
 
     virtual hipdnnHandle_t getHandle() const;
+    virtual bool isOverrideShapeEnabled() const;
+
+    virtual bool isRuntimePassByValueEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

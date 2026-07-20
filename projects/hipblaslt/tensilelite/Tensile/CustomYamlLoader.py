@@ -58,9 +58,11 @@ def parse_scalar(loader: yaml.Loader):
     value: str = evt.value
     value_lower: str = value.lower()
 
-    if value_lower in ('true', 'yes',):
+    # Only accept true/false (case-insensitive), NOT yes/no or 0/1
+    # This matches StrictTypeLoader behavior to ensure type consistency
+    if value_lower == 'true':
         return True
-    elif value_lower in ('false', 'no',):
+    elif value_lower == 'false':
         return False
     elif value_lower in ('null', '', '~'):
         if not evt.style:

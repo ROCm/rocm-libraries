@@ -33,6 +33,7 @@
 #include "rocsparse_csrsv.hpp"
 #include "rocsparse_determine_indextype.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spsv_alg value_)
 {
@@ -44,9 +45,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsv_alg value_)
         CASE(rocsparse_spsv_alg_default);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -62,10 +61,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsv_stage value_)
         CASE(rocsparse_spsv_stage_compute);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spsv_alg value_)
@@ -131,9 +129,9 @@ namespace rocsparse
 
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                if(csrsv_info->get(trans, mat->descr->fill_mode) == nullptr)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsv_analysis(handle,
                                                    trans,
@@ -142,7 +140,6 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
                 }
 
                 return rocsparse_status_success;
@@ -189,9 +186,9 @@ namespace rocsparse
             }
             case rocsparse_spsv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
+                if(csrsv_info->get(trans, mat->descr->fill_mode) == nullptr)
                 {
-                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosv_analysis(handle,
                                                    trans,
@@ -200,7 +197,6 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    &csrsv_info,
                                                    temp_buffer)));
-                    mat->analysed = true;
                 }
                 return rocsparse_status_success;
             }

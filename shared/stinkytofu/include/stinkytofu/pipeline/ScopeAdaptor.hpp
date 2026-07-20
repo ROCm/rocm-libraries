@@ -31,10 +31,10 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
+#include "stinkytofu/support/StandardInstrumentations.hpp"
 
 namespace stinkytofu {
 // -----------------------------------------------------------------------
@@ -75,13 +75,14 @@ inline std::shared_ptr<DebugOutputStreams> createDebugOutputStreams(
 /// DebugPass is global and does not need per-PM setup.
 inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleOptions& opts,
                                  const std::string& label,
-                                 const std::shared_ptr<DebugOutputStreams>& debugStreams) {
+                                 const std::shared_ptr<DebugOutputStreams>& debugStreams,
+                                 const StinkyAsmModule* module = nullptr) {
     auto forEachName = [](const std::string& csv, auto cb) {
         std::istringstream stream(csv);
         std::string name;
         while (std::getline(stream, name, ',')) {
-            auto s = name.find_first_not_of(" ");
-            auto e = name.find_last_not_of(" ");
+            auto s = name.find_first_not_of(' ');
+            auto e = name.find_last_not_of(' ');
             if (s != std::string::npos) cb(name.substr(s, e - s + 1));
         }
     };
@@ -119,7 +120,10 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
                     [&](const std::string& n) { debugConfig->addOnlyPrintAfter(n); });
     }
 
-    pm.addInstrumentation(std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig)));
+    if (opts.DebugLevel == 1) pm.getAnalysisManager().setDebugLogging(true);
+
+    pm.addInstrumentation(
+        std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig), module));
 
     if (!opts.DebugPass.empty()) {
         forEachName(opts.DebugPass,
@@ -127,45 +131,19 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
     }
 }
 
-// -----------------------------------------------------------------------
-// Pass-order snapshot utility
-// -----------------------------------------------------------------------
-
-/// Create a shared DAGScheduleJsonCollector and populate
-/// passFeatureCfg.passOrderSnapshot from ModuleOptions.
-///
-/// Returns nullptr when PassOrderSnapshotJson is empty (feature disabled).
-///
-/// DebugPass (comma-separated pass names) serves as the allow-list for
-/// instruction-order snapshots.  When DebugPass is empty and jsonPath is
-/// set, only StinkyDAGSchedulerPass is recorded by default.
-inline std::shared_ptr<DAGScheduleJsonCollector> createPassOrderSnapshotCollector(
-    PassFeatureConfig& passFeatureCfg, const StinkyAsmModule::ModuleOptions& opts,
-    const std::string& moduleName) {
-    if (opts.PassOrderSnapshotJson.empty()) return nullptr;
-
-    passFeatureCfg.passOrderSnapshot.jsonPath = opts.PassOrderSnapshotJson;
-
-    if (!opts.DebugPass.empty()) {
-        std::istringstream stream(opts.DebugPass);
-        std::string name;
-        while (std::getline(stream, name, ',')) {
-            auto s = name.find_first_not_of(" ");
-            auto e = name.find_last_not_of(" ");
-            if (s != std::string::npos)
-                passFeatureCfg.passOrderSnapshot.dumpAfterPasses.push_back(
-                    name.substr(s, e - s + 1));
-        }
+/// Single entry point for the standard pipeline observers (LLVM
+/// StandardInstrumentations style): debug IR printing plus, when
+/// ModuleOptions.VerifyEach is set, per-pass StinkyTofu ASM IR verification.
+/// Drivers (backend, opt) should call this instead of wiring each observer
+/// individually.
+inline void configureStandardInstrumentations(
+    PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
+    const std::shared_ptr<DebugOutputStreams>& debugStreams,
+    const StinkyAsmModule* module = nullptr) {
+    configureDebugOutput(pm, opts, label, debugStreams, module);
+    if (opts.VerifyEach) {
+        pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
     }
-
-    return std::make_shared<DAGScheduleJsonCollector>(opts.PassOrderSnapshotJson, moduleName);
-}
-
-/// Add PassOrderSnapshotInstrumentation to \p pm when \p collector is non-null.
-inline void configurePassOrderSnapshot(PassManager& pm,
-                                       const std::shared_ptr<DAGScheduleJsonCollector>& collector) {
-    if (collector)
-        pm.addInstrumentation(std::make_shared<PassOrderSnapshotInstrumentation>(collector));
 }
 
 // -----------------------------------------------------------------------
@@ -262,14 +240,16 @@ class ScopeAdaptor : public Pass {
           innerPM(std::move(pm)),
           displayName("ScopeAdaptor(" + makeDebugLabel(this->groupNames) + ")") {}
 
-    void run(Function& /*outerFunc*/, PassContext& outerCtx) override {
+    PreservedAnalyses run(Function& /*outerFunc*/, PassContext& outerCtx,
+                          AnalysisManager& /*AM*/) override {
         // Propagate config from outer PassContext to inner PM
         innerPM.setGemmTileConfig(outerCtx.getGemmTileConfig());
+        innerPM.setAsmCapsConfig(outerCtx.getAsmCapsConfig());
         // innerPM.setPassFeatureConfig(outerCtx.getPassFeatureConfig());
 
         if (groupNames.empty()) {
             runWholeKernel();
-            return;
+            return PreservedAnalyses::none();
         }
 
         if (groupNames.size() == 1) {
@@ -277,9 +257,31 @@ class ScopeAdaptor : public Pass {
         } else {
             runMultiRegion();
         }
+        return PreservedAnalyses::none();
     }
 
    private:
+    /// Move IR from [begin, end) into \p bb.
+    /// StinkyInstructions and non-TEXTBLOCK AsmDirectives are preserved;
+    /// TEXTBLOCK directives (comments) are erased.
+    static void moveIRToBlock(IntrusiveListIterator<IRBase> begin,
+                              IntrusiveListIterator<IRBase> end, BasicBlock* bb) {
+        for (auto it = begin; it != end;) {
+            IRBase* ir = it.getNodePtr();
+            it++;
+            if (dyn_cast<StinkyInstruction>(ir)) {
+                bb->appendIR(ir);
+            } else if (const auto* directive = dyn_cast<AsmDirective>(ir)) {
+                if (directive->kind == AsmDirectiveKind::TEXTBLOCK)
+                    ir->erase();
+                else
+                    bb->appendIR(ir);
+            } else {
+                assert(false && "Unexpected non-instruction IR type in scope adaptor");
+            }
+        }
+    }
+
     /// Extract a single group's instruction range to a temp Function,
     /// run the inner PM, and splice results back.
     void runSingleRegion(const std::string& groupName) {
@@ -293,16 +295,7 @@ class ScopeAdaptor : public Pass {
         Function tempFunc("temp");
         BasicBlock* bb = tempFunc.createBasicBlock("entry");
 
-        // Move StinkyInstructions from module to temporary function
-        for (auto it = begin; it != end;) {
-            IRBase* ir = it.getNodePtr();
-            it++;
-            if (dyn_cast<StinkyInstruction>(ir)) {
-                bb->appendIR(ir);
-            } else {
-                ir->erase();
-            }
-        }
+        moveIRToBlock(begin, end, bb);
 
         // Run the inner pipeline
         innerPM.run(tempFunc);
@@ -342,16 +335,7 @@ class ScopeAdaptor : public Pass {
         Function tempFunc("temp");
         BasicBlock* bb = tempFunc.createBasicBlock("entry");
 
-        // Move StinkyInstructions from the combined range
-        for (auto it = combinedBegin; it != combinedEnd;) {
-            IRBase* ir = it.getNodePtr();
-            it++;
-            if (dyn_cast<StinkyInstruction>(ir)) {
-                bb->appendIR(ir);
-            } else {
-                ir->erase();
-            }
-        }
+        moveIRToBlock(combinedBegin, combinedEnd, bb);
 
         // Run the inner pipeline
         innerPM.run(tempFunc);
@@ -394,16 +378,7 @@ class ScopeAdaptor : public Pass {
         Function tempFunc("temp");
         BasicBlock* bb = tempFunc.createBasicBlock("entry");
 
-        // Move all StinkyInstructions from module to temporary function
-        for (auto it = origBB->begin(); it != origBB->end();) {
-            IRBase* ir = it.getNodePtr();
-            it++;
-            if (dyn_cast<StinkyInstruction>(ir)) {
-                bb->appendIR(ir);
-            } else {
-                ir->erase();
-            }
-        }
+        moveIRToBlock(origBB->begin(), origBB->end(), bb);
 
         // Run the inner pipeline
         innerPM.run(tempFunc);

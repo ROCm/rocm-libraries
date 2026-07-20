@@ -21,7 +21,7 @@
 ################################################################################
 
 from .AsmAddressCalculation import AddrCalculation
-from .Common import DataDirection
+from .Common import DataDirection, isSubtileMultiDU
 from .Common.DataType import DataType
 
 from math import ceil, trunc, modf
@@ -83,7 +83,7 @@ class StoreState:
             if ss.optSGPRUsage == 'BufferLoad_Mask':
                 self.numMaskSgprPerElement = 0
                 self.numMaskSgprPerBatch   = 0
-                self.numTempSgprPerBatch   = kernelWriter.states.laneSGPRCount
+                self.numTempSgprPerBatch = (2 if getattr(kernelWriter.states, 'storeAlign8', False) else 1) * kernelWriter.states.laneSGPRCount
             elif ss.optSGPRUsage == 'BufferLoad_Edge_Mask':
                 self.numMaskSgprPerElement = 0
                 self.numMaskSgprPerBatch   = kernelWriter.states.laneSGPRCount
@@ -253,7 +253,13 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels. Non-multi-DU reuses the Bias column address
+                # (localReferenceVgpr) for the SAV LDS read, so a dedicated SAV
+                # address would only force a redundant per-read recompute in
+                # emitLdChange.
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None
@@ -296,7 +302,10 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels (see note above).
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None
@@ -434,7 +443,9 @@ class StoreState:
 
                 coordOffset1  = eIdx1 * (self.kernel["WavefrontSize"] // matrixInstN) * MFMAContinuousOutputs
                 coordOffset1 += bIdx1 * matrixInstN
-                coordOffset1 += wtIdex * matrixInstN *  matrixInstBN * kernel["MIWaveGroup"][1]
+                # Subtile kernels: successive wave tiles step by MIBShape1 (not MIBShape1 * MIWaveGroup[1]).
+                wtStep1 = matrixInstN * matrixInstBN if kernel.get("UseSubtileImpl") else matrixInstN * matrixInstBN * kernel["MIWaveGroup"][1]
+                coordOffset1 += wtIdex * wtStep1
                 coordOffset1  = coordOffset1 * vectorWidth + vc1
             else: # mac instruction
                 if kernel["LocalSplitU"] > 1:
@@ -462,7 +473,10 @@ class StoreState:
 
                 coordOffset0  = eIdx0 * (self.kernel["WavefrontSize"] // matrixInstM) * MFMAContinuousOutputs
                 coordOffset0 += bIdx0 * matrixInstM
-                coordOffset0 += wtIdex * matrixInstM * matrixInstBM * kernel["MIWaveGroup"][0]
+                # Subtile kernels: each wave owns a contiguous block of rows, so successive
+                # wave tiles step by MIBShape0 (not MIBShape0 * MIWaveGroup[0]).
+                wtStep = matrixInstM * matrixInstBM if kernel.get("UseSubtileImpl") else matrixInstM * matrixInstBM * kernel["MIWaveGroup"][0]
+                coordOffset0 += wtIdex * wtStep
                 coordOffset0  = coordOffset0 * vectorWidth + vc0
             else: # mac instruction
                 coordOffset0 = d0 * kernel["SubGroup0"]*kernel["VectorWidthA"] + vc0
@@ -828,6 +842,8 @@ class StoreState:
 
                 if kernel["EnableMatrixInstruction"]:
                     alignment = self.cfg.numVgprPerValuC * self.cfg.gwvw
+                    #print(self.cfg.numVgprPerValuC, self.cfg.gwvw)
+                    #exit(1)
                     sumIdx    = kw.vgprPool.checkOutAligned(self.cfg.numVgprPerValuC*self.cfg.gwvw, alignment, "vgprValuC") // self.cfg.numVgprPerValuC
                 else:
                     sumIdx = kw.states.c.startVgprValu + vc0 + d0*kernel["VectorWidthA"] + vc1*kernel["ThreadTile0"] + d1*kernel["VectorWidthA"]*kernel["ThreadTile0"]
@@ -1002,8 +1018,9 @@ class StoreState:
                     addrScaleBVecVgpr = None
             else:
                 # allocate new VGPR for each element:
+                # Allow pool growth for per-element D addrs; refineOccupancy still caps total VGPR.
                 addrDVgpr = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
-                    int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=not isOptNLL)
+                    int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
                 if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
                     addrGSUSyncVgprs = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
                         int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
@@ -1057,6 +1074,8 @@ class StoreState:
         self.isReset = False
 
     def checkInTempVgprC(self):
+        if not hasattr(self, 'elementSumIdx'):
+            return # object was not fully initialized
         if self.kernelWriter.states.serializedStore is False:
             return # early exit; currently only serializedStore==True checks out C-tile from register pool
 

@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/ir/asm/DefUseChainUpdater.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -39,8 +40,6 @@ bool isEligibleForRedundantMovElimination(const StinkyInstruction& inst) {
     // Only consider specific instruction types that are safe to eliminate
     // Currently: v_mov_b32 and s_mov_b32
     // Easy to extend by adding more checks here
-
-    uint32_t opcode = inst.getUnifiedOpcode();
 
     // Check if it's a mov instruction by looking at the opcode
     // This is a simple implementation - you may want to check specific opcode values
@@ -95,17 +94,15 @@ class RedundantMovEliminationPassImpl : public Pass {
         return PassName;
     }
 
-    void run(Function& func, PassContext& passCtx) override {
-        int totalEliminated = 0;
-
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         // Process all basic blocks
         for (BasicBlock& bb : func) {
             // Skip filtered basic blocks
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
-            int eliminated = runOnBasicBlock(bb);
-            totalEliminated += eliminated;
+            runOnBasicBlock(bb);
         }
+        return preserveCFGAnalyses();
     }
 
    private:

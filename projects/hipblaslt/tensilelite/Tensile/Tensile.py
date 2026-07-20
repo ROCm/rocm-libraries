@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@ import os
 import subprocess
 import sys
 import argparse
+import glob
+import json
 
 from datetime import datetime
 from pathlib import Path
@@ -43,7 +45,7 @@ from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
+from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -51,6 +53,7 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
+from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -77,6 +80,7 @@ def executeStepsInConfig(
         deviceId: int,
         probSolDict: dict,
         buildOnly: bool = False,
+        solutionPoolFiles: list = None,
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -95,6 +99,7 @@ def executeStepsInConfig(
         srcToolchain (SourceToolchain): The toolchain for making source kernels.
         cCompiler (str): The C compiler to use.
         buildOnly (bool): If True, generate and build kernels but skip benchmarking.
+        solutionPoolFiles (list): Resolved paths to library logic YAMLs to use as solution pools.
     """
 
     buildTmpPath = outputPath / "build_tmp"
@@ -103,9 +108,10 @@ def executeStepsInConfig(
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
-    if "BenchmarkProblems" in config:
+    if "BenchmarkProblems" in config:       
         with timing_context("python_benchmark_problems"):
             BenchmarkProblems.main(
+                config.get("Backend", {}),
                 config["BenchmarkProblems"],
                 config["UseCache"],
                 asmToolchain,
@@ -119,7 +125,9 @@ def executeStepsInConfig(
                 isaInfoMap,
                 probSolDict,
                 buildOnly,
+                solutionPoolFiles,
             )
+        flush_timing_buffer()
         print1("")
 
     if buildOnly:
@@ -150,6 +158,7 @@ def executeStepsInConfig(
                     debugConfig.printIndexAssignmentInfo,
                     isaInfoMap,
                 )
+            flush_timing_buffer()
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -173,6 +182,7 @@ def executeStepsInConfig(
                 deviceId,
                 gfxName,
             )
+        flush_timing_buffer()
         print1("")
 
 
@@ -218,10 +228,15 @@ def addCommonArguments(argParser):
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
         action="store", default="yaml", help="select which library format to use")
     argParser.add_argument("--client-lock", default=None)
-    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH),
+    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH), \
         type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
+    argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
+        help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
     argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
-
+    argParser.add_argument("--cpu-only", dest="cpuOnly", action="store_true", default=False, \
+        help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
+             "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
+             "synthetic results CSV. For CPU-only CI/coverage; perf numbers are synthetic.")
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
 
 
@@ -247,6 +262,9 @@ def argUpdatedGlobalParameters(args):
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:
         rv["PrebuiltClient"] = args.prebuilt_client
+    if args.MXScaleFormat:
+        print1("# Command-line override: MXScaleFormat")
+        rv["MXScaleFormat"] = args.MXScaleFormat
 
     for key, value in args.global_parameters:
         rv[key] = value
@@ -262,37 +280,25 @@ def get_gpu_max_frequency_smi(device_id):
     Get the maximum frequency of the specified GPU device
     '''
     try:
-        # Run rocm-smi command and capture output
-        result = subprocess.run(['rocm-smi', '-s'], capture_output=True, text=True)
+        # Run amd-smi command and capture the GFX clock info as JSON
+        result = subprocess.run(
+            ['amd-smi', 'metric', '-g', str(device_id), '--clock', '--json'],
+            capture_output=True, text=True)
 
         if result.returncode != 0:
-           print(f"Error running rocm-smi: {result.stderr}")
+           print(f"Error running amd-smi: {result.stderr}")
            return None
 
-        # Parse the output
-        lines = result.stdout.split('\n')
-        sclk_section = False
+        data = json.loads(result.stdout)
+        clocks = data['gpu_data'][0]['clock']
+
+        # Collect the max GFX (sclk) clock across all gfx engines/partitions
         frequencies = []
-
-        # Look for the sclk section of the specified device
-        for line in lines:
-            line = line.split(" ")
-            if 'sclk' in line and f"GPU{device_id}" in line:
-                sclk_section = True
-                continue
-
-           # Parse frequencies in the sclk section
-            if sclk_section:
-                for part in line:
-                    if part.endswith("Mhz"):
-                        try:
-                            frequency = part.replace("Mhz", "")
-                            frequencies.append(int(frequency))
-                        except ValueError:
-                            print(f"Error parsing frequency: {part}")
-                        break
-                if "socclk" in line:
-                    break
+        for name, info in clocks.items():
+            if name.startswith('gfx'):
+                max_clk = info.get('max_clk', {}).get('value')
+                if isinstance(max_clk, int):
+                    frequencies.append(max_clk)
 
         # Return the maximum frequency found
         return max(frequencies) if frequencies else None
@@ -305,13 +311,12 @@ def get_gpu_max_frequency(device_id):
     try:
         from hip import hip
     except ImportError:
-        print("HIP module not found. Installing it now...")
-        # Install the HIP module using pip
-        subprocess.run("python3 -m pip install --upgrade pip", shell=True)
-        subprocess.run("python3 -m pip install --index-url https://test.pypi.org/simple/ hip-python", shell=True)
-
-        from hip import hip
-        print("HIP module successfully installed.")
+        # hip-python is optional and intentionally NOT auto-installed here.
+        # Auto-installing from a package index at build time is a supply-chain
+        # risk (ROCM-26748 / SEC-00581) and hip-python has no wheel on some
+        # platforms (e.g. Windows). Return None so the caller falls back to
+        # amd-smi (get_gpu_max_frequency_smi) and then the manual prompt.
+        return None
 
     def hip_check(call_result):
         err, result = call_result[0], call_result[1]
@@ -500,6 +505,11 @@ def Tensile(userArgs):
                  "First run using this flag, then rerun with --use-cache.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
+    argParser.add_argument("--solution-pool", dest="solutionPool", default=None,
+            help="Glob pattern matching library logic YAML file(s). Solutions from the "
+                 "matching file (by ProblemType) will be used as the solution pool instead "
+                 "of generating from ForkParameters. "
+                 "Example: '3_LibraryLogic/*.yaml'")
     argParser.add_argument("--gpu-targets", dest="gpuTargets", default=None,
             help="Semicolon-separated GPU targets (e.g. gfx942). "
                  "Overrides ISA auto-detection and YAML config ISA.")
@@ -531,6 +541,18 @@ def Tensile(userArgs):
         for key,value in prob_sol_map.items():
             print1(f'#  Restored Prob-Solution From Log: [Prob:{key},Sol:{value}]')
 
+    solutionPoolFiles = None
+    if args.solutionPool:
+        pool = args.solutionPool
+        if os.path.isdir(pool):
+            globPattern = os.path.join(pool, "**", "*.yaml")
+        else:
+            globPattern = pool
+        solutionPoolFiles = sorted(f for f in glob.iglob(globPattern, recursive=True) if os.path.isfile(f))
+        if not solutionPoolFiles:
+            printExit("--solution-pool '{}' matched no files".format(args.solutionPool))
+        print1("#  Solution pool: {} files".format(len(solutionPoolFiles)))
+
     # 2nd half of splash
     if len(configPaths) == 1:
         print1("#  Config: {}".format(configPaths[0]))
@@ -543,6 +565,13 @@ def Tensile(userArgs):
 
     print1("# Restoring default globalParameters")
     restoreDefaultGlobalParameters()
+
+    # Stash the --cpu-only flag in undocumented internal plumbing so the deep seams
+    # (Architectures ISA spoof, frequency-probe skip, ClientWriter launch stub) can read
+    # it without threading a new parameter through executeStepsInConfig. Set AFTER
+    # restoreDefaultGlobalParameters() (which would otherwise clobber it back to the
+    # default False). Kept out of the documented --global-parameters surface.
+    globalParameters["CpuOnly"] = args.cpuOnly
 
     if args.LogicFormat:
         globalParameters['LogicFormat'] = args.LogicFormat
@@ -576,20 +605,26 @@ def Tensile(userArgs):
             }]
         }
         config["BenchmarkProblems"] = [[base["ProblemType"], solParams]]
-
+    
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
+
+    # Backend selection precedence:
+    # 1) YAML Backend (with strict validation)
+    # 2) tensile (default)
+    yaml_backend = config.get("Backend", None)
+    config["Backend"] = parse_backend_config(yaml_backend)
 
     asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
     UseEffLike = False if isRhel8() else UseEffLike
 
-    if 'LibraryLogic' in config and UseEffLike and not buildOnly:
+    if 'LibraryLogic' in config and UseEffLike and not buildOnly and not globalParameters["CpuOnly"]:
         max_frequency = get_gpu_max_frequency(device_id)
 
         if not max_frequency or max_frequency <= 0:
-            max_frequency = get_gpu_max_frequency_smi(device_id) # Using rocm-smi just in case
+            max_frequency = get_gpu_max_frequency_smi(device_id) # Using amd-smi just in case
 
         if not max_frequency or max_frequency <= 0:
             print(f"Could not detect valid GPU frequency for device {device_id}")
@@ -660,7 +695,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

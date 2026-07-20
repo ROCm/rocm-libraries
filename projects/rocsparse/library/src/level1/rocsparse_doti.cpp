@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ rocsparse_status rocsparse::doti_template(rocsparse_handle     handle,
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(result, 0, sizeof(T), handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(result, 0, sizeof(T), handle->stream));
             }
             else
             {
@@ -122,7 +122,7 @@ rocsparse_status rocsparse::doti_template(rocsparse_handle     handle,
                                            (T*)nullptr);
 
         RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(result, workspace, sizeof(T), hipMemcpyDeviceToHost, stream));
+            rocsparse_hipMemcpyAsync(result, workspace, sizeof(T), hipMemcpyDeviceToHost, stream));
     }
 #undef DOTI_DIM
 

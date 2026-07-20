@@ -97,6 +97,22 @@ template <typename T>
     return {};
 }
 
+/// Gets a scalar attribute, returning std::nullopt when the backend cannot
+/// report it instead of surfacing an error.
+template <typename T>
+[[nodiscard]] inline std::optional<T> getNullableAttrScalar(hipdnnBackendDescriptor_t desc,
+                                                            hipdnnBackendAttributeName_t attrName,
+                                                            hipdnnBackendAttributeType_t attrType,
+                                                            const std::string& errorContext)
+{
+    T value{};
+    if(getDescriptorAttrScalar<T>(desc, attrName, attrType, value, errorContext).is_bad())
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
 /// Gets a string attribute (char array) from a backend descriptor.
 /// Queries the character count first, then retrieves the string value.
 /// If the attribute is not supported or the string is empty, sets value to empty and returns
@@ -259,13 +275,42 @@ template <typename T>
 }
 
 /// Unpacks a graph-level data type attribute from a backend descriptor.
-/// Queries the attribute, validates the count, and converts the hipdnnDataType_t
-/// to a frontend DataType.
+/// Queries the attribute count first; a count of zero (or
+/// ``HIPDNN_STATUS_NOT_SUPPORTED``) means the field was never set on the
+/// backend side and the caller should treat it as ``DataType::NOT_SET``.
+/// Otherwise fetches the value and converts the ``hipdnnDataType_t`` to a
+/// frontend ``DataType``.
+///
+/// @note This helper does not enforce presence -- absence is a valid result
+///       (returned as ``DataType::NOT_SET`` with no error). Callers that
+///       require the attribute to be present must check for
+///       ``DataType::NOT_SET`` themselves and surface their own error.
 [[nodiscard]] inline std::pair<DataType, Error>
     unpackGraphDataType(hipdnnBackendDescriptor_t desc,
                         hipdnnBackendAttributeName_t attrName,
                         const std::string& errorContext)
 {
+    int64_t count = 0;
+    auto countStatus = hipdnnBackend()->backendGetAttribute(
+        desc, attrName, HIPDNN_TYPE_DATA_TYPE, 0, &count, nullptr);
+    if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+    {
+        return {DataType::NOT_SET, {}};
+    }
+    if(countStatus != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {DataType::NOT_SET,
+                Error{ErrorCode::HIPDNN_BACKEND_ERROR,
+                      "Failed to get count for " + errorContext
+                          + " Backend error: " + backendErrMsg.data()}};
+    }
+    if(count == 0)
+    {
+        return {DataType::NOT_SET, {}};
+    }
+
     hipdnnDataType_t dt{};
     auto err = getDescriptorAttrScalar(desc, attrName, HIPDNN_TYPE_DATA_TYPE, dt, errorContext);
     if(err.is_bad())
@@ -400,8 +445,17 @@ template <typename T>
         case DataType::INT8:
         case DataType::FP8_E4M3:
         case DataType::FP8_E5M2:
+        case DataType::FP8_E4M3_FNUZ:
+        case DataType::FP8_E5M2_FNUZ:
         {
             const uint8_t val = valueBytes[0];
+            tensor->set_value(val);
+            break;
+        }
+        case DataType::BOOLEAN:
+        {
+            bool val = false;
+            std::memcpy(&val, valueBytes.data(), sizeof(bool));
             tensor->set_value(val);
             break;
         }
@@ -419,6 +473,22 @@ template <typename T>
         tensor->set_dim(dims);
         tensor->set_stride(strides);
     }
+
+    // Restore the runtime pass-by-value flag. Must be set AFTER any set_value()
+    // above, which unconditionally forces the flag to true (it can't tell compile-time-
+    // constant from runtime-with-default). Restoring it here after the fact applies the
+    // actual wire value for both states; for a pure user-supplied tensor IS_BY_VALUE
+    // is false (no value read), and only the flag is restored here.
+    // A pre-1.2.0 backend does not recognize the extension attribute and
+    // reports NOT_SUPPORTED; treat that (and any absent value) as false rather
+    // than surfacing an error, symmetric with the guarded send in lowering.
+    const bool isRuntime
+        = getNullableAttrScalar<bool>(tensorDesc,
+                                      HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                      HIPDNN_TYPE_BOOLEAN,
+                                      "tensor is_runtime_pass_by_value")
+              .value_or(false);
+    tensor->set_is_pass_by_value(isRuntime);
 
     return {};
 }

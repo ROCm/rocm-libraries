@@ -34,6 +34,7 @@
 #include <tuple>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "../driver.hpp"
@@ -148,7 +149,8 @@ enum class Gpu : int
     gfx110X = 1 << 7,
     gfx115X = 1 << 8,
     gfx120X = 1 << 9,
-    gfxLast = Gpu::gfx120X, // \note Change the value when adding a new device
+    gfx125X = 1 << 10,
+    gfxLast = Gpu::gfx125X, // \note Change the value when adding a new device
     All     = -1
 };
 
@@ -230,6 +232,8 @@ private:
 };
 
 Gpu GetDevGpuType();
+std::string_view GetBaseDeviceName(std::string_view dev_name);
+Gpu GetGpuType(const std::string& dev_name);
 const std::multimap<Gpu, DevDescription>& GetAllKnownDevices();
 bool IsTestSupportedByDevice(Gpu supported_devs);
 

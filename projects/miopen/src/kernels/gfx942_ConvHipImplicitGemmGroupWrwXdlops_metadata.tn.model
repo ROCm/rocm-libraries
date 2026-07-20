@@ -1,0 +1,449 @@
+{
+    "generated_on": "15 Jun 2026, 02:39:35",
+    "gpu": {
+        "num_cu": 304,
+        "arch": "gfx942"
+    },
+    "version_info": {
+        "miopen_version": "3.5.2"
+    },
+    "sessions": [
+        10,
+        12,
+        14,
+        16
+    ],
+    "note": "Data merged from sessions: [10, 12, 14, 16]",
+    "solver_name": "ConvHipImplicitGemmGroupWrwXdlops",
+    "output_params": [
+        "000_kernel_name",
+        "001_TileLoadThreadGroupSize",
+        "002_TileMathThreadGroupSize",
+        "003_MPerBlock",
+        "004_NPerBlock",
+        "005_KPerBlock",
+        "006_ConvBackwardWeightSpecialization",
+        "007_K1",
+        "008_MXdlPerWave",
+        "009_NXdlPerWave",
+        "010_ABlockTransferSrcScalarPerVector",
+        "011_ABlockTransferDstScalarPerVector_K1",
+        "012_BBlockTransferSrcScalarPerVector",
+        "013_BBlockTransferDstScalarPerVector_K1",
+        "014_CShuffleMXdlPerWavePerShuffle",
+        "015_CShuffleNXdlPerWavePerShuffle",
+        "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+        "017_NumGroupsToMerge",
+        "018_SplitK",
+        "019_GemmSpecialization_layout",
+        "020_BlockSize",
+        "021_MPerXDL",
+        "022_NperXDL",
+        "023_BlkGemmPipelineScheduler",
+        "024_BlkGemmPipelineVersion",
+        "025_BlkGemmPipelinePrefetchStages"
+    ],
+    "num_output_params": 26,
+    "kernel_str_mapping": {
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffle": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "16": "018_SplitK",
+            "1": "020_BlockSize"
+        },
+        "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "18": "017_NumGroupsToMerge",
+            "19": "018_SplitK",
+            "1": "020_BlockSize",
+            "16": "023_BlkGemmPipelineScheduler",
+            "17": "024_BlkGemmPipelineVersion"
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "16": "018_SplitK",
+            "1": "020_BlockSize"
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "16": "017_NumGroupsToMerge",
+            "19": "018_SplitK",
+            "1": "020_BlockSize",
+            "17": "023_BlkGemmPipelineScheduler",
+            "18": "024_BlkGemmPipelineVersion"
+        },
+        "DeviceGroupedConvBwdWeight_Explicit_Xdl": {
+            "0": "000_kernel_name",
+            "3": "003_MPerBlock",
+            "4": "004_NPerBlock",
+            "5": "005_KPerBlock",
+            "8": "008_MXdlPerWave",
+            "9": "009_NXdlPerWave",
+            "10": "010_ABlockTransferSrcScalarPerVector",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "15": "018_SplitK",
+            "1": "019_GemmSpecialization_layout",
+            "2": "020_BlockSize",
+            "6": "021_MPerXDL",
+            "7": "022_NperXDL",
+            "12": "023_BlkGemmPipelineScheduler",
+            "13": "024_BlkGemmPipelineVersion",
+            "14": "025_BlkGemmPipelinePrefetchStages"
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "16": "017_NumGroupsToMerge",
+            "17": "018_SplitK"
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "16": "017_NumGroupsToMerge",
+            "17": "018_SplitK",
+            "1": "020_BlockSize"
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "16": "018_SplitK",
+            "1": "020_BlockSize"
+        },
+        "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle_Large_Tensor": {
+            "0": "000_kernel_name",
+            "2": "003_MPerBlock",
+            "3": "004_NPerBlock",
+            "4": "005_KPerBlock",
+            "5": "006_ConvBackwardWeightSpecialization",
+            "6": "007_K1",
+            "7": "008_MXdlPerWave",
+            "8": "009_NXdlPerWave",
+            "9": "010_ABlockTransferSrcScalarPerVector",
+            "10": "011_ABlockTransferDstScalarPerVector_K1",
+            "11": "012_BBlockTransferSrcScalarPerVector",
+            "12": "013_BBlockTransferDstScalarPerVector_K1",
+            "13": "014_CShuffleMXdlPerWavePerShuffle",
+            "14": "015_CShuffleNXdlPerWavePerShuffle",
+            "15": "016_CBlockTransferScalarPerVector_NWaveNPerXdl",
+            "18": "017_NumGroupsToMerge",
+            "19": "018_SplitK",
+            "1": "020_BlockSize",
+            "16": "023_BlkGemmPipelineScheduler",
+            "17": "024_BlkGemmPipelineVersion"
+        }
+    },
+    "conditional_layouts": {
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "BlkGemmPipelineScheduler": {
+                    "kind": "inline_after_optionals",
+                    "base_index": 15
+                },
+                "BlkGemmPipelineVersion": {
+                    "kind": "inline_after_optionals",
+                    "base_index": 16
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            }
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            },
+            "packed_params": {
+                "TileLoadMathThreadGroupSize": {
+                    "index": 0,
+                    "codec": "tile_load_math_lm",
+                    "outputs": [
+                        "TileLoadThreadGroupSize",
+                        "TileMathThreadGroupSize"
+                    ]
+                }
+            }
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            }
+        }
+    },
+    "split_k_values": [
+        -1,
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128
+    ],
+    "input_params": [
+        "spatial_dim",
+        "in_channels",
+        "in_d",
+        "in_h",
+        "in_w",
+        "out_channels",
+        "out_d",
+        "out_h",
+        "out_w",
+        "fil_d",
+        "fil_h",
+        "fil_w",
+        "pad_d",
+        "pad_h",
+        "pad_w",
+        "conv_stride_d",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_d",
+        "dilation_h",
+        "dilation_w",
+        "batchsize",
+        "bias",
+        "in_layout",
+        "fil_layout",
+        "out_layout",
+        "precision",
+        "direction",
+        "group_count"
+    ],
+    "num_input_params": 29,
+    "encodings": {
+        "inputs": {
+            "in_layout": {
+                "NCHW": 0,
+                "NHWC": 1
+            },
+            "fil_layout": {
+                "NCHW": 0,
+                "NHWC": 1
+            },
+            "out_layout": {
+                "NCHW": 0,
+                "NHWC": 1
+            },
+            "precision": {
+                "BF16": 0,
+                "FP16": 1,
+                "FP32": 2
+            }
+        },
+        "outputs": {
+            "000_kernel_name": {
+                "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle": 0,
+                "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle_Large_Tensor": 1,
+                "DeviceGroupedConvBwdWeight_Explicit_Xdl": 2,
+                "DeviceGroupedConvBwdWeight_Xdl_CShuffle": 3,
+                "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3": 4,
+                "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor": 5,
+                "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3": 6
+            },
+            "006_ConvBackwardWeightSpecialization": {
+                "Default": 0,
+                "Filter1x1Stride1Pad0": 1
+            },
+            "019_GemmSpecialization_layout": {
+                "DeviceBatchedGemmXdlUniversal<Default, CRR>": 0,
+                "DeviceBatchedGemmXdlUniversal<MNKPadding, CRR>": 1
+            },
+            "023_BlkGemmPipelineScheduler": {
+                "BlkGemmPipelineScheduler:Interwave": 0,
+                "BlkGemmPipelineScheduler:Intrawave": 1
+            },
+            "024_BlkGemmPipelineVersion": {
+                "BlkGemmPipelineVersion:v1": 0,
+                "BlkGemmPipelineVersion:v2": 1,
+                "BlkGemmPipelineVersion:v3": 2,
+                "BlkGemmPipelineVersion:v4": 3,
+                "BlkGemmPipelineVersion:v5": 4
+            }
+        }
+    },
+    "decodings": {
+        "inputs": {
+            "in_layout": {
+                "0": "NCHW",
+                "1": "NHWC"
+            },
+            "fil_layout": {
+                "0": "NCHW",
+                "1": "NHWC"
+            },
+            "out_layout": {
+                "0": "NCHW",
+                "1": "NHWC"
+            },
+            "precision": {
+                "0": "BF16",
+                "1": "FP16",
+                "2": "FP32"
+            }
+        },
+        "outputs": {
+            "000_kernel_name": {
+                "0": "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle",
+                "1": "DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle_Large_Tensor",
+                "2": "DeviceGroupedConvBwdWeight_Explicit_Xdl",
+                "3": "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
+                "4": "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3",
+                "5": "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor",
+                "6": "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3"
+            },
+            "006_ConvBackwardWeightSpecialization": {
+                "0": "Default",
+                "1": "Filter1x1Stride1Pad0"
+            },
+            "019_GemmSpecialization_layout": {
+                "0": "DeviceBatchedGemmXdlUniversal<Default, CRR>",
+                "1": "DeviceBatchedGemmXdlUniversal<MNKPadding, CRR>"
+            },
+            "023_BlkGemmPipelineScheduler": {
+                "0": "BlkGemmPipelineScheduler:Interwave",
+                "1": "BlkGemmPipelineScheduler:Intrawave"
+            },
+            "024_BlkGemmPipelineVersion": {
+                "0": "BlkGemmPipelineVersion:v1",
+                "1": "BlkGemmPipelineVersion:v2",
+                "2": "BlkGemmPipelineVersion:v3",
+                "3": "BlkGemmPipelineVersion:v4",
+                "4": "BlkGemmPipelineVersion:v5"
+            }
+        }
+    },
+    "constants": {
+        "inputs": {
+            "spatial_dim": "2",
+            "in_d": "1",
+            "out_d": "1",
+            "fil_d": "1",
+            "pad_d": "0",
+            "conv_stride_d": "1",
+            "dilation_d": "1",
+            "bias": "0",
+            "direction": "W"
+        },
+        "outputs": {
+            "001_TileLoadThreadGroupSize": "256",
+            "014_CShuffleMXdlPerWavePerShuffle": "1",
+            "015_CShuffleNXdlPerWavePerShuffle": "1"
+        }
+    },
+    "missing_value_token": -1.0
+}

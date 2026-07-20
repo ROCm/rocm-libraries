@@ -795,7 +795,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             std::vector<unsigned int> channel_seeds = test_utils::get_random_data<unsigned int>(
-                size,
+                std::max(size, static_cast<size_t>(channels)),
                 std::numeric_limits<unsigned int>::min(),
                 std::numeric_limits<unsigned int>::max(),
                 seed_value
@@ -1097,7 +1097,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             std::vector<unsigned int> channel_seeds = test_utils::get_random_data<unsigned int>(
-                size,
+                std::max(size, static_cast<size_t>(channels)),
                 std::numeric_limits<unsigned int>::min(),
                 std::numeric_limits<unsigned int>::max(),
                 seed_value);

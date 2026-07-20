@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,18 +26,22 @@
 
 #pragma once
 
-// Workaround: ROCm's amd_hip_ocp_host.hpp has a static_assert size mismatch
-// (fp6x32_packed vs __amd_fp6x32_storage_t) in its host-fallback path, which
-// is taken for all non-gfx950/gfx1250 device targets.
-#if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx950__) || defined(__gfx1250__)) && !defined(WIN32) && !defined(_WIN32)
+#include <tensilelitehost/export.h>
+
 #define TENSILE_USE_FP4
-#endif
 
 #ifdef TENSILE_USE_FP4
 
-#ifdef TENSILE_USE_HIP
+#ifdef _WIN32
+
+namespace TensileLite
+{
+    typedef struct Float4{ uint8_t data;} Float4;
+} // end of namespace TensileLite
+
+#else // _WIN32
+
 #include <hip/hip_runtime.h>
-#endif
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
@@ -149,5 +153,7 @@ namespace std
         return stream << static_cast<float>(result[0]) << " " << static_cast<float>(result[1]);
     }
 } // namespace std
+
+#endif // _WIN32
 
 #endif // TENSILE_USE_FP4

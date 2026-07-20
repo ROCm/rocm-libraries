@@ -53,6 +53,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
     RealComplexSpecs specs{node.scheme,
+                           node.dimension,
                            node.length.size(),
                            node.precision,
                            node.inArrayType,
@@ -82,13 +83,13 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
     std::array<size_t, 3> kern_lengths{1, 1, 1};
     std::array<size_t, 4> kern_stride_in{1, 1, 1, 1};
     std::array<size_t, 4> kern_stride_out{1, 1, 1, 1};
-    auto                  dim = data.node->length.size();
+    auto                  lensz = data.node->length.size();
 
     std::copy(data.node->length.begin(), data.node->length.end(), kern_lengths.begin());
     std::copy(data.node->inStride.begin(), data.node->inStride.end(), kern_stride_in.begin());
-    kern_stride_in[dim] = data.node->iDist;
+    kern_stride_in[lensz] = data.node->iDist;
     std::copy(data.node->outStride.begin(), data.node->outStride.end(), kern_stride_out.begin());
-    kern_stride_out[dim] = data.node->oDist;
+    kern_stride_out[lensz] = data.node->oDist;
 
     RTCKernelArgs kargs;
     if(data.node->scheme == CS_KERNEL_COPY_HERM_TO_CMPLX)
@@ -165,6 +166,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
     RealComplexEvenSpecs specs{{node.scheme,
+                                node.dimension,
                                 node.length.size(),
                                 node.precision,
                                 node.inArrayType,
@@ -235,12 +237,13 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
     unsigned int m   = node.length[1];
     unsigned int n   = node.length[0];
-    unsigned int dim = node.length.size();
+    unsigned int dim = node.dimension;
 
     unsigned int gridX;
     unsigned int gridX_1d;
     unsigned int gridY;
-    unsigned int gridZ = node.batch;
+    unsigned int gridZ
+        = node.batch * product(node.length.begin() + node.dimension, node.length.end());
 
     if(node.scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
     {
@@ -288,6 +291,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
     generator.blockDim = {tileX, tileY, 1};
 
     RealComplexEvenTransposeSpecs specs{{node.scheme,
+                                         node.dimension,
                                          node.length.size(),
                                          node.precision,
                                          node.inArrayType,
@@ -318,7 +322,7 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
 {
     RTCKernelArgs kargs;
 
-    kargs.append_size_t(data.node->length.size());
+    kargs.append_size_t(data.node->dimension);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
@@ -340,23 +344,24 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
 
     // pass gridY and gridZ to restore a 3-D GPU grid, if needed for large grids
     unsigned int gridY;
-    unsigned int gridZ = data.node->batch;
+    unsigned int gridZ
+        = data.node->batch
+          * product(data.node->length.begin() + data.node->dimension, data.node->length.end());
 
     if(data.node->scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
     {
         const unsigned int tileY = RealComplexEvenTransposeSpecs::TileY();
         unsigned int       m     = data.node->length[1];
-        unsigned int       dim   = data.node->length.size();
 
         gridY = ((m - 1) / tileY + 1)
-                * (dim > 2 ? static_cast<unsigned int>(data.node->length[2]) : 1);
+                * (data.node->dimension > 2 ? static_cast<unsigned int>(data.node->length[2]) : 1);
     }
     else
     {
         unsigned int       m     = data.node->length[1];
         const unsigned int tileY = RealComplexEvenTransposeSpecs::TileY();
 
-        if(data.node->length.size() > 2)
+        if(data.node->dimension > 2)
         {
             m = data.node->length[2];
         }

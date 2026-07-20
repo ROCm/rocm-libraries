@@ -192,6 +192,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_sparse_to_dense_coo.cpp
 ../testings/testing_sparse_to_dense_csr.cpp
 ../testings/testing_sparse_to_dense_csc.cpp
+../testings/testing_dense_to_sparse_bell.cpp
 ../testings/testing_dense_to_sparse_coo.cpp
 ../testings/testing_dense_to_sparse_csr.cpp
 ../testings/testing_dense_to_sparse_csc.cpp
@@ -217,6 +218,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
 )
+
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
+endif()
 
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 

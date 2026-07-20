@@ -315,8 +315,10 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                       globalReadA, globalReadB, \
                       LWSwapA, LWSwapB, \
                       mfmaCode, loopCounterCode, \
+                      nta=0, ntb=0, \
                       ):
-
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
     module = Module()
 
     globalReadIncACode = removeComments(globalReadIncACode)
@@ -413,7 +415,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     InstStreams = {key: [stream, idMap[key]] for key, stream in opt1.optSchedule.items()}
 
-    macro = Macro("MAINLOOP", ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
+    macro = Macro("MAINLOOP%s%s"%(strNta, strNtb), ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
 
     lastIter = numLoopIter - 1
 
@@ -736,8 +738,8 @@ class RegisterSchedule:
             "WavefrontSize": 64,
             "Use64bShadowLimit": 1,
             "ForceUnrollSubIter": False,
-            "SwapGlobalReadOrder": False,
-            "UsePLRPack": False,
+            "SwapGlobalReadOrder": 0,
+            "UsePLRPack": 0,
             "UseF32XEmulation": False,
             "UseDirect32XEmulation": False,
             "MfmaInitCVgprs": False,
@@ -1018,7 +1020,6 @@ def _get_schedule_256x96x64_16bit_DPLB(kernel, useLDSTr, TLDS):
 
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
     return True, opt1
 
 @RegisterSchedule(
@@ -1036,7 +1037,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         # TODO: This schedule can be improved when BC are resolved for MT192
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC'    : [[12,13, 47,48,49,50,51, 52,53, 56,56, 95]],
             'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
@@ -1214,7 +1215,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS == 0:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB1"),
                      29, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB0. For code path 0, this is actually wait for LRB0 + 1/16 LRA0"),
@@ -1252,7 +1253,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1"),
                      15, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
@@ -1396,7 +1397,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 and 3/8 LRB1 to complete")]
         nglshift = nllshift = 16
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         optSchedule = {
             'SYNC'   : [[12,13, 36,44, 56,59, 66,68, 73,92]],
@@ -1440,7 +1441,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         nglshift = nllshift = 16
     elif (isNN(kernel) or isTT(kernel)) and not useLDSTr and TLDS == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         optSchedule = {
             'SYNC'   : [[8, 12,13, 36,44, 56,59, 66,68, 74, 127]],
@@ -1479,7 +1480,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete"),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         if isTT(kernel):
-            kernel["SwapGlobalReadOrder"] = True
+            kernel["SwapGlobalReadOrder"] = 1
 
             optSchedule['GRIncA'], optSchedule['GRIncB'] = optSchedule['GRIncB'], optSchedule['GRIncA']
             optSchedule['LRA0'], optSchedule['LRB0'] = optSchedule['LRB0'], optSchedule['LRA0']
@@ -1555,7 +1556,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 13 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC'   : [[-1,
             12, 12, # Wait for B
@@ -1641,7 +1642,7 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 11
 
     if isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
 
         syncTable = [
             7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Finish all LRA1s and LRB1s"),
@@ -1846,7 +1847,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     numMfma = 80
     if isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC'   : [[-1,
             12,12, # Wait for LRB0
@@ -1934,7 +1935,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS==0:
         nglshift = nllshift = 0
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
             'GRA': [[16,17,20,20,24,24,28,28,31,31]],
@@ -2113,7 +2114,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 34
 
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         nglshift = nllshift = 0
 
         optSchedule = {
@@ -2348,7 +2349,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
         # Global read scheduling:
         # Each GR has two instructions (addr update + buffer_load), so we list them explicitly as
         # two adjacent MFMA indices per GR.
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         numCodePaths = 2
 
         syncTable = [
@@ -2659,7 +2660,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     }
 
     kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
+    kernel["SwapGlobalReadOrder"] = 0
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt)
@@ -2758,7 +2759,7 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 15
 
     elif isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1"),
                      17, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
@@ -2818,7 +2819,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1 "),
             19, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRB0 have finished"),
@@ -2857,7 +2858,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = syncTable[1::2]
         nglshift = nllshift = 16
     elif isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
@@ -2897,7 +2898,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         ]
         nglshift = nllshift = 16
     elif isNT(kernel) and useLDSTr and TLDS == 0:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
@@ -3017,7 +3018,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     if isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = False
+        kernel["SwapGlobalReadOrder"] = 0
         optSchedule = {
             'SYNC': [[-1,
                       14,
@@ -3243,7 +3244,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
 
     kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
+    kernel["SwapGlobalReadOrder"] = 0
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
@@ -3441,7 +3442,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         # TODO: Add NN schedule in upcoming PR
         return False, None
     elif isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         syncTable = [
@@ -3506,7 +3507,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     mfmaReorder = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
 
@@ -3639,7 +3640,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
 
@@ -3835,7 +3836,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         numPackInstr = 24 
@@ -3921,7 +3922,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
 
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         
         numLrReadA = 32 
@@ -4114,9 +4115,8 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0
-    disable_validation = False
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
         # This schedule follows similar pattern as 192x256x32 TF32 schedule
@@ -4236,7 +4236,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS==0 and kernel["VectorWidthA"] == 4 and kernel["VectorWidthB"] == 4:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
         swap_idx =   [1,2,3, # depend on DS1 
@@ -4303,15 +4303,11 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB3 to complete"),
         ]
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
-        # disable the validation until 4x4MFMA with wider loads is supported by validator
-        disable_validation = True
     else:
         return False, None
         
     kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    if disable_validation:
-        opt1.disableValidation("4x4MFMA with wider loads is not yet supported by validator")
     return True, opt1
 
 @RegisterSchedule(
@@ -4327,7 +4323,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and useLDSTr and TLDS==1:
 
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         # Used the following constrains to create schedule
@@ -4487,7 +4483,7 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         snopCode = [s[1] for s in snops]
  
     kernel["MfmaInitCVgprs"] = True
-    kernel["UsePLRPack"] = True
+    kernel["UsePLRPack"] = 1
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
     return True, opt1
 
@@ -4504,7 +4500,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     syncs = SyncSchedule()
     gr_inc_step = 0
-    disable_validation = False
     num_code_paths = 1
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
@@ -4547,8 +4542,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsb   = [                                                                          20]
         
     elif isNN(kernel) and TLDS==1  and kernel["VectorWidthA"] == 2:
-        disable_validation = True # swap instructions included in pack are not supported yet
-
         lra0   = [0,0,0,0,
                     1,1,1,1]
         lrb0   = [     3,  4,6,6]
@@ -4592,8 +4585,6 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
         lwsb   = [                                                                            20]    
     
     elif isNT(kernel) and useLDSTr and TLDS==0  and kernel["VectorWidthA"] == 2 and kernel["VectorWidthB"] == 2:
-        disable_validation = True # swap instructions included in pack are not supported yet
-
         lra0   = [0,0,0,0,
                     1,1,1,1]
         lrb0   = [     3,3,4,4,
@@ -4675,12 +4666,10 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
 
     kernel["MfmaInitCVgprs"] = True
-    kernel["UsePLRPack"] = True
+    kernel["UsePLRPack"] = 1
     kernel["UseMFMAF32XEmulation"] = True
     kernel["UseDot2F32XEmulation"] = False
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
-    if disable_validation:
-        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "swap instructions included in pack are not supported yet")
     return True, opt1
 
 @RegisterSchedule(
@@ -4698,7 +4687,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     syncs = SyncSchedule()
     syncCode = []   
     gr_inc_step = 1
-    disable_validation = False
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
@@ -4739,8 +4727,6 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         pack_b1 =[                                                                                 i+77 for i in offset] # last at 93
 
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
-        disable_validation = True
-
         offset=[0,0,1,1, 8,8,  9, 9,10,10, 
                 2,2,3,3, 8,8, 11,11,12,12,
                 4,4,5,5, 8,8, 13,13,14,14, 
@@ -4812,10 +4798,8 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["UseMFMAF32XEmulation"] = True
     kernel["UseDot2F32XEmulation"] = False
-    kernel["UsePLRPack"] = True
+    kernel["UsePLRPack"] = 1
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
-    if disable_validation:
-        opt1.disableValidationPass(cmsv.ValidatorPass.ADD_PACK_CONSTRAINTS, "Pack validation for NN transpose is not yet supported by validator")
     return True, opt1
 
 
@@ -4833,7 +4817,7 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
     mfmaReorder = []
     nglshift = nllshift = 0
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
 
@@ -5002,7 +4986,7 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 12 # vmcnt shift for ngl and nll
     elif isNN(kernel) and TLDS==1:
         return False, None
-        # kernel["UsePLRPack"] = True
+        # kernel["UsePLRPack"] = 1
         # kernel["UseMFMAF32XEmulation"] = True
         # kernel["UseDot2F32XEmulation"] = False
 
@@ -5154,7 +5138,7 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         grinca = [0,0,1,1,2,2,3,3,4]
         grincb = [4,5,5,6,6,7,7,8,8]
@@ -5245,7 +5229,7 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     if isTN(kernel) and useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
 
@@ -5347,7 +5331,7 @@ def _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         grinca = [0,0,1,1,2,2,3,3,4]
         grincb = [4,5,5,6,6,7,7,8,8]
@@ -5453,7 +5437,7 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
 
     if isNN(kernel) and useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         syncs.add(11, dscnt=8, comment="wait for LRB0 before pack to complete")
         syncs.add(16, dscnt=8, barrier=True, comment="wait for LRB0 before pack to complete", barrier_comment="barrier for GRA")
         syncs.add(33, dscnt=0, comment="wait for LRA0 before pack to complete")
@@ -5651,7 +5635,7 @@ def _get_schedule_224x320x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
+    kernel["SwapGlobalReadOrder"] = 0
 
     if isTN(kernel) and useLDSTr and TLDS==1:
         syncTable = [

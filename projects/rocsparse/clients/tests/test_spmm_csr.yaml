@@ -42,13 +42,24 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
+# Default-algorithm auto-selection. Drives the full buffer_size -> preprocess ->
+# compute pipeline on an extremely row-skewed and an extremely uniform matrix and
+# checks the default result against the analytic product and both explicit
+# load-balanced kernels. The test builds its own matrices, so it ignores the
+# index/precision below.
+- name: spmm_csr_extra
+  category: quick
+  function: spmm_csr_extra
+  indextype: *i32
+  precision: *double_only_precisions
+
 ##############################
 # Quick
 ##############################
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *double_only_precisions
   M: [300]
   N: [72]
@@ -65,7 +76,7 @@ Tests:
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions_complex_real
   M: [300]
   N: [300]
@@ -82,7 +93,7 @@ Tests:
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *double_only_precisions
   M: 1
   N: [64]
@@ -100,7 +111,7 @@ Tests:
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: [256]
@@ -119,7 +130,7 @@ Tests:
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
   M: 1
   N: [128]
@@ -156,7 +167,7 @@ Tests:
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions_complex
   M: 1
   N: [19]
@@ -169,12 +180,12 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [Chevron2]
+  filename: [mplate]
 
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: [300]
   N: [214]
@@ -194,7 +205,7 @@ Tests:
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *int8_int8_float32_float32_abct_precision
   M: [300]
   N: [210]
@@ -214,7 +225,7 @@ Tests:
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32
+  indextype: *i64
   precision: *float16_float16_float32_float32_abct_precision
   M: [300]
   N: [23, 24]
@@ -249,7 +260,7 @@ Tests:
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: [*float16_float16_float16_float32_abct_precision, *bfloat16_bfloat16_bfloat16_float32_abct_precision]
   M: [300]
   N: [16, 32]
@@ -269,7 +280,7 @@ Tests:
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
   M: [2000]
   N: [1, 2]
@@ -286,7 +297,7 @@ Tests:
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: [2000]
   N: [1, 2]
@@ -303,7 +314,7 @@ Tests:
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: [311]
   N: [60, 441]
@@ -338,7 +349,7 @@ Tests:
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *double_only_precisions
   M: 1
   N: [26, 27]
@@ -375,7 +386,7 @@ Tests:
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: 1
   N: [9]
@@ -424,12 +435,12 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr_row_split]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
-  filename: [Chevron3]
+  filename: [Chevron2]
 
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
   N: [6]
@@ -483,7 +494,7 @@ Tests:
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: 1
   N: [64]
@@ -498,7 +509,7 @@ Tests:
   orderC: [rocsparse_order_row]
   filename: [nos3,
              nos4,
-             mac_econ_fwd500]
+             nos5]
   rand_gen_min: -128.0
   rand_gen_max: 127.0
   convert_to_int: true
@@ -557,7 +568,7 @@ Tests:
 - name: spmm_csr_graph_test
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *double_only_precisions
   M: [223, 485]
   N: [53, 54]
@@ -580,7 +591,7 @@ Tests:
 - name: spmm_csr
   category: nightly
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [431]
   N: [48, 49]
@@ -725,7 +736,7 @@ Tests:
 - name: spmm_csr_file
   category: nightly
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *int8_int8_float32_float32_abct_precision
   M: 1
   N: [77]

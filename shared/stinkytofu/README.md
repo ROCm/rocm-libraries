@@ -53,6 +53,15 @@ rocm-sdk init
 
 ### Standalone (Linux)
 
+The quickest way is `invoke`, which wraps the CMake steps:
+
+```bash
+pip install invoke
+invoke build
+```
+
+Or manually with CMake:
+
 ```bash
 cmake -S . -B build -GNinja \
   -DCMAKE_CXX_COMPILER=amdclang++ \
@@ -72,6 +81,54 @@ invoke build
 ### As part of hipBLASLt
 
 StinkyTofu is automatically built when hipBLASLt includes it via `add_subdirectory`. Tests and Python bindings are disabled in sub-project mode.
+
+### Rebuilding Python bindings after C++ changes
+
+If you modify C++ sources, the installed `.so` becomes stale. Importing `stinkytofu` will raise an `ImportError` listing the modified files.
+
+**Standalone** — rebuild with invoke or CMake directly:
+
+```bash
+invoke build
+# or:
+cmake --build build --target stinkytofu_python
+```
+
+**As part of hipBLASLt** — rebuild the Python bindings target in your hipBLASLt build directory:
+
+```bash
+cmake --build <build_dir> --target stinkytofu_python
+```
+
+## Run clang-tidy
+
+We use `clang-tidy-20`, so additional installation may required.
+
+### 1. Download and Run the LLVM Setup Script
+This script automatically detects your OS distribution, adds the correct LLVM stable/nightly APT repository, and updates your package lists[span_2](start_span)[span_2](end_span).
+
+```bash
+# Get the official script and make it executable
+wget [https://apt.llvm.org/llvm.sh](https://apt.llvm.org/llvm.sh)
+chmod +x llvm.sh
+
+# Run the script to add repositories
+sudo ./llvm.sh 20 reponly
+```
+
+### Install `clang-tidy-20`
+
+```bash
+sudo apt-get update
+sudo apt-get install -y clang-tidy-20
+```
+
+### Run clang-tidy
+
+```bash
+invoke build
+invoke tidy
+```
 
 ## Test
 
@@ -112,4 +169,4 @@ See [docs/](docs/README.md) for detailed documentation including user guides, de
 
 ## License
 
-MIT License. Copyright (C) Advanced Micro Devices, Inc.
+This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.

@@ -317,6 +317,7 @@ Tests:
     - gebsr2gebsc: *conversion_shared
     - gebsr2gebsr: *conversion_shared
     - hyb2csr: *conversion_shared
+    - dense_to_sparse_bell: *conversion_shared
     - dense_to_sparse_coo: *conversion_shared
     - dense_to_sparse_csc: *conversion_shared_mixed_index
     - dense_to_sparse_csr: *conversion_shared_mixed_index
