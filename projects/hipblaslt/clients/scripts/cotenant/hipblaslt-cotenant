@@ -96,6 +96,14 @@ def build_cotenant(arch: str | None, env: dict[str, str]) -> Path:
     print(f"building hipblaslt-cotenant-kernel for {arch} (cache: {out.parent}) ...")
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        sys.exit(f"ERROR: could not create cache dir {out.parent} ({e.strerror}).")
+    # Build to a temp file and rename into place, so concurrent builders (a
+    # parallel sweep with a cold cache) can't corrupt or ETXTBSY each other.
+    fd, tmp_name = tempfile.mkstemp(dir=str(out.parent), prefix=".build-")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
         subprocess.run(
             [
                 hipcc,
@@ -104,18 +112,23 @@ def build_cotenant(arch: str | None, env: dict[str, str]) -> Path:
                 f"--offload-arch={arch}",
                 str(SRC),
                 "-o",
-                str(out),
+                str(tmp),
             ],
             check=True,
             env=env,
         )
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, out)
     except FileNotFoundError:
+        tmp.unlink(missing_ok=True)
         sys.exit(f"ERROR: '{hipcc}' not found; install ROCm or set HIPCC to its path.")
     except subprocess.CalledProcessError as e:
+        tmp.unlink(missing_ok=True)
         sys.exit(
             f"ERROR: building hipblaslt-cotenant-kernel failed (hipcc exited {e.returncode})."
         )
     except OSError as e:
+        tmp.unlink(missing_ok=True)
         sys.exit(f"ERROR: could not write {out} ({e.strerror}).")
     try:
         stamp.write_text(arch)
