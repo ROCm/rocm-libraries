@@ -49,7 +49,12 @@ TEST(TestLayernormBwdParams, HasCorrectTensorPointersForSingleNode)
     EXPECT_NE(params.scale(), nullptr);
     EXPECT_NE(params.mean(), nullptr);
     EXPECT_NE(params.invVariance(), nullptr);
-    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
+    EXPECT_NE(params.epsilon(), nullptr);
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
+    params.epsilon()->UnPackTo(&epsilonTensor);
+    const double epsilon
+        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+    EXPECT_NEAR(epsilon, 1e-5, 1e-10);
     EXPECT_NE(params.dx(), nullptr);
     EXPECT_NE(params.dscale(), nullptr);
     EXPECT_NE(params.dbias(), nullptr);
@@ -72,7 +77,12 @@ TEST(TestLayernormBwdParams, TensorPointersMatchExpectedUids)
     EXPECT_EQ(params.scale()->uid(), attrs->scale_tensor_uid());
     EXPECT_EQ(params.mean()->uid(), attrs->mean_tensor_uid());
     EXPECT_EQ(params.invVariance()->uid(), attrs->inv_variance_tensor_uid());
-    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
+    EXPECT_NE(params.epsilon(), nullptr);
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
+    params.epsilon()->UnPackTo(&epsilonTensor);
+    const double epsilon
+        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+    EXPECT_NEAR(epsilon, 1e-5, 1e-10);
     EXPECT_EQ(params.dx()->uid(), attrs->dx_tensor_uid());
     EXPECT_EQ(params.dscale()->uid(), attrs->dscale_tensor_uid());
     EXPECT_EQ(params.dbias()->uid(), attrs->dbias_tensor_uid());

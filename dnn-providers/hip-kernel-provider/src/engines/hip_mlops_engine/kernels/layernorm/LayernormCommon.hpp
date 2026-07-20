@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#pragma once
+
 #include "VectorTypes.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_LAYERNORM_LOCAL_SIZE;
@@ -63,5 +65,5 @@ __forceinline__ __device__ void calculateMeanRstd(__shared__ float ltmp1[LOCAL_S
     }
     pmean = ltmp1[0];
     float pvar = ltmp2[0] / ltmp3[0];
-    prstd = rsqrt(pvar + eps);
+    prstd = rsqrtf(pvar + eps);
 }

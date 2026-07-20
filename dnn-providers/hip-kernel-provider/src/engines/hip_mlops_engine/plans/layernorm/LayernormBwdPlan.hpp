@@ -43,8 +43,7 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scale() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* mean() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVariance() const;
-    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                        uint32_t numDeviceBuffers) const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilon() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dx() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dscale() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dbias() const;
@@ -55,7 +54,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _scale;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _mean;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invVariance;
-    std::optional<hipdnn_plugin_sdk::ScalarOperand> _epsilon;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _epsilon;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dx;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dscale;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dbias;
@@ -83,7 +82,7 @@ public:
 
 private:
     LayernormBwdParams _params;
-    long _innerSize, _outerSize, _stride, _localSize;
+    int64_t _innerSize, _outerSize, _stride, _localSize;
     static size_t getReqdWorkItemCount(const hipDeviceProp_t& deviceProperties, size_t localSize);
     static bool isParallel(const hipDeviceProp_t& deviceProperties,
                            size_t localSize,

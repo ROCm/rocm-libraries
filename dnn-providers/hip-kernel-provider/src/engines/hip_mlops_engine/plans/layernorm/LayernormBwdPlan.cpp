@@ -15,6 +15,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -39,9 +40,8 @@ LayernormBwdParams::LayernormBwdParams(
                        ? tensorMap.at(attributes.inv_variance_tensor_uid().value())
                        : nullptr)
     , _epsilon(attributes.epsilon_tensor_uid().has_value()
-                   ? std::make_optional(hipdnn_plugin_sdk::makeScalarOperand(
-                         tensorMap, attributes.epsilon_tensor_uid().value(), "Epsilon"))
-                   : std::nullopt)
+                   ? tensorMap.at(attributes.epsilon_tensor_uid().value())
+                   : nullptr)
     , _dx(tensorMap.at(attributes.dx_tensor_uid()))
     , _dscale(tensorMap.at(attributes.dscale_tensor_uid()))
     , _dbias(tensorMap.at(attributes.dbias_tensor_uid()))
@@ -74,13 +74,9 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _invVariance;
 }
 
-double LayernormBwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                        uint32_t numDeviceBuffers) const
+const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormBwdParams::epsilon() const
 {
-    return _epsilon.has_value()
-               ? hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
-                     _epsilon.value(), deviceBuffers, numDeviceBuffers))
-               : 0.0;
+    return _epsilon;
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormBwdParams::dx() const
@@ -109,16 +105,16 @@ LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
 
     const size_t normalizedDim
         = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
-    long outerSize = 1;
-    long innerSize = 1;
-    long stride = 1;
+    int64_t outerSize = 1;
+    int64_t innerSize = 1;
+    int64_t stride = 1;
     const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
     const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
 
     if(normalizedDim > 1
        && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
     {
-        stride = static_cast<long>(xDims->Get(1));
+        stride = static_cast<int64_t>(xDims->Get(1));
     }
 
     for(unsigned int i = 0; i < xDims->size(); ++i)
@@ -127,12 +123,12 @@ LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
         {
             if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
             {
-                outerSize *= static_cast<long>(xDims->Get(i));
+                outerSize *= static_cast<int64_t>(xDims->Get(i));
             }
         }
         else
         {
-            innerSize *= static_cast<long>(xDims->Get(i));
+            innerSize *= static_cast<int64_t>(xDims->Get(i));
         }
     }
 
@@ -180,7 +176,13 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const std::string scaleBiasTypeString = getKernelParamTypeString(scaleBiasDataType);
     const std::string meanInvVarianceTypeString = getKernelParamTypeString(meanInvVarianceDataType);
 
-    const long gridSize = _outerSize * _stride;
+    const int64_t gridSize = _outerSize * _stride;
+    if(gridSize >= UINT32_MAX)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported number of workgroups: "
+                                                           + std::to_string(gridSize));
+    }
 
     _isParallel = isParallel(deviceProperties,
                              static_cast<size_t>(_localSize),
@@ -284,7 +286,14 @@ void LayernormBwdPlan::execute(const Handle& handle,
     auto dbiasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
 
-    double epsilon = _params.epsilonValue(deviceBuffers, numDeviceBuffers);
+    double epsilon = hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON;
+    if(_params.epsilon() != nullptr)
+    {
+        hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
+        _params.epsilon()->UnPackTo(&epsilonTensor);
+        epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor,
+                                                                                  "Epsilon");
+    }
 
     // Launch kernels
     _runnableKernels[0]->launch(handle.getStream(),
