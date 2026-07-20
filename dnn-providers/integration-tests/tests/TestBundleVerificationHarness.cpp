@@ -25,6 +25,7 @@
 #include <variant>
 #include <vector>
 
+#include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -35,6 +36,7 @@
 // NOLINTBEGIN(readability-identifier-naming)
 
 using namespace hipdnn_integration_tests::bundle;
+using namespace hipdnn_tests::constants;
 
 namespace
 {
@@ -47,23 +49,37 @@ class TestableHarness : public IntegrationBundleVerificationHarness
 public:
     using StubFunc = std::function<void(std::unordered_map<int64_t, void*>&)>;
 
-    explicit TestableHarness(StubFunc stub, bool requiresDevice = false)
+    explicit TestableHarness(StubFunc engineStub,
+                             bool requiresDevice = false,
+                             hipdnn_integration_tests::VerificationMode mode
+                             = hipdnn_integration_tests::VerificationMode::AUTO)
         : IntegrationBundleVerificationHarness(requiresDevice)
-        , _stub(std::move(stub))
+        , _engineStub(std::move(engineStub))
+        , _mode(mode)
     {
     }
 
-    using IntegrationBundleVerificationHarness::SetUp;
+    void SetUp() override {}
+
+    using IntegrationBundleVerificationHarness::synthesis;
     using IntegrationBundleVerificationHarness::TestBody;
 
 protected:
     void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override
     {
-        _stub(variantPack);
+        _engineStub(variantPack);
     }
 
+    hipdnn_integration_tests::VerificationMode getVerificationMode() const override
+    {
+        return _mode;
+    }
+
+    void applyMetadataGuards() const override {}
+
 private:
-    StubFunc _stub;
+    StubFunc _engineStub;
+    hipdnn_integration_tests::VerificationMode _mode;
 };
 
 class TestGoldenHarnessFixture : public ::testing::Test
@@ -196,6 +212,77 @@ protected:
     }
 };
 
+std::shared_ptr<IntegrationTestBundle> makeRuntimePbvSynthesisBundle()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const std::vector<int64_t> dataDims = {2, 3};
+    const std::vector<int64_t> dataStrides = {3, 1};
+    const std::vector<int64_t> scalarDims(K_BATCHNORM_TENSOR_EPSILON_DIMS.begin(),
+                                          K_BATCHNORM_TENSOR_EPSILON_DIMS.end());
+    const std::vector<int64_t> scalarStrides(K_BATCHNORM_TENSOR_EPSILON_STRIDES.begin(),
+                                             K_BATCHNORM_TENSOR_EPSILON_STRIDES.end());
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    const auto addDataTensor = [&](int64_t uid, const char* name) {
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, uid, name, DataType::FLOAT, &dataStrides, &dataDims));
+    };
+    const auto addRuntimeScalar = [&](int64_t uid, const char* name) {
+        tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                       uid,
+                                                       name,
+                                                       DataType::FLOAT,
+                                                       &scalarStrides,
+                                                       &scalarDims,
+                                                       false,
+                                                       TensorValue::NONE,
+                                                       0,
+                                                       true));
+    };
+
+    addDataTensor(K_BATCHNORM_TENSOR_X_UID, "x");
+    addDataTensor(K_BATCHNORM_TENSOR_SCALE_UID, "scale");
+    addDataTensor(K_BATCHNORM_TENSOR_BIAS_UID, "bias");
+    addRuntimeScalar(K_BATCHNORM_TENSOR_EPSILON_UID, "epsilon");
+    addDataTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID, "prev_mean");
+    addDataTensor(K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID, "prev_variance");
+    addRuntimeScalar(K_BATCHNORM_TENSOR_MOMENTUM_UID, "momentum");
+    addDataTensor(K_BATCHNORM_TENSOR_Y_UID, "y");
+
+    const auto batchnorm
+        = CreateBatchnormAttributesDirect(builder,
+                                          K_BATCHNORM_TENSOR_X_UID,
+                                          K_BATCHNORM_TENSOR_SCALE_UID,
+                                          K_BATCHNORM_TENSOR_BIAS_UID,
+                                          K_BATCHNORM_TENSOR_EPSILON_UID,
+                                          nullptr,
+                                          K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
+                                          K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
+                                          K_BATCHNORM_TENSOR_MOMENTUM_UID,
+                                          K_BATCHNORM_TENSOR_Y_UID);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "batchnorm_training",
+                                     DataType::FLOAT,
+                                     NodeAttributes::BatchnormAttributes,
+                                     batchnorm.Union()));
+    const auto graph = CreateGraphDirect(builder,
+                                         "runtime_pbv_synthesis",
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         &tensors,
+                                         &nodes);
+    builder.Finish(graph);
+
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->graphBuffer = builder.Release();
+    bundle->outputTensorUids = {K_BATCHNORM_TENSOR_Y_UID};
+    return bundle;
+}
+
 std::shared_ptr<IntegrationTestBundle> makeRuntimePassByValueBundle()
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
@@ -258,6 +345,43 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
     EXPECT_EQ(variantPack.at(2), outputs.at(2)->rawDeviceData());
 }
 } // namespace
+
+TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreSynthesizedEndToEnd)
+{
+    const auto runHarness = [&](float& epsilon, float& momentum) {
+        ::testing::TestPartResultArray results;
+        const auto execute = [&](std::unordered_map<int64_t, void*>& variantPack) {
+            epsilon = *static_cast<const float*>(variantPack.at(K_BATCHNORM_TENSOR_EPSILON_UID));
+            momentum = *static_cast<const float*>(variantPack.at(K_BATCHNORM_TENSOR_MOMENTUM_UID));
+            EXPECT_GE(momentum, 0.0f);
+            EXPECT_LE(momentum, 1.0f);
+            throw hipdnn_integration_tests::EngineNotApplicableError(
+                "value-capture stub completed");
+        };
+        TestableHarness harness(execute);
+
+        auto bundle = makeRuntimePbvSynthesisBundle();
+        harness.setBundle(std::move(bundle), "runtime-pbv-synthesis");
+        harness.synthesis().setGlobalSeed(42);
+
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+        harness.TestBody();
+        EXPECT_TRUE(anySkipped(results));
+        EXPECT_FALSE(anyFailed(results));
+    };
+
+    float firstEpsilon = 0.0f;
+    float firstMomentum = 0.0f;
+    runHarness(firstEpsilon, firstMomentum);
+    EXPECT_FLOAT_EQ(firstEpsilon, 1e-5f);
+
+    float secondEpsilon = 0.0f;
+    float secondMomentum = 0.0f;
+    runHarness(secondEpsilon, secondMomentum);
+    EXPECT_FLOAT_EQ(secondEpsilon, 1e-5f);
+    EXPECT_FLOAT_EQ(secondMomentum, firstMomentum);
+}
 
 // An executor that throws ("unsupported graph") must yield a SKIP, not a FAIL —
 // the harness translates the throw into GTEST_SKIP.
