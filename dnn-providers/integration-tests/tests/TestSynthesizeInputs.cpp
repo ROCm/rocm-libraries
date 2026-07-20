@@ -10,7 +10,6 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
-#include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 
 #include "harness/input-init/SynthesizeInputs.hpp"
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -20,7 +19,6 @@
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests;
-using namespace hipdnn_tests::constants;
 
 namespace
 {
@@ -192,11 +190,18 @@ GraphResult buildConvBiasReluGraph()
 }
 
 // ── Batchnorm training with runtime PBV scalars ─────────────────────────────
+// uids: x=1, y=2, scale=3, bias=4, epsilon=5, prev_mean=8, prev_variance=9, momentum=10
 GraphResult buildBatchnormTrainingRuntimePbvGraph()
 {
     GraphResult result;
-    result.builder
-        = hipdnn_test_sdk::utilities::createBatchnormFwdTrainingRuntimePbvGraph(kDims, kStrides);
+    result.builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        kStrides,
+        kDims,
+        /*withMeanVariance=*/false,
+        /*overrideShapeEnabled=*/false,
+        /*runtimeEpsilon=*/true,
+        /*withRunningStatsAndMomentum=*/true,
+        /*runtimeMomentum=*/true);
     result.graph = GetGraph(result.builder.GetBufferPointer());
     return result;
 }
@@ -441,21 +446,15 @@ TEST(TestSynthesizeInputs, ConvPlusBiasPlusReluFused)
 TEST(TestSynthesizeInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 {
     const auto graph = buildBatchnormTrainingRuntimePbvGraph();
-    const std::vector<int64_t> leafUids = {K_BATCHNORM_TENSOR_X_UID,
-                                           K_BATCHNORM_TENSOR_SCALE_UID,
-                                           K_BATCHNORM_TENSOR_BIAS_UID,
-                                           K_BATCHNORM_TENSOR_EPSILON_UID,
-                                           K_BATCHNORM_TENSOR_PREV_RUNNING_MEAN_UID,
-                                           K_BATCHNORM_TENSOR_PREV_RUNNING_VARIANCE_UID,
-                                           K_BATCHNORM_TENSOR_MOMENTUM_UID};
+    const std::vector<int64_t> leafUids = {1, 3, 4, 5, 8, 9, 10};
 
     auto firstInputs = makeTensorsFromGraph(graph, leafUids);
     SynthesisConfig firstConfig;
     const auto firstResult = synthesizeInputs(*graph.graph, firstInputs, leafUids, firstConfig);
     ASSERT_TRUE(firstResult.filled) << firstResult.reason;
 
-    EXPECT_FLOAT_EQ(scalarValue(firstInputs, K_BATCHNORM_TENSOR_EPSILON_UID), 1e-5f);
-    const float firstMomentum = scalarValue(firstInputs, K_BATCHNORM_TENSOR_MOMENTUM_UID);
+    EXPECT_FLOAT_EQ(scalarValue(firstInputs, 5), 1e-5f);
+    const float firstMomentum = scalarValue(firstInputs, 10);
     EXPECT_GE(firstMomentum, 0.0f);
     EXPECT_LE(firstMomentum, 1.0f);
 
@@ -463,7 +462,7 @@ TEST(TestSynthesizeInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
     SynthesisConfig secondConfig;
     const auto secondResult = synthesizeInputs(*graph.graph, secondInputs, leafUids, secondConfig);
     ASSERT_TRUE(secondResult.filled) << secondResult.reason;
-    EXPECT_FLOAT_EQ(scalarValue(secondInputs, K_BATCHNORM_TENSOR_MOMENTUM_UID), firstMomentum);
+    EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
 }
 
 TEST(TestSynthesizeInputs, SdpaFwdNoStructuredOptionals)

@@ -25,19 +25,17 @@
 #include <variant>
 #include <vector>
 
-#include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
-#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 // NOLINTBEGIN(readability-identifier-naming)
 
 using namespace hipdnn_integration_tests::bundle;
-using namespace hipdnn_tests::constants;
 
 namespace
 {
@@ -213,12 +211,20 @@ protected:
     }
 };
 
+// uids: x=1, y=2, scale=3, bias=4, epsilon=5, prev_mean=8, prev_variance=9, momentum=10
 std::shared_ptr<IntegrationTestBundle> makeRuntimePbvSynthesisBundle()
 {
-    auto builder = hipdnn_test_sdk::utilities::createBatchnormFwdTrainingRuntimePbvGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {3, 1},
+        {2, 3},
+        /*withMeanVariance=*/false,
+        /*overrideShapeEnabled=*/false,
+        /*runtimeEpsilon=*/true,
+        /*withRunningStatsAndMomentum=*/true,
+        /*runtimeMomentum=*/true);
     auto bundle = std::make_shared<IntegrationTestBundle>();
     bundle->graphBuffer = builder.Release();
-    bundle->outputTensorUids = {K_BATCHNORM_TENSOR_Y_UID};
+    bundle->outputTensorUids = {2};
     return bundle;
 }
 
@@ -292,8 +298,8 @@ TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreSynthesizedEndToEnd
     const auto runHarness = [&](float& epsilon, float& momentum) {
         ::testing::TestPartResultArray results;
         const auto execute = [&](std::unordered_map<int64_t, void*>& variantPack) {
-            epsilon = *static_cast<const float*>(variantPack.at(K_BATCHNORM_TENSOR_EPSILON_UID));
-            momentum = *static_cast<const float*>(variantPack.at(K_BATCHNORM_TENSOR_MOMENTUM_UID));
+            epsilon = *static_cast<const float*>(variantPack.at(5));
+            momentum = *static_cast<const float*>(variantPack.at(10));
             EXPECT_GE(momentum, 0.0f);
             EXPECT_LE(momentum, 1.0f);
             throw hipdnn_integration_tests::EngineNotApplicableError(
