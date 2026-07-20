@@ -1,3 +1,9 @@
+# This reusable workflow is a narrow post-build instrumentation job for
+# hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
+# runs two small workloads under rocjitsu's race detector. The workloads run
+# entirely under CPU-side emulation, so the workflow uses the CPU build runner
+# instead of consuming GPU test capacity.
+
 name: TheRock rocjitsu race check Linux
 
 on:
@@ -19,11 +25,6 @@ permissions:
 jobs:
   rocjitsu-race-check-linux:
     name: rocjitsu race check (${{ inputs.amdgpu_families }})
-    # This is a narrow post-build instrumentation job for hipBLASLt.
-    # Normal package tests cover broad functionality; this job fetches the BLAS
-    # artifacts from the just-finished TheRock build and runs two small workloads
-    # under rocjitsu's race detector. The workloads run entirely under CPU-side
-    # emulation; use the CPU build runner instead of consuming GPU test capacity.
     runs-on: ${{ inputs.build_runs_on }}
     timeout-minutes: 90
     container:
@@ -67,6 +68,8 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           path: rocm-libraries
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
 
       - name: Checkout rocm-systems for rocjitsu
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -79,19 +82,16 @@ jobs:
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
 
-      # The base image contains the shell and source-control tools used before
-      # artifact fetch; install only the host libraries needed for the local
-      # rocjitsu source build. ROCm runtime pieces come from TheRock artifacts.
+      # The pinned base image already provides CA certificates, CMake, Git, and
+      # Ninja. Install only the remaining host development files needed for the
+      # local rocjitsu source build. ROCm runtime pieces come from TheRock
+      # artifacts.
       - name: Install rocjitsu build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
-            ca-certificates \
-            cmake \
-            git \
-            libdrm-dev \
-            ninja-build
+            libdrm-dev
 
       # Pull the BLAS runtime and test payload from the current TheRock build.
       # This is what keeps the check aligned with the exact hipBLASLt and
