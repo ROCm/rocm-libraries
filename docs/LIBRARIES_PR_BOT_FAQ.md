@@ -195,7 +195,6 @@ PRs that change real source code must include at least one accompanying unit tes
 | `*_test.*`  | `parser_test.cpp`   |
 | `*_tests.*` | `parser_tests.cpp`  |
 | `Test*`     | `TestUtils.cpp`     |
-| `*_gtest.*` | `matmul_gtest.cpp`  |
 
 **Path-based recognition**
 Any file located under a `test/gtest/` directory is also treated as a unit
