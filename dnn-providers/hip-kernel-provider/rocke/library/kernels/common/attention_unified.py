@@ -1175,8 +1175,12 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         fp16 winners were as accurate as flash).
       * no FP8 K/V (the combo reads bf16 K from LDS; the fp8 cache path uses
         the sync-dequant loader and its own routing).
-      * no ALiBi / QQ bias / softcap / sinks (not wired into the transposed
-        softmax VALU opts; the spec validator rejects them).
+      * no softcap / sinks (not wired into the transposed softmax VALU opts;
+        the spec validator rejects them).
+      * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
+        them per-score, so biased single-batch prefill takes the combo path
+        instead of the fallback. Only softcap/sinks are excluded (above)
+        because the mask-limit shortcut can't fold them.
       * no sliding window (the mask-once / mask-limit opts require no-SW).
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
@@ -1190,8 +1194,6 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
     if problem.dtype not in ("bf16", "fp16"):
         return False
     if problem.use_fp8:
-        return False
-    if problem.use_alibi or problem.use_qq_bias:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
@@ -1344,9 +1346,12 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         16x16 path it replaces lost accuracy on long-KV d128 fp16). The
         fp8 K/V cache path still uses the default kernel.
       * no FP8 K/V (transposed path doesn't dequant K/V from fp8 yet)
-      * no ALiBi or QQ bias (transposed mask block doesn't fold them yet)
       * head_size in {64, 128} (hd=256 not benchmarked yet)
       * no softcap / sinks (not wired into transposed softmax yet)
+      * ALiBi / QQ bias ARE admitted: ``_enable_combo_2d`` and
+        ``_enable_single_batch_combo`` short-circuit to True for biased
+        problems, routing them onto the transposed path (whose softmax body
+        applies bias per-score). Only softcap/sinks stay excluded below.
 
     The validated ``_enable_combo_2d`` family is a superset that DOES wire
     sinks (and sliding window) through the transposed softmax, so it
@@ -1370,8 +1375,8 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.use_fp8:
         return False
-    if problem.use_alibi or problem.use_qq_bias:
-        return False
+    # Only softcap/sinks gated here — alibi/qq_bias are handled by the
+    # transposed softmax body, so do NOT add them to this check.
     if problem.softcap > 0 or problem.use_sinks:
         return False
     if problem.head_size not in (64, 128):
@@ -1611,9 +1616,25 @@ def _gfx942_flash_wide_setting() -> int:
 
 
 def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem) -> int:
-    # D64 and D128 prefill now share the wide (num_warps=4) sliced-K ring path
-    # (the ring superseded the prior D64 nw2/single-buffer config: 13-17% faster,
-    # beats Torch at S2048). See _enable_gfx942_flash_k_sliced_ring.
+    """Single source of truth for the gfx942 flash num_warps, for BOTH dtypes.
+
+    Mirrors attention_spec_builder._tiled_spec_from_problem so the launch-meta
+    grid/block matches the geometry the launcher actually builds:
+      * ring active (fp16, or bf16 D64/D128 prefill): the wide sliced-K ring
+        geometry -> _gfx942_flash_wide_setting() (nw=4 by default; 2 or 0 via
+        HIPDNN_GFX942_FLASH_WIDE). A 0/disabled setting means the L4 (WG=64)
+        fallback, i.e. num_warps=1.
+      * bf16 without the ring: the legacy bf16-wide geometry (nw=2, or the
+        smalltile double-K nw).
+    D64 and D128 prefill share the wide (num_warps=4) sliced-K ring path (the ring
+    superseded the prior D64 nw2/single-buffer config: 13-17% faster, beats Torch
+    at S2048). See _enable_gfx942_flash_k_sliced_ring.
+    """
+    if _enable_gfx942_bf16_flash(problem) and not _enable_gfx942_flash_k_sliced_ring(
+        problem
+    ):
+        nw, _ = _gfx942_bf16_wide_geometry(problem)
+        return nw
     wide = _gfx942_flash_wide_setting()
     return wide if wide in (2, 4) else 1
 
@@ -1665,11 +1686,13 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # mask-limit (nw4) vs the prior per-head bests: D64 13-17% faster (beats Torch
     # at S2048, ~parity elsewhere); D128 beats Torch S2048/S4096. So D64 and D128
     # prefill now share the ring path.
-    # bf16 ring is correctness-verified only for D64 — D128 bf16 ring produces
-    # wrong results (max_abs ~3-5, NaN/Inf for MHA) in the kernel generator and
-    # is excluded until the D128 bf16 ring path in attention_tiled_2d.py is fixed.
-    if _enable_gfx942_bf16_flash(problem) and problem.head_size == 128:
-        return False
+    # bf16 D128 now shares the ring path: the earlier exclusion attached the ring
+    # to the non-ring bf16-WIDE geometry (nw=2, no cfvst), which the ring cannot
+    # use -- the ring requires the conflict-free-V store (cfvst) and the wide nw=4
+    # flash geometry. The spec builder's ring branch instead uses the fp16-flash
+    # geometry (nw=4, tile=64, cfvst) -- verified numerically correct on gfx942
+    # (max_abs 0.00049, no NaN/Inf, GQA + MHA) on both the Python and C++ engines,
+    # with the byte-identity gate GREEN. So D64 and D128 bf16 prefill share the ring.
     if not (
         (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
         and problem.head_size in (64, 128)
@@ -1733,13 +1756,11 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.sliding_window > 0:
         return False
-    if problem.softcap > 0:
-        return False
-    if problem.use_alibi:
-        return False
-    if problem.use_qq_bias:
-        return False
     if _kv_storage_dtype(problem) is not None:
+        return False
+    # register-pv v1 does not implement softcap, ALiBi, or QQ-bias paths;
+    # the spec __post_init__ enforces this.
+    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
         return False
     # use_register_pv requires the 16x16x32 MFMA path; it conflicts with
     # use_mfma_32x32. When the 32x32 path is selected we leave it disabled
@@ -1787,8 +1808,6 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
     # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
     # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
-    if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
-        return False
     if problem.head_size != 64 or problem.block_size != 32:
         return False
     if problem.num_queries_per_kv != 8:
@@ -1825,6 +1844,10 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem) -> bool:
     sliding window (the SW combo keeps its own nw2/T32 mask handling).
     """
     if problem.sliding_window > 0:
+        return False
+    # use_transposed_mask_limit (and the other VALU sub-flags) do not support
+    # softcap, ALiBi or QQ bias; the spec __post_init__ enforces this.
+    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
         return False
     return _enable_transposed_qk_32x32(problem)
 
@@ -2171,7 +2194,10 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             return min(segments, 32)
         if problem.head_size == 128:
             return min(segments, 16)
-        return min(segments, 64)
+        # D256: sweep (decode_shapes_perf gfx942) shows seg128 wins or ties at
+        # every kv_len — do not cap below the formula value.
+        if problem.head_size != 256:
+            return min(segments, 64)
     return segments
 
 
@@ -2216,6 +2242,26 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
     # async DMA. (The remaining decode gap vs Torch is structural -- 64-thread /
     # narrow-MFMA / LDS round-trip -- and needs the segment-kernel restructure.)
     return True
+
+
+def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
+    """Predicate: true when this problem belongs to the D256 bf16 decode cohort.
+
+    Intended for bf16, head_size=256, decode-only (all_decode=True) shapes; the
+    architecture gate (gfx942/gfx950) is enforced by the dispatcher/caller.
+    Excludes sliding window, softcap, sinks, ALiBi, and QQ-bias.
+    """
+    return (
+        problem.head_size == 256
+        and problem.dtype == "bf16"
+        and problem.all_decode
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0.0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+    )
 
 
 def _env_enabled_true(var: str) -> bool:
@@ -3285,8 +3331,11 @@ def _get_2d_launch_meta(
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
     if _enable_gfx942_bf16_flash(problem):
-        nw, _ = _gfx942_bf16_wide_geometry(problem)
-        num_warps = nw
+        # _select_gfx942_flash_num_warps mirrors the spec builder for BOTH dtypes:
+        # ring-active -> fp16-flash wide geometry; bf16 non-ring -> bf16-wide nw.
+        # (Using a mismatched nw here would compute the grid/block for a different
+        # geometry than the launcher actually builds.)
+        num_warps = _select_gfx942_flash_num_warps(problem)
         block_m_per_warp = 32
     elif _enable_gfx942_fp16_flash(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
