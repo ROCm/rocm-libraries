@@ -19,6 +19,7 @@
 
 #include "hip/thread"
 
+#include "hip/__support/misuse.h"
 #include <cstdlib>
 #include <hip/atomic>
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
@@ -601,8 +602,11 @@ __host__ thread::thread() noexcept {
 
 __host__ __device__ thread &thread::operator=(thread &&other) noexcept {
 #ifdef __HIP_DEVICE_COMPILE__
-    if (joinable()) {
-        assert(!joinable() && "Attempted to assign to a hip::thread object that still has an associated thread");
+    if (joinable()) [[unlikely]] {
+        __HIPTHREADS_REPORT_MISUSE("move-assigned onto a still-joinable hip::thread. A hip::thread must be "
+                                   "join()ed or detach()ed before it is destroyed or move-assigned onto.");
+        // Nonfatal mode: detection recorded; leave *this owning its thread.
+        return *this;
     }
 
     worknode_d = other.worknode_d;
@@ -619,11 +623,17 @@ __host__ __device__ thread &thread::operator=(thread &&other) noexcept {
 }
 
 __host__ __device__ thread::~thread() {
-    if (joinable()) {
 #ifdef __HIP_DEVICE_COMPILE__
-        assert(!joinable() && "Attempted to destroy a hip::thread object that still has an associated thread");
+    if (joinable()) [[unlikely]] {
+        __HIPTHREADS_REPORT_MISUSE("destroyed a still-joinable hip::thread. A hip::thread must be join()ed "
+                                   "or detach()ed before it is destroyed or move-assigned onto.");
+        // Nonfatal mode: detection recorded; detach so the still-running work
+        // node is cleaned up and the test can continue to a clean exit.
+        detach();
+        return;
     }
 #else
+    if (joinable()) {
         ::std::terminate();
     }
     if (--gpuThreadFromHost_counter == 0) {
@@ -656,16 +666,19 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
 __host__ __device__ void thread::join() {
 #ifdef __HIP_DEVICE_COMPILE__
     // TODO: check that the user has called hip::start(), in case they use a hip kernel launch to get here
-    if (!joinable()) {
-        assert(joinable() && "Attempted to join a hip::thread object that doesn't have an associated thread");
-    }
+    // Nonfatal mode: nothing to join; detection recorded, __HIPTHREADS_ASSERT causes early return.
+    __HIPTHREADS_ASSERT(joinable(),
+                        "join() called on a hip::thread that has no associated thread (not joinable). "
+                        "Only a joinable hip::thread (one that has not been join()ed or detach()ed) "
+                        "may be join()ed.");
     // A cached value is ok here because if we did call join on ourselves, then we would have been the ones to write to
     // worknode_d->link_to_self when we popped worknode_d off the work queue. It's also not possible for
     // worknode_d->link_to_self == nullptr if we called join on ourselves, because calling join implies nobody will call
     // detach, and the actively executing thread is by definition, not finished.
-    if (worknode_d->link_to_self == &currentWorkNode[blockIdx.x]) {
-        assert(false && "Attempted to join the hip::thread object associated with the active thread");
-    }
+    // Nonfatal mode: a self-join can never complete; detection recorded, __HIPTHREADS_ASSERT causes early return.
+    __HIPTHREADS_ASSERT(worknode_d->link_to_self != &currentWorkNode[blockIdx.x],
+                        "join() called on the hip::thread associated with the currently-running thread "
+                        "(self-join). A thread cannot join itself; this would spin forever.");
     // We don't need to lock here because we know nobody is going to call detach on worknode_d.
     while (!worknode_d->isSchedulerDoneWith()) {
         // spin while we wait for it to finish.
@@ -693,9 +706,11 @@ __host__ __device__ void thread::join() {
 
 __host__ __device__ void thread::detach() {
 #ifdef __HIP_DEVICE_COMPILE__
-    if (!joinable()) {
-        assert(joinable() && "Attempted to detach a hip::thread object that doesn't have an associated thread");
-    }
+    // Nonfatal mode: nothing to detach; detection recorded, __HIPTHREADS_ASSERT causes early return.
+    __HIPTHREADS_ASSERT(joinable(),
+                        "detach() called on a hip::thread that has no associated thread (not joinable). "
+                        "Only a joinable hip::thread (one that has not been join()ed or detach()ed) "
+                        "may be detach()ed.");
 
     worknode_d->release();
 

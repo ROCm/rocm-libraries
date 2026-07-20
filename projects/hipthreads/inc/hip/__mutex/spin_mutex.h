@@ -23,6 +23,7 @@
 #include "hip/thread_config"
 
 #include "hip/hip_runtime.h"
+#include "hip/__support/misuse.h"
 #include <cassert>
 #include <cstdint>
 
@@ -100,7 +101,9 @@ class _LIBHIPTHREADS_TYPE_VIS _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(capability
             //
             // Technically this is more strict than we need to be, because we're doing this at a block level and not a
             // wave level, but that's fine.
-            assert(ownerBlockId != myBlockId && "Deadlock detected: Tried to acquire a lock already owned by someone in the same block");
+            __HIPTHREADS_ASSERT(ownerBlockId != myBlockId,
+                                "recursive lock of a non-recursive hip::spin_mutex: a block already "
+                                "holding the lock tried to acquire it again (would livelock).");
         }
     }
     
@@ -140,8 +143,10 @@ class _LIBHIPTHREADS_TYPE_VIS _LIBHIPTHREADS_THREAD_SAFETY_ANNOTATION(capability
         __threadfence();
         // This counts as the atomic store operation 'X' described in "Fence-atomic synchronization" at
         // https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
-        [[maybe_unused]] uint64_t oldOwner = atomicExch(&owner, INVALID_OWNER);
-        assert(oldOwner == blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z);
+        uint64_t oldOwner = atomicExch(&owner, INVALID_OWNER);
+        __HIPTHREADS_ASSERT(oldOwner == blockIdx.x + gridDim.x * blockIdx.y + gridDim.x * gridDim.y * blockIdx.z,
+                            "unlock of a hip::spin_mutex by a block that does not own it (corrupts the "
+                            "owner state of whichever block did own it).");
     }
 };
 
