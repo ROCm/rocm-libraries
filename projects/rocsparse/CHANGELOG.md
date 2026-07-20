@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+(Unreleased) rocSPARSE 5.0.0
+
+### Added
+* Added `rocsparse_sddmm` batched support to COO format.
+
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added
