@@ -199,7 +199,11 @@ void graphBindings(nb::module_& m)
         .def("get_intermediate_data_type", &graph::Graph::get_intermediate_data_type)
         .def("get_io_data_type", &graph::Graph::get_io_data_type)
         .def("get_preferred_engine_id_ext", &graph::Graph::get_preferred_engine_id_ext)
-        .def("tensor", &graph::Graph::tensor, nb::rv_policy::reference)
+        .def_static("tensor",
+                    static_cast<std::shared_ptr<graph::TensorAttributes> (*)(
+                        const graph::TensorAttributes&)>(&graph::Graph::tensor),
+                    nb::arg("tensor"),
+                    nb::rv_policy::reference)
         .def_static(
             "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
         .def(
