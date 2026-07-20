@@ -103,6 +103,10 @@ jobs:
             ${{ inputs.cmake_options }}
           BUILD_DIR: build-coverage
         run: |
+          # Override PROFILE_DIR with the container workspace path so the coverage
+          # profraw path baked into the tests is valid on the test node too
+          # (build and test containers share ${GITHUB_WORKSPACE}=/__w/...).
+          export extra_cmake_options="${extra_cmake_options} -DPROFILE_DIR=${GITHUB_WORKSPACE}/coverage-report"
           python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-artifacts and therock-dist

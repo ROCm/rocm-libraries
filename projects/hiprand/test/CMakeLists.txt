@@ -43,7 +43,7 @@ else()
     endif()
 endif()
 
-set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
+set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report" CACHE PATH "Directory for coverage profraw/report output; CI overrides via -DPROFILE_DIR so the path is valid on the test node")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
