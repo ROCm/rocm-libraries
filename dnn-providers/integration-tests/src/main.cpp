@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -324,6 +325,21 @@ int main(int argc, char** argv) noexcept
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+
+        {
+            const auto* unit = ::testing::UnitTest::GetInstance();
+            const int total = unit->test_to_run_count();
+            const int passed = unit->successful_test_count();
+            const int skip = unit->skipped_test_count();
+            const int failed = unit->failed_test_count();
+            const double pct = total > 0 ? 100.0 * passed / total : 0.0;
+
+            std::cerr << "\n==== TEST COVERAGE SUMMARY ====\n"
+                      << "Passed:  " << passed << " / " << total << " (" << std::fixed
+                      << std::setprecision(1) << pct << "%)\n"
+                      << "Skipped: " << skip << "\n"
+                      << "Failed:  " << failed << "\n";
+        }
 
         // Generate support matrix if requested
         if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
