@@ -206,15 +206,14 @@ private:
     // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
     bool synthesizeInputs();
 
-    OutputTensors allocateSentinelOutputs() const;
-    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
-                                                        bool useDevice) const;
-
     // ── buffer allocation + execution ───────────────────────────────────
     // allocateSentinelOutputs / buildVariantPack prepare the buffers;
     // runEngine* / runReference* call the executors and capture results.
     // Outputs are sentinel-filled (NaN) so an unwritten output element is
     // caught by allClose rather than masquerading as a computed zero.
+    OutputTensors allocateSentinelOutputs() const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
+                                                        bool useDevice) const;
     // Runs the engine into fresh output buffers. Returns nullopt if the
     // engine threw (its message is written to `error`) or raised a fatal
     // GTest failure (in which case `error` is left empty).

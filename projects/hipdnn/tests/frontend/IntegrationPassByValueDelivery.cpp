@@ -104,7 +104,6 @@ protected:
 
         Tensor<float> xTensor(dims);
         Tensor<float> scaleTensor(scaleDims);
-        Tensor<float> yTensor(dims);
         xTensor.fillWithValue(1.0f);
         scaleTensor.fillWithValue(1.0f);
 
@@ -138,7 +137,7 @@ protected:
 
         // Exercise the shared frontend harness: ordinary tensors use device
         // storage while the runtime pass-by-value epsilon uses host storage.
-        hipdnn_test_sdk::utilities::GraphTensorBundle tensorBundle(graph, hostEpsilonValue);
+        const hipdnn_test_sdk::utilities::GraphTensorBundle tensorBundle(graph, hostEpsilonValue);
         auto variantPack = tensorBundle.variantPack();
 
         result = graph.execute(_handle, variantPack, nullptr);
