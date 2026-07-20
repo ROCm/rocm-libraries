@@ -6,10 +6,10 @@
 .DESCRIPTION
     Installs dnn-benchmark into the ROCm wheel env named by the ROCM_WHEEL_VENV env
     var (published by wheel_build_setup.ps1); if it's unset, wheel_build_setup.ps1 is
-    run to create the venv and set it. Optionally builds hipDNN + the Python bindings
-    and the MIOpen provider from source (-ForceBuild), wires the bindings onto the env
-    via a .pth, installs the tool (editable) and PyTorch per -TorchMode, then verifies
-    the result.
+    run to create the venv and set it. Optionally builds hipDNN, the standalone
+    Python bindings, and the MIOpen provider from source (-ForceBuild), wires the
+    bindings onto the env via a .pth, installs the tool (editable) and PyTorch per
+    -TorchMode, then verifies the result.
 
     Parameters mirror setup.sh where they apply on Windows. setup.sh's venv
     management (--reuse-venv / --workspace) is omitted: this script installs into
@@ -29,9 +29,10 @@
     Override the pip index URL used for torch (setup.sh --torch-index-url).
 
 .PARAMETER ForceBuild
-    Build hipDNN (with bindings) and the MIOpen provider from source, then install
-    them to -InstallDir (setup.sh --force-build). Needs the MSVC toolchain and a
-    ROCm devel prefix (the _rocm_sdk_devel wheel, or -RocmPrefix).
+    Build hipDNN, the standalone Python bindings, and the MIOpen provider from
+    source. hipDNN/provider artifacts install to -InstallDir; Python bindings stay
+    in their build tree and are wired onto the env via a .pth. Needs the MSVC
+    toolchain and a ROCm devel prefix (the _rocm_sdk_devel wheel, or -RocmPrefix).
 
 .PARAMETER RocmPrefix
     Explicit ROCm/hipDNN prefix for the binding/provider build (setup.sh
@@ -78,9 +79,13 @@ $PSNativeCommandUseErrorActionPreference = $false
 # --- Paths -----------------------------------------------------------------
 $ScriptDir   = $PSScriptRoot
 $HipdnnRoot  = (Resolve-Path (Join-Path $ScriptDir '..\..')).Path
-$BindingsPkg = Join-Path $HipdnnRoot 'python'
-$BindingsLib = Join-Path $HipdnnRoot 'build\lib'
-$BuildDir    = Join-Path $HipdnnRoot 'build'
+$BuildDir = Join-Path $HipdnnRoot 'build'
+$BindingsRoot  = Join-Path $HipdnnRoot 'python'
+$BindingsSrc   = Join-Path $BindingsRoot 'frontend_bindings'
+$BindingsBuild = Join-Path $BuildDir 'python'
+$BindingsPackage = Join-Path $BindingsBuild 'wheel_package'
+$BindingsPkgDir = Join-Path $BindingsPackage 'hipdnn_frontend'
+$BindingsPackScript = Join-Path $BindingsRoot 'frontend_wheel_package\pack_frontend_wheel.py'
 $ProviderDir = Join-Path $HipdnnRoot '..\..\dnn-providers\miopen-provider'
 $BuildType   = 'Release'
 $WinSdkRoot  = 'C:\Program Files (x86)\Windows Kits\10'
@@ -296,7 +301,7 @@ if ($ForceBuild) {
     # Don't override a caller-set value.
     if (-not $env:PYTORCH_ROCM_ARCH) { $env:PYTORCH_ROCM_ARCH = $GpuArch }
 
-    # hipDNN: configure -> build -> install (Python bindings included).
+    # hipDNN: configure -> build -> install.
     $hipdnnArgs = @(
         '-GNinja'
         "-DCMAKE_BUILD_TYPE=$BuildType"
@@ -310,12 +315,32 @@ if ($ForceBuild) {
         "-DAMDGPU_TARGETS=$GpuArch"
         '-DENABLE_CLANG_FORMAT=OFF'
         '-DHIPDNN_SKIP_TESTS=ON'
-        '-DHIPDNN_BUILD_PYTHON_BINDINGS=ON'
         "-DCMAKE_INSTALL_PREFIX=`"$installFwd`""
     )
     $hipdnnStages = New-CMakeStages -Source $HipdnnRoot -Build $BuildDir -ConfigureArgs $hipdnnArgs
-    Invoke-ToolchainBuild -Title "Building + installing hipDNN (with Python bindings)" `
+    Invoke-ToolchainBuild -Title "Building + installing hipDNN" `
         -Commands $hipdnnStages | Out-Null
+
+    # Python bindings: standalone CMake project against the installed hipDNN artifacts.
+    $bindingsPrefixPath = "$installFwd;$wheelFwd"
+    $bindingsArgs = @(
+        '-GNinja'
+        "-DCMAKE_BUILD_TYPE=$BuildType"
+        "-DCMAKE_CXX_COMPILER=`"$wheelFwd/lib/llvm/bin/clang++.exe`""
+        "-DCMAKE_MAKE_PROGRAM=`"$ninjaFwd`""
+        "-DCMAKE_PREFIX_PATH=`"$bindingsPrefixPath`""
+        "-DPython_EXECUTABLE=`"$pythonFwd`""
+    )
+    $cmakeCmd = '"{0}"' -f $CMakeExe
+    $bindingsSrc = '"{0}"' -f (Fwd $BindingsSrc)
+    $bindingsBld = '"{0}"' -f (Fwd $BindingsBuild)
+    $bindingsConfigure = '{0} -S {1} -B {2} {3}' -f $cmakeCmd, $bindingsSrc, $bindingsBld, ($bindingsArgs -join ' ')
+    $bindingsBuildCmd = '{0} --build {1}' -f $cmakeCmd, $bindingsBld
+    $bindingsPackScript = '"{0}"' -f (Fwd $BindingsPackScript)
+    $bindingsPackageDir = '"{0}"' -f (Fwd $BindingsPackage)
+    $bindingsPackCmd = '"{0}" {1} --build-dir {2} --wheel-dir {3}' -f $pythonFwd, $bindingsPackScript, $bindingsBld, $bindingsPackageDir
+    Invoke-ToolchainBuild -Title "Building hipDNN Python bindings" `
+        -Commands @($bindingsConfigure, $bindingsBuildCmd, $bindingsPackCmd) | Out-Null
 
     # MIOpen provider: built against the freshly installed hipDNN (best-effort).
     if ($ProviderDir) {
@@ -361,12 +386,13 @@ if ($ForceBuild) {
 }
 
 # --- 4. Wire the compiled bindings onto the environment via a .pth ----------
-# Bindings build out-of-tree. Add python/ (the package) plus the directory that
-# holds the compiled extension to site-packages. The .pyd can land in build/lib
-# (Ninja, -ForceBuild) or build/<config>/lib (multi-config generators), so probe
-# all three and prefer a release build over a debug one.
+# Bindings build out-of-tree as a standalone CMake project. Add the staged
+# wheel package root to site-packages; it contains the configured
+# hipdnn_frontend/__init__.py and the compiled extension.
+# Probe legacy and multi-config extension locations for already-built trees.
 $pydDir = $null
-foreach ($cand in @($BindingsLib,
+foreach ($cand in @($BindingsPkgDir,
+                    (Join-Path $BindingsBuild 'lib'),
                     (Join-Path $BuildDir 'release\lib'),
                     (Join-Path $BuildDir 'debug\lib'))) {
     if (Get-ChildItem -Path $cand -Filter 'hipdnn_frontend_python*.pyd' -ErrorAction SilentlyContinue) {
@@ -387,7 +413,8 @@ elseif ($pydDir) {
     # bin/ via os.add_dll_directory from the .pth — stashing the handle on sys so
     # it isn't GC'd before the import. ROCm deps are preloaded by the package
     # __init__ (rocm_sdk / ROCM_PATH) ahead of the extension import.
-    $lines = @($BindingsPkg, $pydDir)
+    $lines = @($BindingsPackage)
+    if ($pydDir -ne $BindingsPkgDir) { $lines += $pydDir }
     $backendBin = Join-Path (Split-Path $pydDir -Parent) 'bin'
     if (Test-Path (Join-Path $backendBin 'hipdnn_backend.dll')) {
         $lines += "import os, sys; _p = r'$backendBin'; sys.__dict__.setdefault('_hipdnn_dll_dirs', []).append(os.add_dll_directory(_p))"
@@ -395,13 +422,13 @@ elseif ($pydDir) {
 
     $sitePkgs = (& $Python -c "import sysconfig; print(sysconfig.get_path('purelib'))").Trim()
     $pth = Join-Path $sitePkgs 'hipdnn_frontend.pth'
-    Write-Step "Wiring hipdnn_frontend onto the env via $pth (extension in $pydDir)"
+    Write-Step "Wiring hipdnn_frontend onto the env via $pth (package in $BindingsPackage)"
     Set-Content -Path $pth -Value $lines -Encoding ascii
 }
 else {
     Write-Warn ("hipdnn_frontend is not importable and no compiled extension was found " +
-                "under $BindingsLib or $BuildDir\<config>\lib. Re-run with -ForceBuild, or " +
-                "pip-install the bindings from $BindingsPkg (see python/README.md).")
+                "under $BindingsPkgDir or legacy build lib directories. Re-run with -ForceBuild, " +
+                "or build the standalone CMake project under $BindingsSrc.")
 }
 
 # --- 5. Install the dnn-benchmark package + PyTorch ------------------------
