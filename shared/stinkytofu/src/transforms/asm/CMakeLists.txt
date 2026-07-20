@@ -25,6 +25,7 @@ target_sources(stinkytofu_objs PRIVATE
     RegionClonePass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
+    InsertPseudoClusterBarrierPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
     RemoveInstructionPass.cpp

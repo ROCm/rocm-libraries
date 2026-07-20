@@ -40,6 +40,7 @@
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertPseudoClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
@@ -75,6 +76,14 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     if (enableWaitCnt) {
         pm.addPass(createStinkyRemoveWaitCntPass());
         pm.addPass(createStinkyRemoveNopPass());
+    }
+
+    // Plant PSEUDO_CLUSTER_BARRIER placeholders before scheduling so the DAG
+    // keeps them ordered via their SCC dependency, then a post-DAG pass expands
+    // them into concrete s_barrier_signal/wait -3. Runs after CFGBuilder (needs
+    // BBs for anchor detection) and before BuildImplicitDependency/DAG.
+    if (module.getModuleOptions().ClusterBarrier) {
+        pm.addPass(createInsertPseudoClusterBarrierPass());
     }
 
     // addPeepholeOptPasses(pm, optLevel);

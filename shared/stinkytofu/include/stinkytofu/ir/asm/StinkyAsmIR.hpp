@@ -329,20 +329,26 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     }
 
     /// Creates a cluster-barrier placeholder pseudo-instruction (emits no assembly).
-    /// It is inserted before the DAG scheduler carrying dependency operands so the
-    /// scheduler keeps it ordered relative to its anchor, and is expanded into the
-    /// concrete s_barrier_signal/wait -3 sequence (described by
-    /// PseudoClusterBarrierData) by the post-DAG expansion pass.
+    /// It is inserted before the DAG scheduler and expanded into the concrete
+    /// s_barrier_signal/wait -3 sequence (described by PseudoClusterBarrierData)
+    /// by the post-DAG expansion pass.
     /// See docs/developer/pseudo-cluster-barrier-plan.md.
     ///
-    /// No IF_HasSideEffect flag: the scheduler must treat it as an ordinary,
-    /// movable node whose ordering comes solely from its def-use operands.
+    /// IF_HasSideEffect: like FENCE, this makes the DAG scheduler treat the
+    /// placeholder as a NON-movable region boundary whose position is strictly
+    /// preserved. That pins it exactly where the inserting pass places it (right
+    /// after its anchor `s_barrier_wait -1`) and, because nothing is scheduled
+    /// across a side-effect boundary, keeps any SCC (or other) def->use chain
+    /// from being split around the future expansion point.
     StinkyInstruction* createPseudoClusterBarrier(
-        PseudoClusterBarrierData::Kind kind = PseudoClusterBarrierData::Kind::SignalWait) {
+        PseudoClusterBarrierData::Kind kind = PseudoClusterBarrierData::Kind::SignalWait,
+        IRBase* insertBefore = nullptr) {
         static const HwInstDesc pseudoClusterBarrierMCID{
-            GFX::PSEUDO_CLUSTER_BARRIER, GFX::PSEUDO_CLUSTER_BARRIER, 0, 0, 0,
-            "PSEUDO_CLUSTER_BARRIER",    makeFlagSet({})};
-        StinkyInstruction* inst = create(&pseudoClusterBarrierMCID);
+            GFX::PSEUDO_CLUSTER_BARRIER, GFX::PSEUDO_CLUSTER_BARRIER,
+            0,                           0,
+            0,                           "PSEUDO_CLUSTER_BARRIER",
+            makeFlagSet({InstFlag::IF_HasSideEffect})};
+        StinkyInstruction* inst = create(&pseudoClusterBarrierMCID, insertBefore);
         inst->addModifier<PseudoClusterBarrierData>(PseudoClusterBarrierData{kind});
         return inst;
     }

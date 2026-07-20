@@ -35,6 +35,7 @@
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/InsertPseudoClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/LongBranchLoweringPass.hpp"
@@ -120,6 +121,8 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createMemTokenConsistencyCheckPass(); }},
     {"RaiseVgprMsbPass", [](const auto&) { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
+    {"InsertPseudoClusterBarrierPass",
+     [](const auto&) { return createInsertPseudoClusterBarrierPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},
