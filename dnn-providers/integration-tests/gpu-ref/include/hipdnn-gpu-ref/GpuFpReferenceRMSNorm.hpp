@@ -39,6 +39,21 @@ inline std::vector<std::string> buildRMSNormFwdDefines()
 
 class GpuFpReferenceRMSNorm
 {
+private:
+    struct TensorProps
+    {
+        std::string name;
+        const std::vector<int64_t>* dims;
+        const std::vector<int64_t>* strides;
+
+        TensorProps(std::string n, const std::vector<int64_t>* d, const std::vector<int64_t>* s)
+            : name(std::move(n))
+            , dims(d)
+            , strides(s)
+        {
+        }
+    };
+
 public:
     static constexpr unsigned int BLOCK_SIZE = 256;
 
@@ -55,7 +70,7 @@ public:
                       hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms = nullptr,
                       hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias = nullptr)
     {
-        validateInput(input, scale, output, invRms, bias);
+        validateFwdInput(input, scale, output, invRms, bias);
 
         auto defines = detail::buildRMSNormFwdDefines<InputDataType,
                                                       ScaleDataType,
@@ -92,155 +107,162 @@ private:
           || std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>;
 
     static void validateConsistentDimensions(const std::vector<int64_t>& inputDims,
-                                             const std::vector<int64_t>& scaleDims,
-                                             const std::vector<int64_t>& outputDims,
-                                             const std::vector<int64_t>* invRmsDims,
-                                             const std::vector<int64_t>* biasDims)
+                                             const std::vector<TensorProps>& otherIOTensorProps,
+                                             const std::vector<TensorProps>& affineTensorProps,
+                                             const std::vector<int64_t>* invRmsDims)
     {
-        // Validate the tensor ranks
-        const auto& nDims = inputDims.size();
+        const auto nDims = inputDims.size();
 
+        // Validate input tensor rank
         if(nDims < 3 || nDims > 5)
         {
-            throw std::invalid_argument(
-                "RMSNorm forward requires input tensor rank to be 3, 4, or 5.");
+            throw std::invalid_argument("RMSNorm requires input tensor rank to be 3, 4, or 5.");
         }
 
-        if(scaleDims.size() != nDims)
+        // Validate all other I/O tensors have the same rank and shape as the input tensor
+        for(const auto& [name, dims, strides] : otherIOTensorProps)
         {
-            throw std::invalid_argument(
-                "RMSNorm forward requires scale tensor rank to be equal to the input tensor rank.");
-        }
-
-        if(outputDims.size() != nDims)
-        {
-            throw std::invalid_argument("RMSNorm forward requires output tensor rank to be equal "
-                                        "to the input tensor rank.");
-        }
-
-        if(invRmsDims != nullptr && invRmsDims->size() != nDims)
-        {
-            throw std::invalid_argument("RMSNorm forward requires invRms tensor rank to be equal "
-                                        "to the input tensor rank.");
-        }
-
-        if(biasDims != nullptr && biasDims->size() != nDims)
-        {
-            throw std::invalid_argument(
-                "RMSNorm forward requires bias tensor rank to be equal to the input tensor rank.");
-        }
-
-        // Validate the compatibility of the input and output dimensions
-        if(inputDims != outputDims)
-        {
-            throw std::invalid_argument(
-                "RMSNorm forward requires input and output tensors to have the same shape.");
-        }
-
-        // Validate the compatibility of the scale and bias dimensions with the input dimensions
-        if(biasDims != nullptr && scaleDims != *biasDims)
-        {
-            throw std::invalid_argument(
-                "RMSNorm forward requires scale and bias tensors to have the same shape.");
-        }
-
-        const auto& normalizeDim = getNormalizeDim(inputDims, scaleDims);
-        if(!std::all_of(scaleDims.begin(),
-                        scaleDims.begin()
-                            + static_cast<std::vector<int64_t>::difference_type>(normalizeDim),
-                        [](int64_t d) { return d == 1; }))
-        {
-            throw std::invalid_argument("RMSNorm forward requires affine tensor dimensions to have "
-                                        "1s in the leading dimensions.");
-        }
-
-        // Validate invRms dimensions are compatible with input and scale tensors
-        if(invRmsDims != nullptr)
-        {
-            std::vector<int64_t> expectedInvRmsDims = inputDims;
-            for(size_t i = 0; i < expectedInvRmsDims.size(); ++i)
+            if(dims == nullptr)
             {
-                if(scaleDims[i] != 1)
+                continue;
+            }
+            if(dims->size() != nDims)
+            {
+                throw std::invalid_argument("RMSNorm requires " + name
+                                            + " tensor rank to be equal to the input tensor rank.");
+            }
+            if(*dims != inputDims)
+            {
+                throw std::invalid_argument("RMSNorm requires " + name
+                                            + " and input tensors to have the same shape.");
+            }
+        }
+
+        // Validate all affine tensors have the same rank as the input tensor
+        for(const auto& [name, dims, strides] : affineTensorProps)
+        {
+            if(dims == nullptr)
+            {
+                continue;
+            }
+            if(dims->size() != nDims)
+            {
+                throw std::invalid_argument("RMSNorm requires " + name
+                                            + " tensor rank to be equal to the input tensor rank.");
+            }
+        }
+
+        // Find the first available affine tensor to use as the shape reference for the rest
+        const TensorProps* refAffineTensorProp = nullptr;
+        for(const auto& prop : affineTensorProps)
+        {
+            if(prop.dims != nullptr)
+            {
+                refAffineTensorProp = &prop;
+                break;
+            }
+        }
+
+        // Validate all affine tensors have the same shape as the first affine tensor
+        if(refAffineTensorProp != nullptr)
+        {
+            for(const auto& [name, dims, strides] : affineTensorProps)
+            {
+                if(dims == nullptr || dims == refAffineTensorProp->dims)
                 {
-                    expectedInvRmsDims[i] = 1;
+                    continue;
+                }
+                if(*dims != *refAffineTensorProp->dims)
+                {
+                    throw std::invalid_argument("RMSNorm requires " + name + " and "
+                                                + refAffineTensorProp->name
+                                                + " tensors to have the same shape.");
                 }
             }
-            if(*invRmsDims != expectedInvRmsDims)
+
+            // Validate affine tensor dimensions have 1s in the leading dimensions
+            const auto& affineDims = *refAffineTensorProp->dims;
+            const auto& normalizeDim = getNormalizeDim(inputDims, affineDims);
+            if(!std::all_of(affineDims.begin(),
+                            affineDims.begin()
+                                + static_cast<std::vector<int64_t>::difference_type>(normalizeDim),
+                            [](int64_t d) { return d == 1; }))
             {
-                throw std::invalid_argument(
-                    "RMSNorm forward requires invRms tensor dimensions to be derived from the "
-                    "input and scale tensor dimensions.");
+                throw std::invalid_argument("RMSNorm requires affine tensor dimensions to have 1s "
+                                            "in the leading dimensions.");
+            }
+
+            // Validate invRms dimensions are compatible with the input and affine tensor dimensions
+            if(invRmsDims != nullptr)
+            {
+                if(invRmsDims->size() != nDims)
+                {
+                    throw std::invalid_argument("RMSNorm requires invRms tensor rank to be equal "
+                                                "to the input tensor rank.");
+                }
+                std::vector<int64_t> expectedInvRmsDims = inputDims;
+                for(size_t i = 0; i < expectedInvRmsDims.size(); ++i)
+                {
+                    if(affineDims[i] != 1)
+                    {
+                        expectedInvRmsDims[i] = 1;
+                    }
+                }
+                if(*invRmsDims != expectedInvRmsDims)
+                {
+                    throw std::invalid_argument("RMSNorm requires invRms tensor dimensions to be "
+                                                "derived from the input and "
+                                                "affine tensor dimensions.");
+                }
             }
         }
     }
 
-    template <class InputDataType, class ScaleDataType, class OutputDataType, class ComputeDataType>
-    static void validateConsistentLayouts(
-        const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
-        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
-        const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
-        const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms,
-        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias)
+    static void validateConsistentLayouts(const std::vector<int64_t>& inputDims,
+                                          const std::vector<int64_t>& inputStrides,
+                                          const std::vector<TensorProps>& otherTensorProps)
     {
         using hipdnn_data_sdk::utilities::TensorLayout;
 
-        const auto& scaleDims = scale.dims();
-        const auto& outputDims = output.dims();
-        const auto* invRmsDims = invRms ? &invRms->dims() : nullptr;
-        const auto* biasDims = bias ? &bias->dims() : nullptr;
-
-        const auto& inputStrides = input.strides();
-        const auto& scaleStrides = scale.strides();
-        const auto& outputStrides = output.strides();
-        const auto* invRmsStrides = invRms ? &invRms->strides() : nullptr;
-        const auto* biasStrides = bias ? &bias->strides() : nullptr;
-
-        const auto nDims = input.dims().size();
+        const auto nDims = inputDims.size();
         const auto inputStrideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(inputStrides);
 
-        // Validate input tensor layout
+        // Validate reference tensor layout
         static const std::unordered_map<size_t, std::pair<TensorLayout, TensorLayout>>
             s_validLayouts = {{3, {TensorLayout::NCL, TensorLayout::NLC}},
                               {4, {TensorLayout::NCHW, TensorLayout::NHWC}},
                               {5, {TensorLayout::NCDHW, TensorLayout::NDHWC}}};
 
-        const auto layoutIt = s_validLayouts.find(nDims);
-        if(layoutIt == s_validLayouts.end())
+        const auto it = s_validLayouts.find(nDims);
+        if(it == s_validLayouts.end())
         {
-            throw std::invalid_argument(
-                "RMSNorm forward requires input tensor rank to be 3, 4, or 5.");
+            throw std::invalid_argument("RMSNorm requires input tensor rank to be 3, 4, or 5.");
         }
 
-        const auto& [channelFirst, channelLast] = layoutIt->second;
+        const auto& [channelFirst, channelLast] = it->second;
         if(inputStrideOrder != channelFirst.strideOrder
            && inputStrideOrder != channelLast.strideOrder)
         {
-            throw std::invalid_argument("RMSNorm forward requires " + std::to_string(nDims)
+            throw std::invalid_argument("RMSNorm requires " + std::to_string(nDims)
                                         + "D input tensor to be in " + channelFirst.name + " or "
                                         + channelLast.name + " layout.");
         }
 
-        // Validate all other layouts are consistent with input layout
-        const auto validateTensorLayout = [&inputStrideOrder](const std::vector<int64_t>& dims,
-                                                              const std::vector<int64_t>& strides,
-                                                              const std::string& name) {
-            if(!hipdnn_data_sdk::utilities::isLayoutAgnostic(dims)
-               && hipdnn_data_sdk::utilities::extractStrideOrder(strides) != inputStrideOrder)
+        // Validate all other tensor layouts are consistent with the reference tensor layout
+        for(const auto& [name, dims, strides] : otherTensorProps)
+        {
+            if(dims == nullptr || strides == nullptr)
             {
-                throw std::invalid_argument("RMSNorm forward requires " + name
-                                            + " tensor layout to be consistent with input "
-                                              "tensor layout.");
+                continue;
             }
-        };
-        validateTensorLayout(outputDims, outputStrides, "output");
-        validateTensorLayout(scaleDims, scaleStrides, "scale");
-        if(biasStrides != nullptr)
-        {
-            validateTensorLayout(*biasDims, *biasStrides, "bias");
-        }
-        if(invRmsStrides != nullptr)
-        {
-            validateTensorLayout(*invRmsDims, *invRmsStrides, "invRms");
+
+            if(!hipdnn_data_sdk::utilities::isLayoutAgnostic(*dims)
+               && hipdnn_data_sdk::utilities::extractStrideOrder(*strides) != inputStrideOrder)
+            {
+                throw std::invalid_argument(
+                    "RMSNorm requires " + name
+                    + " tensor layout to be consistent with input tensor layout.");
+            }
         }
     }
 
@@ -248,11 +270,12 @@ private:
               class ScaleDataType = InputDataType,
               class OutputDataType = InputDataType,
               class ComputeDataType = double>
-    static void validateInput(const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
-                              const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
-                              const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
-                              const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms,
-                              const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias)
+    static void
+        validateFwdInput(const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
+                         const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
+                         const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
+                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms,
+                         const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias)
     {
         const auto& inputDims = input.dims();
         const auto& scaleDims = scale.dims();
@@ -260,9 +283,32 @@ private:
         const auto* invRmsDims = invRms ? &invRms->dims() : nullptr;
         const auto* biasDims = bias ? &bias->dims() : nullptr;
 
-        // Validate tensor dimensions and layouts
-        validateConsistentDimensions(inputDims, scaleDims, outputDims, invRmsDims, biasDims);
-        validateConsistentLayouts(input, scale, output, invRms, bias);
+        // Validate tensor dimensions
+        std::vector<TensorProps> otherIOTensorProps;
+        otherIOTensorProps.emplace_back("output", &outputDims, &output.strides());
+
+        std::vector<TensorProps> affineTensorProps;
+        affineTensorProps.emplace_back("scale", &scaleDims, &scale.strides());
+        if(biasDims != nullptr)
+        {
+            affineTensorProps.emplace_back("bias", biasDims, &bias->strides());
+        }
+
+        validateConsistentDimensions(inputDims, otherIOTensorProps, affineTensorProps, invRmsDims);
+
+        // Validate tensor layouts
+        std::vector<TensorProps> otherTensorProps;
+        otherTensorProps.emplace_back("scale", &scaleDims, &scale.strides());
+        otherTensorProps.emplace_back("output", &outputDims, &output.strides());
+        if(invRmsDims != nullptr)
+        {
+            otherTensorProps.emplace_back("invRms", invRmsDims, &invRms->strides());
+        }
+        if(biasDims != nullptr)
+        {
+            otherTensorProps.emplace_back("bias", biasDims, &bias->strides());
+        }
+        validateConsistentLayouts(inputDims, input.strides(), otherTensorProps);
 
         // Validate data types
         static_assert(IS_SUPPORTED_DATA_TYPE<InputDataType>,
