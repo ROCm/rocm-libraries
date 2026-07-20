@@ -1,0 +1,16 @@
+{
+    "format_version": 1,
+    "operation": "BatchnormFwdTrainingRuntimeScalar/Momentum",
+    "generator": "generate_batchnorm_runtime_scalar_golden.py",
+    "generator_sha256": "e24401f1082a3b59972afc589bcd538e61eff52adc3fd57f307ab5e7d45c6d0d",
+    "generator_version": "1.1.0",
+    "generated_at": "2026-07-17T22:22:46Z",
+    "reference_source": "synthesis+cpu_reference",
+    "notes": "Runtime-with-default scalar bundle: momentum (uid=6) has is_runtime_pass_by_value=true with compile-time default value=0.5. Synthesis provides the runtime value; CPU reference executor verifies correctness. A provider using the baked default (0.5) instead of the runtime value produces diverging output.",
+    "config": {
+        "scalar": "momentum",
+        "x_dims": [2, 3, 4, 5],
+        "scalar_uid": 6,
+        "compile_time_default": 0.5
+    }
+}

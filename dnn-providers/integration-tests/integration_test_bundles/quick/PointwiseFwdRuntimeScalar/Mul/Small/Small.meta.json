@@ -1,0 +1,16 @@
+{
+    "format_version": 1,
+    "operation": "PointwiseFwdRuntimeScalar/MUL",
+    "generator": "generate_pointwise_runtime_scalar_golden.py",
+    "generator_version": "1.0.0",
+    "generated_at": "2026-07-17T15:48:00Z",
+    "reference_source": "synthesis+cpu_reference",
+    "notes": "Runtime-with-default scalar bundle: in_1 (uid=1) has is_runtime_pass_by_value=true with compile-time default value=1.0 (multiplicative identity). Synthesis provides the runtime value; CPU reference executor verifies correctness. A provider using the baked default (1.0) instead of the runtime value produces diverging output.",
+    "config": {
+        "operation": "mul",
+        "dims": [2, 4, 6, 8],
+        "dtype": "float",
+        "scalar_uid": 1,
+        "compile_time_default": 1.0
+    }
+}

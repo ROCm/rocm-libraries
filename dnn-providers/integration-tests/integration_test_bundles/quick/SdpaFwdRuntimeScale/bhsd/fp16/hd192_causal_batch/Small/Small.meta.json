@@ -1,0 +1,9 @@
+{
+    "format_version": 1,
+    "operation": "SdpaFwdRuntimeScale",
+    "generator": "generate_sdpa_runtime_scale_golden.py",
+    "generator_version": "1.0.0",
+    "generated_at": "2026-07-17T15:48:00Z",
+    "reference_source": "synthesis+cpu_reference",
+    "notes": "Runtime-with-default scale bundle: scale tensor has is_runtime_pass_by_value=true with a baked compile-time default of 2.0. The CPU reference reads the scale from the variantPack (also 2.0) when attn_scale_value is null. A provider that ignores the runtime tensor and falls back to 1/sqrt(headDim) produces diverging output."
+}

@@ -1,0 +1,58 @@
+{
+    "nodes": [
+        {
+            "type": "PointwiseAttributes",
+            "compute_data_type": "float",
+            "name": "",
+            "inputs": {
+                "operation": "add",
+                "in_0_tensor_uid": 0,
+                "in_1_tensor_uid": 1,
+                "in_2_tensor_uid": null,
+                "axis_tensor_uid": null,
+                "relu_lower_clip": null,
+                "relu_upper_clip": null,
+                "relu_lower_clip_slope": null,
+                "swish_beta": null,
+                "elu_alpha": null,
+                "softplus_beta": null
+            },
+            "outputs": {
+                "out_0_tensor_uid": 2
+            }
+        }
+    ],
+    "tensors": [
+        {
+            "uid": 0,
+            "name": "in0",
+            "dims": [2, 4, 6, 8],
+            "strides": [192, 48, 8, 1],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 1,
+            "name": "scalar",
+            "dims": [1],
+            "strides": [1],
+            "data_type": "float",
+            "virtual": false,
+            "is_runtime_pass_by_value": true,
+            "value_type": "Float32Value",
+            "value": 0.0
+        },
+        {
+            "uid": 2,
+            "name": "out0",
+            "dims": [2, 4, 6, 8],
+            "strides": [192, 48, 8, 1],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "io_data_type": "float",
+    "compute_data_type": "float",
+    "intermediate_data_type": "float",
+    "name": ""
+}
