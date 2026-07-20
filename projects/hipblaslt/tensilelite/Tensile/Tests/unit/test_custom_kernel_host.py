@@ -18,6 +18,8 @@ from Tensile.SolutionStructs.Naming import _getName, getKernelFileBase
 from Tensile.SolutionStructs.Solution import Solution
 from Tensile.Toolchain.Component import Assembler
 
+pytestmark = pytest.mark.unit
+
 
 # --------------------------------------------------------------------------- #
 # Solution._assignCustomKernelParameters

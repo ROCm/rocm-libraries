@@ -17,6 +17,8 @@ import pytest
 import Tensile.AddCustomConfig as acc
 import Tensile.ValidateMetadata as vm
 
+pytestmark = pytest.mark.unit
+
 
 META_EMPTY = dedent("""\
     .amdgpu_metadata

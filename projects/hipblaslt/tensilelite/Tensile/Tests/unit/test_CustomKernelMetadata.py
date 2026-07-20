@@ -53,6 +53,8 @@ from Tensile.CustomKernels import (
 from Tensile.Toolchain.Assembly import validateCustomKernelMetadataAtBuild
 from Tensile.ValidateMetadata import validate_all
 
+pytestmark = pytest.mark.unit
+
 
 def write_kernel(path, config):
     path.parent.mkdir(parents=True, exist_ok=True)

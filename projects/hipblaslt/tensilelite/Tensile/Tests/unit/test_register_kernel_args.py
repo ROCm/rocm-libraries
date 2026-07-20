@@ -30,6 +30,8 @@ from Tensile.Activation import ActivationType
 from Tensile.Common import DataDirection
 from Tensile.KernelWriter import KernelWriter
 
+pytestmark = pytest.mark.unit
+
 
 def _writer(useBias=DataDirection.NONE, needBiasType=False, bpeCinternal=4,
             numActivationArgSize=1, debugKernel=False,

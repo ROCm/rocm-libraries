@@ -25,6 +25,8 @@ from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
+pytestmark = pytest.mark.unit
+
 
 _FIXTURE = (Path(__file__).parent / "characterization" / "LibraryIO"
             / "data" / "logic_gfx942_HSS_BH.yaml")
