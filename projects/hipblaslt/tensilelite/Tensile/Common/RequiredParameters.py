@@ -132,6 +132,7 @@ def getRequiredParametersMin() -> set:
         'TransposeLDSMetadata',
         'TDMInst',
         "TDMSplit",
+        "TDMLoadWaveSync",
         "TDMIterateMode",
         "MXScaleFormat",
         "MXLoadInst",

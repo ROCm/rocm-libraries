@@ -6691,6 +6691,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
+                               # between an urgent and a deferrable tensor_load group.
+                               # Off by default.
+                               "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
                                # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
                                # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
                                # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
