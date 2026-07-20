@@ -75,7 +75,8 @@ inline std::shared_ptr<DebugOutputStreams> createDebugOutputStreams(
 /// DebugPass is global and does not need per-PM setup.
 inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleOptions& opts,
                                  const std::string& label,
-                                 const std::shared_ptr<DebugOutputStreams>& debugStreams) {
+                                 const std::shared_ptr<DebugOutputStreams>& debugStreams,
+                                 const StinkyAsmModule* module = nullptr) {
     auto forEachName = [](const std::string& csv, auto cb) {
         std::istringstream stream(csv);
         std::string name;
@@ -121,7 +122,8 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
 
     if (opts.DebugLevel == 1) pm.getAnalysisManager().setDebugLogging(true);
 
-    pm.addInstrumentation(std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig)));
+    pm.addInstrumentation(
+        std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig), module));
 
     if (!opts.DebugPass.empty()) {
         forEachName(opts.DebugPass,
@@ -136,8 +138,9 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
 /// individually.
 inline void configureStandardInstrumentations(
     PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
-    const std::shared_ptr<DebugOutputStreams>& debugStreams) {
-    configureDebugOutput(pm, opts, label, debugStreams);
+    const std::shared_ptr<DebugOutputStreams>& debugStreams,
+    const StinkyAsmModule* module = nullptr) {
+    configureDebugOutput(pm, opts, label, debugStreams, module);
     if (opts.VerifyEach) {
         pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
     }
