@@ -15,10 +15,10 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 #define DEBUG_LOG 0
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -1140,6 +1140,9 @@ struct GridwiseMoeGemmBlockScale
                                BElementwiseOperation b_element_op,
                                CElementwiseOperation c_element_op)
     {
+        static_assert(ActivationOperation != Activation::swiglu_oai_and_mul,
+                      "gridwise_moe_gemm_blockscale does not support swiglu_oai_and_mul; use the "
+                      "non-blockscale gridwise_moe_gemm.");
 #if defined(__gfx942__) || defined(__gfx950__)
         constexpr auto b_coherence_flag = NonTemporalLoadB
                                               ? AmdBufferCoherenceEnum::WAVE_NT1
@@ -1694,6 +1697,9 @@ struct GridwiseMoeGemmBlockScale
                                     BElementwiseOperation b_element_op,
                                     CElementwiseOperation c_element_op)
     {
+        static_assert(ActivationOperation != Activation::swiglu_oai_and_mul,
+                      "gridwise_moe_gemm_blockscale does not support swiglu_oai_and_mul; use the "
+                      "non-blockscale gridwise_moe_gemm.");
 #if defined(__gfx942__) || defined(__gfx950__)
         constexpr auto b_coherence_flag = NonTemporalLoadB
                                               ? AmdBufferCoherenceEnum::WAVE_NT1
@@ -2224,4 +2230,6 @@ struct GridwiseMoeGemmBlockScale
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

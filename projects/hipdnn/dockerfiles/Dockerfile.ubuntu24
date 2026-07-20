@@ -46,7 +46,9 @@ RUN apt-get update && apt-get install -y \
     bison \
     flex \
     gh \
+    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
+
 
 # Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
 # official .deb package directly. It bundles all remote backends (incl. S3),

@@ -131,11 +131,6 @@ vectorizedBwdActivationOp(FpPrecVecType const& dy,
 
 } // namespace
 
-// Note: Calls with !MIO_BN_USESAVED configurations are not tested with the CI. Apparently there are
-// some precision issues with the original CL version as well; it is not clear if this is an
-// implementation or design problem. During the HIP port we only verified that these kernels run and
-// give valid numerical result, but the precision issues were not addressed.
-
 namespace miopen {
 namespace batchnorm {
 
@@ -350,8 +345,14 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 {
-    static constexpr unsigned int read_size  = mio_config::layout_nhwc ? 1 : 4;
-    static constexpr unsigned int write_size = mio_config::layout_nhwc ? 1 : 2;
+    // For NCHW layout, the read/write loops process flattened NHW positions with vectorized
+    // memory accesses. When HW is not a multiple of the vector size, the last access in a
+    // channel crosses into the next channel's memory, corrupting results with data computed
+    // using the wrong channel's statistics. Fall back to scalar access when HW is not aligned.
+    static constexpr unsigned int read_size =
+        (!mio_config::layout_nhwc && mio_bn_config::hw % 4 == 0) ? 4 : 1;
+    static constexpr unsigned int write_size =
+        (!mio_config::layout_nhwc && mio_bn_config::hw % 2 == 0) ? 2 : 1;
 
     using fp_read_vec_type       = typename mapped_vector_type<FpType, read_size>::type;
     using fp_prec_read_vec_type  = typename mapped_vector_type<FpPrecType, read_size>::type;
@@ -434,7 +435,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex(lid + less4);
+                    unsigned int index = getTensorIndex((lid << 2) + less4);
                     if(index + read_size - 1 < mio_bn_config::nchw)
                     {
                         read4 = cast<fp_prec_read_vec_type>(
@@ -491,7 +492,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         constexpr unsigned int readUnrollHint =
             mio_bn_config::n > mio_bn_config::loop_unroll_max_n ? 4 : 2;
         static_unroll_count<unsigned int, 0, less4, grprd, readUnrollHint>{[&](unsigned int k) {
-            unsigned int l = k + (lid << 2 * (1 - mio_config::layout_nhwc));
+            unsigned int l = k + (lid * read_size);
             if(l < less4)
             {
                 unsigned int index     = getTensorIndex(l);
@@ -512,7 +513,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
         if constexpr(rem4 > 0)
         {
-            unsigned int index = getTensorIndex((lid << 2 * (1 - mio_config::layout_nhwc)) + less4);
+            unsigned int index = getTensorIndex((lid * read_size) + less4);
             if(index + read_size - 1 < mio_bn_config::nchw)
             {
                 fp_read_vec_type xread = *(reinterpret_cast<const fp_read_vec_type*>(x_in + index));

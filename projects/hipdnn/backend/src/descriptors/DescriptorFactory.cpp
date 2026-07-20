@@ -21,9 +21,11 @@
 #include "HipdnnException.hpp"
 #include "KnobDescriptor.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "LayernormBackwardOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
+#include "ProfilingControlDescriptor.hpp"
 #include "RMSNormBackwardOperationDescriptor.hpp"
 #include "RMSNormOperationDescriptor.hpp"
 #include "ReductionOperationDescriptor.hpp"
@@ -32,6 +34,10 @@
 #include "SdpaFwdOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
+// Required: EngineHeuristicDescriptor holds std::unique_ptr<SelectionHeuristic>
+// via forward declaration, so the complete type must be visible where
+// make_shared<EngineHeuristicDescriptor>() instantiates the destructor.
+#include "heuristics/SelectionHeuristic.hpp"
 #include "logging/Logging.hpp"
 
 namespace hipdnn_backend
@@ -112,6 +118,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<LayernormOperationDescriptor>();
         break;
+    case HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<LayernormBackwardOperationDescriptor>();
+        break;
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormOperationDescriptor>();
         break;
@@ -132,6 +141,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<RMSNormBackwardOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_PROFILING_CONTROL_EXT:
+        privateDesc = std::make_shared<ProfilingControlDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

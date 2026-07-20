@@ -5,9 +5,12 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common/load_and_convert_tile.hpp"
+#include "ck_tile/ops/elementwise.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_asmem_bsmem_creg_v1_default_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
-#include "ck_tile/ops/elementwise.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
+
+#include <type_traits>
 
 namespace ck_tile {
 
@@ -96,9 +99,6 @@ struct BlockUniversalGemmAsBsCr
     using AComputeDataType = remove_cvref_t<typename Traits::AComputeDataType>;
     using BComputeDataType = remove_cvref_t<typename Traits::BComputeDataType>;
     using CDataType        = remove_cvref_t<typename Traits::CDataType>;
-
-    using ATypeToUse = if_select_t<AComputeDataType, tf32_t, float_t, AComputeDataType>;
-    using BTypeToUse = if_select_t<BComputeDataType, tf32_t, float_t, BComputeDataType>;
 
     using WarpGemm = remove_cvref_t<typename Traits::WarpGemm>;
 
@@ -201,8 +201,8 @@ struct BlockUniversalGemmAsBsCr
         static constexpr auto BLdsTileDistr =
             decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
 
-        using ALdsTile = decltype(make_static_distributed_tensor<ATypeToUse>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<BTypeToUse>(BLdsTileDistr));
+        using ALdsTile = decltype(make_static_distributed_tensor<AComputeDataType>(ALdsTileDistr));
+        using BLdsTile = decltype(make_static_distributed_tensor<BComputeDataType>(BLdsTileDistr));
 
         ALdsTile a_warp_tile_;
         BLdsTile b_warp_tile_;
@@ -286,8 +286,8 @@ struct BlockUniversalGemmAsBsCr
         static constexpr auto BLdsTileDistr =
             decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
 
-        using ALdsTile = decltype(make_static_distributed_tensor<ATypeToUse>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<BTypeToUse>(BLdsTileDistr));
+        using ALdsTile = decltype(make_static_distributed_tensor<AComputeDataType>(ALdsTileDistr));
+        using BLdsTile = decltype(make_static_distributed_tensor<BComputeDataType>(BLdsTileDistr));
 
         ALdsTile a_warp_tile_;
         BLdsTile b_warp_tile_;
@@ -301,8 +301,25 @@ struct BlockUniversalGemmAsBsCr
                                           bool_constant<ALoadTranspose> = {},
                                           bool_constant<BLoadTranspose> = {})
         {
-            load_and_convert_tile<UnaryOpSize_, ALoadTranspose>(a_warp_tile_, a_block_window);
-            load_and_convert_tile<UnaryOpSize_, BLoadTranspose>(b_warp_tile_, b_block_window);
+            constexpr auto NEG1 = number<-1>{};
+            if constexpr(Traits::Problem::Async && ALoadTranspose)
+            {
+                load_tile_transpose_with_offset(
+                    a_warp_tile_, a_block_window, 0, NEG1, true_type{}, true_type{});
+            }
+            else
+            {
+                load_and_convert_tile<UnaryOpSize_, ALoadTranspose>(a_warp_tile_, a_block_window);
+            }
+            if constexpr(Traits::Problem::Async && BLoadTranspose)
+            {
+                load_tile_transpose_with_offset(
+                    b_warp_tile_, b_block_window, 0, NEG1, true_type{}, true_type{});
+            }
+            else
+            {
+                load_and_convert_tile<UnaryOpSize_, BLoadTranspose>(b_warp_tile_, b_block_window);
+            }
         }
 
         // C += A * B
@@ -384,8 +401,8 @@ struct BlockUniversalGemmAsBsCr
         static constexpr auto BLdsTileDistr =
             decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
 
-        using ALdsTile = decltype(make_static_distributed_tensor<ATypeToUse>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<BTypeToUse>(BLdsTileDistr));
+        using ALdsTile = decltype(make_static_distributed_tensor<AComputeDataType>(ALdsTileDistr));
+        using BLdsTile = decltype(make_static_distributed_tensor<BComputeDataType>(BLdsTileDistr));
 
         ALdsTile a_warp_tile_;
         BLdsTile b_warp_tile_;

@@ -99,6 +99,9 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         getTensorValue(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    // Intentionally value-presence only (not "|| is_runtime_pass_by_value()"):
+    // back-compat C-API meaning, distinct from TensorAttributesWrapper::isByValue()'s
+    // umbrella. See RFC 0016 §4.1.
     case HIPDNN_ATTR_TENSOR_IS_BY_VALUE:
     {
         const bool isByValue
@@ -112,6 +115,15 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "TensorDescriptor::getAttribute()");
         break;
     }
+    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT:
+        getScalar(_data.is_runtime_pass_by_value,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "TensorDescriptor::getAttribute: attributeName not supported");
@@ -173,6 +185,14 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         setTensorValue(attributeType, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT:
+        setScalar(_data.is_runtime_pass_by_value,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -515,7 +535,7 @@ std::string TensorDescriptor::toString() const
             break;
         }
     }
-    str += "}";
+    str += '}';
     return str;
 }
 

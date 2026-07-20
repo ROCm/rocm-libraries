@@ -140,7 +140,7 @@ class TestCkTileGroupedGemm : public ::testing::Test
         EXPECT_TRUE(Kernel::IsSupportedArgument(kargs));
 
         // Use the filtered kargs (zero-dim groups are excluded by MakeKargs) to derive
-        // the correct grid size and group count — not the raw gemm_descs vector.
+        // the correct grid size and group count - not the raw gemm_descs vector.
         const dim3 blocks = Kernel::BlockSize();
         if(kargs.empty())
             return;
@@ -267,13 +267,14 @@ class TestCkTileGroupedGemm : public ::testing::Test
         // Calculate thresholds
         const auto rtol = ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(
             ck_tile::integer_divide_ceil(K, kbatch));
-        auto atol = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
-            max_accumulated_value / kbatch, ck_tile::integer_divide_ceil(K, kbatch));
+        const float safe_max = max_accumulated_value > 0 ? max_accumulated_value : 1.0f;
+        auto atol            = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
+            safe_max / kbatch, ck_tile::integer_divide_ceil(K, kbatch));
         // Calculate error due to split_k accumulation
         const auto rtol_split_k =
             ck_tile::get_relative_threshold<CDataType, CDataType, CDataType>(kbatch);
-        auto atol_split_k = ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(
-            max_accumulated_value, kbatch);
+        auto atol_split_k =
+            ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(safe_max, kbatch);
 
         // Add extra tolerance for BF16 to account for hardware vs software conversion differences
         // Hardware __bf16 conversion and software float_to_bf16 can differ by up to 1 ULP
@@ -468,7 +469,7 @@ class TestCkTileGroupedGemm : public ::testing::Test
         bool pass{true};
         for(int i = 0; i < group_count; ++i)
         {
-            // Groups with M=0 or N=0 produce no output — skip validation.
+            // Groups with M=0 or N=0 produce no output - skip validation.
             // K=0 groups do produce output (all zeros) and are validated normally.
             if(Ms[i] == 0 || Ns[i] == 0)
                 continue;

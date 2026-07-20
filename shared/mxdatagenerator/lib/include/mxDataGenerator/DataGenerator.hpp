@@ -7,12 +7,22 @@
 #include "data_generation_utils.hpp"
 
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
 #include <type_traits>
 #include <variant>
+#include <algorithm>
+
+// `<bit>` provides std::endian (C++20). Used by read_data_bits_le's
+// little-endian static_assert. Guarded so this header still compiles
+// against pre-C++20 toolchains that don't ship the header.
+#if __has_include(<bit>)
+#    include <bit>
+#endif
 
 #include <omp.h>
 
@@ -22,6 +32,11 @@ namespace DGen
 
     constexpr index_t SPRINKLE_BLOCK_MIN = 3;
     constexpr index_t SPRINKLE_BLOCK_MAX = 15;
+
+    // Default PRNG seed shared by every DataGenerator backend (CPU and GPU)
+    // so equivalent generates with no explicit setSeed produce reproducible
+    // streams. Single source of truth - bumping this changes both backends.
+    inline constexpr uint32_t kDefaultSeed = 1713573848u;
 
     //
     // Defining Data Initialization Modes
@@ -133,6 +148,80 @@ namespace DGen
         }
     };
 
+    // Constant-value fills: every element dequantizes to the named value
+    // (scale=1.0). NaN/Inf are broadcast via setNaN/setInf, which routes
+    // to the data byte for F8 E5M2 and to the scale byte for F4/F6.
+    // Inf only exists for F8 E5M2; the generator throws otherwise.
+    struct Twos
+    {
+        std::string toString() const
+        {
+            return "Twos";
+        }
+    };
+
+    struct NegOnes
+    {
+        std::string toString() const
+        {
+            return "NegOnes";
+        }
+    };
+
+    struct MaxVals
+    {
+        std::string toString() const
+        {
+            return "MaxVals";
+        }
+    };
+
+    struct DenormMins
+    {
+        std::string toString() const
+        {
+            return "DenormMins";
+        }
+    };
+
+    struct DenormMaxs
+    {
+        std::string toString() const
+        {
+            return "DenormMaxs";
+        }
+    };
+
+    struct NaNs
+    {
+        std::string toString() const
+        {
+            return "NaNs";
+        }
+    };
+
+    struct Infs
+    {
+        std::string toString() const
+        {
+            return "Infs";
+        }
+    };
+
+    // Uniform-integer fill in [lo, hi], converted via satConvertToType (so
+    // out-of-range values saturate). Caller picks the range because the
+    // appropriate magnitude is data-type dependent.
+    struct RandInt
+    {
+        int lo = -10;
+        int hi = 10;
+
+        std::string toString() const
+        {
+            return "RandInt(" + std::to_string(lo) + ", " + std::to_string(hi) + ")";
+        }
+    };
+
     using DataInitMode = std::variant<Bounded,
                                       BoundedAlternatingSign,
                                       Unbounded,
@@ -145,7 +234,15 @@ namespace DGen
                                       Checkerboard,
                                       ScaledDiagonal,
                                       TrigonometricFromFloat,
-                                      NormalFromFloat>;
+                                      NormalFromFloat,
+                                      Twos,
+                                      NegOnes,
+                                      MaxVals,
+                                      DenormMins,
+                                      DenormMaxs,
+                                      NaNs,
+                                      Infs,
+                                      RandInt>;
 
     inline std::string toString(DataInitMode const& initMode)
     {
@@ -157,6 +254,33 @@ namespace DGen
     {
         s << toString(initMode);
         return s;
+    }
+
+    inline bool dataInitModesEqual(DataInitMode const& a, DataInitMode const& b)
+    {
+        return toString(a) == toString(b);
+    }
+
+    inline bool isRandomLikeDataInitMode(DataInitMode const& mode)
+    {
+        return std::holds_alternative<Bounded>(mode) || std::holds_alternative<BoundedAlternatingSign>(mode)
+               || std::holds_alternative<Unbounded>(mode) || std::holds_alternative<NormalFromFloat>(mode)
+               || std::holds_alternative<RandInt>(mode);
+    }
+
+    inline bool isConstantScaleInitMode(DataInitMode const& mode)
+    {
+        return std::holds_alternative<Ones>(mode) || std::holds_alternative<Zeros>(mode)
+               || std::holds_alternative<Twos>(mode) || std::holds_alternative<MaxVals>(mode)
+               || std::holds_alternative<NaNs>(mode) || std::holds_alternative<Infs>(mode);
+    }
+
+    // Phase 1: random-like data init + constant scale init (e.g. Bounded + Ones).
+    inline bool canDecoupleScaleInit(DataInitMode const& dataMode, DataInitMode const& scaleMode)
+    {
+        if(dataInitModesEqual(dataMode, scaleMode))
+            return true;
+        return isRandomLikeDataInitMode(dataMode) && isConstantScaleInitMode(scaleMode);
     }
 
     enum DataScaling
@@ -174,11 +298,63 @@ namespace DGen
 
         DataInitMode initMode = Bounded{};
 
+        // When set and different from initMode, scale bytes are filled from this
+        // mode and data blocks are re-quantized (random-like data + constant scale).
+        std::optional<DataInitMode> scaleInitMode;
+
         double min = -1.0;
         double max = 1.0;
 
         DataScaling scaling      = DataScaling::Mean;
         index_t     blockScaling = 1;
+    };
+
+    // MX scale-block indexing along the stride-1 (contiguous) dimension.
+    struct ScaleBlockLayout
+    {
+        index_t contiguousDim = 0;
+        index_t blockSize     = 1;
+
+        index_t scaleBlocksPerRow() const
+        {
+            return (contiguousDim + blockSize - 1) / blockSize;
+        }
+
+        index_t numScaleBlocks(index_t arraySize) const
+        {
+            // Fallback when contiguousDim is unset (defensive; callers may misbehave).
+            if(contiguousDim <= 0)
+                return (arraySize + blockSize - 1) / blockSize;
+            const index_t numRows = arraySize / contiguousDim;
+            return scaleBlocksPerRow() * numRows;
+        }
+
+        index_t scaleBlockElementCount(index_t scale_i) const
+        {
+            const index_t blocksPerRow = scaleBlocksPerRow();
+            const index_t blockInRow   = scale_i % blocksPerRow;
+            const index_t tail         = contiguousDim - blockInRow * blockSize;
+            return std::min(blockSize, tail);
+        }
+
+        index_t dataIndex(index_t scale_i, index_t block_i) const
+        {
+            const index_t blocksPerRow = scaleBlocksPerRow();
+            const index_t row          = scale_i / blocksPerRow;
+            const index_t blockInRow   = scale_i % blocksPerRow;
+            return row * contiguousDim + blockInRow * blockSize + block_i;
+        }
+
+        index_t scaleIndexForData(index_t data_i) const
+        {
+            // Fallback treats the buffer as one contiguous row (ceil block count).
+            if(contiguousDim <= 0)
+                return data_i / blockSize;
+            const index_t row          = data_i / contiguousDim;
+            const index_t pos          = data_i % contiguousDim;
+            const index_t blocksPerRow = scaleBlocksPerRow();
+            return row * blocksPerRow + pos / blockSize;
+        }
     };
 
     template <typename DTYPE>
@@ -200,7 +376,7 @@ namespace DGen
         std::vector<uint8_t> getScaleBytes() const;
 
         // set rng seed
-        void setSeed(uint seed);
+        void setSeed(uint32_t seed);
 
         // get reference double vector.
         std::vector<double> getReferenceDouble() const; // Hopefully won't overflow to NaN/Inf
@@ -208,10 +384,40 @@ namespace DGen
         // get reference float double vector.
         std::vector<float> getReferenceFloat() const; // Might overflow to NaN/Inf
 
+        // Layout helpers (contiguous dim set by generate()).
+        index_t scaleIndexForData(index_t data_i) const
+        {
+            return layout().scaleIndexForData(data_i);
+        }
+
+        index_t dataIndex(index_t scale_i, index_t block_i) const
+        {
+            return layout().dataIndex(scale_i, block_i);
+        }
+
+        index_t scaleBlockElementCount(index_t scale_i) const
+        {
+            return layout().scaleBlockElementCount(scale_i);
+        }
+
+        index_t numScaleBlocks() const
+        {
+            return layout().numScaleBlocks(m_dataDesc.array_size);
+        }
+
     private:
+        ScaleBlockLayout layout() const
+        {
+            return {m_contiguousDim, blockSize()};
+        }
+
+        index_t blockSize() const
+        {
+            return isScaled<DTYPE>() ? m_options.blockScaling : 1;
+        }
         DataGeneratorOptions m_options;
 
-        uint                   m_seed = 1713573848;
+        uint32_t               m_seed = kDefaultSeed;
         std::vector<Generator> m_gen;
         const int              m_num_threads = std::min(32, omp_get_max_threads());
 
@@ -228,6 +434,29 @@ namespace DGen
 
         std::vector<uint8_t> m_dataBytes;
         std::vector<uint8_t> m_scaleBytes;
+
+        // Contiguous dimension (sorted_size[0], stride 1) for partial tail scale blocks.
+        index_t m_contiguousDim = 0;
+
+        index_t numScaleBlocks(index_t block_size) const
+        {
+            return ScaleBlockLayout{m_contiguousDim, block_size}.numScaleBlocks(m_dataDesc.array_size);
+        }
+
+        index_t scaleBlockElementCount(index_t scale_i, index_t block_size) const
+        {
+            return ScaleBlockLayout{m_contiguousDim, block_size}.scaleBlockElementCount(scale_i);
+        }
+
+        index_t dataIndex(index_t scale_i, index_t block_i, index_t block_size) const
+        {
+            return ScaleBlockLayout{m_contiguousDim, block_size}.dataIndex(scale_i, block_i);
+        }
+
+        index_t scaleIndexForData(index_t data_i, index_t block_size) const
+        {
+            return ScaleBlockLayout{m_contiguousDim, block_size}.scaleIndexForData(data_i);
+        }
 
         static std::vector<uint8_t> packArray(BufferDesc in_desc, const std::vector<uint8_t>& src);
 
@@ -255,6 +484,19 @@ namespace DGen
                                              const float                 mean,
                                              const float                 std_dev);
 
+        // Broadcasts the low `m_dataDesc.byte_size` bytes of `bits` to every
+        // element with a neutral 1.0 scale. uint64_t fits every supported DTYPE.
+        void generate_data_constant_bits(uint64_t bits);
+        void generate_data_twos();
+        void generate_data_neg_ones();
+        void generate_data_max_vals();
+        void generate_data_denorm_mins();
+        void generate_data_denorm_maxs();
+        void generate_data_nans();
+        void generate_data_infs();
+
+        void generate_data_rand_int(int lo, int hi);
+
         uint32_t scale_block_mean(const std::vector<uint32_t>& scales,
                                   std::vector<uint64_t>&       data,
                                   index_t                      block_size);
@@ -265,6 +507,10 @@ namespace DGen
         void post_sprinkle(const std::vector<index_t>& size, int32_t unbiased_min_exp);
 
         void setGenerator(int numThreads);
+
+        void fillScaleTemplateBytes(DataInitMode const& scaleMode, std::vector<uint8_t>& s_template);
+
+        void apply_decoupled_scale_init(DataInitMode const& scaleMode);
     };
 
     // Helpers for easy visiting of DataInitMode
@@ -343,12 +589,20 @@ namespace DGen
                             },
                             [&](const NormalFromFloat& n) {
                                 generate_data_normal_from_float(size, n.mean, n.std_dev);
-                            }},
+                            },
+                            [&](const Twos&) { generate_data_twos(); },
+                            [&](const NegOnes&) { generate_data_neg_ones(); },
+                            [&](const MaxVals&) { generate_data_max_vals(); },
+                            [&](const DenormMins&) { generate_data_denorm_mins(); },
+                            [&](const DenormMaxs&) { generate_data_denorm_maxs(); },
+                            [&](const NaNs&) { generate_data_nans(); },
+                            [&](const Infs&) { generate_data_infs(); },
+                            [&](const RandInt& r) { generate_data_rand_int(r.lo, r.hi); }},
                    m_options.initMode);
     }
 
     template <typename DTYPE>
-    inline void DataGenerator<DTYPE>::setSeed(uint seed)
+    inline void DataGenerator<DTYPE>::setSeed(uint32_t seed)
     {
         m_seed = seed;
     }
@@ -392,11 +646,7 @@ namespace DGen
         if(sorted_stride[0] != 1)
             throw std::invalid_argument("Invalid dimensions: the smallest stride must be 1.");
 
-        // assume dimension of contiguous elements is a multiple of block size
-        if(sorted_size[0] % options.blockScaling != 0)
-            throw std::invalid_argument(
-                "Invalid block scaling: dimension of contiguous elements must "
-                "be a multiple of block size.");
+        m_contiguousDim = sorted_size[0];
 
         // find array sizes (unpacked)
         m_dataDesc.array_size = sorted_stride[n_size - 1] * sorted_size[n_size - 1];
@@ -414,7 +664,7 @@ namespace DGen
                 throw std::invalid_argument("Invalid block scaling: block size must be greater "
                                             "than 0 for this data type.");
             }
-            m_scaleDesc.array_size = m_dataDesc.array_size / options.blockScaling;
+            m_scaleDesc.array_size = numScaleBlocks(options.blockScaling);
             m_scaleDesc.bit_size   = getScaleSignBits<DTYPE>() + getScaleExponentBits<DTYPE>()
                                    + getScaleMantissaBits<DTYPE>();
             m_scaleDesc.byte_size   = (m_scaleDesc.bit_size + 7) / 8;
@@ -430,7 +680,149 @@ namespace DGen
 
         dispatch_generate_data(sorted_size, sorted_stride);
 
+        DataInitMode const effectiveScaleMode
+            = m_options.scaleInitMode.value_or(m_options.initMode);
+        if constexpr(isScaled<DTYPE>())
+        {
+            if(!dataInitModesEqual(effectiveScaleMode, m_options.initMode)
+               && canDecoupleScaleInit(m_options.initMode, effectiveScaleMode))
+            {
+                apply_decoupled_scale_init(effectiveScaleMode);
+            }
+        }
+
         return *this;
+    }
+
+    template <typename DTYPE>
+    void DataGenerator<DTYPE>::fillScaleTemplateBytes(DataInitMode const& scaleMode,
+                                                    std::vector<uint8_t>& s_template)
+    {
+        std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+        std::fill(s_template.begin(), s_template.end(), 0x00);
+
+        auto setScaleFromValue = [&](double value) {
+            if constexpr(isScaled<DTYPE>())
+            {
+                using scaleInfo = scale_info_t<DTYPE>;
+                if constexpr(hasFullRangeScale<DTYPE>())
+                {
+                    const auto scale_candidates = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+                    s_template[0] = nearestFiniteScaleByte<scaleInfo>(
+                        std::abs(value), scale_candidates);
+                }
+                else
+                {
+                    const int exp = static_cast<int>(std::round(std::log2(std::abs(value))));
+                    s_template[0] = static_cast<uint8_t>(exp + getScaleBias<DTYPE>());
+                }
+            }
+        };
+
+        std::visit(overload{[&](const Ones&) {
+                                setOne<DTYPE>(s_template.data(),
+                                              d_dummy.data(),
+                                              0,
+                                              0,
+                                              m_options.forceDenorm);
+                            },
+                            [&](const Zeros&) {},
+                            [&](const Twos&) { setScaleFromValue(2.0); },
+                            [&](const NegOnes&) { setScaleFromValue(1.0); },
+                            [&](const MaxVals&) {
+                                if constexpr(isScaled<DTYPE>())
+                                {
+                                    using scaleInfo = scale_info_t<DTYPE>;
+                                    const auto scale_candidates
+                                        = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+                                    if(!scale_candidates.empty())
+                                    {
+                                        s_template[0] = *std::max_element(
+                                            scale_candidates.begin(),
+                                            scale_candidates.end(),
+                                            [](uint8_t a, uint8_t b) {
+                                                return getScaleValue<scaleInfo>(a)
+                                                       < getScaleValue<scaleInfo>(b);
+                                            });
+                                    }
+                                }
+                            },
+                            [&](const DenormMins&) { setScaleFromValue(1.0); },
+                            [&](const DenormMaxs&) { setScaleFromValue(1.0); },
+                            [&](const NaNs&) {
+                                setNaN<DTYPE>(
+                                    s_template.data(), d_dummy.data(), 0, 0);
+                            },
+                            [&](const Infs&) {
+                                if constexpr(DTYPE::dataInfo.hasInf)
+                                {
+                                    setOne<DTYPE>(s_template.data(),
+                                                  d_dummy.data(),
+                                                  0,
+                                                  0,
+                                                  /*subNormal=*/false);
+                                    setInf<DTYPE>(
+                                        s_template.data(), d_dummy.data(), 0, 0);
+                                }
+                            },
+                            [&](const auto&) {
+                                throw std::invalid_argument(
+                                    "DataGenerator::fillScaleTemplateBytes: unsupported "
+                                    "scale init mode for decoupled generation");
+                            }},
+                   scaleMode);
+    }
+
+    template <typename DTYPE>
+    void DataGenerator<DTYPE>::apply_decoupled_scale_init(DataInitMode const& scaleMode)
+    {
+        const auto           refFloats  = getReferenceFloat();
+        const index_t        block_size = m_options.blockScaling;
+        std::vector<uint8_t> s_template(m_scaleDesc.byte_size, 0x00);
+        fillScaleTemplateBytes(scaleMode, s_template);
+
+        using scaleInfo = scale_info_t<DTYPE>;
+        const double scaleValue = getScaleValue<scaleInfo>(s_template[0]);
+        const bool   scaleIsNan = std::isnan(scaleValue);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t scale_i = 0; scale_i < m_scaleDesc.array_size; scale_i++)
+        {
+            std::memcpy(&m_scaleBytes[scale_i * m_scaleDesc.byte_size],
+                        s_template.data(),
+                        m_scaleDesc.byte_size);
+
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
+            {
+                const index_t data_i = dataIndex(scale_i, block_i, block_size);
+                const float   ref    = refFloats[static_cast<size_t>(data_i)];
+
+                if(scaleIsNan || std::isnan(ref))
+                {
+                    setNaN<DTYPE>(
+                        m_scaleBytes.data(), m_dataBytes.data(), scale_i, data_i);
+                }
+                else if(std::isinf(ref))
+                {
+                    if constexpr(DTYPE::dataInfo.hasInf)
+                        setInf<DTYPE>(
+                            m_scaleBytes.data(), m_dataBytes.data(), scale_i, data_i);
+                }
+                else if(ref == 0.0f || scaleValue == 0.0)
+                {
+                    setZero<DTYPE>(
+                        m_scaleBytes.data(), m_dataBytes.data(), scale_i, data_i);
+                }
+                else
+                {
+                    const uint64_t result = satConvertToType<DTYPE>(
+                        ref / static_cast<float>(scaleValue));
+                    std::memcpy(&m_dataBytes[data_i * m_dataDesc.byte_size],
+                                &result,
+                                m_dataDesc.byte_size);
+                }
+            }
+        }
     }
 
     template <typename DTYPE>
@@ -455,7 +847,7 @@ namespace DGen
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t i = 0; i < m_dataDesc.array_size; i++)
         {
-            const auto scale_idx = i / block_size;
+            const auto scale_idx = scaleIndexForData(i, block_size);
             ret[i] = toDouble<DTYPE>(m_scaleBytes.data(), m_dataBytes.data(), scale_idx, i);
         }
 
@@ -472,7 +864,7 @@ namespace DGen
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t i = 0; i < m_dataDesc.array_size; i++)
         {
-            const auto scale_idx = i / block_size;
+            const auto scale_idx = scaleIndexForData(i, block_size);
             ret[i] = toFloat<DTYPE>(m_scaleBytes.data(), m_dataBytes.data(), scale_idx, i);
         }
 
@@ -683,7 +1075,7 @@ namespace DGen
                                             "represent the requested range.");
             }
 
-            const auto numBlocks = m_dataDesc.array_size / block_size;
+            const auto numBlocks = numScaleBlocks(block_size);
 #pragma omp parallel for num_threads(m_num_threads)
             for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
             {
@@ -697,9 +1089,9 @@ namespace DGen
 
                 const auto& candidates = data_candidates[stored_scale];
                 std::uniform_int_distribution<size_t> data_dist(0, candidates.size() - 1);
-                for(index_t block_i = 0; block_i < block_size; block_i++)
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
                 {
-                    const auto data_i = scale_i * block_size + block_i;
+                    const auto data_i = dataIndex(scale_i, block_i, block_size);
                     const auto result = candidates[data_dist(m_gen[tid])];
                     std::memcpy(&m_dataBytes[data_i * m_dataDesc.byte_size],
                                 &result,
@@ -727,7 +1119,7 @@ namespace DGen
 
         int32_t dtype_max_norm_biased_exp = static_cast<int32_t>(dtype_max_norm_exp) - dataBias;
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
@@ -743,12 +1135,12 @@ namespace DGen
                 std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
                 //
-                const auto data_i = scale_i * block_size + block_i;
+                const auto data_i = dataIndex(scale_i, block_i, block_size);
 
                 // generate sign
                 bool    sign;
@@ -902,7 +1294,7 @@ namespace DGen
                 return;
             }
 
-            const auto numBlocks = m_dataDesc.array_size / block_size;
+            const auto numBlocks = numScaleBlocks(block_size);
 #pragma omp parallel for num_threads(m_num_threads)
             for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
             {
@@ -914,9 +1306,9 @@ namespace DGen
                             &stored_scale,
                             m_scaleDesc.byte_size);
 
-                for(index_t block_i = 0; block_i < block_size; block_i++)
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
                 {
-                    const auto data_i     = scale_i * block_size + block_i;
+                    const auto data_i     = dataIndex(scale_i, block_i, block_size);
                     const bool negative   = static_cast<bool>(data_i % 2);
                     const auto& candidates = negative ? neg_data_candidates[stored_scale]
                                                       : pos_data_candidates[stored_scale];
@@ -948,7 +1340,7 @@ namespace DGen
 
         int32_t dtype_max_norm_biased_exp = static_cast<int32_t>(dtype_max_norm_exp) - dataBias;
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
@@ -968,12 +1360,12 @@ namespace DGen
                 std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
                 //
-                auto data_i = scale_i * block_size + block_i;
+                auto data_i = dataIndex(scale_i, block_i, block_size);
 
                 // generate sign
                 bool sign = static_cast<bool>(data_i % 2);
@@ -1046,7 +1438,7 @@ namespace DGen
 
         const int32_t  subnorm_min_exp = dataUnbiasedEMin - dataMantissaBits;
         const uint64_t max             = (ONE << m_dataDesc.bit_size) - 1;
-        const auto     numBlocks       = m_dataDesc.array_size / block_size;
+        const auto     numBlocks       = numScaleBlocks(block_size);
 
         if constexpr(hasFullRangeScale<DTYPE>())
         {
@@ -1065,9 +1457,9 @@ namespace DGen
                             m_scaleDesc.byte_size);
 
                 std::uniform_int_distribution<uint64_t> data_dist(0, max);
-                for(index_t block_i = 0; block_i < block_size; block_i++)
+                for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
                 {
-                    const auto data_i = scale_i * block_size + block_i;
+                    const auto data_i = dataIndex(scale_i, block_i, block_size);
 
                     uint64_t d;
                     do
@@ -1103,12 +1495,12 @@ namespace DGen
 
             int32_t max_exp = std::numeric_limits<int32_t>::min();
             int32_t min_exp = std::numeric_limits<int32_t>::max();
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {
                 //
                 // compute index
                 //
-                index_t data_i = scale_i * block_size + block_i;
+                index_t data_i = dataIndex(scale_i, block_i, block_size);
 
                 //
                 // generate random block
@@ -1146,7 +1538,7 @@ namespace DGen
                 //
                 // Generate scale
                 //
-                if(isScaled<DTYPE>() && block_i == block_size - 1)
+                if(isScaled<DTYPE>() && block_i == scaleBlockElementCount(scale_i, block_size) - 1)
                 {
                     int32_t scaleMax = scaleBiasedEMax;
                     int32_t scaleMin = scaleBiasedEMin;
@@ -1225,6 +1617,177 @@ namespace DGen
         for(index_t i = 0; i < m_scaleDesc.array_size; i++)
         {
             std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_one[0], m_scaleDesc.byte_size);
+        }
+    }
+
+    // Broadcasts the low `byte_size` bytes of `bits` to every data element and
+    // a neutral 1.0 scale to every block. setOne supplies the per-DTYPE scale=1.0
+    // encoding (E8M0_127, E5M3 0x78, E4M3 0x38).
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_constant_bits(uint64_t bits)
+    {
+        if(m_dataDesc.byte_size > sizeof(bits))
+            throw std::runtime_error(
+                "DataGenerator::generate_data_constant_bits: data byte_size "
+                "exceeds 8; widen the bits carrier before adding such a type.");
+
+        std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
+        std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+        setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_dataDesc.array_size; i++)
+        {
+            std::memcpy(
+                &m_dataBytes[i * m_dataDesc.byte_size], &bits, m_dataDesc.byte_size);
+        }
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+        {
+            std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_one[0], m_scaleDesc.byte_size);
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_twos()
+    {
+        generate_data_constant_bits(satConvertToType<DTYPE>(2.0f));
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_neg_ones()
+    {
+        generate_data_constant_bits(satConvertToType<DTYPE>(-1.0f));
+    }
+
+    // Reads the low `byte_size` bytes of `src` into a uint64_t (little-endian).
+    // The memcpy-into-low-bytes idiom only matches the byte order in `src`
+    // when the host is little-endian; ROCm targets all are, but make the
+    // assumption explicit so a future big-endian port doesn't quietly
+    // miscompile.
+    inline uint64_t read_data_bits_le(uint8_t const* src, index_t byte_size)
+    {
+#if __cpp_lib_endian >= 201907L
+        static_assert(std::endian::native == std::endian::little,
+                      "read_data_bits_le: implementation assumes a "
+                      "little-endian host (matches all current ROCm targets).");
+#endif
+        uint64_t bits = 0;
+        std::memcpy(&bits, src, byte_size);
+        return bits;
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_max_vals()
+    {
+        std::vector<uint8_t> d_max(m_dataDesc.byte_size, 0x00);
+        setDataMax<DTYPE>(d_max.data(), 0, /*subNormal=*/false, /*positive=*/true);
+        generate_data_constant_bits(read_data_bits_le(d_max.data(), m_dataDesc.byte_size));
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_denorm_maxs()
+    {
+        std::vector<uint8_t> d_max(m_dataDesc.byte_size, 0x00);
+        setDataMax<DTYPE>(d_max.data(), 0, /*subNormal=*/true, /*positive=*/true);
+        generate_data_constant_bits(read_data_bits_le(d_max.data(), m_dataDesc.byte_size));
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_denorm_mins()
+    {
+        // Smallest non-zero subnormal (mantissa LSB) is 0x1 across every
+        // supported DTYPE.
+        generate_data_constant_bits(uint64_t{0x1});
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_nans()
+    {
+        std::vector<uint8_t> s_nan(m_scaleDesc.byte_size, 0x00);
+        std::vector<uint8_t> d_nan(m_dataDesc.byte_size, 0x00);
+        setOne<DTYPE>(s_nan.data(), d_nan.data(), 0, 0, /*subNormal=*/false);
+        setNaN<DTYPE>(s_nan.data(), d_nan.data(), 0, 0);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_dataDesc.array_size; i++)
+        {
+            std::memcpy(&m_dataBytes[i * m_dataDesc.byte_size], &d_nan[0], m_dataDesc.byte_size);
+        }
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+        {
+            std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_nan[0], m_scaleDesc.byte_size);
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_infs()
+    {
+        // Throw rather than silently produce ones via setInf's documented
+        // no-op for types that lack an Inf encoding. (bf16/fp16/f32 and
+        // F8 E5M2 do have one; F8 E4M3 and the MX FP4 / FP6 variants
+        // don't.)
+        if constexpr(!DTYPE::dataInfo.hasInf)
+        {
+            throw std::runtime_error(
+                "DataGenerator: Inf init mode is not supported because this "
+                "data type has no Inf representation.");
+        }
+        else
+        {
+            std::vector<uint8_t> s_inf(m_scaleDesc.byte_size, 0x00);
+            std::vector<uint8_t> d_inf(m_dataDesc.byte_size, 0x00);
+            setOne<DTYPE>(s_inf.data(), d_inf.data(), 0, 0, /*subNormal=*/false);
+            setInf<DTYPE>(s_inf.data(), d_inf.data(), 0, 0);
+
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t i = 0; i < m_dataDesc.array_size; i++)
+            {
+                std::memcpy(
+                    &m_dataBytes[i * m_dataDesc.byte_size], &d_inf[0], m_dataDesc.byte_size);
+            }
+
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+            {
+                std::memcpy(
+                    &m_scaleBytes[i * m_scaleDesc.byte_size], &s_inf[0], m_scaleDesc.byte_size);
+            }
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_rand_int(int lo, int hi)
+    {
+        if(lo > hi)
+            throw std::invalid_argument(
+                "DataGenerator::generate_data_rand_int: lo must be <= hi");
+
+        std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
+        std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+        setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+        {
+            std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_one[0], m_scaleDesc.byte_size);
+        }
+
+        // satConvertToType saturates out-of-range values rather than wrapping.
+        // `uniform_int_distribution<int>` is stateless across calls so it's
+        // shared between threads (operator() takes the per-thread engine by
+        // ref). Hoisting matches generate_data_rand etc.
+        std::uniform_int_distribution<int> dist(lo, hi);
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_dataDesc.array_size; i++)
+        {
+            int const      tid  = omp_get_thread_num();
+            int const      v    = dist(m_gen[tid]);
+            uint64_t const bits = satConvertToType<DTYPE>(static_cast<float>(v));
+            std::memcpy(&m_dataBytes[i * m_dataDesc.byte_size], &bits, m_dataDesc.byte_size);
         }
     }
 
@@ -1446,21 +2009,22 @@ namespace DGen
 
         std::uniform_real_distribution<> angle_dist(0.0, 2.0 * M_PI);
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
         {
             const auto            tid = omp_get_thread_num();
+            const index_t         width = scaleBlockElementCount(scale_i, block_size);
             std::vector<uint64_t> temp_data((isScaled<DTYPE>() ? block_size : 0), 0);
             std::vector<uint32_t> temp_scale((isScaled<DTYPE>() ? block_size : 0), 0);
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < width; block_i++)
             {
                 //
                 // compute index
                 //
-                index_t data_i = scale_i * block_size + block_i;
+                index_t data_i = dataIndex(scale_i, block_i, block_size);
 
                 //
                 // generate random block
@@ -1568,16 +2132,16 @@ namespace DGen
                 //
                 if constexpr(isScaled<DTYPE>())
                 {
-                    if(block_i == block_size - 1)
+                    if(block_i == width - 1)
                     {
                         const uint32_t block_scale
-                            = dispatch_scale_block(temp_scale, temp_data, block_size);
+                            = dispatch_scale_block(temp_scale, temp_data, width);
 
                         // Write to array
-                        for(index_t i = 0; i < block_size; i++)
+                        for(index_t i = 0; i < width; i++)
                         {
                             std::memcpy(
-                                &m_dataBytes[(scale_i * block_size + i) * m_dataDesc.byte_size],
+                                &m_dataBytes[dataIndex(scale_i, i, block_size) * m_dataDesc.byte_size],
                                 &temp_data[i],
                                 m_dataDesc.byte_size);
                         }
@@ -1605,21 +2169,22 @@ namespace DGen
         // Prepare a normal distribution with the requested mean and standard deviation
         std::normal_distribution<> normal_dist{mean, std_dev};
 
-        const auto numBlocks = m_dataDesc.array_size / block_size;
+        const auto numBlocks = numScaleBlocks(block_size);
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
         {
             const auto            tid = omp_get_thread_num();
+            const index_t         width = scaleBlockElementCount(scale_i, block_size);
             std::vector<uint64_t> temp_data((isScaled<DTYPE>() ? block_size : 0), 0);
             std::vector<uint32_t> temp_scale((isScaled<DTYPE>() ? block_size : 0), 0);
 
-            for(index_t block_i = 0; block_i < block_size; block_i++)
+            for(index_t block_i = 0; block_i < width; block_i++)
             {
                 //
                 // compute index
                 //
-                index_t data_i = scale_i * block_size + block_i;
+                index_t data_i = dataIndex(scale_i, block_i, block_size);
 
                 //
                 // generate random block
@@ -1652,16 +2217,16 @@ namespace DGen
                 //
                 if constexpr(isScaled<DTYPE>())
                 {
-                    if(block_i == block_size - 1)
+                    if(block_i == width - 1)
                     {
                         const uint32_t block_scale
-                            = dispatch_scale_block(temp_scale, temp_data, block_size);
+                            = dispatch_scale_block(temp_scale, temp_data, width);
 
                         // Write to array
-                        for(index_t i = 0; i < block_size; i++)
+                        for(index_t i = 0; i < width; i++)
                         {
                             std::memcpy(
-                                &m_dataBytes[(scale_i * block_size + i) * m_dataDesc.byte_size],
+                                &m_dataBytes[dataIndex(scale_i, i, block_size) * m_dataDesc.byte_size],
                                 &temp_data[i],
                                 m_dataDesc.byte_size);
                         }
@@ -1772,9 +2337,8 @@ namespace DGen
             }
         }
 
-        avg_scale /= n;
-
-        uint32_t block_scale = std::round(avg_scale);
+        uint32_t block_scale
+            = n == 0 ? static_cast<uint32_t>(getScaleBias<DTYPE>()) : std::round(avg_scale / n);
 
         //
         // adjust data
@@ -1949,7 +2513,7 @@ namespace DGen
             for(index_t clmp_block_i = 0; clmp_block_i < clmp_block_size; clmp_block_i++)
             {
                 const auto data_i  = clmp_i * clmp_block_size + clmp_block_i;
-                index_t    scale_i = (data_i / block_size);
+                index_t    scale_i = scaleIndexForData(data_i, block_size);
 
                 // reset
                 if(clmp_block_i == 0)
@@ -2030,7 +2594,7 @@ namespace DGen
                         while(marked[target])
                             target = (target + 1) % clmp_block_size;
                         const auto target_data_i  = block_data_i + target;
-                        const auto target_scale_i = target_data_i / block_size;
+                        const auto target_scale_i = scaleIndexForData(target_data_i, block_size);
 
                         // get scale
                         uint32_t stored_scale = 0;

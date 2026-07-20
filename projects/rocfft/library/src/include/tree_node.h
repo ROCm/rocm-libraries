@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,7 @@
 #include "compute_scheme.h"
 #include "data_layout.h"
 #include "enum_printer.h"
+#include "exec_info.h"
 #include "function_map_key.h"
 #include "function_pool.h"
 #include "kargs.h"
@@ -50,6 +51,10 @@
 #include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
+
+#ifdef ROCFFT_RCCL_ENABLE
+#include "rccl_wrapper.h"
+#endif
 
 enum NodeType
 {
@@ -177,25 +182,78 @@ class TreeNode;
 class LeafNode;
 class function_pool;
 
-// Internally-allocated temporary buffers (as opposed to
-// user-provided work/in/out buffers)
+// Identifier for a location that a buffer lives on, or that a kernel
+// will execute on.  this specifies a multi-process rank as well as a
+// device ID.
+struct rocfft_location_t
+{
+    rocfft_location_t() = default;
+    rocfft_location_t(int _comm_rank, int _device)
+        : comm_rank(_comm_rank)
+        , device(_device)
+    {
+    }
+
+    // return a location for the current device on comm rank 0
+    static rocfft_location_t rank0_current_device()
+    {
+        rocfft_location_t id;
+        if(hipGetDevice(&id.device) != hipSuccess)
+            throw std::runtime_error("hipGetDevice failed");
+        return id;
+    }
+
+    // allow locations to be sorted
+    bool operator<(const rocfft_location_t& other) const
+    {
+        if(comm_rank != other.comm_rank)
+            return comm_rank < other.comm_rank;
+        return device < other.device;
+    }
+
+    bool operator==(const rocfft_location_t& other) const
+    {
+        return comm_rank == other.comm_rank && device == other.device;
+    }
+
+    std::string str() const
+    {
+        std::string ret = "comm rank ";
+        ret += std::to_string(comm_rank);
+        ret += " device ";
+        ret += std::to_string(device);
+        return ret;
+    }
+
+    int comm_rank = 0;
+    int device    = 0;
+};
+
+// Conceptual representation of temporary buffers, e.g., for
+// workspaces or communications.
 class InternalTempBuffer
 {
 public:
-    InternalTempBuffer(int comm_rank)
-        : comm_rank(comm_rank)
+    InternalTempBuffer(rocfft_location_t _location)
+        : location(_location)
     {
     }
     InternalTempBuffer(const InternalTempBuffer&) = delete;
     InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
     ~InternalTempBuffer()                                    = default;
 
-    void set_size_bytes(size_t in)
+    void ensure_size_bytes(size_t in)
     {
-        if(buf)
-            throw std::runtime_error("cannot set internal buffer size after allocation");
         if(in > size_bytes)
+        {
             size_bytes = in;
+            // Round size up to nearest multiple of 16 bytes, to
+            // ensure that if we satisfy two temp buffer requests
+            // with a single allocation, neither one will be
+            // unexpectedly misaligned.
+            auto remainder = size_bytes % 16;
+            size_bytes += remainder ? 16 - remainder : 0;
+        }
     }
 
     size_t get_size_bytes() const
@@ -203,27 +261,14 @@ public:
         return size_bytes;
     }
 
-    void alloc(int deviceID)
+    const rocfft_location_t& get_location() const
     {
-        rocfft_scoped_device device(deviceID);
-        if(buf.alloc(size_bytes) != hipSuccess)
-            throw std::runtime_error("internal temp buffer allocation failure");
-    }
-
-    void* data()
-    {
-        return buf.data();
-    }
-
-    int get_comm_rank() const
-    {
-        return comm_rank;
+        return location;
     }
 
 private:
-    int    comm_rank  = 0;
-    size_t size_bytes = 0;
-    gpubuf buf;
+    rocfft_location_t location;
+    size_t            size_bytes = 0;
 };
 
 // Class representing a buffer in a multi-plan item.
@@ -273,14 +318,17 @@ public:
         BufferPtr ret;
         ret.type      = PTR_TEMP;
         ret.temp_ptr  = ptr;
-        ret.comm_rank = ptr->get_comm_rank();
+        ret.comm_rank = ptr->get_location().comm_rank;
         return ret;
     }
 
     // Get a pointer to the buffer.  The buffer might be an
     // user-provided input or output buffer that's only known at
     // execute time.
-    void* get(void* in_buffer[], void* out_buffer[], int local_comm_rank) const
+    void* get(void*                                 in_buffer[],
+              void*                                 out_buffer[],
+              int                                   local_comm_rank,
+              const rocfft_execution_info_internal& info) const
     {
         if(comm_rank != local_comm_rank)
             return nullptr;
@@ -293,7 +341,7 @@ public:
         case PTR_USER_OUT:
             return out_buffer[idx];
         case PTR_TEMP:
-            return temp_ptr->data();
+            return info.get_concrete_ptr(temp_ptr.get());
         }
     }
 
@@ -318,9 +366,9 @@ public:
         case PTR_TEMP:
         {
             std::stringstream ss;
-            ss << "temp buffer on rank " << comm_rank << " ";
             if(temp_ptr)
-                ss << temp_ptr->data();
+                ss << "temp buffer handle " << temp_ptr.get() << " size "
+                   << temp_ptr->get_size_bytes() << " on rank " << comm_rank;
             else
                 ss << "(null)";
             return ss.str();
@@ -852,7 +900,7 @@ public:
         if(isPartialPassEnabled())
         {
             auto key = GetPPKernelsKey();
-            return pool.get_kernel(key, scheme);
+            return pool.get_kernel(key, scheme, batch);
         }
         else
         {
@@ -868,7 +916,7 @@ public:
         if(isPartialPassEnabled())
         {
             auto key = GetPPKernelsKey();
-            if(!pool.has_function(key))
+            if(!pool.has_function(key, batch))
             {
                 if(LOG_TRACE_ENABLED())
                     (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
@@ -1029,53 +1077,6 @@ public:
     }
 };
 
-// Identifier for a location that a buffer lives on, or that a kernel
-// will execute on.  this specifies a multi-process rank as well as a
-// device ID.
-struct rocfft_location_t
-{
-    rocfft_location_t() = default;
-    rocfft_location_t(int _comm_rank, int _device)
-        : comm_rank(_comm_rank)
-        , device(_device)
-    {
-    }
-
-    // return a location for the current device on comm rank 0
-    static rocfft_location_t rank0_current_device()
-    {
-        rocfft_location_t id;
-        if(hipGetDevice(&id.device) != hipSuccess)
-            throw std::runtime_error("hipGetDevice failed");
-        return id;
-    }
-
-    // allow locations to be sorted
-    bool operator<(const rocfft_location_t& other) const
-    {
-        if(comm_rank != other.comm_rank)
-            return comm_rank < other.comm_rank;
-        return device < other.device;
-    }
-
-    bool operator==(const rocfft_location_t& other) const
-    {
-        return comm_rank == other.comm_rank && device == other.device;
-    }
-
-    std::string str() const
-    {
-        std::string ret = "comm rank ";
-        ret += std::to_string(comm_rank);
-        ret += " device ";
-        ret += std::to_string(device);
-        return ret;
-    }
-
-    int comm_rank = 0;
-    int device    = 0;
-};
-
 struct rocfft_mp_request_t;
 
 // Abstract base class for all items in a multi-node/device plan
@@ -1107,13 +1108,6 @@ struct MultiPlanItem
     // wait for outstanding communication requests to finish
     void WaitCommRequests();
 
-    // Get work buffer requirements for this item.  Only ExecPlans
-    // should need this, as data movement shouldn't need temp buffers.
-    virtual void WorkBufBytesPerDevice(size_t               base_type_size,
-                                       std::vector<size_t>& workBufBytes) const
-    {
-    }
-
     // Print a description of this item to the plan log
     virtual void Print(rocfft_ostream& os, const int indent) const = 0;
 
@@ -1123,6 +1117,8 @@ struct MultiPlanItem
 
     // Check if this item writes to the specified BufferPtr
     virtual bool WritesToBuffer(const BufferPtr& ptr) const = 0;
+    // Check if this item reads from the specified BufferPtr
+    virtual bool ReadsFromBuffer(const BufferPtr& ptr) const = 0;
 
     // Check if the specified rank will execute this item
     virtual bool ExecutesOnRank(int rank) const = 0;
@@ -1204,6 +1200,11 @@ struct CommPointToPoint : public MultiPlanItem
         return ptr == destPtr;
     }
 
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == srcPtr;
+    }
+
     bool ExecutesOnRank(int comm_rank) const override
     {
         return srcLocation.comm_rank == comm_rank || destLocation.comm_rank == comm_rank;
@@ -1228,6 +1229,244 @@ private:
     // Event to signal when the async operations are finished.
     hipEvent_wrapper_t event;
 };
+
+#ifdef ROCFFT_RCCL_ENABLE
+// RCCL-based all-to-all communication for multi-GPU transpose.
+struct CommRCCLAllToAll : public MultiPlanItem
+{
+    // per-rank state for one participant in the all-to-all.  caller
+    // fills sendBuffer / recvBuffer; the stream and completion event
+    // are allocated in-place by the constructor.  bundling these
+    // together guarantees they can never go out of sync.  the event
+    // is recorded on stream once ncclGroupEnd has enqueued the
+    // collective; Wait() synchronizes on the event to align with
+    // every other MultiPlanItem (see CommPointToPoint / CommScatter /
+    // CommGather), instead of on the stream directly.
+    struct agent_t
+    {
+        BufferPtr           sendBuffer;
+        BufferPtr           recvBuffer;
+        hipStream_wrapper_t stream;
+        hipEvent_wrapper_t  event;
+    };
+
+    // _agents must be indexed by RCCL rank.  rocfft_rccl_comm_t assigns
+    // ranks in sorted device-id order (this holds even for non-contiguous
+    // device sets such as {1, 3, 6}), so building the vector in the same
+    // order as _rccl.get_devices(), or equivalently in ascending device-id
+    // order, satisfies the contract.
+    CommRCCLAllToAll(const rocfft_rccl_comm_t& _rccl,
+                     rocfft_precision          _precision,
+                     rocfft_array_type         _arrayType,
+                     size_t                    _count_per_rank,
+                     std::vector<agent_t>      _agents)
+        : rccl(_rccl)
+        , precision(_precision)
+        , arrayType(_arrayType)
+        , count_per_rank(_count_per_rank)
+        , agents(std::move(_agents))
+    {
+        // single-process RCCL only, so the local rank is always 0;
+        // ExecutesOnRank() relies on this being set explicitly since
+        // the MultiPlanItem base does not default-initialize it
+        local_comm_rank = 0;
+
+        // validate caller-supplied agent count against the communicator
+        const auto nranks = rccl.num_ranks();
+        if(agents.size() != nranks)
+            throw std::invalid_argument(
+                "CommRCCLAllToAll: agents.size() (" + std::to_string(agents.size())
+                + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
+
+        // allocate one stream and one completion event per
+        // participating device, in RCCL rank order.  event and
+        // stream are bound to the same device by the scoped_device
+        // so hipEventRecord(event, stream) at execute time is valid.
+        const auto devices = rccl.get_devices();
+        for(size_t r = 0; r < devices.size(); ++r)
+        {
+            rocfft_scoped_device scoped(devices[r]);
+            agents[r].stream.alloc();
+            agents[r].event.alloc();
+        }
+    }
+
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
+    void Wait() override;
+
+    void Print(rocfft_ostream& os, const int indent) const override;
+
+    bool WritesToBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& a : agents)
+        {
+            if(ptr == a.recvBuffer)
+                return true;
+        }
+        return false;
+    }
+
+    // the collective consumes each per-agent send buffer.
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& a : agents)
+        {
+            if(ptr == a.sendBuffer)
+                return true;
+        }
+        return false;
+    }
+
+    // single-process RCCL: all participating devices belong to the local
+    // process, so the collective runs on local_comm_rank only.
+    bool ExecutesOnRank(int comm_rank) const override
+    {
+        return comm_rank == local_comm_rank;
+    }
+
+private:
+    const rocfft_rccl_comm_t& rccl;
+
+    const rocfft_precision  precision;
+    const rocfft_array_type arrayType;
+    const size_t            count_per_rank; // elements per rank (uniform)
+
+    // per-rank send/recv buffers and stream, indexed by RCCL rank to
+    // match the ordering returned by rccl.get_devices().
+    std::vector<agent_t> agents;
+};
+
+// kind of point-to-point RCCL transfer issued by CommRCCLGrouped
+enum class rccl_op
+{
+    send,
+    recv
+};
+
+// RCCL-based grouped send/recv for non-uniform patterns
+struct CommRCCLGrouped : public MultiPlanItem
+{
+    CommRCCLGrouped(rocfft_rccl_comm_t& _rccl,
+                    rocfft_precision    _precision,
+                    rocfft_array_type   _arrayType)
+        : rccl(_rccl)
+        , precision(_precision)
+        , arrayType(_arrayType)
+    {
+    }
+
+    // transfer_kind is a non-type template parameter so call sites read
+    // as AddTransfer<rccl_op::send>(...) / AddTransfer<rccl_op::recv>(...)
+    // instead of using opaque true/false flags.
+    template <rccl_op transfer_kind>
+    void AddTransfer(rocfft_location_t peer_location,
+                     rocfft_location_t local_location,
+                     BufferPtr         buffer,
+                     size_t            offset,
+                     size_t            count,
+                     int               comm_rank)
+    {
+        Transfer t;
+        t.peer_location  = peer_location;
+        t.local_location = local_location;
+        t.buffer         = buffer;
+        t.offset         = offset;
+        t.count          = count;
+        t.op             = transfer_kind;
+
+        // allocate stream + completion event on the correct device
+        // when the local endpoint lives on this process.  event and
+        // stream are bound to the same device by scoped_device so
+        // hipEventRecord(event, stream) at execute time is valid.
+        if(local_location.comm_rank == comm_rank)
+        {
+            rocfft_scoped_device dev(local_location.device);
+            t.stream.alloc();
+            t.event.alloc();
+        }
+        transfers.push_back(std::move(t));
+    }
+
+    bool HasTransfers() const
+    {
+        return !transfers.empty();
+    }
+
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
+    void Wait() override;
+
+    void Print(rocfft_ostream& os, const int indent) const override;
+
+    bool WritesToBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& t : transfers)
+        {
+            if(t.op == rccl_op::recv && ptr == t.buffer)
+                return true;
+        }
+        return false;
+    }
+
+    // send transfers read from their pack buffer before launching the
+    // ncclSend; recv transfers do not read from t.buffer.
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& t : transfers)
+        {
+            if(t.op == rccl_op::send && ptr == t.buffer)
+                return true;
+        }
+        return false;
+    }
+
+    bool ExecutesOnRank(int comm_rank) const override
+    {
+        for(const auto& t : transfers)
+        {
+            if(t.local_location.comm_rank == comm_rank)
+                return true;
+        }
+        return false;
+    }
+
+private:
+    struct Transfer
+    {
+        // peer and local endpoints, both as (comm_rank, device) pairs;
+        // the peer's RCCL rank is derived at execution time from
+        // peer_location.device via rccl.get_rank().
+        rocfft_location_t peer_location;
+        rocfft_location_t local_location;
+        BufferPtr         buffer;
+        size_t            offset;
+        size_t            count;
+        rccl_op           op;
+        // each transfer has its own stream and completion event;
+        // both are only allocated for transfers whose local endpoint
+        // lives on this process.  the event is recorded after
+        // ncclGroupEnd has enqueued the send/recv on the stream so
+        // Wait() can synchronize on events (matching every other
+        // MultiPlanItem) instead of on streams directly.
+        hipStream_wrapper_t stream;
+        hipEvent_wrapper_t  event;
+    };
+
+    const rocfft_rccl_comm_t& rccl;
+    const rocfft_precision    precision;
+    const rocfft_array_type   arrayType;
+    std::vector<Transfer>     transfers;
+};
+#endif // ROCFFT_RCCL_ENABLE
 
 // This struct has a vector of ranks to scatter to.  Executing can
 // create an MPI group with those ranks.
@@ -1305,6 +1544,11 @@ struct CommScatter : public MultiPlanItem
                 return true;
         }
         return false;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == srcPtr;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
@@ -1405,6 +1649,16 @@ struct CommGather : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == destPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        for(const auto& op : ops)
+        {
+            if(ptr == op.srcPtr)
+                return true;
+        }
+        return false;
     }
 
     bool ExecutesOnRank(int comm_rank) const override
@@ -1509,6 +1763,12 @@ struct CommAllToAll : public MultiPlanItem
         return ptr == recvBuf;
     }
 
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        // only reads from send buffer
+        return ptr == sendBuf;
+    }
+
     bool ExecutesOnRank(int comm_rank) const override
     {
         // runs on all ranks
@@ -1569,6 +1829,7 @@ struct ExecPlan : public MultiPlanItem
     // are pointers to those temp buffers.
     BufferPtr inputPtr;
     BufferPtr outputPtr;
+    BufferPtr workPtr;
 
     void ExecuteAsync(const rocfft_plan                       plan,
                       void*                                   in_buffer[],
@@ -1630,15 +1891,6 @@ struct ExecPlan : public MultiPlanItem
     // OB_IN refers to iStride, OB_OUT refers to oStride
     std::map<OperatingBuffer, bool> isUnitStride;
 
-    void WorkBufBytesPerDevice(size_t               base_type_size,
-                               std::vector<size_t>& workBufBytes) const override
-    {
-        // base type is the size of one real, work buf counts in
-        // complex numbers
-        workBufBytes[location.device]
-            = std::max(workBufSize * 2 * base_type_size, workBufBytes[location.device]);
-    }
-
     // for callbacks, work out which nodes of the plan are loading data
     // from global memory, and storing data to global memory
     std::pair<TreeNode*, TreeNode*> get_load_store_nodes() const;
@@ -1646,6 +1898,11 @@ struct ExecPlan : public MultiPlanItem
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
         return ptr == outputPtr;
+    }
+
+    bool ReadsFromBuffer(const BufferPtr& ptr) const override
+    {
+        return ptr == inputPtr;
     }
 
     bool ExecutesOnRank(int comm_rank) const override

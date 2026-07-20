@@ -10,7 +10,9 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <logging/GraphLogger.hpp>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
@@ -54,6 +56,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
     graph->preferred_engine_id = _preferredEngineId;
+    graph->is_override_shape_enabled = _isOverrideShapeEnabled;
     graph->name = _name;
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
@@ -87,6 +90,19 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
         // Build node from operation
         graph->nodes.push_back(op->buildNode());
     }
+
+    // Stamp the minimum engine plugin API version this graph requires, from the
+    // single shared graph -> version mapping (see PluginVersionConstants.hpp).
+    // A newer writer can therefore emit graphs an older reader must reject --
+    // deserializeGraph() enforces the ceiling below.
+    const bool anyRuntimePassByValue
+        = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+            graph->tensors, [](const auto& tensor) { return tensor.get(); });
+    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        _isOverrideShapeEnabled, anyRuntimePassByValue);
+    graph->min_required_engine_api_version
+        = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
+            hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
 
     return graph;
 }
@@ -194,6 +210,15 @@ void GraphDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         getPreferredEngineId(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        getScalar(_isOverrideShapeEnabled,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "GraphDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         getString(_name,
@@ -326,6 +351,14 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
         setPreferredEngineId(attributeType, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        setScalar(_isOverrideShapeEnabled,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "GraphDescriptor::setAttribute()");
+        break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         setString(
             _name, attributeType, elementCount, arrayOfElements, "GraphDescriptor::setAttribute()");
@@ -360,11 +393,22 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
 
+    const auto requiredVersion
+        = hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version.get());
+    THROW_IF_TRUE(
+        requiredVersion > hipdnn_data_sdk::utilities::
+                Version{hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION},
+        HIPDNN_STATUS_NOT_SUPPORTED,
+        "Serialized graph requires a newer engine plugin API version than this build supports.");
+
     // Extract graph-level attributes
     _computeDataType = graph->compute_data_type;
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
+    _isOverrideShapeEnabled = graph->is_override_shape_enabled;
+    _isRuntimePassByValueEnabled = requiredVersion >= hipdnn_data_sdk::utilities::Version{
+                                       hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
     _name = graph->name;
 
     // Populate _operations from the deserialized graph nodes
@@ -389,6 +433,10 @@ void GraphDescriptor::buildSerializedGraph()
     THROW_IF_NULL(graph,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "GraphDescriptor::buildSerializedGraph: graph is null");
+    _isRuntimePassByValueEnabled
+        = hipdnn_plugin_sdk::fromEngineApiVersion(*graph->min_required_engine_api_version)
+          >= hipdnn_data_sdk::utilities::Version{
+              hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
 
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
@@ -475,13 +523,23 @@ hipdnnHandle_t GraphDescriptor::getHandle() const
     return _handle;
 }
 
+bool GraphDescriptor::isOverrideShapeEnabled() const
+{
+    return _isOverrideShapeEnabled;
+}
+
+bool GraphDescriptor::isRuntimePassByValueEnabled() const
+{
+    return _isRuntimePassByValueEnabled;
+}
+
 std::string GraphDescriptor::toString() const
 {
     std::string str = "GraphDescriptor: {handle=";
     str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
     str += ", name=" + (_name.empty() ? std::string("(empty)") : _name);
     str += ", serializedGraphSize=" + std::to_string(_graphSerializedBuffer.size());
-    str += "}";
+    str += '}';
     return str;
 }
 

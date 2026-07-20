@@ -1,182 +1,110 @@
 ---
 name: hipdnn-superbuild-test
-description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration scope, and gtest filtering. Handles Windows DLL PATH automatically.
-argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|all] [jobs=<N>] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
+description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite. Handles Windows DLL PATH automatically.
+argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|external-integration|all] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # hipDNN Superbuild Test Runner
 
-Run tests against an existing superbuild produced by `/hipdnn-superbuild`. Each component built into the superbuild registers its own ctest targets prefixed with the component name (e.g., `hipdnn-unit-check`, `miopen-provider-unit-check`).
+Use this skill when the user asks to test an existing hipDNN superbuild. It does not configure or build the project. If no superbuild exists, tell the user to build first with `hipdnn-superbuild`.
 
-> Requires a prior `/hipdnn-superbuild` run. This skill does not configure or build — it only runs tests.
+## Inputs
 
-## Arguments
+Infer options from the user request:
 
-- **Component** (default: `all`):
-  - `hipdnn` — only hipDNN tests
-  - `miopen` — only miopen-provider tests
-  - `hipblaslt` — only hipblaslt-provider tests
-  - `hip-kernel` — only hip-kernel-provider tests
-  - `integration-tests` — the hipdnn-integration-tests component
-  - `all` — every component that has test targets in the build
-- **Scope** (default: `unit`):
-  - `unit` — fast tests, no GPU required
-  - `integration` — GPU required
-  - `all` — both unit and integration
-- `jobs=<N>` — Parallel job count for test execution (passed via `-j`)
-- `ROCM_PATH=<path>` — Override ROCm SDK devel path. Auto-discovered via the wheel setup helper if unset on Windows; defaults to `/opt/rocm` on Linux. Threaded into the test process env as `ROCM_PATH` so providers that JIT-compile kernels via hiprtc (e.g. `hip-kernel-provider`) can find the HIP headers.
-- `--filter=<gtest_pattern>` — Run only matching tests via gtest_filter (forces direct binary execution)
-- `--verbose` — Use the `-verbose` ctest target variants
-- `--keep-going` — When `component: all`, continue running remaining components after one fails (rather than stopping)
+- **Component**: `hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`; default `all`
+- **Scope**: `unit`, `integration`, `external-integration`, or `all`; default `unit`. `external-integration` covers the cross-provider `hipdnn_integration_tests` suite (the `<provider>-external-integration-check` targets)
+- **Filter**: optional gtest filter; when present, run test binaries directly
+- **Verbose**: use verbose test targets when requested
+- **Keep going**: continue after failures only when requested
+- **ROCm path**: optional `ROCM_PATH=<path>` override; Linux defaults to `/opt/rocm`
+- **Jobs**: optional explicit parallelism only when the user requests it and active workspace instructions permit it
 
-## Step 0: Detect Environment
+## Workflow
 
-Run these commands separately (never chain with `&&`):
+1. Determine the repository root:
+   ```bash
+   git rev-parse --show-toplevel
+   ```
 
-1. Detect the repository root:
-```bash
-git rev-parse --show-toplevel
-```
-Store the result as `REPO_ROOT`.
+2. Resolve paths:
+   - Build directory: honor active workspace instructions first; otherwise use `<repo-root>/build`.
+   - Binary directory: `<build-dir>/bin`.
+   - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, or when the invoked skill has no bundled `scripts/` directory.
 
-2. Detect the platform:
-```bash
-[[ -f /etc/os-release ]] && echo "Linux" || echo "Windows"
-```
-Store the result as `PLATFORM`.
+3. Verify the superbuild exists:
+   ```bash
+   ls <build-dir>/build.ninja
+   ```
+   Stop if it is missing.
 
-Derive these paths:
-- `BUILD_DIR` = `$REPO_ROOT/build`
-- `BIN_DIR` = `$REPO_ROOT/build/bin`
-- `HELPERS` = `$REPO_ROOT/projects/hipdnn/tools/ai/skills/helpers`
+4. Resolve ROCm path on Windows:
+   ```bash
+   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>]
+   ```
+   Parse `ROCM_PATH=...` from stdout and set `ROCM_BIN=<rocm-path>/bin`. Skip this step on Linux unless the user supplied an override. On Windows, always pass the resolved `ROCM_BIN` to `cmake_run.py` (steps 6-8) via `--rocm-bin`: it is required both for the runtime PATH and for staging the wheel's `amd_comgr.dll` app-local (see Notes).
 
-## Step 1: Parse Arguments
+5. Discover CMake test targets:
+   ```bash
+   python3 <scripts>/discover_test_targets.py --build-dir <build-dir> --component <component> --scope <scope>
+   ```
+   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
+   If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
 
-Parse `$ARGUMENTS` for:
-- **Component**: `hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all` (default: `all`)
-- **Scope**: `unit`, `integration`, or `all` (default: `unit`)
-- **Jobs**: value after `jobs=`
-- **ROCM_PATH**: value after `ROCM_PATH=`
-- **Filter**: value after `--filter=`
-- **Verbose**: presence of `--verbose`
-- **Keep going**: presence of `--keep-going`
+6. Run tests through `cmake_run.py` when no gtest filter is requested:
+   ```bash
+   python3 <scripts>/cmake_run.py --build-dir <build-dir> --target <target> [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+   ```
+   Add `--jobs <N>` only when explicit jobs are both requested and permitted. For verbose mode, append `-verbose` to the target name.
 
-## Step 2: Verify Superbuild Exists
+7. Run direct binaries when a gtest filter is requested:
+   ```bash
+   python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <binary-path> --gtest-filter "<filter>" [--extra-arg=<flag> ...] [-- <passthrough args>] [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+   ```
+   Use the component-to-binary mapping below to choose binaries. `cmake_run.py` accepts arbitrary passthrough flags for the binary: simple values via repeatable `--extra-arg` (use `--extra-arg=--flag` for flag-like values), or an entire flag list after a literal `--`. Passing multiple tokens inside `--binary` is rejected with a clear error.
 
-```bash
-ls $BUILD_DIR/build.ninja
-```
+8. Reproduce the cross-provider external-integration suite (`--scope external-integration`):
+   - To run the whole suite exactly as CI does, build the custom target:
+     ```bash
+     python3 <scripts>/cmake_run.py --build-dir <build-dir> --target <provider>-external-integration-check [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+     ```
+   - To run with a custom gtest filter, take the `<component>:command:<cmdline>` line from step 5, run the first token as `--binary` and the rest after `--`, adding your own `--gtest-filter`:
+     ```bash
+     python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
+     ```
 
-If missing: tell the user to run `/hipdnn-superbuild [preset]` first and stop.
+9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested.
 
-## Step 3: Resolve ROCm Path (Windows only)
+## Direct Binary Mapping
 
-Windows test execution needs the ROCm bin on PATH for DLL loading. Use the shared helper to locate it:
+| Component | Unit Binaries | Integration Binaries | External Integration (cross-provider) |
+|-----------|---------------|----------------------|----------------------------------------|
+| `hipdnn` | `hipdnn_backend_tests`, `hipdnn_frontend_tests`, `hipdnn_data_sdk_tests`, `hipdnn_flatbuffers_sdk_tests`, `hipdnn_plugin_sdk_tests`, `hipdnn_test_sdk_tests` | `hipdnn_public_backend_tests`, `hipdnn_public_frontend_tests`, `hipdnn_backend_logging_shutdown_tests` | — |
+| `miopen` | `miopen_plugin_tests` | `miopen_plugin_integration_tests` | `miopen-provider-external-integration-check` (`hipdnn_integration_tests` + `miopen_plugin`, engine `MIOPEN_ENGINE`) |
+| `hipblaslt` | `hipblaslt_plugin_tests` | `hipblaslt_plugin_integration_tests` | `hipblaslt-provider-external-integration-check` (`hipdnn_integration_tests` + `hipblaslt_plugin`, engine `HIPBLASLT_ENGINE`) |
+| `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` | `hip-kernel-provider-external-integration-check` when present |
+| `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` | — |
 
-```bash
-python $HELPERS/windows_rocm_setup.py --repo-root $REPO_ROOT [--rocm-path $ROCM_PATH]
-```
+The exact article/engine/config for the external suite is resolved at build time; get the ready-to-run command from `discover_test_targets.py --scope external-integration` (the `command:` line) rather than hardcoding paths.
 
-Parse the `ROCM_PATH=...` line from stdout. Set `ROCM_BIN = $ROCM_PATH/bin`. On Linux, skip this step.
+## Report
 
-## Step 4: Discover Targets
+Summarize per-component results:
 
-Use the discovery helper, which knows about the hip-kernel-provider naming inconsistency and falls back to its path-qualified target automatically:
-
-```bash
-python $HELPERS/discover_test_targets.py --build-dir $BUILD_DIR --component <component> --scope <scope>
-```
-
-The helper outputs one `<component>:<target>` line per match. If `--filter` was provided, jump to Step 5b. Otherwise continue to Step 5a with this list.
-
-## Step 5: Run Tests
-
-### Step 5a: Run via cmake target (helper-wrapped)
-
-For each `component:target` line from Step 4, run the shared cmake build helper. It runs `cmake --build … --target …` with `ROCM_PATH` set in the test process env, and on Windows also prepends `<build>/bin` and the ROCm bin directory to `PATH` so the test executables ctest spawns can resolve their DLLs. The env block propagates through cmake → ninja → ctest → test.exe via `CreateProcessW`, so no PowerShell wrapper is needed.
-
-Run the helper with stdout/stderr captured to a log, tail only on failure, and propagate the exit code so PASS/FAIL is detectable from the bash exit status (don't rely on parsing tail output — a segfault or `0xc0000135` DLL-load crash may produce no "FAIL" string):
-
-```bash
-LOG=$(mktemp)
-python $HELPERS/cmake_run.py --build-dir $BUILD_DIR --target <target> [--jobs <N>] [--rocm-path $ROCM_PATH] [--rocm-bin $ROCM_BIN] > "$LOG" 2>&1
-RC=$?
-if [ $RC -ne 0 ]; then echo "FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
-exit $RC
-```
-
-`--rocm-path` is optional: the helper defaults to `/opt/rocm` on Linux and to `--rocm-bin`'s parent on Windows. Pass it explicitly only when the user supplied `ROCM_PATH=`. Pass `--rocm-bin $ROCM_BIN` only on Windows.
-
-If `--verbose` was provided, append `-verbose` to the target name (e.g., `hipdnn-unit-check-verbose`). For path-qualified targets like `dnn-providers/hip-kernel-provider/src/unit-check`, use `dnn-providers/hip-kernel-provider/src/unit-check-verbose`.
-
-Run targets sequentially in separate Bash invocations (do not chain with `&&`). Track pass/fail per component.
-
-If a component fails:
-- If `--keep-going` was provided, record the failure and continue with the remaining components.
-- Otherwise stop and report.
-
-### Step 5b: Run via direct binary with --filter
-
-`--filter` requires running the test binary directly. List available binaries:
-
-```bash
-ls $BIN_DIR/*tests*.exe 2>/dev/null
-```
-
-(On Linux, omit `.exe`.)
-
-Component → binary mapping:
-
-| Component | Unit Binaries | Integration Binaries |
-|-----------|---------------|---------------------|
-| `hipdnn` | `hipdnn_backend_tests`, `hipdnn_frontend_tests`, `hipdnn_data_sdk_tests`, `hipdnn_flatbuffers_sdk_tests`, `hipdnn_plugin_sdk_tests`, `hipdnn_test_sdk_tests` | `hipdnn_public_backend_tests`, `hipdnn_public_frontend_tests`, `hipdnn_backend_logging_shutdown_tests` |
-| `miopen` | `miopen_plugin_tests` | `miopen_plugin_integration_tests` |
-| `hipblaslt` | `hipblaslt_plugin_tests` | `hipblaslt_plugin_integration_tests` |
-| `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` |
-| `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` |
-
-Use the same helper in `--binary` mode — it sets `PATH`/`ROCM_PATH` the same way and avoids any shell-quoting concerns with paths containing spaces or special characters:
-
-```bash
-LOG=$(mktemp)
-python $HELPERS/cmake_run.py --build-dir $BUILD_DIR --binary $BIN_DIR/<binary>[.exe] --gtest-filter "<filter>" [--rocm-path $ROCM_PATH] [--rocm-bin $ROCM_BIN] > "$LOG" 2>&1
-RC=$?
-if [ $RC -ne 0 ]; then echo "FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
-exit $RC
-```
-
-## Step 6: Report
-
-Summarize per-component test results. If `--keep-going` was used and some failed, list each failure separately. Example:
-
-```
+```text
 hipdnn:
-  hipdnn-unit-check:                 PASS  6/6 binaries, 7150 tests, 12.45s
+  hipdnn-unit-check: PASS
 miopen-provider:
-  miopen-provider-unit-check:        PASS  1/1 binaries, 2875 tests, 29.94s
-hipblaslt-provider:
-  hipblaslt-provider-unit-check:     PASS  1/1 binaries, 0.94s
-hip-kernel-provider:
-  dnn-providers/hip-kernel-provider/src/unit-check:  FAIL  2 tests:
-    - TestRMSnormPlanBuilder.IsApplicableReturnsTrueForValidInferenceGraph
-    - TestRMSnormValidator.Valid
+  miopen-provider-unit-check: FAIL (see <log>)
 ```
 
-If a component was requested but its targets are not in the build, say so explicitly (the discovery helper will return zero matches for that component).
+If a requested component has no matching target, say that it was not present in the existing superbuild and name the preset or component likely needed.
 
 ## Notes
 
-- **Helpers** under `$REPO_ROOT/projects/hipdnn/tools/ai/skills/helpers/`:
-  - `windows_rocm_setup.py` — detects/installs the wheel ROCm and prints paths
-  - `discover_test_targets.py` — finds available test targets, with hip-kernel fallback
-  - `cmake_run.py` — runs `cmake --build <target>` or a test binary directly with `PATH`/`ROCM_PATH` set in the subprocess env
-- **Windows DLL/PATH** — Handled by `cmake_run.py`: it prepends `<build>/bin` and the ROCm bin to `PATH` on Python's subprocess env, which `CreateProcessW` propagates to grandchildren. Do **not** try to set `PATH` from bash — MSYS2 doesn't translate it into the Win32 form ninja's `cmd.exe /C` invocations need.
-- **Integration tests require an AMD GPU.** They will fail on machines without GPU access. For unit-only verification, use `scope: unit` (the default).
-- **hip-kernel-provider target naming** — Auto-handled by the discovery helper. The provider currently uses unprefixed `unit-check` rather than `hip-kernel-provider-unit-check`; the helper finds it under `dnn-providers/hip-kernel-provider/src/unit-check`.
-- **Stale build** — If the discovery helper returns no targets for a component, that component was not in the superbuild's preset. Re-run `/hipdnn-superbuild <preset>` with a preset that includes it.
-
-## Related Skills
-
-- `/hipdnn-superbuild` — Build hipDNN with providers
-- `/hipdnn-test` — Test the standalone hipDNN build
+- `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, `scripts/windows_rocm_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
+- Windows DLL loading is handled by `cmake_run.py`, which sets PATH in Python's subprocess environment before launching CMake or test binaries.
+- Windows comgr staging: before launching any target or binary on Windows, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr. This happens on every Windows run, not just for a specific kernel path; GCN-assembly Winograd solvers are the common failure (`[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`), but the version mismatch is not limited to them. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (a low version indicates the stale System32 copy; the wheel's is newer).
+- Integration tests require an AMD GPU. Unit scope is the default for CPU-only validation.
+- Prefer running test binaries through `cmake_run.py` (it wires PATH/ROCM_PATH for the loader); pass extra binary flags via `--extra-arg`/`-- <args>` rather than folding them into `--binary`.

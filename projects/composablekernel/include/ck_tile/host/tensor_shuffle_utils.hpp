@@ -6,6 +6,24 @@
 #include <stdexcept>
 
 namespace ck_tile {
+namespace detail {
+template <typename GemmConfig, typename T, typename = void>
+struct b_contiguous_items_per_access
+{
+    // Default: 16 / sizeof(T)
+    static constexpr int value = 16 / static_cast<int>(sizeof(T));
+};
+
+template <typename GemmConfig, typename T>
+struct b_contiguous_items_per_access<GemmConfig,
+                                     T,
+                                     std::void_t<decltype(GemmConfig::BContiguousItemsPerAccess)>>
+{
+    // PackedSize specified
+    static constexpr int value = GemmConfig::BContiguousItemsPerAccess;
+};
+} // namespace detail
+
 template <typename T>
 auto shuffle_aq(const ck_tile::HostTensor<T>* t, int block_aq_k)
 {
@@ -102,9 +120,10 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmConfig)
     }
     else
     {
-        const int KLane = ck_tile::get_warp_size() / gemmConfig.N_Warp_Tile;
-        const int ItemsPerAccess =
-            std::min(16 / static_cast<int>(sizeof(T)), gemmConfig.K_Warp_Tile / KLane);
+        constexpr int KLane = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
+        constexpr int ItemsPerAccess =
+            std::min(detail::b_contiguous_items_per_access<GemmConfig, T>::value,
+                     GemmConfig::K_Warp_Tile / KLane);
 
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Warp_Tile,
                                        gemmConfig.N_Warp_Tile,
@@ -139,13 +158,16 @@ auto bq_permuteN(const ck_tile::HostTensor<T>& t, index_t group_n)
     return ck_tile::reference_permute(t_view, {0, 3, 1, 2, 4});
 }
 
-template <typename GemmConfig, typename T>
-auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmConfig)
+template <typename GemmConfig, index_t BlockedXDLNPerWarp, typename T>
+auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t,
+                        const GemmConfig& gemmConfig,
+                        number<BlockedXDLNPerWarp>)
 {
     assert(t.get_lengths().size() == 2);
-    int n_      = t.get_lengths()[1];
-    int k_      = t.get_lengths()[0];
-    int NRepeat = gemmConfig.N_Tile / gemmConfig.N_Warp_Tile / gemmConfig.N_Warp;
+    int n_ = t.get_lengths()[1];
+    int k_ = t.get_lengths()[0];
+    constexpr ck_tile::index_t NRepeat =
+        GemmConfig::N_Tile / GemmConfig::N_Warp_Tile / GemmConfig::N_Warp;
     if(ck_tile::is_gfx12_supported())
     {
         constexpr int divisor = 2;
@@ -164,24 +186,28 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmC
     }
     else
     {
+        static_assert(NRepeat % BlockedXDLNPerWarp == 0,
+                      "wrong! NRepeat must be a multiple of BlockedXDLNPerWarp");
         constexpr int KLane = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
         constexpr int ItemsPerAccess =
-            std::min(16 / static_cast<int>(sizeof(T)), GemmConfig::K_Warp_Tile / KLane);
+            std::min(detail::b_contiguous_items_per_access<GemmConfig, T>::value,
+                     GemmConfig::K_Warp_Tile / KLane);
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Tile,
                                        gemmConfig.N_Warp,
                                        gemmConfig.N_Warp_Tile,
-                                       NRepeat,
+                                       NRepeat / BlockedXDLNPerWarp,
+                                       BlockedXDLNPerWarp,
                                        k_ / ItemsPerAccess,
                                        ItemsPerAccess});
         std::copy(t.begin(), t.end(), t_view.begin());
-        return ck_tile::reference_permute(t_view, {0, 3, 1, 4, 2, 5});
+        return ck_tile::reference_permute(t_view, {0, 3, 1, 4, 5, 2, 6});
     }
 }
 
-template <typename GemmConfig, typename T>
+template <typename GemmConfig, typename T, index_t BlockedXDLNPerWarp = 1>
 auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t)
 {
-    return shuffle_b_permuteN(t, GemmConfig{});
+    return shuffle_b_permuteN(t, GemmConfig{}, number<BlockedXDLNPerWarp>{});
 }
 
 template <typename FlatmmConfig, typename T>

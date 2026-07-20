@@ -35,6 +35,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstddef>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -129,18 +130,14 @@ namespace TensileLite
             m_errorInSolution   = false;
             m_executedSolution  = false;
 
-            // MXFP4/MXFP8 data can depend on the selected solution (e.g. MI-based preSwizzle when
-            // enabled). prepareCPUInputs runs in preProblem before preSolution, so the initial
-            // SolveCPU may not match GPU inputs refreshed in DataInitialization::preSolution.
-            // Re-run the CPU reference after that refresh (CPU "current" buffers are synced there
-            // when the MX path runs).
+            // Re-run CPU reference after DataInitialization refreshes MX inputs.
             if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
                || solution == nullptr)
                 return;
 
             if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
-                // Must mirror DataInitialization::preSolution's gate.
+                // Match DataInitialization MX gate.
                 if(!isMXProblem(*gemm))
                     return;
                 ScopedTimer timer("cpu_reference_gemm_per_solution");
@@ -379,6 +376,15 @@ namespace TensileLite
             return rv;
         }
 
+        bool ReferenceValidator::shouldSkipNullTensor(const std::string& tensorName,
+                                                      bool hasNullPointer,
+                                                      bool hasZeroElements) const
+        {
+            // Only output tensors reach this function (filtered by isOutput() check)
+            // Output tensors should never have null pointers or zero elements
+            return false;
+        }
+
         bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
                                           ContractionInputs const&      reference,
                                           ContractionInputs const&      result)
@@ -507,7 +513,26 @@ namespace TensileLite
                     std::cout << "Validating tensor " << tensor.getName() << ", cpu pointer "
                               << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
-                
+
+                // Check if we should skip this tensor due to null pointers or zero elements
+                bool hasNullPointer = (resPtr == nullptr || refPtr == nullptr);
+                bool hasZeroElements = (result.maxElements[i] == 0);
+
+                if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
+                {
+                    continue;
+                }
+
+                // If we reach here with null pointers or zero elements, it's an error
+                if(hasNullPointer || hasZeroElements)
+                {
+                    std::stringstream ss;
+                    ss << "Unexpected null pointer or zero elements for tensor " << tensor.getName()
+                       << " (resPtr=" << resPtr << ", refPtr=" << refPtr
+                       << ", maxElements=" << result.maxElements[i] << ")";
+                    throw std::runtime_error(ss.str());
+                }
+
                 rv &= checkResults(
                     tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
             }
@@ -516,13 +541,15 @@ namespace TensileLite
 
         void ReferenceValidator::allocateResultBuffer(size_t bytes)
         {
-            if(m_cpuResultBufferSize == bytes)
+            // Only skip reallocation if size matches AND buffer is valid
+            if(m_cpuResultBufferSize == bytes && m_cpuResultBuffer.get() != nullptr)
                 return;
+
             m_cpuResultBuffer.reset();
 
             uint8_t* buffer;
-            HIP_CHECK_EXC(hipHostMalloc(&buffer, bytes, 0));
-            m_cpuResultBuffer.reset(buffer, hipHostFree);
+            HIP_CHECK_EXC(hipHostMalloc((void**)&buffer, bytes, 0));
+            m_cpuResultBuffer.reset(buffer, [](uint8_t* p) { HIP_CHECK_EXC(hipHostFree(p)); });
             m_cpuResultBufferSize = bytes;
         }
 
@@ -562,8 +589,7 @@ namespace TensileLite
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.amaxd().totalAllocatedBytes());
 
-            if(m_cpuResultBufferSize < requiredBufferSize)
-                allocateResultBuffer(requiredBufferSize);
+            allocateResultBuffer(requiredBufferSize);
 
             if(m_printTensorA)
             {
@@ -778,12 +804,31 @@ namespace TensileLite
             size_t elementsAfterData    = 0;
 
             BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
+            // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
             if(boundsCheck == BoundsCheckMode::NaN)
                 elementsToCopy = maxElement;
             size_t bytesToCopy = elementsToCopy * sizeof(ValidType);
 
-            if(m_cpuResultBufferSize < bytesToCopy)
-                allocateResultBuffer(bytesToCopy);
+            // Check if we should skip this tensor due to null pointers or no data
+            bool hasNullPointer = (result == nullptr || reference == nullptr);
+            bool hasZeroElements = (bytesToCopy == 0 || maxElement == 0);
+
+            if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
+            {
+                return true;
+            }
+
+            // If we reach here with null pointers or no data, it's an error
+            if(hasNullPointer || hasZeroElements)
+            {
+                std::stringstream ss;
+                ss << "Unexpected null pointer or no data for tensor " << tensor.getName()
+                   << " (result=" << result << ", reference=" << reference
+                   << ", bytesToCopy=" << bytesToCopy << ", maxElement=" << maxElement << ")";
+                throw std::runtime_error(ss.str());
+            }
+
+            allocateResultBuffer(bytesToCopy);
 
             auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
 
