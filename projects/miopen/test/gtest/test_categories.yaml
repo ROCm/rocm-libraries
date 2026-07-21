@@ -112,7 +112,6 @@ test_categories:
     # -DMIOPEN_DAPPER_MODE=union (TheRock default), which passes --dapper-json to the
     # category generator; otherwise this is a no-op and the category runs in full.
     enable_dapper: "True"
-    dapper_json_file: "miopen_dapper_tests.json"
     test_patterns: *positive_patterns
 
     exclude:
