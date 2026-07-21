@@ -41,126 +41,125 @@ namespace
         return trans;
     }
 
-    inline rocblas_int grouped_gemm_ex_lda(rocblas_int       m,
-                                           rocblas_int       k,
-                                           rocblas_operation transA,
-                                           rocblas_int       lda_override)
+    template <typename Ti>
+    inline Ti grouped_gemm_ex_lda(Ti m, Ti k, rocblas_operation transA, Ti lda_override)
     {
         if(lda_override > 0)
             return lda_override;
-        rocblas_int a_row = transA == rocblas_operation_none ? m : k;
-        return std::max(a_row, rocblas_int(1));
+        const Ti a_row = transA == rocblas_operation_none ? m : k;
+        return std::max(a_row, Ti(1));
     }
 
-    inline rocblas_int grouped_gemm_ex_ldb(rocblas_int       n,
-                                           rocblas_int       k,
-                                           rocblas_operation transB,
-                                           rocblas_int       ldb_override)
+    template <typename Ti>
+    inline Ti grouped_gemm_ex_ldb(Ti n, Ti k, rocblas_operation transB, Ti ldb_override)
     {
         if(ldb_override > 0)
             return ldb_override;
-        rocblas_int b_row = transB == rocblas_operation_none ? k : n;
-        return std::max(b_row, rocblas_int(1));
+        const Ti b_row = transB == rocblas_operation_none ? k : n;
+        return std::max(b_row, Ti(1));
     }
 
-    inline rocblas_int grouped_gemm_ex_ldc(rocblas_int m, rocblas_int ldc_override)
+    template <typename Ti>
+    inline Ti grouped_gemm_ex_ldc(Ti m, Ti ldc_override)
     {
         if(ldc_override > 0)
             return ldc_override;
-        return std::max(m, rocblas_int(1));
+        return std::max(m, Ti(1));
     }
 
-    template <typename Tc>
+    template <typename Tc, typename Ti>
     struct grouped_gemm_ex_test_config
     {
-        rocblas_int group_count{};
-        rocblas_int problem_count{};
+        Ti group_count{};
+        Ti problem_count{};
 
         std::vector<rocblas_operation> transa_array;
         std::vector<rocblas_operation> transb_array;
-        std::vector<rocblas_int>       m_array;
-        std::vector<rocblas_int>       n_array;
-        std::vector<rocblas_int>       k_array;
-        std::vector<rocblas_int>       lda_array;
-        std::vector<rocblas_int>       ldb_array;
-        std::vector<rocblas_int>       ldc_array;
-        std::vector<rocblas_int>       ldd_array;
-        std::vector<rocblas_int>       group_size;
+        std::vector<Ti>                m_array;
+        std::vector<Ti>                n_array;
+        std::vector<Ti>                k_array;
+        std::vector<Ti>                lda_array;
+        std::vector<Ti>                ldb_array;
+        std::vector<Ti>                ldc_array;
+        std::vector<Ti>                ldd_array;
+        std::vector<Ti>                group_size;
         std::vector<Tc>                alpha_array;
         std::vector<Tc>                beta_array;
 
-        rocblas_int max_m{};
-        rocblas_int max_n{};
-        rocblas_int max_k{};
-        rocblas_int max_lda{};
-        rocblas_int max_ldb{};
-        rocblas_int max_ldc{};
-        rocblas_int max_ldd{};
-        rocblas_int max_a_row{};
-        rocblas_int max_a_col{};
-        rocblas_int max_b_row{};
-        rocblas_int max_b_col{};
+        Ti max_m{};
+        Ti max_n{};
+        Ti max_k{};
+        Ti max_lda{};
+        Ti max_ldb{};
+        Ti max_ldc{};
+        Ti max_ldd{};
+        Ti max_a_row{};
+        Ti max_a_col{};
+        Ti max_b_row{};
+        Ti max_b_col{};
     };
 
-    template <typename Tc>
-    grouped_gemm_ex_test_config<Tc> grouped_gemm_ex_test_config_from_arg(const Arguments& arg)
+    template <typename Tc, typename Ti>
+    grouped_gemm_ex_test_config<Tc, Ti> grouped_gemm_ex_test_config_from_arg(const Arguments& arg)
     {
-        grouped_gemm_ex_test_config<Tc> cfg{};
+        grouped_gemm_ex_test_config<Tc, Ti> cfg{};
         cfg.group_count
-            = std::min(std::max(arg.stride_x, int64_t(1)), int64_t(k_max_grouped_gemm_groups));
+            = Ti(std::min(std::max(arg.stride_x, int64_t(1)), int64_t(k_max_grouped_gemm_groups)));
 
         const rocblas_operation base_trans_a = char2rocblas_operation(arg.transA);
         const rocblas_operation base_trans_b = char2rocblas_operation(arg.transB);
         const Tc                base_alpha   = arg.get_alpha<Tc>();
         const Tc                base_beta    = arg.get_beta<Tc>();
 
-        cfg.transa_array.resize(cfg.group_count);
-        cfg.transb_array.resize(cfg.group_count);
-        cfg.m_array.resize(cfg.group_count);
-        cfg.n_array.resize(cfg.group_count);
-        cfg.k_array.resize(cfg.group_count);
-        cfg.lda_array.resize(cfg.group_count);
-        cfg.ldb_array.resize(cfg.group_count);
-        cfg.ldc_array.resize(cfg.group_count);
-        cfg.ldd_array.resize(cfg.group_count);
-        cfg.group_size.resize(cfg.group_count);
-        cfg.alpha_array.resize(cfg.group_count);
-        cfg.beta_array.resize(cfg.group_count);
+        const rocblas_int group_count = rocblas_int(cfg.group_count);
+        cfg.transa_array.resize(group_count);
+        cfg.transb_array.resize(group_count);
+        cfg.m_array.resize(group_count);
+        cfg.n_array.resize(group_count);
+        cfg.k_array.resize(group_count);
+        cfg.lda_array.resize(group_count);
+        cfg.ldb_array.resize(group_count);
+        cfg.ldc_array.resize(group_count);
+        cfg.ldd_array.resize(group_count);
+        cfg.group_size.resize(group_count);
+        cfg.alpha_array.resize(group_count);
+        cfg.beta_array.resize(group_count);
 
-        for(rocblas_int g = 0; g < cfg.group_count; ++g)
+        for(rocblas_int g = 0; g < group_count; ++g)
         {
-            // add in g to sizes and batch_count to test different group sizes and batch counts
-            cfg.m_array[g] = rocblas_int(arg.M + g);
-            cfg.n_array[g] = rocblas_int(arg.N + g);
-            cfg.k_array[g] = rocblas_int(arg.K + g);
+            const Ti m_g = Ti(arg.M + g);
+            const Ti n_g = Ti(arg.N + g);
+            const Ti k_g = Ti(arg.K + g);
+
+            cfg.m_array[g] = m_g;
+            cfg.n_array[g] = n_g;
+            cfg.k_array[g] = k_g;
 
             cfg.transa_array[g]
                 = (g % 2 == 0) ? base_trans_a : grouped_gemm_ex_toggle_n_t(base_trans_a);
             cfg.transb_array[g]
                 = (g % 2 == 0) ? base_trans_b : grouped_gemm_ex_toggle_n_t(base_trans_b);
 
-            const rocblas_int lda_g = arg.lda > 0 ? rocblas_int(arg.lda + g) : 0;
-            const rocblas_int ldb_g = arg.ldb > 0 ? rocblas_int(arg.ldb + g) : 0;
-            const rocblas_int ldc_g = arg.ldc > 0 ? rocblas_int(arg.ldc + g) : 0;
-            const rocblas_int ldd_g = arg.ldd > 0 ? rocblas_int(arg.ldd + g) : ldc_g;
+            const Ti lda_g = arg.lda > 0 ? Ti(arg.lda + g) : Ti(0);
+            const Ti ldb_g = arg.ldb > 0 ? Ti(arg.ldb + g) : Ti(0);
+            const Ti ldc_g = arg.ldc > 0 ? Ti(arg.ldc + g) : Ti(0);
+            const Ti ldd_g = arg.ldd > 0 ? Ti(arg.ldd + g) : ldc_g;
 
-            cfg.lda_array[g]
-                = grouped_gemm_ex_lda(cfg.m_array[g], cfg.k_array[g], cfg.transa_array[g], lda_g);
-            cfg.ldb_array[g]
-                = grouped_gemm_ex_ldb(cfg.n_array[g], cfg.k_array[g], cfg.transb_array[g], ldb_g);
-            cfg.ldc_array[g] = grouped_gemm_ex_ldc(cfg.m_array[g], ldc_g);
-            cfg.ldd_array[g] = grouped_gemm_ex_ldc(cfg.m_array[g], ldd_g);
+            cfg.lda_array[g] = grouped_gemm_ex_lda(m_g, k_g, cfg.transa_array[g], lda_g);
+            cfg.ldb_array[g] = grouped_gemm_ex_ldb(n_g, k_g, cfg.transb_array[g], ldb_g);
+            cfg.ldc_array[g] = grouped_gemm_ex_ldc(m_g, ldc_g);
+            cfg.ldd_array[g] = grouped_gemm_ex_ldc(m_g, ldd_g);
 
-            cfg.group_size[g]  = std::max(arg.batch_count+g, int64_t(0));
+            cfg.group_size[g]  = Ti(std::max(arg.batch_count + g, int64_t(0)));
             cfg.alpha_array[g] = base_alpha;
             cfg.beta_array[g]  = base_beta;
         }
 
-        cfg.problem_count = 0;
-        for(rocblas_int g = 0; g < cfg.group_count; ++g)
+        cfg.problem_count = Ti(0);
+        for(rocblas_int g = 0; g < group_count; ++g)
             cfg.problem_count += cfg.group_size[g];
 
-        for(rocblas_int g = 0; g < cfg.group_count; ++g)
+        for(rocblas_int g = 0; g < group_count; ++g)
         {
             cfg.max_m   = std::max(cfg.max_m, cfg.m_array[g]);
             cfg.max_n   = std::max(cfg.max_n, cfg.n_array[g]);
@@ -170,13 +169,13 @@ namespace
             cfg.max_ldc = std::max(cfg.max_ldc, cfg.ldc_array[g]);
             cfg.max_ldd = std::max(cfg.max_ldd, cfg.ldd_array[g]);
 
-            rocblas_int a_row
+            const Ti a_row
                 = cfg.transa_array[g] == rocblas_operation_none ? cfg.m_array[g] : cfg.k_array[g];
-            rocblas_int a_col
+            const Ti a_col
                 = cfg.transa_array[g] == rocblas_operation_none ? cfg.k_array[g] : cfg.m_array[g];
-            rocblas_int b_row
+            const Ti b_row
                 = cfg.transb_array[g] == rocblas_operation_none ? cfg.k_array[g] : cfg.n_array[g];
-            rocblas_int b_col
+            const Ti b_col
                 = cfg.transb_array[g] == rocblas_operation_none ? cfg.n_array[g] : cfg.k_array[g];
 
             cfg.max_a_row = std::max(cfg.max_a_row, a_row);
@@ -185,20 +184,16 @@ namespace
             cfg.max_b_col = std::max(cfg.max_b_col, b_col);
         }
 
-        cfg.max_a_row = std::max(cfg.max_a_row, rocblas_int(1));
-        cfg.max_a_col = std::max(cfg.max_a_col, rocblas_int(1));
-        cfg.max_b_row = std::max(cfg.max_b_row, rocblas_int(1));
-        cfg.max_b_col = std::max(cfg.max_b_col, rocblas_int(1));
-        cfg.max_m     = std::max(cfg.max_m, rocblas_int(1));
-        cfg.max_n     = std::max(cfg.max_n, rocblas_int(1));
+        cfg.max_a_row = std::max(cfg.max_a_row, Ti(1));
+        cfg.max_a_col = std::max(cfg.max_a_col, Ti(1));
+        cfg.max_b_row = std::max(cfg.max_b_row, Ti(1));
+        cfg.max_b_col = std::max(cfg.max_b_col, Ti(1));
+        cfg.max_m     = std::max(cfg.max_m, Ti(1));
+        cfg.max_n     = std::max(cfg.max_n, Ti(1));
 
         return cfg;
     }
 
-    inline std::vector<int64_t> grouped_gemm_ex_to_int64(const std::vector<rocblas_int>& v)
-    {
-        return std::vector<int64_t>(v.begin(), v.end());
-    }
 }
 
 template <typename Ti, typename To, typename Tc>
@@ -211,9 +206,14 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                      ? rocblas_gemm_grouped_batched_ex_64_fortran
                                                      : rocblas_gemm_grouped_batched_ex_64;
 
-    grouped_gemm_ex_test_config<Tc> cfg           = grouped_gemm_ex_test_config_from_arg<Tc>(arg);
-    const rocblas_int               group_count   = cfg.group_count;
-    const rocblas_int               problem_count = cfg.problem_count;
+    grouped_gemm_ex_test_config<Tc, rocblas_int> cfg
+        = grouped_gemm_ex_test_config_from_arg<Tc, rocblas_int>(arg);
+    grouped_gemm_ex_test_config<Tc, int64_t> cfg_64{};
+    if(arg.api & c_API_64)
+        cfg_64 = grouped_gemm_ex_test_config_from_arg<Tc, int64_t>(arg);
+
+    const rocblas_int group_count   = rocblas_int(cfg.group_count);
+    const rocblas_int problem_count = rocblas_int(cfg.problem_count);
 
     const size_t safe_size        = std::max(size_t(cfg.max_a_row) * size_t(cfg.max_a_col),
                                       size_t(cfg.max_b_row) * size_t(cfg.max_b_col));
@@ -234,46 +234,45 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
     void* const*       dD_ptr
         = const_cast<void* const*>(reinterpret_cast<const void* const*>(dD.ptr_on_device()));
 
-    const std::vector<int64_t> m_array_64    = grouped_gemm_ex_to_int64(cfg.m_array);
-    const std::vector<int64_t> n_array_64    = grouped_gemm_ex_to_int64(cfg.n_array);
-    const std::vector<int64_t> k_array_64    = grouped_gemm_ex_to_int64(cfg.k_array);
-    const std::vector<int64_t> lda_array_64  = grouped_gemm_ex_to_int64(cfg.lda_array);
-    const std::vector<int64_t> ldb_array_64  = grouped_gemm_ex_to_int64(cfg.ldb_array);
-    const std::vector<int64_t> ldc_array_64  = grouped_gemm_ex_to_int64(cfg.ldc_array);
-    const std::vector<int64_t> ldd_array_64  = grouped_gemm_ex_to_int64(cfg.ldd_array);
-    const std::vector<int64_t> group_size_64 = grouped_gemm_ex_to_int64(cfg.group_size);
-    std::vector<rocblas_int>   bad_m_array(cfg.m_array);
-    bad_m_array[0]                            = -1;
-    const std::vector<int64_t> bad_m_array_64 = grouped_gemm_ex_to_int64(bad_m_array);
-    std::vector<rocblas_int>   bad_group_size(cfg.group_size);
-    bad_group_size[0]                            = -1;
-    const std::vector<int64_t> bad_group_size_64 = grouped_gemm_ex_to_int64(bad_group_size);
+    std::vector<rocblas_int> bad_m_array(cfg.m_array);
+    bad_m_array[0] = -1;
+    std::vector<rocblas_int> bad_group_size(cfg.group_size);
+    bad_group_size[0] = -1;
+
+    std::vector<int64_t> bad_m_array_64;
+    std::vector<int64_t> bad_group_size_64;
+    if(arg.api & c_API_64)
+    {
+        bad_m_array_64       = cfg_64.m_array;
+        bad_m_array_64[0]    = -1;
+        bad_group_size_64    = cfg_64.group_size;
+        bad_group_size_64[0] = -1;
+    }
 
     if(arg.api & c_API_64)
     {
-        const int64_t group_count_64 = group_count;
         EXPECT_ROCBLAS_STATUS(rocblas_gemm_grouped_batched_ex_fn_64(nullptr,
                                                                     cfg.transa_array.data(),
                                                                     cfg.transb_array.data(),
-                                                                    m_array_64.data(),
-                                                                    n_array_64.data(),
-                                                                    k_array_64.data(),
+                                                                    cfg_64.m_array.data(),
+                                                                    cfg_64.n_array.data(),
+                                                                    cfg_64.k_array.data(),
                                                                     cfg.alpha_array.data(),
                                                                     dA_ptr,
                                                                     arg.a_type,
-                                                                    lda_array_64.data(),
+                                                                    cfg_64.lda_array.data(),
                                                                     dB_ptr,
                                                                     arg.b_type,
-                                                                    ldb_array_64.data(),
+                                                                    cfg_64.ldb_array.data(),
                                                                     cfg.beta_array.data(),
                                                                     dC_ptr,
                                                                     arg.c_type,
-                                                                    ldc_array_64.data(),
+                                                                    cfg_64.ldc_array.data(),
                                                                     dD_ptr,
                                                                     arg.d_type,
-                                                                    ldd_array_64.data(),
-                                                                    group_count_64,
-                                                                    group_size_64.data(),
+                                                                    cfg_64.ldd_array.data(),
+                                                                    cfg_64.group_count,
+                                                                    cfg_64.group_size.data(),
                                                                     arg.compute_type,
                                                                     algo,
                                                                     flags),
@@ -282,25 +281,25 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
         EXPECT_ROCBLAS_STATUS(rocblas_gemm_grouped_batched_ex_fn_64(handle,
                                                                     cfg.transa_array.data(),
                                                                     cfg.transb_array.data(),
-                                                                    m_array_64.data(),
-                                                                    n_array_64.data(),
-                                                                    k_array_64.data(),
+                                                                    cfg_64.m_array.data(),
+                                                                    cfg_64.n_array.data(),
+                                                                    cfg_64.k_array.data(),
                                                                     nullptr,
                                                                     dA_ptr,
                                                                     arg.a_type,
-                                                                    lda_array_64.data(),
+                                                                    cfg_64.lda_array.data(),
                                                                     dB_ptr,
                                                                     arg.b_type,
-                                                                    ldb_array_64.data(),
+                                                                    cfg_64.ldb_array.data(),
                                                                     cfg.beta_array.data(),
                                                                     dC_ptr,
                                                                     arg.c_type,
-                                                                    ldc_array_64.data(),
+                                                                    cfg_64.ldc_array.data(),
                                                                     dD_ptr,
                                                                     arg.d_type,
-                                                                    ldd_array_64.data(),
-                                                                    group_count_64,
-                                                                    group_size_64.data(),
+                                                                    cfg_64.ldd_array.data(),
+                                                                    cfg_64.group_count,
+                                                                    cfg_64.group_size.data(),
                                                                     arg.compute_type,
                                                                     algo,
                                                                     flags),
@@ -310,24 +309,24 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                     cfg.transa_array.data(),
                                                                     cfg.transb_array.data(),
                                                                     bad_m_array_64.data(),
-                                                                    n_array_64.data(),
-                                                                    k_array_64.data(),
+                                                                    cfg_64.n_array.data(),
+                                                                    cfg_64.k_array.data(),
                                                                     cfg.alpha_array.data(),
                                                                     dA_ptr,
                                                                     arg.a_type,
-                                                                    lda_array_64.data(),
+                                                                    cfg_64.lda_array.data(),
                                                                     dB_ptr,
                                                                     arg.b_type,
-                                                                    ldb_array_64.data(),
+                                                                    cfg_64.ldb_array.data(),
                                                                     cfg.beta_array.data(),
                                                                     dC_ptr,
                                                                     arg.c_type,
-                                                                    ldc_array_64.data(),
+                                                                    cfg_64.ldc_array.data(),
                                                                     dD_ptr,
                                                                     arg.d_type,
-                                                                    ldd_array_64.data(),
-                                                                    group_count_64,
-                                                                    group_size_64.data(),
+                                                                    cfg_64.ldd_array.data(),
+                                                                    cfg_64.group_count,
+                                                                    cfg_64.group_size.data(),
                                                                     arg.compute_type,
                                                                     algo,
                                                                     flags),
@@ -336,24 +335,24 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
         EXPECT_ROCBLAS_STATUS(rocblas_gemm_grouped_batched_ex_fn_64(handle,
                                                                     cfg.transa_array.data(),
                                                                     cfg.transb_array.data(),
-                                                                    m_array_64.data(),
-                                                                    n_array_64.data(),
-                                                                    k_array_64.data(),
+                                                                    cfg_64.m_array.data(),
+                                                                    cfg_64.n_array.data(),
+                                                                    cfg_64.k_array.data(),
                                                                     cfg.alpha_array.data(),
                                                                     dA_ptr,
                                                                     arg.a_type,
-                                                                    lda_array_64.data(),
+                                                                    cfg_64.lda_array.data(),
                                                                     dB_ptr,
                                                                     arg.b_type,
-                                                                    ldb_array_64.data(),
+                                                                    cfg_64.ldb_array.data(),
                                                                     cfg.beta_array.data(),
                                                                     dC_ptr,
                                                                     arg.c_type,
-                                                                    ldc_array_64.data(),
+                                                                    cfg_64.ldc_array.data(),
                                                                     dD_ptr,
                                                                     arg.d_type,
-                                                                    ldd_array_64.data(),
-                                                                    group_count_64,
+                                                                    cfg_64.ldd_array.data(),
+                                                                    cfg_64.group_count,
                                                                     bad_group_size_64.data(),
                                                                     arg.compute_type,
                                                                     algo,
@@ -482,9 +481,14 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                                      ? rocblas_gemm_grouped_batched_ex_64_fortran
                                                      : rocblas_gemm_grouped_batched_ex_64;
 
-    grouped_gemm_ex_test_config<Tc> cfg           = grouped_gemm_ex_test_config_from_arg<Tc>(arg);
-    const rocblas_int               group_count   = cfg.group_count;
-    const rocblas_int               problem_count = cfg.problem_count;
+    grouped_gemm_ex_test_config<Tc, rocblas_int> cfg
+        = grouped_gemm_ex_test_config_from_arg<Tc, rocblas_int>(arg);
+    grouped_gemm_ex_test_config<Tc, int64_t> cfg_64{};
+    if(arg.api & c_API_64)
+        cfg_64 = grouped_gemm_ex_test_config_from_arg<Tc, int64_t>(arg);
+
+    const rocblas_int group_count   = rocblas_int(cfg.group_count);
+    const rocblas_int problem_count = rocblas_int(cfg.problem_count);
 
     if(group_count <= 0 || problem_count <= 0)
         return;
@@ -547,7 +551,7 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     {
         copy_matrix_with_different_leading_dimensions(hC, hD_gold);
 
-        rocblas_int idx = 0;
+        int64_t idx = 0;
         for(rocblas_int g = 0; g < group_count; ++g)
         {
             for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
@@ -572,37 +576,28 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     const auto run_grouped_gemm_ex = [&](const void* alpha_ptr, const void* beta_ptr) {
         if(arg.api & c_API_64)
         {
-            const std::vector<int64_t> m_array_64     = grouped_gemm_ex_to_int64(cfg.m_array);
-            const std::vector<int64_t> n_array_64     = grouped_gemm_ex_to_int64(cfg.n_array);
-            const std::vector<int64_t> k_array_64     = grouped_gemm_ex_to_int64(cfg.k_array);
-            const std::vector<int64_t> lda_array_64   = grouped_gemm_ex_to_int64(cfg.lda_array);
-            const std::vector<int64_t> ldb_array_64   = grouped_gemm_ex_to_int64(cfg.ldb_array);
-            const std::vector<int64_t> ldc_array_64   = grouped_gemm_ex_to_int64(cfg.ldc_array);
-            const std::vector<int64_t> ldd_array_64   = grouped_gemm_ex_to_int64(cfg.ldd_array);
-            const std::vector<int64_t> group_size_64  = grouped_gemm_ex_to_int64(cfg.group_size);
-            const int64_t              group_count_64 = group_count;
             CHECK_ROCBLAS_ERROR(rocblas_gemm_grouped_batched_ex_fn_64(handle,
                                                                       cfg.transa_array.data(),
                                                                       cfg.transb_array.data(),
-                                                                      m_array_64.data(),
-                                                                      n_array_64.data(),
-                                                                      k_array_64.data(),
+                                                                      cfg_64.m_array.data(),
+                                                                      cfg_64.n_array.data(),
+                                                                      cfg_64.k_array.data(),
                                                                       alpha_ptr,
                                                                       dA_ptr,
                                                                       arg.a_type,
-                                                                      lda_array_64.data(),
+                                                                      cfg_64.lda_array.data(),
                                                                       dB_ptr,
                                                                       arg.b_type,
-                                                                      ldb_array_64.data(),
+                                                                      cfg_64.ldb_array.data(),
                                                                       beta_ptr,
                                                                       dC_ptr,
                                                                       arg.c_type,
-                                                                      ldc_array_64.data(),
+                                                                      cfg_64.ldc_array.data(),
                                                                       dDref_ptr,
                                                                       d_type,
-                                                                      ldd_array_64.data(),
-                                                                      group_count_64,
-                                                                      group_size_64.data(),
+                                                                      cfg_64.ldd_array.data(),
+                                                                      cfg_64.group_count,
+                                                                      cfg_64.group_size.data(),
                                                                       arg.compute_type,
                                                                       algo,
                                                                       flags));
@@ -710,16 +705,6 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
         FrequencyMonitor& freq_monitor = getFrequencyMonitor();
         freq_monitor.start();
 
-        const std::vector<int64_t> m_array_64     = grouped_gemm_ex_to_int64(cfg.m_array);
-        const std::vector<int64_t> n_array_64     = grouped_gemm_ex_to_int64(cfg.n_array);
-        const std::vector<int64_t> k_array_64     = grouped_gemm_ex_to_int64(cfg.k_array);
-        const std::vector<int64_t> lda_array_64   = grouped_gemm_ex_to_int64(cfg.lda_array);
-        const std::vector<int64_t> ldb_array_64   = grouped_gemm_ex_to_int64(cfg.ldb_array);
-        const std::vector<int64_t> ldc_array_64   = grouped_gemm_ex_to_int64(cfg.ldc_array);
-        const std::vector<int64_t> ldd_array_64   = grouped_gemm_ex_to_int64(cfg.ldd_array);
-        const std::vector<int64_t> group_size_64  = grouped_gemm_ex_to_int64(cfg.group_size);
-        const int64_t              group_count_64 = group_count;
-
         for(int i = 0; i < total_calls; i++)
         {
             if(i == number_cold_calls)
@@ -730,25 +715,25 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                 CHECK_ROCBLAS_ERROR(rocblas_gemm_grouped_batched_ex_fn_64(handle,
                                                                           cfg.transa_array.data(),
                                                                           cfg.transb_array.data(),
-                                                                          m_array_64.data(),
-                                                                          n_array_64.data(),
-                                                                          k_array_64.data(),
+                                                                          cfg_64.m_array.data(),
+                                                                          cfg_64.n_array.data(),
+                                                                          cfg_64.k_array.data(),
                                                                           cfg.alpha_array.data(),
                                                                           dA_ptr,
                                                                           arg.a_type,
-                                                                          lda_array_64.data(),
+                                                                          cfg_64.lda_array.data(),
                                                                           dB_ptr,
                                                                           arg.b_type,
-                                                                          ldb_array_64.data(),
+                                                                          cfg_64.ldb_array.data(),
                                                                           cfg.beta_array.data(),
                                                                           dC_ptr,
                                                                           arg.c_type,
-                                                                          ldc_array_64.data(),
+                                                                          cfg_64.ldc_array.data(),
                                                                           dDref_ptr,
                                                                           d_type,
-                                                                          ldd_array_64.data(),
-                                                                          group_count_64,
-                                                                          group_size_64.data(),
+                                                                          cfg_64.ldd_array.data(),
+                                                                          cfg_64.group_count,
+                                                                          cfg_64.group_size.data(),
                                                                           arg.compute_type,
                                                                           algo,
                                                                           flags));

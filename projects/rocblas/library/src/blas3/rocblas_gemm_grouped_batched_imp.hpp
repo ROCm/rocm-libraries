@@ -133,8 +133,7 @@ namespace
                     handle, rocblas_gemm_grouped_batched_name<T>, "group_count", group_count);
         }
 
-        API_INT problem_count = 0;
-        auto    validArgs     = rocblas_gemm_grouped_batched_arg_check(handle,
+        auto validArgs = rocblas_gemm_grouped_batched_arg_check(handle,
                                                                 transa_array,
                                                                 transb_array,
                                                                 m_array,
@@ -149,15 +148,14 @@ namespace
                                                                 Carray,
                                                                 ldc_array,
                                                                 group_count,
-                                                                group_size,
-                                                                problem_count);
+                                                                group_size);
 
         if(validArgs != rocblas_status_continue)
             return validArgs;
 
         if(check_numerics)
         {
-            API_INT idx = 0;
+            int64_t idx = 0;
             for(API_INT g = 0; g < group_count; ++g)
             {
                 bool           is_input = true;
@@ -191,29 +189,29 @@ namespace
         }
 
         rocblas_status status
-            = ROCBLAS_API(rocblas_internal_gemm_grouped_batched_template)(handle,
-                                                                          transa_array,
-                                                                          transb_array,
-                                                                          m_array,
-                                                                          n_array,
-                                                                          k_array,
-                                                                          alpha_host,
-                                                                          Aarray,
-                                                                          lda_array,
-                                                                          Barray,
-                                                                          ldb_array,
-                                                                          beta_host,
-                                                                          Carray,
-                                                                          ldc_array,
-                                                                          group_count,
-                                                                          group_size);
+            = rocblas_internal_gemm_grouped_batched_template<API_INT, T>(handle,
+                                                                         transa_array,
+                                                                         transb_array,
+                                                                         m_array,
+                                                                         n_array,
+                                                                         k_array,
+                                                                         alpha_host,
+                                                                         Aarray,
+                                                                         lda_array,
+                                                                         Barray,
+                                                                         ldb_array,
+                                                                         beta_host,
+                                                                         Carray,
+                                                                         ldc_array,
+                                                                         group_count,
+                                                                         group_size);
 
         if(status != rocblas_status_success)
             return status;
 
         if(check_numerics)
         {
-            API_INT idx = 0;
+            int64_t idx = 0;
             for(API_INT g = 0; g < group_count; ++g)
             {
                 bool           is_input = false;

@@ -24,28 +24,6 @@
 
 #include "rocblas_gemm.hpp"
 
-template <typename T>
-struct RocblasGroupedGemmProblem
-{
-    rocblas_handle           handle;
-    rocblas_int              group_count;
-    rocblas_int              problem_count;
-    const rocblas_operation* transa_array;
-    const rocblas_operation* transb_array;
-    const rocblas_int*       m_array;
-    const rocblas_int*       n_array;
-    const rocblas_int*       k_array;
-    const T*                 alpha_array;
-    const T* const*          Aarray;
-    const rocblas_int*       lda_array;
-    const T* const*          Barray;
-    const rocblas_int*       ldb_array;
-    const T*                 beta_array;
-    T* const*                Carray;
-    const rocblas_int*       ldc_array;
-    const rocblas_int*       group_size;
-};
-
 template <typename API_INT, typename T>
 inline rocblas_status rocblas_gemm_grouped_batched_arg_check(rocblas_handle           handle,
                                                              const rocblas_operation* transa_array,
@@ -62,11 +40,8 @@ inline rocblas_status rocblas_gemm_grouped_batched_arg_check(rocblas_handle     
                                                              T* const*                Carray,
                                                              const API_INT*           ldc_array,
                                                              API_INT                  group_count,
-                                                             const API_INT*           group_size,
-                                                             API_INT& problem_count_out)
+                                                             const API_INT*           group_size)
 {
-    problem_count_out = 0;
-
     if(!handle)
         return rocblas_status_invalid_handle;
 
@@ -80,15 +55,13 @@ inline rocblas_status rocblas_gemm_grouped_batched_arg_check(rocblas_handle     
        || !beta_array || !lda_array || !ldb_array || !ldc_array || !group_size)
         return rocblas_status_invalid_pointer;
 
+    int64_t problem_count = 0;
     for(API_INT g = 0; g < group_count; ++g)
     {
         if(group_size[g] < 0)
             return rocblas_status_invalid_size;
 
-        const API_INT next_count = problem_count_out + group_size[g];
-        if(next_count < problem_count_out)
-            return rocblas_status_invalid_size;
-        problem_count_out = next_count;
+        problem_count += group_size[g];
 
         const T* alpha_g = alpha_array + g;
         const T* beta_g  = beta_array + g;
@@ -113,27 +86,27 @@ inline rocblas_status rocblas_gemm_grouped_batched_arg_check(rocblas_handle     
             return valid;
     }
 
-    if(problem_count_out > 0 && (!Aarray || !Barray || !Carray))
+    if(problem_count > 0 && (!Aarray || !Barray || !Carray))
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
 }
 
-template <typename T>
+template <typename TI_, typename T>
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     rocblas_internal_gemm_grouped_batched_template(rocblas_handle           handle,
                                                    const rocblas_operation* transa_array,
                                                    const rocblas_operation* transb_array,
-                                                   const rocblas_int*       m_array,
-                                                   const rocblas_int*       n_array,
-                                                   const rocblas_int*       k_array,
+                                                   const TI_*               m_array,
+                                                   const TI_*               n_array,
+                                                   const TI_*               k_array,
                                                    const T*                 alpha_array,
                                                    const T* const*          Aarray,
-                                                   const rocblas_int*       lda_array,
+                                                   const TI_*               lda_array,
                                                    const T* const*          Barray,
-                                                   const rocblas_int*       ldb_array,
+                                                   const TI_*               ldb_array,
                                                    const T*                 beta_array,
                                                    T* const*                Carray,
-                                                   const rocblas_int*       ldc_array,
-                                                   rocblas_int              group_count,
-                                                   const rocblas_int*       group_size);
+                                                   const TI_*               ldc_array,
+                                                   TI_                      group_count,
+                                                   const TI_*               group_size);
