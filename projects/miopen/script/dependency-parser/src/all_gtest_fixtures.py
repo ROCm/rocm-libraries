@@ -6,10 +6,16 @@ if sys.version_info < (3, 10):
 
 import os
 import stat
-import resource
 import subprocess
 import json
 from pathlib import Path
+
+# 'resource' is a Unix-only stdlib module (absent on Windows). Import defensively so
+# this module loads on Windows; core-dump limiting is a Unix concept and is skipped there.
+try:
+    import resource
+except ImportError:
+    resource = None
 
 
 def is_executable(file_path: Path) -> bool:
@@ -22,8 +28,9 @@ def is_executable(file_path: Path) -> bool:
 
 
 def disable_core_dump():
-    """Disable core dump generation."""
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    """Disable core dump generation (no-op on platforms without the 'resource' module)."""
+    if resource is not None:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
 def list_gtest_fixtures(executable: Path):

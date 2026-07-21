@@ -9,7 +9,6 @@ import time
 import json
 import os
 import re
-import resource
 import shlex
 import stat
 import subprocess
