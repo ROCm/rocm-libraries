@@ -585,6 +585,81 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     return _enable_d128_small_tile(problem) and problem.block_size >= 32
 
 
+def _enable_softmax_mfma_interleave(problem: UnifiedAttentionProblem) -> bool:
+    """gfx950 single-batch d128 prefill: interleave the softmax VALU into the
+    MFMA window via ``iglp_opt(1)`` and widen to num_warps=4.
+
+    The shipped selector routes this cohort to num_warps=2 with no MFMA/softmax
+    interleave, which leaves the Matrix cores starved: rocprofv3 on D128 S8192
+    (Llama-3.1-405B, bf16) shows MFMA-busy ~5% / occupancy ~12% at 2 waves. The
+    ``use_softmax_mfma_interleave`` lever (``iglp_opt(1)`` at the loop top, which
+    lets the backend spread the causal-mask + softmax VALU across the MFMA gap)
+    combined with num_warps=4 lifts MFMA-busy to ~18% and occupancy to ~24%.
+
+    Measured (gfx950 MI355X, comgr llvm22, same-session vs the shipped auto path;
+    ``sweep_shapes_gfx950.py`` across the gap-doc cohort, correctness max_abs=0.0
+    vs the shipped kernel on every shape):
+      * D128 S8192: 122 -> 443 TF (3.6x); S4096 118 -> 412 (3.5x);
+        S2048 109 -> 350 (3.2x); S1024 108 -> 278 (2.6x); S512 105 -> 198 (1.9x).
+      * Holds across Llama-3-8B/70B, Llama-3.1-405B, Qwen2.5-7B, Qwen3-235B,
+        GPT-3-13B (MHA); bf16 and fp16 alike (no dtype cliff).
+
+    Occupancy (probe_occupancy / llvm-readelf on the produced HSACO): the widened
+    nw=4 + interleave kernel is 250 VGPR / 0 AGPR / 0 spill / 64 KB LDS -> 8
+    waves/CU, strictly BETTER than the shipped nw=2 kernel (296 VGPR / 40 AGPR,
+    4 waves/CU) -- so this does not trip the ``_enable_d128_small_tile`` nw=2
+    occupancy reconciliation (that concern was T=32 on llvm20; here T stays 128).
+
+    Scoped to the exact single-batch d128 combo cohort. The residual gap to
+    FlyDSL (~1090 TF) is structural (an 8-wave/32x32 dual-wave rewrite) and is
+    tracked separately; this is the hint-only ceiling and ships standalone.
+
+    **Why this cohort only (measured, not assumed).** The interleave lever pays
+    off wherever the loop is schedule-bound with a softmax-VALU/MFMA-idle window
+    to fill -- i.e. a 32x32-transposed (combo) geometry at nw>=2. The full
+    eligible space was swept (MI355X); adding ONLY the hint to each cohort's
+    SHIPPED spec:
+
+        cohort (shipped geometry)        S1024  S2048  S4096
+        d128 single-batch combo, nw4      1.10x  1.05x  1.03x  <- the gated win
+        d64  single-batch combo, nw4      0.97x  0.95x  0.93x  (regresses)
+        d128 multi-seq combo, nw2         1.00x  1.00x  0.99x  (neutral)
+        d256 single-seq plain, nw1        1.00x  1.00x  0.99x  (see note)
+        d128 sliding-window plain, nw2    0.83x  0.72x  0.73x  (see note)
+
+    The hint is inert on d128 multi-seq (already nw2-combo, no idle window to
+    exploit at that occupancy) and regresses d64 and d128-sliding-window on
+    their shipped geometry. It matches the runbook (arch/gfx950.md): iglp_opt
+    is neutral-to-negative without a real MFMA-idle window.
+
+    **d256 and d128-sliding-window ALSO benefit from this lever -- covered
+    elsewhere, not dropped.** On their SHIPPED plain geometry the hint alone is
+    inert/negative, but with the combo+nw geometry those cohorts want, the lever
+    helps there too and is being enabled by the cohort-owning PRs: d256 gfx950
+    via PR #9233 (AICK-1495, 32x32 combo + interleave mode2/g4, 1.1-1.94x vs
+    AOTriton), sliding-window d128 via AICK-1492 (wide-atom windowed path, in
+    progress). This gate stays scoped to the single-batch d128 combo so it does
+    not collide with those; the lever's d256/SWA coverage lives with the kernel
+    geometry work that unlocks it.
+
+    ESCAPE HATCH: ``HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0`` (or off/no/false)
+    force-DISABLES the lever, restoring the prior nw=2 / no-interleave routing.
+    """
+    env = (
+        __import__("os")
+        .environ.get("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE", "")
+        .strip()
+        .lower()
+    )
+    if env in ("0", "false", "no", "off"):
+        return False
+    return (
+        problem.head_size == 128
+        and not problem.use_fp8
+        and _enable_single_batch_combo(problem)
+    )
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -823,6 +898,13 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         # nw=2 here, overriding the S>=2048 -> nw=4 rule. When the small-tile
         # gate is OFF this branch is byte-for-byte the prior behavior.
         if problem.head_size == 64:
+            target = 4
+        elif _enable_softmax_mfma_interleave(problem):
+            # d128 softmax-MFMA-interleave cohort: widen to nw=4. The interleaved
+            # kernel is occupancy-BETTER than the shipped nw=2 (250 vs 296 VGPR,
+            # 8 vs 4 waves/CU -- see _enable_softmax_mfma_interleave), so the
+            # small-tile nw=2 reconciliation below does not apply. Overrides the
+            # _enable_d128_small_tile -> nw=2 rule for this cohort only.
             target = 4
         elif _enable_d128_small_tile(problem):
             target = 2
@@ -1616,9 +1698,25 @@ def _gfx942_flash_wide_setting() -> int:
 
 
 def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem) -> int:
-    # D64 and D128 prefill now share the wide (num_warps=4) sliced-K ring path
-    # (the ring superseded the prior D64 nw2/single-buffer config: 13-17% faster,
-    # beats Torch at S2048). See _enable_gfx942_flash_k_sliced_ring.
+    """Single source of truth for the gfx942 flash num_warps, for BOTH dtypes.
+
+    Mirrors attention_spec_builder._tiled_spec_from_problem so the launch-meta
+    grid/block matches the geometry the launcher actually builds:
+      * ring active (fp16, or bf16 D64/D128 prefill): the wide sliced-K ring
+        geometry -> _gfx942_flash_wide_setting() (nw=4 by default; 2 or 0 via
+        HIPDNN_GFX942_FLASH_WIDE). A 0/disabled setting means the L4 (WG=64)
+        fallback, i.e. num_warps=1.
+      * bf16 without the ring: the legacy bf16-wide geometry (nw=2, or the
+        smalltile double-K nw).
+    D64 and D128 prefill share the wide (num_warps=4) sliced-K ring path (the ring
+    superseded the prior D64 nw2/single-buffer config: 13-17% faster, beats Torch
+    at S2048). See _enable_gfx942_flash_k_sliced_ring.
+    """
+    if _enable_gfx942_bf16_flash(problem) and not _enable_gfx942_flash_k_sliced_ring(
+        problem
+    ):
+        nw, _ = _gfx942_bf16_wide_geometry(problem)
+        return nw
     wide = _gfx942_flash_wide_setting()
     return wide if wide in (2, 4) else 1
 
@@ -1670,11 +1768,13 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # mask-limit (nw4) vs the prior per-head bests: D64 13-17% faster (beats Torch
     # at S2048, ~parity elsewhere); D128 beats Torch S2048/S4096. So D64 and D128
     # prefill now share the ring path.
-    # bf16 ring is correctness-verified only for D64 — D128 bf16 ring produces
-    # wrong results (max_abs ~3-5, NaN/Inf for MHA) in the kernel generator and
-    # is excluded until the D128 bf16 ring path in attention_tiled_2d.py is fixed.
-    if _enable_gfx942_bf16_flash(problem) and problem.head_size == 128:
-        return False
+    # bf16 D128 now shares the ring path: the earlier exclusion attached the ring
+    # to the non-ring bf16-WIDE geometry (nw=2, no cfvst), which the ring cannot
+    # use -- the ring requires the conflict-free-V store (cfvst) and the wide nw=4
+    # flash geometry. The spec builder's ring branch instead uses the fp16-flash
+    # geometry (nw=4, tile=64, cfvst) -- verified numerically correct on gfx942
+    # (max_abs 0.00049, no NaN/Inf, GQA + MHA) on both the Python and C++ engines,
+    # with the byte-identity gate GREEN. So D64 and D128 bf16 prefill share the ring.
     if not (
         (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
         and problem.head_size in (64, 128)
@@ -2176,7 +2276,10 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             return min(segments, 32)
         if problem.head_size == 128:
             return min(segments, 16)
-        return min(segments, 64)
+        # D256: sweep (decode_shapes_perf gfx942) shows seg128 wins or ties at
+        # every kv_len — do not cap below the formula value.
+        if problem.head_size != 256:
+            return min(segments, 64)
     return segments
 
 
@@ -2221,6 +2324,26 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
     # async DMA. (The remaining decode gap vs Torch is structural -- 64-thread /
     # narrow-MFMA / LDS round-trip -- and needs the segment-kernel restructure.)
     return True
+
+
+def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
+    """Predicate: true when this problem belongs to the D256 bf16 decode cohort.
+
+    Intended for bf16, head_size=256, decode-only (all_decode=True) shapes; the
+    architecture gate (gfx942/gfx950) is enforced by the dispatcher/caller.
+    Excludes sliding window, softcap, sinks, ALiBi, and QQ-bias.
+    """
+    return (
+        problem.head_size == 256
+        and problem.dtype == "bf16"
+        and problem.all_decode
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0.0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+    )
 
 
 def _env_enabled_true(var: str) -> bool:
@@ -3290,8 +3413,11 @@ def _get_2d_launch_meta(
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
     if _enable_gfx942_bf16_flash(problem):
-        nw, _ = _gfx942_bf16_wide_geometry(problem)
-        num_warps = nw
+        # _select_gfx942_flash_num_warps mirrors the spec builder for BOTH dtypes:
+        # ring-active -> fp16-flash wide geometry; bf16 non-ring -> bf16-wide nw.
+        # (Using a mismatched nw here would compute the grid/block for a different
+        # geometry than the launcher actually builds.)
+        num_warps = _select_gfx942_flash_num_warps(problem)
         block_m_per_warp = 32
     elif _enable_gfx942_fp16_flash(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)

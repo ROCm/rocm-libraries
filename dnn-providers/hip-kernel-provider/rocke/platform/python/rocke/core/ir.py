@@ -65,63 +65,19 @@ NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 # ----- target-neutral MMA metadata ---------------------------------------
 #
 # ``IRBuilder.mma`` emits a single ``tile.mma`` op keyed by ``op_id``; the ISA
-# backend lowers that op_id to the matching MFMA/WMMA call. To stay BYTE-
-# IDENTICAL with the historical ISA-named emission, ``mma`` must size the result
-# vector and pick the result-name hint exactly as the legacy method did. These
-# tables encode both, keyed by op_id.
-#
-# ``_MMA_C_FRAG_LEN`` is duplicated here (rather than imported from
-# ``core/arch``) so ``ir.py`` stays free of an ``arch`` import when a caller
-# passes a bare op_id string; an ``MmaOp`` object always supplies its own
-# ``c_frag_len`` and bypasses this table.
-_MMA_C_FRAG_LEN: Dict[str, int] = {
-    "mfma_f32_16x16x4_f32": 4,
-    "mfma_f32_32x32x2_f32": 16,
-    "mfma_f32_16x16x16_f16": 4,
-    "mfma_f32_16x16x32_f16": 4,
-    "mfma_f32_16x16x16_bf16": 4,
-    "mfma_f32_16x16x32_bf16": 4,
-    "mfma_f32_16x16x32_fp8": 4,
-    "mfma_f32_16x16x32_bf8": 4,
-    "mfma_f32_32x32x8_f16": 16,
-    "mfma_f32_32x32x16_f16": 16,
-    "mfma_f32_32x32x8_bf16": 16,
-    "mfma_f32_32x32x16_bf16": 16,
-    "mfma_f32_32x32x16_fp8": 16,
-    "mfma_f32_32x32x16_bf8": 16,
-    "mfma_f32_4x4x4_f16": 4,
-    "mfma_f32_16x16x128_fp4": 4,
-    "mfma_f32_16x16x96_fp6": 4,
-    "mfma_f32_16x16x128_fp8": 4,
-    "mfma_scale_f32_16x16x128_f8f6f4": 4,
-    "wmma_f32_16x16x16_f16": 8,
-    "wmma_f32_16x16x16_bf16": 8,
-    "wmma_i32_16x16x16_iu8": 8,
-    "wmma_i32_16x16x16_iu4": 8,
-    "wmma_gfx12_f32_16x16x16_f16": 8,
-    "wmma_gfx12_f32_16x16x16_bf16": 8,
-    "wmma_gfx1250_f32_16x16x32_f16": 8,
-    "wmma_gfx1250_f32_16x16x32_bf16": 8,
-    "wmma_gfx1250_f32_16x16x64_fp8_fp8": 8,
-    "wmma_gfx1250_f32_16x16x64_fp8_bf8": 8,
-    "wmma_gfx1250_f32_16x16x64_bf8_fp8": 8,
-    "wmma_gfx1250_f32_16x16x64_bf8_bf8": 8,
-}
+# backend lowers that op_id to the matching MFMA/WMMA call. To size the result
+# vector, ``mma`` needs the accumulator fragment length and dtype for the atom.
+# Both are read from the arch SSOT (``core/arch/target``): fragment lengths from
+# ``_MMA_FRAGMENT_INFO`` and the accumulator dtype from the JSON catalog. ir.py
+# keeps *no* private copy of that data — an ``MmaOp`` object supplies both fields
+# directly, and a bare op_id string is resolved through the lazy helpers below.
+# The arch package is imported lazily (inside the helpers) so ir.py stays
+# importable without eagerly loading the arch tree.
 
-# op_id -> accumulator/result *element* type. Float atoms accumulate in f32;
-# integer WMMA atoms (iu8/iu4) accumulate in i32. Used by ``IRBuilder.mma`` to
-# size the result vector element type when ``op`` is a bare op_id string; an
-# ``MmaOp`` object supplies its ``c_dtype`` directly and bypasses this table.
-_MMA_C_INT_OP_IDS = frozenset(
-    {
-        "wmma_i32_16x16x16_iu8",
-        "wmma_i32_16x16x16_iu4",
-    }
-)
-
-# op_id -> the ``result_name_hint`` the legacy ISA-named method used. Most atoms
-# used "acc"; a handful used distinct hints that must be preserved verbatim so
-# the SSA value numbering (and thus the emitted text) is unchanged.
+# op_id -> the ``result_name_hint`` the legacy ISA-named method used. This is
+# purely ir-side SSA naming (not arch data), kept here so the emitted value
+# numbering stays byte-identical. Most atoms used "acc"; a handful used distinct
+# hints that must be preserved verbatim.
 _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
     "mfma_f32_16x16x128_fp4": "acc4",
@@ -132,13 +88,33 @@ _MMA_RESULT_HINT: Dict[str, str] = {
 
 
 def _mma_c_frag_len(op_id: str) -> int:
-    try:
-        return _MMA_C_FRAG_LEN[op_id]
-    except KeyError:
+    """Accumulator fragment length for ``op_id`` from the arch SSOT.
+
+    Resolved through ``core/arch/target._MMA_FRAGMENT_INFO`` (imported lazily);
+    ir.py holds no private copy. Unknown op_ids (frag length 0) raise, matching
+    the strictness callers relied on.
+    """
+    from rocke.core.arch import target as _arch
+
+    frag_len = _arch._frag_info(op_id).c_frag_len
+    if frag_len <= 0:
         raise ValueError(
             f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
-            f"{sorted(_MMA_C_FRAG_LEN)}"
+            f"{sorted(_arch._MMA_FRAGMENT_INFO)}"
         )
+    return frag_len
+
+
+def _mma_c_is_int(op_id: str) -> bool:
+    """True when ``op_id`` accumulates in i32 (integer WMMA).
+
+    Sourced from the arch catalog's accumulator dtype
+    (``core/arch/data/arch_specs.json`` via ``target._op_id_c_dtype``), imported
+    lazily. Op_ids absent from the catalog default to the f32 accumulator.
+    """
+    from rocke.core.arch import target as _arch
+
+    return _arch._op_id_c_dtype().get(op_id) == "i32"
 
 
 @dataclass(frozen=True)
@@ -1558,11 +1534,9 @@ class IRBuilder:
         )
         # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
         # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
-        # is an MmaOp, else fall back to the op_id table.
+        # is an MmaOp, else resolve from the arch SSOT via op_id.
         c_dtype = getattr(op, "c_dtype", None)
-        is_int_acc = (
-            c_dtype == "i32" if c_dtype is not None else op_id in _MMA_C_INT_OP_IDS
-        )
+        is_int_acc = c_dtype == "i32" if c_dtype is not None else _mma_c_is_int(op_id)
         c_elem = I32 if is_int_acc else F32
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(

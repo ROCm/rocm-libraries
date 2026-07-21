@@ -169,6 +169,8 @@ public:
                 tensorMap, nodeAttributes->inv_rms_tensor_uid().value(), ComputeDataTypeEnum);
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 
