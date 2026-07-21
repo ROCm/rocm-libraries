@@ -195,7 +195,9 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(dtype, tol, hq, hk, sq):
     try:
         from builders.common.attention_spec_builder import _tiled_spec_from_problem
 
-        s = H.Shape(f"d128_{hq}_{hk}_S{sq}", dtype, sq, sq, 128, hq, hk, 1, True, "perf")
+        s = H.Shape(
+            f"d128_{hq}_{hk}_S{sq}", dtype, sq, sq, 128, hq, hk, 1, True, "perf"
+        )
 
         # randn (unit-variance) inputs -- NOT the uniform_(-0.1,0.1) default that
         # masked the ring bug.
@@ -208,9 +210,9 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(dtype, tol, hq, hk, sq):
         value_cache = torch.randn(max_blk, BS, hk, 128, device="cuda").to(td)
         cu_q = torch.tensor([0, sq], dtype=torch.int32, device="cuda")
         kv_lens = torch.tensor([sq], dtype=torch.int32, device="cuda")
-        block_tables = torch.arange(
-            max_blk, dtype=torch.int32, device="cuda"
-        ).view(1, max_blk)
+        block_tables = torch.arange(max_blk, dtype=torch.int32, device="cuda").view(
+            1, max_blk
+        )
         scale = 128**-0.5
         data = {
             "query": query,
