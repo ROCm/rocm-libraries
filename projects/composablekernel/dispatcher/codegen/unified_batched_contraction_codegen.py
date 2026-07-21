@@ -77,6 +77,11 @@ ELEMENTWISE_TO_CK = {
     "MultiDMultiply": "MultiDMultiply",
 }
 
+# Epilogue variants the generator can emit: "cshuffle" -> CShuffleEpilogue,
+# "default" -> DefaultGemm2DEpilogue. Any other value is a config error (e.g. a
+# JSON typo) and must be rejected rather than silently emitting the Default path.
+VALID_EPILOGUES = ("cshuffle", "default")
+
 DOUBLE_SMEM_PIPELINES = {"compv4", "preshufflev2", "comp_async"}
 
 
@@ -223,6 +228,15 @@ class BCHeaderGenerator:
             raise ValueError(f"layout must be 3 chars of r/c, got {spec.layout}")
         if spec.pipeline not in PIPELINE_IMPL_MAP:
             raise ValueError(f"unsupported pipeline {spec.pipeline}")
+        if spec.epilogue not in VALID_EPILOGUES:
+            raise ValueError(
+                f"unsupported epilogue {spec.epilogue!r}; expected one of {VALID_EPILOGUES}"
+            )
+        if spec.elementwise not in ELEMENTWISE_TO_CK:
+            raise ValueError(
+                f"unsupported elementwise {spec.elementwise!r}; "
+                f"expected one of {tuple(ELEMENTWISE_TO_CK)}"
+            )
 
         t = spec.tile
         ns = "ns_" + spec.name
@@ -238,7 +252,7 @@ class BCHeaderGenerator:
         pipeline_impl = PIPELINE_IMPL_MAP[spec.pipeline]
         base_pipeline = BASE_PIPELINE_MAP[spec.pipeline]
         scheduler_ck = SCHEDULER_TO_CK[spec.scheduler]
-        elementwise_ck = ELEMENTWISE_TO_CK.get(spec.elementwise, "PassThrough")
+        elementwise_ck = ELEMENTWISE_TO_CK[spec.elementwise]
         double_smem = "true" if spec.pipeline in DOUBLE_SMEM_PIPELINES else "false"
 
         if spec.num_d_tensors == 0:

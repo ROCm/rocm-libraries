@@ -53,6 +53,8 @@ int dispatcher_get_num_dim_g(void);   // compiled-in NUM_DIM_G (also m/n/k)
 int dispatcher_get_num_d_tensors(void);
 int dispatcher_run_batched_contraction(
     const void* A, const void* B, void* E,          // host, row-major packed
+    const void** d_ptrs, int num_d,                 // D-tensor host ptrs; num_d must == compiled-in NUM_D_TENSORS
+                                                    //   (d_ptrs may be NULL only when num_d==0)
     const int64_t* g_dims, const int64_t* m_dims,
     const int64_t* n_dims, const int64_t* k_dims,
     int num_dim_g, int num_dim_m, int num_dim_n, int num_dim_k,  // must == compiled-in
