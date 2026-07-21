@@ -22456,6 +22456,171 @@ catch(...)
     return hipblas_exception_to_status();
 }
 
+// gemm_grouped_batched
+hipblasStatus_t hipblasSgemmGroupedBatched(hipblasHandle_t           handle,
+                                           const hipblasOperation_t* transA_array,
+                                           const hipblasOperation_t* transB_array,
+                                           const int*                m_array,
+                                           const int*                n_array,
+                                           const int*                k_array,
+                                           const float*              alpha_array,
+                                           const float* const        Aarray[],
+                                           const int*                lda_array,
+                                           const float* const        Barray[],
+                                           const int*                ldb_array,
+                                           const float*              beta_array,
+                                           float* const              Carray[],
+                                           const int*                ldc_array,
+                                           int                       group_count,
+                                           const int*                group_size)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)lda_array;
+    (void)Barray;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)ldc_array;
+    (void)group_count;
+    (void)group_size;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasDgemmGroupedBatched(hipblasHandle_t           handle,
+                                           const hipblasOperation_t* transA_array,
+                                           const hipblasOperation_t* transB_array,
+                                           const int*                m_array,
+                                           const int*                n_array,
+                                           const int*                k_array,
+                                           const double*             alpha_array,
+                                           const double* const       Aarray[],
+                                           const int*                lda_array,
+                                           const double* const       Barray[],
+                                           const int*                ldb_array,
+                                           const double*             beta_array,
+                                           double* const             Carray[],
+                                           const int*                ldc_array,
+                                           int                       group_count,
+                                           const int*                group_size)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)lda_array;
+    (void)Barray;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)ldc_array;
+    (void)group_count;
+    (void)group_size;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasSgemmGroupedBatched_64(hipblasHandle_t           handle,
+                                              const hipblasOperation_t* transA_array,
+                                              const hipblasOperation_t* transB_array,
+                                              const int64_t*            m_array,
+                                              const int64_t*            n_array,
+                                              const int64_t*            k_array,
+                                              const float*              alpha_array,
+                                              const float* const        Aarray[],
+                                              const int64_t*            lda_array,
+                                              const float* const        Barray[],
+                                              const int64_t*            ldb_array,
+                                              const float*              beta_array,
+                                              float* const              Carray[],
+                                              const int64_t*            ldc_array,
+                                              int64_t                   group_count,
+                                              const int64_t*            group_size)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)lda_array;
+    (void)Barray;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)ldc_array;
+    (void)group_count;
+    (void)group_size;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasDgemmGroupedBatched_64(hipblasHandle_t           handle,
+                                              const hipblasOperation_t* transA_array,
+                                              const hipblasOperation_t* transB_array,
+                                              const int64_t*            m_array,
+                                              const int64_t*            n_array,
+                                              const int64_t*            k_array,
+                                              const double*             alpha_array,
+                                              const double* const       Aarray[],
+                                              const int64_t*            lda_array,
+                                              const double* const       Barray[],
+                                              const int64_t*            ldb_array,
+                                              const double*             beta_array,
+                                              double* const             Carray[],
+                                              const int64_t*            ldc_array,
+                                              int64_t                   group_count,
+                                              const int64_t*            group_size)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)lda_array;
+    (void)Barray;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)ldc_array;
+    (void)group_count;
+    (void)group_size;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 // gemm_strided_batched
 hipblasStatus_t hipblasHgemmStridedBatched(hipblasHandle_t    handle,
                                            hipblasOperation_t transa,
@@ -23424,6 +23589,238 @@ try
 #else
     return HIPBLAS_STATUS_NOT_SUPPORTED;
 #endif
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedEx(hipblasHandle_t           handle,
+                                            const hipblasOperation_t* transA_array,
+                                            const hipblasOperation_t* transB_array,
+                                            const int*                m_array,
+                                            const int*                n_array,
+                                            const int*                k_array,
+                                            const void*               alpha_array,
+                                            const void* const         Aarray[],
+                                            hipDataType               a_type,
+                                            const int*                lda_array,
+                                            const void* const         Barray[],
+                                            hipDataType               b_type,
+                                            const int*                ldb_array,
+                                            const void*               beta_array,
+                                            const void* const         Carray[],
+                                            hipDataType               c_type,
+                                            const int*                ldc_array,
+                                            void* const               Darray[],
+                                            hipDataType               d_type,
+                                            const int*                ldd_array,
+                                            int                       group_count,
+                                            const int*                group_size,
+                                            hipblasComputeType_t      compute_type,
+                                            hipblasGemmAlgo_t         algo)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)a_type;
+    (void)lda_array;
+    (void)Barray;
+    (void)b_type;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)c_type;
+    (void)ldc_array;
+    (void)Darray;
+    (void)d_type;
+    (void)ldd_array;
+    (void)group_count;
+    (void)group_size;
+    (void)compute_type;
+    (void)algo;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedExWithFlags(hipblasHandle_t           handle,
+                                                     const hipblasOperation_t* transA_array,
+                                                     const hipblasOperation_t* transB_array,
+                                                     const int*                m_array,
+                                                     const int*                n_array,
+                                                     const int*                k_array,
+                                                     const void*               alpha_array,
+                                                     const void* const         Aarray[],
+                                                     hipDataType               a_type,
+                                                     const int*                lda_array,
+                                                     const void* const         Barray[],
+                                                     hipDataType               b_type,
+                                                     const int*                ldb_array,
+                                                     const void*               beta_array,
+                                                     const void* const         Carray[],
+                                                     hipDataType               c_type,
+                                                     const int*                ldc_array,
+                                                     void* const               Darray[],
+                                                     hipDataType               d_type,
+                                                     const int*                ldd_array,
+                                                     int                       group_count,
+                                                     const int*                group_size,
+                                                     hipblasComputeType_t      compute_type,
+                                                     hipblasGemmAlgo_t         algo,
+                                                     hipblasGemmFlags_t        flags)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)a_type;
+    (void)lda_array;
+    (void)Barray;
+    (void)b_type;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)c_type;
+    (void)ldc_array;
+    (void)Darray;
+    (void)d_type;
+    (void)ldd_array;
+    (void)group_count;
+    (void)group_size;
+    (void)compute_type;
+    (void)algo;
+    (void)flags;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedEx_64(hipblasHandle_t           handle,
+                                               const hipblasOperation_t* transA_array,
+                                               const hipblasOperation_t* transB_array,
+                                               const int64_t*            m_array,
+                                               const int64_t*            n_array,
+                                               const int64_t*            k_array,
+                                               const void*               alpha_array,
+                                               const void* const         Aarray[],
+                                               hipDataType               a_type,
+                                               const int64_t*            lda_array,
+                                               const void* const         Barray[],
+                                               hipDataType               b_type,
+                                               const int64_t*            ldb_array,
+                                               const void*               beta_array,
+                                               const void* const         Carray[],
+                                               hipDataType               c_type,
+                                               const int64_t*            ldc_array,
+                                               void* const               Darray[],
+                                               hipDataType               d_type,
+                                               const int64_t*            ldd_array,
+                                               int64_t                   group_count,
+                                               const int64_t*            group_size,
+                                               hipblasComputeType_t      compute_type,
+                                               hipblasGemmAlgo_t         algo)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)a_type;
+    (void)lda_array;
+    (void)Barray;
+    (void)b_type;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)c_type;
+    (void)ldc_array;
+    (void)Darray;
+    (void)d_type;
+    (void)ldd_array;
+    (void)group_count;
+    (void)group_size;
+    (void)compute_type;
+    (void)algo;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGemmGroupedBatchedExWithFlags_64(hipblasHandle_t           handle,
+                                                        const hipblasOperation_t* transA_array,
+                                                        const hipblasOperation_t* transB_array,
+                                                        const int64_t*            m_array,
+                                                        const int64_t*            n_array,
+                                                        const int64_t*            k_array,
+                                                        const void*               alpha_array,
+                                                        const void* const         Aarray[],
+                                                        hipDataType               a_type,
+                                                        const int64_t*            lda_array,
+                                                        const void* const         Barray[],
+                                                        hipDataType               b_type,
+                                                        const int64_t*            ldb_array,
+                                                        const void*               beta_array,
+                                                        const void* const         Carray[],
+                                                        hipDataType               c_type,
+                                                        const int64_t*            ldc_array,
+                                                        void* const               Darray[],
+                                                        hipDataType               d_type,
+                                                        const int64_t*            ldd_array,
+                                                        int64_t                   group_count,
+                                                        const int64_t*            group_size,
+                                                        hipblasComputeType_t      compute_type,
+                                                        hipblasGemmAlgo_t         algo,
+                                                        hipblasGemmFlags_t        flags)
+try
+{
+    (void)handle;
+    (void)transA_array;
+    (void)transB_array;
+    (void)m_array;
+    (void)n_array;
+    (void)k_array;
+    (void)alpha_array;
+    (void)Aarray;
+    (void)a_type;
+    (void)lda_array;
+    (void)Barray;
+    (void)b_type;
+    (void)ldb_array;
+    (void)beta_array;
+    (void)Carray;
+    (void)c_type;
+    (void)ldc_array;
+    (void)Darray;
+    (void)d_type;
+    (void)ldd_array;
+    (void)group_count;
+    (void)group_size;
+    (void)compute_type;
+    (void)algo;
+    (void)flags;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
 }
 catch(...)
 {
