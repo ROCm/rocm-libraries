@@ -10,61 +10,15 @@ else()
   set(MIOPEN_BUILD_IN_THEROCK OFF)
 endif()
 
-# Dapper master switch (read by both the native/Jenkins flow and TheRock):
-#   off      : Dapper disabled (no analysis / no shard-file / no dapper ctest tests;
-#              the single gtest and its shard tests still build and run)
-#   validate : native shard + dapper_diff coverage validation (Jenkins/MICI default)
-#   union    : ACTIVE -- the reduced subtractive union filter actually runs (TheRock default)
-if(MIOPEN_BUILD_IN_THEROCK)
-  set(_MIOPEN_DAPPER_MODE_DEFAULT "union")
-else()
-  set(_MIOPEN_DAPPER_MODE_DEFAULT "validate")
-endif()
-set(MIOPEN_DAPPER_MODE "${_MIOPEN_DAPPER_MODE_DEFAULT}" CACHE STRING
-    "Dapper mode: off | validate | union")
-set_property(CACHE MIOPEN_DAPPER_MODE PROPERTY STRINGS off validate union)
-set(MIOPEN_DAPPER_BASE_REF "origin/develop" CACHE STRING
-    "Git ref to compute the Dapper impact diff against")
-message(STATUS "Dapper: MIOPEN_DAPPER_MODE=${MIOPEN_DAPPER_MODE} (TheRock=${MIOPEN_BUILD_IN_THEROCK})")
-
 # Gates the native shard-file / dapper_dev_filters / dapper_add_sharded_test machinery
-# below. Only ON for a native build with Dapper enabled; OFF in TheRock and when off.
+# below. dapper_init() flips it ON for an enabled native build; it stays OFF in TheRock and
+# when Dapper is off.
 set(MIOPEN_ENABLE_DAPPER_NATIVE OFF)
 
-# When Dapper does not run dapper_init() (TheRock, or native 'off'), restore the pre-Dapper
-# single-gtest default that dapper_init() would otherwise force.
-macro(_miopen_default_single_gtest)
-  if(NOT DEFINED MIOPEN_TEST_SINGLE_GTEST)
-    if(MIOPEN_TEST_DISCRETE)
-      set(MIOPEN_TEST_SINGLE_GTEST OFF)
-    else()
-      set(MIOPEN_TEST_SINGLE_GTEST ON)
-    endif()
-  endif()
-endmacro()
-
-if(MIOPEN_BUILD_IN_THEROCK)
-  _miopen_default_single_gtest()
-  # Produce the Dapper impact JSON on the (GPU-less) builder so the runner can compute the
-  # union filter. Only the JSON-producing steps run; no native shard/ctest dapper tests.
-  if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
-    find_package(Python 3 REQUIRED COMPONENTS Interpreter)
-    include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
-    dapper_therock_generate_json()
-  endif()
-else()
-  # Native/Jenkins build. 'validate'/'union' set up the native pipeline; 'off' disables it.
-  # (Full native check->union activation is a follow-up; today 'union' here is exercised via
-  # the existing `diff_check` target.)
-  if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
-    set(MIOPEN_ENABLE_DAPPER_NATIVE ON)
-    find_package(Python 3 REQUIRED COMPONENTS Interpreter)
-    include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
-    dapper_init()
-  else()
-    _miopen_default_single_gtest()
-  endif()
-endif()
+# Dapper mode selection, single-gtest defaulting, and all native/TheRock wiring live in
+# dapper_init() (see dapper.cmake) to keep Dapper's footprint here minimal.
+include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
+dapper_init()
 
 if(MIOPEN_USE_HIPBLASLT)
   find_package(hipblaslt REQUIRED PATHS /opt/rocm $ENV{HIP_PATH})

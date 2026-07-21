@@ -1,15 +1,72 @@
+# Restore the pre-Dapper single-gtest default that _dapper_native_init() would otherwise
+# force. Used when Dapper does not run the native init (TheRock, or native mode=off).
+macro(_dapper_default_single_gtest)
+    if(NOT DEFINED MIOPEN_TEST_SINGLE_GTEST)
+        if(MIOPEN_TEST_DISCRETE)
+            set(MIOPEN_TEST_SINGLE_GTEST OFF)
+        else()
+            set(MIOPEN_TEST_SINGLE_GTEST ON)
+        endif()
+    endif()
+endmacro()
+
+# Dapper entry point. Selects the mode, wires up the native or TheRock pipeline, and (for an
+# enabled native build) flips MIOPEN_ENABLE_DAPPER_NATIVE ON in the caller's scope.
+#
+# Dapper master switch (read by both the native/Jenkins flow and TheRock):
+#   off      : Dapper disabled (no analysis / no shard-file / no dapper ctest tests;
+#              the single gtest and its shard tests still build and run)
+#   validate : native shard + dapper_diff coverage validation (Jenkins/MICI default)
+#   union    : ACTIVE -- the reduced subtractive union filter actually runs (TheRock default)
 macro(dapper_init)
+    if(MIOPEN_BUILD_IN_THEROCK)
+        set(_MIOPEN_DAPPER_MODE_DEFAULT "union")
+    else()
+        set(_MIOPEN_DAPPER_MODE_DEFAULT "validate")
+    endif()
+    set(MIOPEN_DAPPER_MODE "${_MIOPEN_DAPPER_MODE_DEFAULT}" CACHE STRING
+        "Dapper mode: off | validate | union")
+    set_property(CACHE MIOPEN_DAPPER_MODE PROPERTY STRINGS off validate union)
+    set(MIOPEN_DAPPER_BASE_REF "origin/develop" CACHE STRING
+        "Git ref to compute the Dapper impact diff against")
+    # Additive attribution bridges run during 'parse' (see dependency-parser/main.py).
+    # Default 'symbol' (nm-based, correctness-dominant); set to "" to disable all bridges.
+    # Applies to both native and TheRock. The bridge module must exist on the current branch.
+    set(MIOPEN_DAPPER_BRIDGES "symbol" CACHE STRING
+        "Comma-separated dapper attribution bridges to run during 'parse' (symbol)")
+    message(STATUS "Dapper: MIOPEN_DAPPER_MODE=${MIOPEN_DAPPER_MODE} (TheRock=${MIOPEN_BUILD_IN_THEROCK})")
+
+    if(MIOPEN_BUILD_IN_THEROCK)
+        _dapper_default_single_gtest()
+        # Produce the Dapper impact JSON on the (GPU-less) builder so the runner can compute the
+        # union filter. Only the JSON-producing steps run; no native shard/ctest dapper tests.
+        if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
+            find_package(Python 3 REQUIRED COMPONENTS Interpreter)
+            dapper_therock_generate_json()
+        endif()
+    else()
+        # Native/Jenkins build. 'validate'/'union' set up the native pipeline; 'off' disables it.
+        # (Full native check->union activation is a follow-up; today 'union' here is exercised via
+        # the existing `diff_check` target.)
+        if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
+            set(MIOPEN_ENABLE_DAPPER_NATIVE ON)
+            find_package(Python 3 REQUIRED COMPONENTS Interpreter)
+            _dapper_native_init()
+        else()
+            _dapper_default_single_gtest()
+        endif()
+    endif()
+endmacro()
+
+# Native/Jenkins Dapper setup: single-gtest mapping targets (shas/fixtures/mapping) plus the
+# diff_check convenience target. dapper_dev_filters()/dapper_add_sharded_test() add the ctest
+# analysis tests later, once the shard tests are registered.
+macro(_dapper_native_init)
     set(MIOPEN_TEST_SINGLE_GTEST 1)
     # Dapper no longer forces the discrete test build. The dependency mapping is now
     # derived from the single aggregated miopen_gtest (per-source synthetic bin/test_<stem>
     # keys in enhanced_ninja_parser), so the ~280 discrete test binaries are unnecessary.
     # Respect whatever MIOPEN_TEST_DISCRETE the user/CI set (default off) instead of forcing it.
-
-    # Additive attribution bridges run during 'parse' (see dependency-parser/main.py).
-    # Default 'symbol' (nm-based, correctness-dominant); set to "" to disable all bridges.
-    # The bridge module must exist on the current branch.
-    set(MIOPEN_DAPPER_BRIDGES "symbol" CACHE STRING
-        "Comma-separated dapper attribution bridges to run during 'parse' (symbol)")
 
     # TRJS
     message(STATUS "------------------------------------ CMAKE_CURRENT_LIST_DIR: ${CMAKE_CURRENT_LIST_DIR}")
