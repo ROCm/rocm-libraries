@@ -235,7 +235,9 @@ constexpr const char* hipsparse_routine::to_string() const
 #include "testing_spmv_csr.hpp"
 #include "testing_spmv_sell.hpp"
 #include "testing_spsm_coo.hpp"
+#include "testing_spsm_csc.hpp"
 #include "testing_spsm_csr.hpp"
+#include "testing_spsv_csc.hpp"
 #include "testing_spsv_csr.hpp"
 
 bool hipsparse_routine::is_routine_supported(hipsparse_routine::value_type FNAME)
@@ -699,6 +701,7 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IABCT_X(coomv, testing_spmv_coo);
         DEFINE_CASE_IJABCT_X(csrmv, testing_spmv_csr);
         DEFINE_CASE_IJT_X(csrsv, testing_spsv_csr);
+        DEFINE_CASE_IJT_X(cscsv, testing_spsv_csc);
         DEFINE_CASE_T(gemvi);
         DEFINE_CASE_T(hybmv);
 
@@ -710,6 +713,7 @@ hipsparseStatus_t hipsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT_X(csrmm, testing_spmm_csr);
         DEFINE_CASE_IT_X(coosm, testing_spsm_coo);
         DEFINE_CASE_IJT_X(csrsm, testing_spsm_csr);
+        DEFINE_CASE_IJT_X(cscsm, testing_spsm_csc);
         DEFINE_CASE_T(gemmi);
 
         // Extra
