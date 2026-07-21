@@ -380,14 +380,22 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
     constexpr size_t SCRATCH_BUFFER_SIZE = sizeof(Rpp32f) * 8294400;
 
     // Use handle's pre-allocated scratch buffer if sufficient, otherwise reallocate overflow buffer
+    auto hip_async_deleter = [stream = handle.GetStream()](void* ptr) {
+        if(ptr) {
+            (void)hipFreeAsync(ptr, stream);
+        }
+    };
+    // Ensure the overflow buffer is properly freed if used
+    std::unique_ptr<Rpp8u, decltype(hip_async_deleter)> scratchOverflowGuard(nullptr, hip_async_deleter);
     Rpp8u* scratchBuffer;
-    if (requiredSize <= SCRATCH_BUFFER_SIZE)
+    if (requiredSize <= SCRATCH_BUFFER_SIZE) {
         scratchBuffer =
             reinterpret_cast<Rpp8u*>(handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
-    else
+    } else {
         // Reallocate overflow buffer if needed
         RPP_HIP_RETURN_IF_ERROR(hipMalloc(&scratchBuffer, requiredSize));
-
+        scratchOverflowGuard.reset(scratchBuffer);
+    }
     unsigned int* d_hist = reinterpret_cast<unsigned int*>(scratchBuffer);
     unsigned char* d_lut = reinterpret_cast<unsigned char*>(scratchBuffer + histSize);
 
