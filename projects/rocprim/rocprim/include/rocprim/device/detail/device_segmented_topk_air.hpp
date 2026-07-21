@@ -327,7 +327,7 @@ struct device_segmented_topk_air_impl : BaseType
 
 
     template<unsigned int Iteration, unsigned int HistogramSize, class SharedStorageType>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     choose_pivot_bin(
         SharedStorageType& storage,
         histogram_t<bins_per_thread> const& thread_bins,
@@ -539,8 +539,8 @@ struct device_segmented_topk_air_impl : BaseType
     }
 
     ROCPRIM_KERNEL ROCPRIM_FORCE_INLINE
-    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) 
-    static void 
+    ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
+    static void
     large_segments_kernel(
         [[maybe_unused]] storage_type* p_global_storage,
         KeysInputIterator    keys_input,
@@ -609,13 +609,13 @@ struct device_segmented_topk_air_impl : BaseType
                 {
                     N_this_iteration = storage.N;
                     K_this_iteration = storage.K;
-                }
-                
-                // Return earlier
-                if(static_cast<common_size_t>(K_this_iteration)
-                   == static_cast<common_size_t>(N_this_iteration))
-                {
-                    return; // All threads return no divergence
+
+                    // Return earlier
+                    if(static_cast<common_size_t>(K_this_iteration)
+                       == static_cast<common_size_t>(N_this_iteration))
+                    {
+                        return; // All threads return no divergence
+                    }
                 }
 
                 // The size of valid bins in the histogram or current iteration
