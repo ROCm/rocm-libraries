@@ -52,6 +52,7 @@ from rocke.helpers import (
     WmmaTensor,
     load_wmma_tile,
     make_global_view,
+    make_lds_view,
     make_tile_window,
     store_wmma_tile,
     wmma_mma,
@@ -60,6 +61,9 @@ from rocke.helpers.attention import apply_attention_mask
 
 _WMMA_OP_ID = "wmma_f32_16x16x16_f16"
 _BLOCK_K = 16
+# Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
+# every lane's (tile_max - m_i) <= this. exp2(8)=256 keeps P in fp32 range.
+_LAZY_RESCALE_THRESHOLD = 8.0
 
 
 @dataclass(frozen=True)
@@ -127,6 +131,60 @@ class SwapQKCfg:
     #   ~8 TF. Enabled by default because the shipped defaults ARE w2/bn32; the
     #   sweep will still expose the bad off-sweet-spot points.
     buffer_gather: bool = True
+    # dual_gather: kill the 2x V-load redundancy from the WMMA A-operand's
+    # lane 0-15 <-> 16-31 duplication. Instead of lanes 16-31 re-loading subtile
+    # d, they load the ADJACENT subtile d+1 (one 32-lane load fetches TWO
+    # d-subtiles); a permlanex16 + select then broadcasts each subtile's fragment
+    # into both halves. Halves the V load instructions (256->128) at the cost of
+    # permlanex16/cndmask VALU -- a win because the kernel is memory-unit-bound
+    # (MemUnitBusy ~= 4984). Requires n_dk even (D%32==0).
+    # MEASURED: halves V loads (256->128) + s_waitcnt (147->76); small consistent
+    # win once loads are no longer strictly binding (+0.3-0.7 TF, ~22.0 @ L2048)
+    # and lower VGPR/instr. Also lets block_n=64 fit spill-free (though bn32 is
+    # still the sweet spot -- larger tiles don't beat it, bn128 collapses on VGPR).
+    dual_gather: bool = True
+    # lazy_rescale: skip the O-accumulator rescale (n_dk vector-muls/iter) when the
+    # running softmax max is stable -- i.e. every lane's tile_max is within
+    # _LAZY_RESCALE_THRESHOLD log2 of m_i, so not re-anchoring is safe (exp2(8)=256
+    # can't overflow fp32). gfx950 dense ships this ALWAYS-ON (+~2%, parity-
+    # identical). A VALU win here (the max stabilizes after the first few K-tiles,
+    # so most iters skip). Implemented as a wave-uniform 0/1-trip scf.for so the
+    # multiplies are genuinely skipped (rocke scf_if carries no results).
+    lazy_rescale: bool = True
+    # fast_exp2: use raw v_exp_f32 (exp2_fast) instead of the IEEE exp2 that the
+    # backend guards with a v_cmp/v_cndmask clamp. Safe: online-softmax exp args
+    # (m_i - m_new, s - m_new) are always <= 0. gfx950's exp2_fast lever (+11.5%).
+    fast_exp2: bool = True
+    # pipeline: software-pipeline the QK across K-tiles. Compute tile 0's QK in a
+    # prologue and carry the scores as loop iter-args; each iteration runs the
+    # CURRENT tile's softmax/P-transpose/PV while issuing the NEXT tile's QK
+    # WMMAs -- so the matrix unit stays fed during the softmax VALU (WMMA
+    # utilization) instead of idling. Costs n_kv_sub carried score tiles.
+    # MEASURED DEAD-END: regresses 22->10 TF. Carrying current+next scores on top
+    # of the 64-VGPR O accumulator blows the 256-VGPR budget (vgpr=255 + spills),
+    # collapsing occupancy. The kernel is register-bound, so it cannot pipeline.
+    pipeline: bool = False
+    # q_hoist: Q is loop-invariant (this wave's 16 query rows). Load all n_dk Q
+    # fragments ONCE before the K-loop and pre-scale them by scale_log2, so the
+    # QK loop (a) doesn't reload Q every tile -> fewer QK loads + fewer vmcnt(0)
+    # drains, and (b) the QK output is already scaled -> drop the per-slot softmax
+    # scale-mul (VALU). Costs n_dk live Q fragments (register pressure).
+    # MEASURED DEAD-END: regresses 22->13 TF. The 8 hoisted Q fragments (64 VGPR)
+    # on top of the 64-VGPR O accumulator blow the 256-VGPR budget (vgpr=256 + 60
+    # spills). Same register wall as `pipeline` -- the kernel is register-bound.
+    q_hoist: bool = False
+    # q_lds: the register-pressure-free version of q_hoist. Stage each wave's 16
+    # (pre-scaled) query rows into LDS ONCE, then the QK re-reads Q from LDS
+    # (ds_read/lgkmcnt) instead of global (global_load/vmcnt). Moves Q off the
+    # V-gather's contended vmcnt AND drops the per-slot softmax scale-mul, WITHOUT
+    # holding Q in VGPRs (avoids the q_hoist register wall). Costs W*16*hs*2 bytes
+    # LDS (8 KB for w2/D128) + a one-time cooperative staging pass + intra-wave
+    # waitcnt.
+    # MEASURED DEAD-END: regresses 22.6->9.1 TF. Same lesson as V (cache-gather
+    # beat LDS): on this APU the cache-resident global Q re-read is free (hidden by
+    # pingpong), while LDS staging breaks the clause/pipeline structure -- vmcnt(0)
+    # drains EXPLODE 20->77 and instr 1215->1689. L1-hit >= LDS here.
+    q_lds: bool = False
     name: str = "wmma_fmha_swapqk"
 
     @property
@@ -158,6 +216,12 @@ class SwapQKCfg:
             "pfv" if self.prefetch_v else "npf",
             "stat" if self.static_shape else "dyn",
             "buf" if self.buffer_gather else "flat",
+            "dual" if self.dual_gather else "single",
+            "lazy" if self.lazy_rescale else "eager",
+            "fexp" if self.fast_exp2 else "iexp",
+            "pipe" if self.pipeline else "nopipe",
+            "qh" if self.q_hoist else "noqh",
+            "qlds" if self.q_lds else "qglob",
         )
 
 
@@ -360,6 +424,45 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             )
         return v_a
 
+    # ---- A1: dual-subtile half-packed gather (halves the V load count) ----
+    n_i32 = a_frag // 2  # 8 dwords per <16 x f16> fragment
+
+    def _load_col(k_base, vwin, d_col):
+        """Gather V[kv=0..15, d_col] (per-lane d_col) via buffer or flat path."""
+        v_a = b.zero_vec(dtype_ir, a_frag)
+        if cfg.buffer_gather:
+            elem0 = b.add(b.add(kvh_off, b.mul(k_base, sv)), d_col)
+            voff = b.mul(elem0, c2)
+            for j in range(a_frag):
+                v_a = b.vec_insert(
+                    v_a, b.buffer_load_f16_d16(v_rsrc, voff, soff_list[j]), j
+                )
+        else:
+            for j in range(a_frag):
+                v_a = b.vec_insert(
+                    v_a, vwin.load_scalar(b, c0, b.const_i32(j), d_col), j
+                )
+        return v_a
+
+    def dual_gather(k_base, vwin, d):
+        """Return the A-fragments for subtiles (d, d+1) from ONE gather: lanes
+        0-15 load subtile d, lanes 16-31 load subtile d+1, then permlanex16 +
+        select broadcast each subtile into both lane-halves (the layout the WMMA
+        A-operand's lane^16 duplication requires)."""
+        # per-lane d_col = (d + lane//16)*16 + lane%16  -> lo half=d, hi half=d+1
+        d_col = b.add(b.const_i32(d * 16), b.add(b.mul(b.div(lane, c16), c16), col))
+        loaded = _load_col(k_base, vwin, d_col)
+        li = b.vec_bitcast(loaded, VectorType(I32, n_i32))
+        fd, fd1 = [], []
+        for i in range(n_i32):
+            e = b.vec_extract(li, i)
+            p = b.permlanex16(e)  # value held by lane^16 (the other subtile)
+            fd.append(b.select(lane_lt16, e, p))  # subtile d in both halves
+            fd1.append(b.select(lane_lt16, p, e))  # subtile d+1 in both halves
+        frag_d = b.vec_bitcast(b.vec_pack(fd, I32), VectorType(dtype_ir, a_frag))
+        frag_d1 = b.vec_bitcast(b.vec_pack(fd1, I32), VectorType(dtype_ir, a_frag))
+        return frag_d, frag_d1
+
     def _tree(vals, op):
         # log-depth reduction (shorter loop-carried m/l critical path).
         while len(vals) > 1:
@@ -369,18 +472,60 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             vals = nxt
         return vals[0]
 
-    kloop = b.scf_for_iter(
-        b.const_i32(0), loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
-    )
-    with kloop as (kt, state):
-        m_i, l_i, accs = unpack(state)
-        k_block_base = b.mul(kt, c_block_n)
-        ilp = max(1, cfg.qk_ilp)
+    ilp = max(1, cfg.qk_ilp)
 
-        # ---- QK for each 16-kv sub-tile: S^T = K @ Q^T (A=K rows=kv, B=Q cols=query) ----
+    # q_hoist: load + pre-scale Q once (loop-invariant). QK output is then already
+    # scaled, so the softmax drops the per-slot scale-mul.
+    q_hoisted = None
+    if cfg.q_hoist:
+        scale_f16 = b.cast_f32_to(scale_log2, F16)
+        scale_vec = b.zero_vec(dtype_ir, a_frag)
+        for i in range(a_frag):
+            scale_vec = b.vec_insert(scale_vec, scale_f16, i)
+        q_hoisted = []
+        for d in range(n_dk):
+            qf = load_wmma_tile(
+                b, qwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
+            )
+            q_hoisted.append(
+                WmmaTensor(atom, "b", b.vector_mul(qf.value, scale_vec), arch)
+            )
+
+    # q_lds: stage this wave's 16 pre-scaled query rows into LDS once.
+    Q_lds = None
+    if cfg.q_lds:
+        _QPAD = 8  # f16 bank-pad on the d-row (QK reads consecutive query rows)
+        Q_lds = make_lds_view(
+            b,
+            dtype=dtype_ir,
+            shape=(W, 16, hs),
+            strides=(16 * (hs + _QPAD), hs + _QPAD, 1),
+            name_hint="Qsh",
+        )
+        _sf16 = b.cast_f32_to(scale_log2, F16)
+        _sv8 = b.zero_vec(dtype_ir, 8)
+        for _i in range(8):
+            _sv8 = b.vec_insert(_sv8, _sf16, _i)
+        _chunks = (16 * hs) // (wave * 8)  # vec8 chunks per lane (D%16==0 -> even)
+        for _i in range(_chunks):
+            _c = b.add(lane, b.const_i32(_i * wave))
+            _base = b.mul(_c, b.const_i32(8))
+            _row = b.div(_base, b.const_i32(hs))
+            _colc = b.mod(_base, b.const_i32(hs))
+            _v8 = Q_view.load_vec(b, [head, b.add(q_token_base, _row), _colc], n=8)
+            Q_lds.store_vec(b, [wave_id, _row, _colc], b.vector_mul(_v8, _sv8), 8)
+        b.s_waitcnt(lgkmcnt=0)  # intra-wave: this wave reads only its own Q_lds slab
+
+    def q_lds_read(d):
+        lo = Q_lds.load_vec(b, [wave_id, col, b.const_i32(d * 16)], n=8)
+        hi = Q_lds.load_vec(b, [wave_id, col, b.const_i32(d * 16 + 8)], n=8)
+        return WmmaTensor(atom, "b", b.vec_concat(lo, hi), arch)
+
+    def compute_qk(k_block_base):
+        """S^T = K @ Q^T for all n_kv_sub sub-tiles -> list of score WmmaTensors."""
         if pingpong:
             b.s_setprio(1)
-        sub_scores = []
+        subs = []
         for ns in range(n_kv_sub):
             kwin = k_window(b.add(k_block_base, b.const_i32(ns * 16)))
             acc_ilp = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(ilp)]
@@ -388,16 +533,51 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
                 k_tile = load_wmma_tile(
                     b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
                 )
-                q_tile = load_wmma_tile(
-                    b, qwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
-                )
+                if cfg.q_hoist:
+                    q_tile = q_hoisted[d]
+                elif cfg.q_lds:
+                    q_tile = q_lds_read(d)
+                else:
+                    q_tile = load_wmma_tile(
+                        b, qwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
+                    )
                 acc_ilp[d % ilp] = wmma_mma(b, k_tile, q_tile, acc_ilp[d % ilp])
             sc = acc_ilp[0]
             for si in range(1, ilp):
                 sc = WmmaTensor(
                     atom, "c", b.vector_add(sc.value, acc_ilp[si].value), arch
                 )
-            sub_scores.append(sc)
+            subs.append(sc)
+        if pingpong:
+            b.s_setprio(0)
+        return subs
+
+    if cfg.pipeline:
+        # prologue: tile 0's QK, carried as iter-args (current-tile scores).
+        for ns, sc in enumerate(compute_qk(c0)):
+            iter_args.append((f"sc{ns}", sc.value))
+
+    kloop = b.scf_for_iter(
+        b.const_i32(0), loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
+    )
+    with kloop as (kt, state):
+        m_i, l_i, accs = unpack(state)
+        k_block_base = b.mul(kt, c_block_n)
+
+        # ---- QK: S^T = K @ Q^T. Pipelined -> consume the carried current-tile
+        # scores and issue the NEXT tile's QK now (overlaps this tile's softmax/
+        # P-transpose/PV, keeping the WMMA unit fed). Non-pipelined -> compute inline.
+        next_subs = None
+        if cfg.pipeline:
+            sub_scores = [
+                WmmaTensor(atom, "c", state[2 + n_dk + ns], arch)
+                for ns in range(n_kv_sub)
+            ]
+            kt_n = b.add(kt, b.const_i32(1))
+            kt_n = b.select(b.cmp_ge(kt_n, loop_stop), kt, kt_n)
+            next_subs = compute_qk(b.mul(kt_n, c_block_n))
+        else:
+            sub_scores = compute_qk(k_block_base)
         if pingpong:
             b.s_setprio(0)
 
@@ -432,7 +612,9 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             row = []
             for i in range(c_frag):
                 kv_rel, q_rel = sub_scores[ns].coord(b, lane, i)  # (row=kv, col=query)
-                s_i = b.fmul(sub_scores[ns].slot(b, i), scale_log2)
+                s_i = sub_scores[ns].slot(b, i)
+                if not (cfg.q_hoist or cfg.q_lds):  # else scale pre-baked into Q
+                    s_i = b.fmul(s_i, scale_log2)
                 s_i = apply_attention_mask(
                     b,
                     s_i,
@@ -447,10 +629,25 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         all_s = [v for row in s_sub for v in row]
         local_max = _tree(list(all_s), b.fmax)
         tile_max = b.fmax(local_max, permx16_f32(local_max))
-        m_new = b.fmax(m_i, tile_max)
-        alpha = b.exp2(b.fsub(m_i, m_new))
+        # lazy: if every lane's tile_max is within threshold of m_i, don't
+        # re-anchor (m_new = m_i -> alpha = 1) and skip the O rescale below.
+        skip_rescale = None
+        if cfg.lazy_rescale:
+            below = b.select(
+                b.fcmp(
+                    "ole", b.fsub(tile_max, m_i), b.const_f32(_LAZY_RESCALE_THRESHOLD)
+                ),
+                b.const_i32(1),
+                c0,
+            )
+            skip_rescale = b.cmp_ne(b.wave_all(below), c0)  # wave-uniform i1
+            m_new = b.select(skip_rescale, m_i, b.fmax(m_i, tile_max))
+        else:
+            m_new = b.fmax(m_i, tile_max)
+        _exp2 = b.exp2_fast if cfg.fast_exp2 else b.exp2
+        alpha = _exp2(b.fsub(m_i, m_new))
         ps_sub = [
-            [b.exp2(b.fsub(s_sub[ns][i], m_new)) for i in range(c_frag)]
+            [_exp2(b.fsub(s_sub[ns][i], m_new)) for i in range(c_frag)]
             for ns in range(n_kv_sub)
         ]
         all_p = [v for row in ps_sub for v in row]
@@ -462,7 +659,27 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         alpha_vec = b.zero_vec_f32(c_frag)
         for i in range(c_frag):
             alpha_vec = b.vec_insert(alpha_vec, alpha, i)
-        new_accs = [accs[d].scale(b, alpha_vec) for d in range(n_dk)]
+        if cfg.lazy_rescale:
+            # wave-uniform 0/1-trip loop: run the n_dk rescale muls only when the
+            # max was re-anchored (skip_rescale False). scf.for carries the accs
+            # as iter-args, so a 0-trip genuinely skips the multiplies.
+            n_res = b.select(skip_rescale, c0, b.const_i32(1))
+            rloop = b.scf_for_iter(
+                c0,
+                n_res,
+                b.const_i32(1),
+                iter_args=[(f"ra{d}", accs[d].value) for d in range(n_dk)],
+                iv_name="rsc",
+            )
+            with rloop as (_rsc, rstate):
+                out = [
+                    WmmaTensor(atom, "c", rstate[d], arch).scale(b, alpha_vec).value
+                    for d in range(n_dk)
+                ]
+                b.scf_yield(*out)
+            new_accs = [WmmaTensor(atom, "c", v, arch) for v in rloop.results]
+        else:
+            new_accs = [accs[d].scale(b, alpha_vec) for d in range(n_dk)]
 
         # ---- PV: O^T += V @ P for each kv sub-tile (register P-transpose, no LDS) ----
         p_tiles = [
@@ -471,7 +688,24 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         ]
         if pingpong:
             b.s_setprio(1)
-        if cfg.prefetch_v:
+        if cfg.dual_gather:
+            # one gather feeds two adjacent d-subtiles (halved load count).
+            for ns in range(n_kv_sub):
+                for dp in range(0, n_dk, 2):
+                    frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
+                    new_accs[dp] = wmma_mma(
+                        b,
+                        WmmaTensor(atom, "a", frag_d, arch),
+                        p_tiles[ns],
+                        new_accs[dp],
+                    )
+                    new_accs[dp + 1] = wmma_mma(
+                        b,
+                        WmmaTensor(atom, "a", frag_d1, arch),
+                        p_tiles[ns],
+                        new_accs[dp + 1],
+                    )
+        elif cfg.prefetch_v:
             # one-step-ahead prefetch: gather (idx+1) while WMMA(idx) runs.
             for idx, (ns, d) in enumerate(pv_steps):
                 v_cur = v_next
@@ -487,7 +721,10 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         if pingpong:
             b.s_setprio(0)
 
-        b.scf_yield(m_new, l_new, *[a.value for a in new_accs])
+        yields = [m_new, l_new, *[a.value for a in new_accs]]
+        if cfg.pipeline:
+            yields.extend(s.value for s in next_subs)
+        b.scf_yield(*yields)
 
     m_f, l_f, accs_f = unpack(kloop.results)
 

@@ -536,6 +536,16 @@ class IRBuilder:
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
 
+    def exp2_fast(self, a: Value) -> Value:
+        """Raw hardware ``v_exp_f32`` (``llvm.amdgcn.exp2.f32``), NO IEEE range
+        reduction / overflow guard -- unlike :meth:`exp2` (``llvm.exp2.f32``)
+        which the backend expands with a ``v_cmp``/``v_cndmask`` clamp. Safe
+        wherever the argument is provably <= 0 (online-softmax ``s - m``): the
+        result lands in ``[0, 1]``. f32 only. (gfx950's ``exp2_fast`` lever.)"""
+        return self._op(
+            "math.exp2_fast", [a], [a.type], result_name_hint="exp2f"
+        ).result
+
     def log2(self, a: Value) -> Value:
         return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
 
@@ -3571,6 +3581,7 @@ PURE_OP_NAMES = {
     "arith.sitofp_f32",
     "arith.cvt_fp8_to_f32",
     "math.exp2",
+    "math.exp2_fast",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",

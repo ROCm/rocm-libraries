@@ -273,6 +273,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
     ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
@@ -1655,6 +1656,18 @@ class _Lowerer:
         self._need("exp2.f32")
         self._current().emit(
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
+        )
+
+    def _op_math_exp2_fast(self, op: Op) -> None:
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.exp2_fast currently supports f32")
+        # Raw hardware v_exp_f32 (no IEEE range-reduction/overflow guard). Safe
+        # for online-softmax where the argument is always <= 0 (exp2 in [0,1]).
+        self._need("amdgcn.exp2.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float "
+            f"@llvm.amdgcn.exp2.f32(float {self._operand(v)})"
         )
 
     def _op_math_log2(self, op: Op) -> None:

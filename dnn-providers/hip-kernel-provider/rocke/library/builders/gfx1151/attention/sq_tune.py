@@ -155,7 +155,7 @@ def _fmt(r):
     vpe = c.waves_per_eu if c.waves_per_eu is not None else "def"
     return (
         f"w{c.n_waves} vpe={vpe:>3} {c.sched_mode:>8} ilp{c.qk_ilp} bn{c.block_n:>2} "
-        f"pf{int(c.prefetch_v)} st{int(c.static_shape)} bg{int(c.buffer_gather)} | "
+        f"dg{int(c.dual_gather)} fx{int(c.fast_exp2)} qlds{int(c.q_lds)} | "
         f"{'Y' if r['ok'] else 'N'} {r['max_abs']:.2e} "
         f"{r['us']:8.1f}us {r['tflops']:7.2f} TF | "
         f"gld={r.get('gld', '-')} dsld={r.get('dsld', '-')} dsst={r.get('dsst', '-')} "
@@ -191,6 +191,40 @@ def main():
         default=[1],
         help="buffer_gather D16: 0/1 (only wins at w2/bn>=32)",
     )
+    ap.add_argument(
+        "--dual",
+        type=int,
+        nargs="+",
+        default=[1],
+        help="dual_gather (halve V loads): 0/1",
+    )
+    ap.add_argument(
+        "--lazy", type=int, nargs="+", default=[1], help="lazy_rescale: 0/1"
+    )
+    ap.add_argument(
+        "--fexp",
+        type=int,
+        nargs="+",
+        default=[1],
+        help="fast_exp2 (v_exp_f32, no guard): 0/1",
+    )
+    ap.add_argument(
+        "--pipe",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="pipeline QK across K-tiles: 0/1",
+    )
+    ap.add_argument(
+        "--qh", type=int, nargs="+", default=[0], help="q_hoist (+prescale): 0/1"
+    )
+    ap.add_argument(
+        "--qlds",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="q_lds (LDS-staged +prescale Q): 0/1",
+    )
     ap.add_argument("--no-verify", action="store_true")
     ap.add_argument("--arch", default="gfx1151")
     ap.add_argument("--emit", default=None)
@@ -211,49 +245,63 @@ def main():
         f"shape: B{shape.batch} Sq{shape.seqlen_q} Sk{shape.seqlen_k} D{shape.head_size} "
         f"Hq{shape.heads} Hk{shape.kvh} causal={shape.causal}"
     )
+    import itertools
+
     best = None
-    for w in args.waves:
-        for wpe in args.wpe:
-            for sched in args.sched:
-                for il in args.ilp:
-                    for bn in args.block_n:
-                        for pf in args.pfv:
-                            for st in args.static:
-                                for bg in args.buf:
-                                    cfg = SwapQKCfg(
-                                        head_size=shape.head_size,
-                                        num_query_heads=shape.heads,
-                                        num_kv_heads=shape.kv_heads,
-                                        mask_mode="causal" if shape.causal else "none",
-                                        n_waves=w,
-                                        waves_per_eu=(wpe or None),
-                                        sched_mode=sched,
-                                        qk_ilp=il,
-                                        block_n=bn,
-                                        prefetch_v=bool(pf),
-                                        static_shape=bool(st),
-                                        buffer_gather=bool(bg),
-                                    )
-                                    try:
-                                        r = verify_and_time(
-                                            cfg,
-                                            shape,
-                                            objdump=objdump,
-                                            verify=not args.no_verify,
-                                            arch=args.arch,
-                                            emit_dir=args.emit,
-                                            prebuilt_dir=args.prebuilt,
-                                        )
-                                    except Exception as e:  # noqa: BLE001
-                                        print(
-                                            f"w{w} wpe={wpe} {sched} ilp{il} bn{bn} pf{pf} bg{bg}: BUILD/RUN FAIL: {e}"
-                                        )
-                                        continue
-                                    print(_fmt(r))
-                                    if r["ok"] and (
-                                        best is None or r["tflops"] > best["tflops"]
-                                    ):
-                                        best = r
+    for w, wpe, sched, il, bn, pf, st, bg, dg, lz, fx, pp, qh, ql in itertools.product(
+        args.waves,
+        args.wpe,
+        args.sched,
+        args.ilp,
+        args.block_n,
+        args.pfv,
+        args.static,
+        args.buf,
+        args.dual,
+        args.lazy,
+        args.fexp,
+        args.pipe,
+        args.qh,
+        args.qlds,
+    ):
+        cfg = SwapQKCfg(
+            head_size=shape.head_size,
+            num_query_heads=shape.heads,
+            num_kv_heads=shape.kv_heads,
+            mask_mode="causal" if shape.causal else "none",
+            n_waves=w,
+            waves_per_eu=(wpe or None),
+            sched_mode=sched,
+            qk_ilp=il,
+            block_n=bn,
+            prefetch_v=bool(pf),
+            static_shape=bool(st),
+            buffer_gather=bool(bg),
+            dual_gather=bool(dg),
+            lazy_rescale=bool(lz),
+            fast_exp2=bool(fx),
+            pipeline=bool(pp),
+            q_hoist=bool(qh),
+            q_lds=bool(ql),
+        )
+        try:
+            r = verify_and_time(
+                cfg,
+                shape,
+                objdump=objdump,
+                verify=not args.no_verify,
+                arch=args.arch,
+                emit_dir=args.emit,
+                prebuilt_dir=args.prebuilt,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(
+                f"w{w} wpe={wpe} {sched} ilp{il} bn{bn} bg{bg} dg{dg} lz{lz} fx{fx}: FAIL: {e}"
+            )
+            continue
+        print(_fmt(r))
+        if r["ok"] and (best is None or r["tflops"] > best["tflops"]):
+            best = r
     if best:
         print("\nBEST:", _fmt(best))
 
