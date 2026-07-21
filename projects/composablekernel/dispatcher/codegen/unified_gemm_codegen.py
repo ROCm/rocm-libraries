@@ -546,6 +546,13 @@ using GemmMultiDArgs = {ns_name}::GemmMultiDArgs;
 
         multi_d_types = self._multi_d_types(config)
 
+        # Old-TE (gemm_instance_builder.py) wires UsePersistentKernel from the swept
+        # 'persistent' flag only for universal/preshuffle/grouped/mx/batched — NOT multi_d,
+        # whose kernel path leaves it at the template default (false). Honoring it for multi_d
+        # spuriously flips AccumVGPR 224->384 and spills to scratch (~32% slower on small
+        # register-bound shapes), so force it off here to stay byte-identical to Old-TE.
+        use_persistent_kernel = tr.persistent and config.variant != GemmVariant.MULTI_D
+
         return f"""
 namespace {ns_name} {{
 constexpr const char* KERNEL_NAME = "{kernel_name}";
@@ -585,7 +592,7 @@ struct {struct_name} {{
     static constexpr bool kPadN = {str(tr.pad_n).lower()};
     static constexpr bool kPadK = {str(tr.pad_k).lower()};
     static constexpr bool TransposeC = false;
-    static constexpr bool UsePersistentKernel = {str(tr.persistent).lower()};
+    static constexpr bool UsePersistentKernel = {str(use_persistent_kernel).lower()};
     static constexpr bool DoubleSmemBuffer = {str(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2").lower()};
     static constexpr bool UseStructuredSparsity = false;
     static constexpr bool Preshuffle = {str(config.preshuffle).lower()};
