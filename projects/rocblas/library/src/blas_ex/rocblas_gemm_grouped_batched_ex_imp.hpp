@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,8 +44,13 @@ namespace
         alpha_host = alpha_array;
         beta_host  = beta_array;
 
+        if(group_count < 0)
+            return rocblas_status_invalid_size;
         if(handle->pointer_mode == rocblas_pointer_mode_host || group_count == 0)
             return rocblas_status_success;
+
+        if(!alpha_array || !beta_array)
+            return rocblas_status_invalid_pointer;
 
         const size_t scalar_stride = rocblas_gemm_ex_compute_type_size(compute_type);
         if(scalar_stride == 0)
@@ -54,8 +59,11 @@ namespace
         const size_t bytes = static_cast<size_t>(group_count) * scalar_stride;
         alpha_h.resize(bytes);
         beta_h.resize(bytes);
-        RETURN_IF_HIP_ERROR(hipMemcpy(alpha_h.data(), alpha_array, bytes, hipMemcpyDeviceToHost));
-        RETURN_IF_HIP_ERROR(hipMemcpy(beta_h.data(), beta_array, bytes, hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            alpha_h.data(), alpha_array, bytes, hipMemcpyDeviceToHost, handle->get_stream()));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            beta_h.data(), beta_array, bytes, hipMemcpyDeviceToHost, handle->get_stream()));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->get_stream()));
         alpha_host = alpha_h.data();
         beta_host  = beta_h.data();
         return rocblas_status_success;
@@ -137,8 +145,7 @@ namespace
             }
         }
 
-        API_INT problem_count = 0;
-        auto    validArgs     = rocblas_gemm_grouped_batched_ex_arg_check(handle,
+        auto validArgs = rocblas_gemm_grouped_batched_ex_arg_check(handle,
                                                                    transa_array,
                                                                    transb_array,
                                                                    m_array,
@@ -160,8 +167,7 @@ namespace
                                                                    ldd_array,
                                                                    group_count,
                                                                    group_size,
-                                                                   compute_type,
-                                                                   problem_count);
+                                                                   compute_type);
 
         if(validArgs != rocblas_status_continue)
         {

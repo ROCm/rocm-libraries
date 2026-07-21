@@ -69,11 +69,8 @@ inline rocblas_status
                                               const API_INT*           ldd_array,
                                               API_INT                  group_count,
                                               const API_INT*           group_size,
-                                              rocblas_datatype         compute_type,
-                                              API_INT&                 problem_count_out)
+                                              rocblas_datatype         compute_type)
 {
-    problem_count_out = 0;
-
     if(!handle)
         return rocblas_status_invalid_handle;
 
@@ -91,15 +88,13 @@ inline rocblas_status
     if(scalar_stride == 0)
         return rocblas_status_invalid_value;
 
+    int64_t problem_count = 0;
     for(API_INT g = 0; g < group_count; ++g)
     {
         if(group_size[g] < 0)
             return rocblas_status_invalid_size;
 
-        const API_INT next_count = problem_count_out + group_size[g];
-        if(next_count < problem_count_out)
-            return rocblas_status_invalid_size;
-        problem_count_out = next_count;
+        problem_count += group_size[g];
 
         const void* alpha_g
             = static_cast<const char*>(alpha_array) + static_cast<size_t>(g) * scalar_stride;
@@ -131,7 +126,7 @@ inline rocblas_status
             return valid;
     }
 
-    if(problem_count_out > 0 && (!Aarray || !Barray || !Carray || !Darray))
+    if(problem_count > 0 && (!Aarray || !Barray || !Carray || !Darray))
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,15 +52,27 @@ namespace
         alpha_host = alpha_array;
         beta_host  = beta_array;
 
+        if(group_count < 0)
+            return rocblas_status_invalid_size;
         if(handle->pointer_mode == rocblas_pointer_mode_host || group_count == 0)
             return rocblas_status_success;
 
+        if(!alpha_array || !beta_array)
+            return rocblas_status_invalid_pointer;
+
         alpha_h.resize(group_count);
         beta_h.resize(group_count);
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(alpha_h.data(), alpha_array, group_count * sizeof(T), hipMemcpyDeviceToHost));
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(beta_h.data(), beta_array, group_count * sizeof(T), hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(alpha_h.data(),
+                                           alpha_array,
+                                           group_count * sizeof(T),
+                                           hipMemcpyDeviceToHost,
+                                           handle->get_stream()));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(beta_h.data(),
+                                           beta_array,
+                                           group_count * sizeof(T),
+                                           hipMemcpyDeviceToHost,
+                                           handle->get_stream()));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->get_stream()));
         alpha_host = alpha_h.data();
         beta_host  = beta_h.data();
         return rocblas_status_success;

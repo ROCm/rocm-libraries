@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,8 +30,6 @@
 
 namespace
 {
-    constexpr rocblas_int k_max_grouped_gemm_groups = 8;
-
     inline rocblas_operation grouped_gemm_ex_toggle_n_t(rocblas_operation trans)
     {
         if(trans == rocblas_operation_none)
@@ -70,8 +68,8 @@ namespace
     template <typename Tc, typename Ti>
     struct grouped_gemm_ex_test_config
     {
-        Ti group_count{};
-        Ti problem_count{};
+        Ti      group_count{};
+        int64_t problem_count{};
 
         std::vector<rocblas_operation> transa_array;
         std::vector<rocblas_operation> transb_array;
@@ -103,15 +101,14 @@ namespace
     grouped_gemm_ex_test_config<Tc, Ti> grouped_gemm_ex_test_config_from_arg(const Arguments& arg)
     {
         grouped_gemm_ex_test_config<Tc, Ti> cfg{};
-        cfg.group_count
-            = Ti(std::min(std::max(arg.stride_x, int64_t(1)), int64_t(k_max_grouped_gemm_groups)));
+        cfg.group_count = arg.stride_x;
 
         const rocblas_operation base_trans_a = char2rocblas_operation(arg.transA);
         const rocblas_operation base_trans_b = char2rocblas_operation(arg.transB);
         const Tc                base_alpha   = arg.get_alpha<Tc>();
         const Tc                base_beta    = arg.get_beta<Tc>();
 
-        const rocblas_int group_count = rocblas_int(cfg.group_count);
+        const Ti group_count = cfg.group_count;
         cfg.transa_array.resize(group_count);
         cfg.transb_array.resize(group_count);
         cfg.m_array.resize(group_count);
@@ -125,11 +122,13 @@ namespace
         cfg.alpha_array.resize(group_count);
         cfg.beta_array.resize(group_count);
 
-        for(rocblas_int g = 0; g < group_count; ++g)
+        for(Ti g = 0; g < group_count; ++g)
         {
-            const Ti m_g = Ti(arg.M + g);
-            const Ti n_g = Ti(arg.N + g);
-            const Ti k_g = Ti(arg.K + g);
+            int variation = g % 4;
+
+            const Ti m_g = Ti(arg.M + variation);
+            const Ti n_g = Ti(arg.N + variation);
+            const Ti k_g = Ti(arg.K + variation);
 
             cfg.m_array[g] = m_g;
             cfg.n_array[g] = n_g;
@@ -140,26 +139,26 @@ namespace
             cfg.transb_array[g]
                 = (g % 2 == 0) ? base_trans_b : grouped_gemm_ex_toggle_n_t(base_trans_b);
 
-            const Ti lda_g = arg.lda > 0 ? Ti(arg.lda + g) : Ti(0);
-            const Ti ldb_g = arg.ldb > 0 ? Ti(arg.ldb + g) : Ti(0);
-            const Ti ldc_g = arg.ldc > 0 ? Ti(arg.ldc + g) : Ti(0);
-            const Ti ldd_g = arg.ldd > 0 ? Ti(arg.ldd + g) : ldc_g;
+            const Ti lda_g = arg.lda > 0 ? Ti(arg.lda + variation) : Ti(0);
+            const Ti ldb_g = arg.ldb > 0 ? Ti(arg.ldb + variation) : Ti(0);
+            const Ti ldc_g = arg.ldc > 0 ? Ti(arg.ldc + variation) : Ti(0);
+            const Ti ldd_g = arg.ldd > 0 ? Ti(arg.ldd + variation) : ldc_g;
 
             cfg.lda_array[g] = grouped_gemm_ex_lda(m_g, k_g, cfg.transa_array[g], lda_g);
             cfg.ldb_array[g] = grouped_gemm_ex_ldb(n_g, k_g, cfg.transb_array[g], ldb_g);
             cfg.ldc_array[g] = grouped_gemm_ex_ldc(m_g, ldc_g);
             cfg.ldd_array[g] = grouped_gemm_ex_ldc(m_g, ldd_g);
 
-            cfg.group_size[g]  = Ti(std::max(arg.batch_count + g, int64_t(0)));
+            cfg.group_size[g]  = Ti(std::max(arg.batch_count + variation, int64_t(0)));
             cfg.alpha_array[g] = base_alpha;
             cfg.beta_array[g]  = base_beta;
         }
 
         cfg.problem_count = Ti(0);
-        for(rocblas_int g = 0; g < group_count; ++g)
+        for(Ti g = 0; g < group_count; ++g)
             cfg.problem_count += cfg.group_size[g];
 
-        for(rocblas_int g = 0; g < group_count; ++g)
+        for(Ti g = 0; g < group_count; ++g)
         {
             cfg.max_m   = std::max(cfg.max_m, cfg.m_array[g]);
             cfg.max_n   = std::max(cfg.max_n, cfg.n_array[g]);
@@ -212,8 +211,8 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
     if(arg.api & c_API_64)
         cfg_64 = grouped_gemm_ex_test_config_from_arg<Tc, int64_t>(arg);
 
-    const rocblas_int group_count   = rocblas_int(cfg.group_count);
-    const rocblas_int problem_count = rocblas_int(cfg.problem_count);
+    // we aren't testing these with > 32bit groups for now
+    const int64_t problem_count = (cfg.problem_count);
 
     const size_t safe_size        = std::max(size_t(cfg.max_a_row) * size_t(cfg.max_a_col),
                                       size_t(cfg.max_b_row) * size_t(cfg.max_b_col));
@@ -223,10 +222,10 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
     rocblas_gemm_algo    algo  = rocblas_gemm_algo_standard;
     uint32_t             flags = 0;
 
-    DEVICE_MEMCHECK(device_batch_vector<Ti>, dA, (padded_safe_size, 1, std::max(problem_count, 1)));
-    DEVICE_MEMCHECK(device_batch_vector<Ti>, dB, (padded_safe_size, 1, std::max(problem_count, 1)));
-    DEVICE_MEMCHECK(device_batch_vector<To>, dC, (padded_safe_size, 1, std::max(problem_count, 1)));
-    DEVICE_MEMCHECK(device_batch_vector<To>, dD, (padded_safe_size, 1, std::max(problem_count, 1)));
+    DEVICE_MEMCHECK(device_batch_vector<Ti>, dA, (padded_safe_size, 1, problem_count));
+    DEVICE_MEMCHECK(device_batch_vector<Ti>, dB, (padded_safe_size, 1, problem_count));
+    DEVICE_MEMCHECK(device_batch_vector<To>, dC, (padded_safe_size, 1, problem_count));
+    DEVICE_MEMCHECK(device_batch_vector<To>, dD, (padded_safe_size, 1, problem_count));
 
     const void* const* dA_ptr = reinterpret_cast<const void* const*>(dA.ptr_on_device());
     const void* const* dB_ptr = reinterpret_cast<const void* const*>(dB.ptr_on_device());
@@ -358,6 +357,61 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                     algo,
                                                                     flags),
                               rocblas_status_invalid_size);
+
+        EXPECT_ROCBLAS_STATUS(rocblas_gemm_grouped_batched_ex_fn_64(handle,
+                                                                    cfg.transa_array.data(),
+                                                                    cfg.transb_array.data(),
+                                                                    cfg_64.m_array.data(),
+                                                                    cfg_64.n_array.data(),
+                                                                    cfg_64.k_array.data(),
+                                                                    cfg.alpha_array.data(),
+                                                                    dA_ptr,
+                                                                    arg.a_type,
+                                                                    cfg_64.lda_array.data(),
+                                                                    dB_ptr,
+                                                                    arg.b_type,
+                                                                    cfg_64.ldb_array.data(),
+                                                                    cfg.beta_array.data(),
+                                                                    dC_ptr,
+                                                                    arg.c_type,
+                                                                    cfg_64.ldc_array.data(),
+                                                                    dD_ptr,
+                                                                    arg.d_type,
+                                                                    cfg_64.ldd_array.data(),
+                                                                    int64_t(-1),
+                                                                    cfg_64.group_size.data(),
+                                                                    arg.compute_type,
+                                                                    algo,
+                                                                    flags),
+                              rocblas_status_invalid_size);
+
+        // If group_count==0, then all pointers can be nullptr without issue.
+        EXPECT_ROCBLAS_STATUS(rocblas_gemm_grouped_batched_ex_fn_64(handle,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    arg.a_type,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    arg.b_type,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    arg.c_type,
+                                                                    nullptr,
+                                                                    nullptr,
+                                                                    arg.d_type,
+                                                                    nullptr,
+                                                                    int64_t(0),
+                                                                    nullptr,
+                                                                    arg.compute_type,
+                                                                    algo,
+                                                                    flags),
+                              rocblas_status_success);
     }
     else
     {
@@ -381,7 +435,7 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  dD_ptr,
                                                                  arg.d_type,
                                                                  cfg.ldd_array.data(),
-                                                                 group_count,
+                                                                 cfg.group_count,
                                                                  cfg.group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
@@ -408,7 +462,7 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  dD_ptr,
                                                                  arg.d_type,
                                                                  cfg.ldd_array.data(),
-                                                                 group_count,
+                                                                 cfg.group_count,
                                                                  cfg.group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
@@ -435,7 +489,7 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  dD_ptr,
                                                                  arg.d_type,
                                                                  cfg.ldd_array.data(),
-                                                                 group_count,
+                                                                 cfg.group_count,
                                                                  cfg.group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
@@ -462,12 +516,67 @@ void testing_gemm_grouped_batched_ex_bad_arg(const Arguments& arg)
                                                                  dD_ptr,
                                                                  arg.d_type,
                                                                  cfg.ldd_array.data(),
-                                                                 group_count,
+                                                                 cfg.group_count,
                                                                  bad_group_size.data(),
                                                                  arg.compute_type,
                                                                  algo,
                                                                  flags),
                               rocblas_status_invalid_size);
+
+        EXPECT_ROCBLAS_STATUS(rocblas_gemm_grouped_batched_ex_fn(handle,
+                                                                 cfg.transa_array.data(),
+                                                                 cfg.transb_array.data(),
+                                                                 cfg.m_array.data(),
+                                                                 cfg.n_array.data(),
+                                                                 cfg.k_array.data(),
+                                                                 cfg.alpha_array.data(),
+                                                                 dA_ptr,
+                                                                 arg.a_type,
+                                                                 cfg.lda_array.data(),
+                                                                 dB_ptr,
+                                                                 arg.b_type,
+                                                                 cfg.ldb_array.data(),
+                                                                 cfg.beta_array.data(),
+                                                                 dC_ptr,
+                                                                 arg.c_type,
+                                                                 cfg.ldc_array.data(),
+                                                                 dD_ptr,
+                                                                 arg.d_type,
+                                                                 cfg.ldd_array.data(),
+                                                                 -1,
+                                                                 cfg.group_size.data(),
+                                                                 arg.compute_type,
+                                                                 algo,
+                                                                 flags),
+                              rocblas_status_invalid_size);
+
+        // If group_count==0, then all pointers can be nullptr without issue.
+        EXPECT_ROCBLAS_STATUS(rocblas_gemm_grouped_batched_ex_fn(handle,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 arg.a_type,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 arg.b_type,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 arg.c_type,
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 arg.d_type,
+                                                                 nullptr,
+                                                                 0,
+                                                                 nullptr,
+                                                                 arg.compute_type,
+                                                                 algo,
+                                                                 flags),
+                              rocblas_status_success);
     }
 }
 
