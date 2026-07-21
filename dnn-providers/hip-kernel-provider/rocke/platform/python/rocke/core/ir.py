@@ -2375,7 +2375,11 @@ class IRBuilder:
 
     def av_store_b128(self, ptr: Value, data: Value) -> None:
         """``llvm.amdgcn.av.store.b128`` — agent-scope 128-bit vector store."""
-        if not isinstance(data.type, VectorType) or data.type.count != 4:
+        if (
+            not isinstance(data.type, VectorType)
+            or data.type.count != 4
+            or data.type.elem != I32
+        ):
             raise ValueError("av_store_b128 requires <4 x i32> data")
         self._op("tile.av_store_b128", [ptr, data])
 

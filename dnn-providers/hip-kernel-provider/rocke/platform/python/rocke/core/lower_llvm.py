@@ -774,8 +774,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
     ),
     # --- DPP / cross-lane relayout ---
-    "mov.dpp8.i32": "declare i32 @llvm.amdgcn.mov.dpp8(i32, i32 immarg)",
-    "mov.dpp8.f32": "declare float @llvm.amdgcn.mov.dpp8(float, i32 immarg)",
+    "mov.dpp8.i32": "declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)",
+    "mov.dpp8.f32": "declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)",
     # --- Wave reductions (gfx10+) ---
     "wave.reduce.fmax.f32": (
         "declare float @llvm.amdgcn.wave.reduce.fmax.f32(float, i32 immarg)"
@@ -3153,7 +3153,7 @@ class _Lowerer:
         llvm_ty = _llvm_type(data.type)
         self._need(f"mov.dpp8.{ty_name}")
         self._current().emit(
-            f"  {op.result.name} = call {llvm_ty} @llvm.amdgcn.mov.dpp8("
+            f"  {op.result.name} = call {llvm_ty} @llvm.amdgcn.mov.dpp8.{ty_name}("
             f"{llvm_ty} {self._operand(data)}, i32 {sel})"
         )
 

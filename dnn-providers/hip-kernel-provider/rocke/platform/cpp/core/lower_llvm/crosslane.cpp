@@ -315,9 +315,10 @@ static void _op_tile_mov_dpp8(rocke_lower_t* L, const rocke_op_t* op)
     }
     rocke_ll_need(L, key);
     rocke_ll_emitf(L,
-                   "  %s = call %s @llvm.amdgcn.mov.dpp8(%s %s, i32 %lld)",
+                   "  %s = call %s @llvm.amdgcn.mov.dpp8.%s(%s %s, i32 %lld)",
                    ll_result_name(op),
                    llvm_ty,
+                   rocke_i_type_is(data->type, "i32") ? "i32" : "f32",
                    llvm_ty,
                    rocke_ll_operand(L, data),
                    (long long)(sel & 0xFFFFFF));

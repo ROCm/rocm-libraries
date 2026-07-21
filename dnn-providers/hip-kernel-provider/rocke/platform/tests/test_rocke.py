@@ -696,7 +696,6 @@ class TestHelpers(unittest.TestCase):
         b = IRBuilder("future_intrinsics_smoke")
         out_p = b.param("out", PtrType(F32, "global"), align=4)
         tid = b.thread_id_x()
-        lane = b.lane_id()
         x = b.const_f32(1.0)
         xi = b.const_i32(1)
         # Reduction + DPP + swizzle relayout
@@ -706,7 +705,7 @@ class TestHelpers(unittest.TestCase):
         _sw = b.ds_swizzle_xor(xi, 1)
         _sw2 = b.ds_swizzle(xi, 0x041F)
         # Lane ops + permute
-        _rl = b.readlane(xi, lane)
+        _rl = b.readlane(xi, b.const_i32(0))
         _wl = b.writelane(xi, b.const_i32(0), xi)
         _pl = b.permlane64(xi)
         _ab = b.alignbyte(xi, xi, b.const_i32(8))
@@ -723,7 +722,7 @@ class TestHelpers(unittest.TestCase):
         for needle in (
             "@llvm.amdgcn.wave.reduce.fmax.f32",
             "@llvm.amdgcn.wave.reduce.add.i32",
-            "@llvm.amdgcn.mov.dpp8",
+            "@llvm.amdgcn.mov.dpp8.i32",
             "@llvm.amdgcn.ds.swizzle",
             "@llvm.amdgcn.readlane.i32",
             "@llvm.amdgcn.writelane.i32",

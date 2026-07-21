@@ -39,7 +39,6 @@ int main(void)
     rocke_value_t* out_p
         = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), nullptr);
     rocke_value_t* tid = rocke_b_thread_id_x(&b);
-    rocke_value_t* lane = rocke_b_lane_id(&b);
     rocke_value_t* x = rocke_b_const_f32(&b, 1.0);
     rocke_value_t* xi = rocke_b_const_i32(&b, 1);
 
@@ -48,7 +47,7 @@ int main(void)
     rocke_value_t* dpp8 = rocke_b_mov_dpp8(&b, xi, 0x765432);
     rocke_value_t* sw = rocke_b_ds_swizzle_xor(&b, xi, 1);
     rocke_value_t* sw2 = rocke_b_ds_swizzle(&b, xi, 0x041F);
-    rocke_value_t* rl = rocke_b_readlane(&b, xi, lane);
+    rocke_value_t* rl = rocke_b_readlane(&b, xi, rocke_b_const_i32(&b, 0));
     rocke_value_t* wl = rocke_b_writelane(&b, xi, rocke_b_const_i32(&b, 0), xi);
     rocke_value_t* pl = rocke_b_permlane64(&b, xi);
     rocke_value_t* ab = rocke_b_alignbyte(&b, xi, xi, rocke_b_const_i32(&b, 8));
@@ -83,7 +82,7 @@ int main(void)
     static const char* const needles[] = {
         "@llvm.amdgcn.wave.reduce.fmax.f32",
         "@llvm.amdgcn.wave.reduce.add.i32",
-        "@llvm.amdgcn.mov.dpp8",
+        "@llvm.amdgcn.mov.dpp8.i32",
         "@llvm.amdgcn.ds.swizzle",
         "@llvm.amdgcn.readlane.i32",
         "@llvm.amdgcn.writelane.i32",

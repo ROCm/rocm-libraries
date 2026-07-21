@@ -316,8 +316,8 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"global.load.async.to.lds.b8",
      "declare void @llvm.amdgcn.global.load.async.to.lds.b8(ptr addrspace(1) nocapture, ptr "
      "addrspace(3) nocapture, i32 immarg, i32 immarg)"},
-    {"mov.dpp8.i32", "declare i32 @llvm.amdgcn.mov.dpp8(i32, i32 immarg)"},
-    {"mov.dpp8.f32", "declare float @llvm.amdgcn.mov.dpp8(float, i32 immarg)"},
+    {"mov.dpp8.i32", "declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)"},
+    {"mov.dpp8.f32", "declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)"},
     {"wave.reduce.fmax.f32", "declare float @llvm.amdgcn.wave.reduce.fmax.f32(float, i32 immarg)"},
     {"wave.reduce.fadd.f32", "declare float @llvm.amdgcn.wave.reduce.fadd.f32(float, i32 immarg)"},
     {"wave.reduce.add.i32", "declare i32 @llvm.amdgcn.wave.reduce.add.i32(i32, i32 immarg)"},
