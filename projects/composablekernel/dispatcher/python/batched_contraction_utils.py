@@ -52,9 +52,44 @@ _CTYPES_LIB_SRC = (
     Path(__file__).parent.parent / "bindings" / "ctypes" / "batched_contraction_ctypes_lib.cpp"
 )
 _HIPCC = os.environ.get("CK_TILE_HIPCC", "/opt/rocm/bin/hipcc")
-_DEFAULT_ARCH = "gfx942"
+
+_SUPPORTED_ARCHS = ("gfx90a", "gfx942", "gfx950")
 
 _NP_DTYPE = {"fp16": np.float16, "bf16": None, "fp32": np.float32}  # bf16 filled lazily
+
+
+def _get_arch() -> str:
+    """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
+    import subprocess
+
+    arch = ""
+    try:
+        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if "Name:" in line and "gfx" in line:
+                arch = line.split()[-1].strip()
+                break
+    except Exception:
+        arch = ""
+    if not arch:
+        raise RuntimeError(
+            "Could not detect GPU architecture from rocminfo; refusing to default "
+            "to gfx942. Pass gfx_arch explicitly."
+        )
+    if arch not in _SUPPORTED_ARCHS:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHS)}"
+        )
+    return arch
+
+
+def _validate_arch(arch: str) -> str:
+    """Validate an explicitly supplied arch against the supported set."""
+    if arch not in _SUPPORTED_ARCHS:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHS)}"
+        )
+    return arch
 
 
 def _np_dtype(dtype: str):
@@ -104,7 +139,7 @@ class BatchedContractionKernelConfig:
 
     block_size: int = 256
     k_block_per_cu: int = 1
-    gfx_arch: str = _DEFAULT_ARCH
+    gfx_arch: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -118,6 +153,7 @@ class BatchedContractionKernelConfig:
             num_dim_g=self.num_dim_g, num_dim_m=self.num_dim_m,
             num_dim_n=self.num_dim_n, num_dim_k=self.num_dim_k,
             num_d_tensors=self.num_d_tensors, elementwise=self.elementwise,
+            k_block_per_cu=self.k_block_per_cu,
         )
 
     def to_codegen_config(self) -> dict:
@@ -279,6 +315,11 @@ class BatchedContractionDispatcherLib:
 
         A = np.ascontiguousarray(A)
         B = np.ascontiguousarray(B)
+        # E is the output buffer. ascontiguousarray() may return a *copy* when the
+        # caller's E is non-contiguous; the kernel would then fill that copy and the
+        # caller's original E would be left unchanged. Keep a handle to the original
+        # so we can copy the result back into it after the kernel runs.
+        original_E = E
         E = np.ascontiguousarray(E)
         Ds = Ds or []
         Ds = [np.ascontiguousarray(d) for d in Ds]
@@ -299,6 +340,10 @@ class BatchedContractionDispatcherLib:
         )
         if rc != 0:
             raise RuntimeError(f"dispatcher_run_batched_contraction rc={rc}")
+        # If ascontiguousarray copied E, the kernel filled the copy, not the
+        # caller's buffer. Copy the result back so the caller's E holds the output.
+        if E is not original_E:
+            np.copyto(original_E, E.reshape(original_E.shape))
         return tms.value
 
     def cleanup(self):
@@ -467,7 +512,8 @@ def setup_multiple_batched_contraction_dispatchers(
     (None on failure). Dedups by .name; cross-arch cache via _{arch}.so suffix."""
     if not configs:
         return []
-    arch = gfx_arch or configs[0].gfx_arch or _DEFAULT_ARCH
+    explicit = gfx_arch or configs[0].gfx_arch
+    arch = _validate_arch(explicit) if explicit else _get_arch()
     base = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="bc_bridge_"))
     headers = base / "generated_kernels"
     libs = base / "libs"
@@ -562,7 +608,8 @@ def expand_sweep(config: dict, dtype: str = "fp16", layout: str = "rcr") -> List
     return out
 
 
-def default_fp16_config(gfx_arch: str = _DEFAULT_ARCH) -> BatchedContractionKernelConfig:
+def default_fp16_config(gfx_arch: Optional[str] = None) -> BatchedContractionKernelConfig:
+    gfx_arch = _validate_arch(gfx_arch) if gfx_arch else _get_arch()
     return BatchedContractionKernelConfig(
         dtype="fp16", layout="rcr", pipeline="compv3", epilogue="cshuffle", scheduler="intrawave",
         tile_m=128, tile_n=128, tile_k=64, warp_m=2, warp_n=2, warp_k=1,

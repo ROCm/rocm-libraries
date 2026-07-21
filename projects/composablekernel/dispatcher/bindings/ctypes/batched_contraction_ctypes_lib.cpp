@@ -39,7 +39,8 @@
 // ck_tile::BatchedContractionHostArgs type and SelectedKernel/KERNEL_NAME.
 
 #ifndef GFX_ARCH
-#define GFX_ARCH "gfx942"
+#error \
+    "GFX_ARCH must be defined at compile time (pass -DGFX_ARCH=<arch>); do not default to a specific GPU architecture."
 #endif
 
 static bool g_initialized = false;
@@ -154,6 +155,25 @@ int dispatcher_run_batched_contraction(const void* A,
     if(num_dim_g <= 0 || num_dim_m <= 0 || num_dim_n <= 0 || num_dim_k <= 0)
     {
         std::cerr << "dispatcher_run_batched_contraction: num_dim_* must be > 0\n";
+        return -1;
+    }
+    if(!g_dims || !m_dims || !n_dims || !k_dims)
+    {
+        std::cerr << "dispatcher_run_batched_contraction: null dim pointer\n";
+        return -1;
+    }
+    // Every individual dimension length must be strictly positive before we
+    // dereference the dim arrays to build the HostArgs shape/stride vectors.
+    auto all_positive = [](const int64_t* p, int n) {
+        for(int i = 0; i < n; ++i)
+            if(p[i] <= 0)
+                return false;
+        return true;
+    };
+    if(!all_positive(g_dims, num_dim_g) || !all_positive(m_dims, num_dim_m) ||
+       !all_positive(n_dims, num_dim_n) || !all_positive(k_dims, num_dim_k))
+    {
+        std::cerr << "dispatcher_run_batched_contraction: all dim values must be > 0\n";
         return -1;
     }
     if(num_dim_g != CONTRACTION_KEY_NUM_DIM_G || num_dim_m != CONTRACTION_KEY_NUM_DIM_M ||

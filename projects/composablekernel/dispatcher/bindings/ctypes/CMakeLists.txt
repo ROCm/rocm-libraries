@@ -91,13 +91,17 @@ if(BC_KERNEL_HEADERS)
         CK_TILE_SINGLE_KERNEL_INCLUDE
     )
 else()
-    message(STATUS "No batched-contraction kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_batched_contraction_lib SHARED batched_contraction_ctypes_lib.cpp)
-    target_include_directories(dispatcher_batched_contraction_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-    )
-    target_link_libraries(dispatcher_batched_contraction_lib PRIVATE hip::device)
+    # batched_contraction_ctypes_lib.cpp cannot be compiled "without a kernel":
+    # it force-includes a generated header for its SelectedKernel / KERNEL_NAME /
+    # CONTRACTION_KEY_* symbols (only exported under CK_TILE_SINGLE_KERNEL_INCLUDE).
+    # A stub target would therefore always fail to compile, so fail configuration
+    # early with a clear message instead of emitting an unbuildable target.
+    message(FATAL_ERROR
+        "No batched-contraction kernel header found in "
+        "${CMAKE_BINARY_DIR}/generated_kernels/batched_contraction_*.hpp. "
+        "Generate a kernel header first (unified_batched_contraction_codegen.py); "
+        "dispatcher_batched_contraction_lib requires a force-included generated header "
+        "and cannot be built without one.")
 endif()
 
 # =============================================================================

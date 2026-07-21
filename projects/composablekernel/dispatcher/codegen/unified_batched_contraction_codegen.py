@@ -114,6 +114,7 @@ def make_batched_contraction_kernel_name(
     num_dim_k: int,
     num_d_tensors: int = 0,
     elementwise: str = "PassThrough",
+    k_block_per_cu: int = 1,
 ) -> str:
     """Canonical kernel name. BatchedContractionKernelConfig.name and the codegen
     both call this so the compiled .so and the Python config always agree."""
@@ -137,6 +138,10 @@ def make_batched_contraction_kernel_name(
         parts.append(f"d{num_d_tensors}")
     if elementwise != "PassThrough":
         parts.append(elementwise)
+    # k_block_per_cu changes the launched kernel; encode it so distinct values do
+    # not collide on one name. Omit for the default (1) to keep names stable.
+    if k_block_per_cu != 1:
+        parts.append(f"kbpc{k_block_per_cu}")
     return "_".join(parts)
 
 
@@ -201,6 +206,7 @@ class BCKernelSpec:
             num_dim_g=self.num_dim_g, num_dim_m=self.num_dim_m,
             num_dim_n=self.num_dim_n, num_dim_k=self.num_dim_k,
             num_d_tensors=self.num_d_tensors, elementwise=self.elementwise,
+            k_block_per_cu=self.k_block_per_cu,
         )
 
 
