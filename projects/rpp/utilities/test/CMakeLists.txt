@@ -43,6 +43,7 @@ add_executable(rpp_tests
     image/color/color_twist_test.cpp
     image/arithmetic/magnitude_test.cpp
     image/effects/solarize_test.cpp
+    image/effects/channel_dropout_test.cpp
     image/bitwise/bitwise_and_test.cpp
     image/bitwise/bitwise_or_test.cpp
     image/bitwise/bitwise_xor_test.cpp
