@@ -1051,8 +1051,8 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     // empty — it still sets scaleFmtA/scaleFmtB. Checking fmtA/fmtB alone would
     // drop its matrix_*_scale_fmt.
     bool empty() const {
-        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE
-               && scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE;
+        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE &&
+               scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE;
     }
 };
 
