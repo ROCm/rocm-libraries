@@ -408,6 +408,17 @@ class UnifiedAttention2DTiledSpec:
     # full [T, HD] K tiles. This is the LDS prerequisite for NumPrefetchK/V=3
     # on MI300X; v1 syncs per slice before adding overlap.
     use_k_sliced_ring: bool = False
+    # Ring pipeline depth: how many K slices are staged/in-flight at once.
+    #   3 (default): depth-3 pipeline (live set {kg, kg+1, kg+2}), 3 LDS slots.
+    #     For k_groups=4 (D128) this map (kg % 3) reuses slot 0 for slice 3, so
+    #     the reusing DMA is fenced by a drain-on-reuse barrier (see the schedule
+    #     in build_unified_attention_2d_tiled). Depth-3 needs cfvst + the wide
+    #     nw=4 geometry.
+    #   2: depth-2 pipeline (live set {kg, kg+1}), 2 LDS slots (kg % 2). Never
+    #     reuses a slot within the k_groups=4 live set, uses less LDS (lower
+    #     register/occupancy pressure), and is the measured best for fp16 D128
+    #     prefill on gfx942 (~0.72-1.05x AOTriton flash, correct at magnitude).
+    ring_depth: int = 3
     # Use CK Tile's explicit LDS buffer sequence for the sliced-K pipeline
     # instead of the conservative round-robin slot map. This is opt-in because
     # the sequence can reuse the previously consumed slot and therefore needs
@@ -938,6 +949,13 @@ class UnifiedAttention2DTiledSpec:
                 else ""
             ),
             "ksring" if self.use_k_sliced_ring else "",
+            # depth-2 ring is a distinct schedule (fp16 D128); tag it so the HSACO
+            # cache key and kernel name differ from the default depth-3 ring.
+            (
+                f"rd{self.ring_depth}"
+                if self.use_k_sliced_ring and self.ring_depth != 3
+                else ""
+            ),
             "ldsseq" if self.use_k_sliced_ldsseq else "",
             "iglp1" if self.use_iglp_opt else "",
             "k1buf" if self.use_k_single_buffer else "",
@@ -1574,7 +1592,12 @@ def build_unified_attention_2d_tiled(
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     Q_BYTES = BLOCK_M * HD * 2
     K_SLICE_HD = 32
-    K_SLICE_SLOTS = 3
+    # Ring pipeline depth (spec.ring_depth): depth-3 keeps the live set
+    # {kg, kg+1, kg+2} in 3 slots; depth-2 keeps {kg, kg+1} in 2 slots (fewer
+    # LDS slots, lower occupancy pressure -- fp16 D128's best). See the spec
+    # field docstring and the schedule loop below.
+    RING_DEPTH = spec.ring_depth if spec.ring_depth in (2, 3) else 3
+    K_SLICE_SLOTS = RING_DEPTH
     K_SLICED_ACTIVE = K_SLICED_RING and USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
     # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
     K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
@@ -3951,6 +3974,10 @@ def build_unified_attention_2d_tiled(
                     k_groups = HD // K_SLICE_HD
                     k_steps_per_group = K_SLICE_HD // QK_K_STEP
 
+                    # Slices ahead of the current kg that are kept in flight:
+                    # depth-3 prefetches kg+2, depth-2 prefetches kg+1.
+                    prefetch = RING_DEPTH - 1
+
                     def _kslot(group_idx: int) -> int:
                         if K_SLICED_LDSSEQ and k_groups == 4:
                             return (1, 2, 0, 1)[group_idx]
@@ -3959,24 +3986,28 @@ def build_unified_attention_2d_tiled(
                         return group_idx % K_SLICE_SLOTS
 
                     _issue_k_slice_load_runtime(kv_tile_iv, 0, _kslot(0))
-                    if k_groups > 1:
+                    if k_groups > 1 and prefetch >= 2:
                         _issue_k_slice_load_runtime(kv_tile_iv, 1, _kslot(1))
                     for kg in range(k_groups):
                         slot = _kslot(kg)
-                        if kg + 2 < k_groups:
-                            next_slot = _kslot(kg + 2)
-                            if (
-                                K_SLICED_LDSSEQ
-                                and kg > 0
-                                and next_slot == _kslot(kg - 1)
-                            ):
-                                # CK's LdsSeq can reuse the slice consumed by the
-                                # previous kg. Drain LDS reads before overwriting
-                                # that slot; the VMEM prefetch still overlaps the
-                                # current slice's compute after the partial wait.
+                        nxt = kg + prefetch
+                        if nxt < k_groups:
+                            next_slot = _kslot(nxt)
+                            # Drain-on-reuse: if the slice we are about to DMA
+                            # reuses the LDS slot that slice(kg-1) was just read
+                            # from, the DMA must wait for those reads to retire or
+                            # it clobbers operands mid-flight. This fires for the
+                            # default kg%3 map at k_groups=4 (D128): at kg=1 the
+                            # depth-3 prefetch targets slice 3 -> slot 0, the slot
+                            # slice 0 used. Without this fence the QK accumulation
+                            # is corrupted (max_abs ~0.5-1.3 at magnitude); D64
+                            # (k_groups=2) never reuses a slot so it is unaffected.
+                            # (CK's LdsSeq map hits the same reuse and always
+                            # relied on this drain; it now applies to every map.)
+                            if kg > 0 and next_slot == _kslot(kg - 1):
                                 b.s_waitcnt(lgkmcnt=0)
                                 b.s_barrier_bare()
-                            _issue_k_slice_load_runtime(kv_tile_iv, kg + 2, next_slot)
+                            _issue_k_slice_load_runtime(kv_tile_iv, nxt, next_slot)
                         # Leave one newer slice's VMEM stream in flight whenever
                         # such a slice exists; fully drain for the final slice.
                         if kg + 1 < k_groups:
