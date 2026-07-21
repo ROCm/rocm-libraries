@@ -1265,7 +1265,7 @@ private:
         if(get_num_used_gpus() > 1)
         {
             // TODO: enable below once hipfftXtSetWorkArea is enabled
-#if(0)
+#if 0
             ret = hipfftXtSetWorkArea(plan, workareas.data);
 #else
             throw unimplemented_exception(
@@ -1428,12 +1428,16 @@ private:
             throw std::runtime_error("unsupported data type for load callback");
         }
         }
+
+        check_jit_callback_state();
         ret = hipfftXtSetJITCallback(plan,
-                                     load_cb_symbol,
-                                     load_cb_func.data(),
-                                     load_cb_func.size(),
+                                     load_jit_cb_state->symbol,
+                                     load_jit_cb_state->func.data(),
+                                     load_jit_cb_state->func.size(),
                                      cbtype,
-                                     load_cb_data.data());
+                                     load_jit_cb_state->data.empty()
+                                         ? nullptr
+                                         : load_jit_cb_state->get_raw_data_ptrs().data());
         if(ret != HIPFFT_SUCCESS)
             return ret;
 
@@ -1478,11 +1482,13 @@ private:
         }
         }
         ret = hipfftXtSetJITCallback(plan,
-                                     store_cb_symbol,
-                                     store_cb_func.data(),
-                                     store_cb_func.size(),
+                                     store_jit_cb_state->symbol,
+                                     store_jit_cb_state->func.data(),
+                                     store_jit_cb_state->func.size(),
                                      cbtype,
-                                     store_cb_data.data());
+                                     store_jit_cb_state->data.empty()
+                                         ? nullptr
+                                         : store_jit_cb_state->get_raw_data_ptrs().data());
         return ret;
 #endif
     }

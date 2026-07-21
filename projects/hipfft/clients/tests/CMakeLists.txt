@@ -74,11 +74,12 @@ set( hipfft-test_source
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
 
-if( BUILD_WITH_LIB STREQUAL "CUDA")
-  target_link_libraries( hipfft-test PRIVATE CUDA::nvrtc )
+# Link to runtime compilation library
+if( BUILD_WITH_LIB STREQUAL CUDA)
+  set( HIPFFT_RTC_LIB CUDA::nvrtc )
 else()
   find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
-  target_link_libraries( hipfft-test PRIVATE hiprtc::hiprtc )
+  set( HIPFFT_RTC_LIB hiprtc::hiprtc )
 endif()
 
 set( TEST_TARGETS hipfft-test )
@@ -171,11 +172,7 @@ if( HIPFFT_MPI_ENABLE )
     PRIVATE
     ${MPI_C_INCLUDE_PATH}
   )
-  if( BUILD_WITH_LIB STREQUAL "CUDA")
-    target_link_libraries( hipfft_mpi_worker PRIVATE CUDA::nvrtc )
-  else()
-    target_link_libraries( hipfft_mpi_worker PRIVATE hiprtc::hiprtc )
-  endif()
+  target_link_libraries( hipfft_mpi_worker PRIVATE ${HIPFFT_RTC_LIB} )
   add_compile_definitions( HIPFFT_MPI_ENABLE )
 endif()
 
@@ -186,6 +183,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
     find_package( HIP REQUIRED )
   endif()
 endif()
+target_link_libraries( hipfft-test PRIVATE ${HIPFFT_RTC_LIB} )
 
 if( HIPFFT_BUILD_SCOPE )
   set( TESTS_OUT_DIR "/../staging" )
@@ -375,6 +373,12 @@ endif()
 # tests have callback functions, which need to be built as relocatable device code
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_compile_options( hipfft-test PRIVATE -dc )
+  # on CUDA, RTC callback code needs to be told where the CUDA includes are
+  list( GET CUDAToolkit_INCLUDE_DIRS 0 HIPFFT_CUDA_INCLUDE )
+  target_compile_definitions( hipfft-test PRIVATE HIPFFT_CUDA_INCLUDE=\"${HIPFFT_CUDA_INCLUDE}\" )
+  if( HIPFFT_MPI_ENABLE )
+    target_compile_definitions( hipfft_mpi_worker PRIVATE HIPFFT_CUDA_INCLUDE=\"${HIPFFT_CUDA_INCLUDE}\" )
+  endif()
 endif()
 
 if(FFTW_MULTITHREAD)
