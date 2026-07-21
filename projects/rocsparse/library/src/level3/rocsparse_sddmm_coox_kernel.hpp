@@ -127,6 +127,7 @@ namespace rocsparse
                            J                   N,
                            J                   K,
                            I                   nnz,
+                           int64_t             batch_count,
                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                            const A* __restrict__ dense_A,
                            int64_t lda,
@@ -140,7 +141,7 @@ namespace rocsparse
                            const I* __restrict__ coo_row_ind,
                            int64_t row_indices_batch_stride_C,
                            const I* __restrict__ coo_col_ind,
-                           int64_t col_indices_batch_stride_C,
+                           int64_t              col_indices_batch_stride_C,
                            rocsparse_index_base coo_base,
                            bool                 is_host_mode)
     {
@@ -157,25 +158,28 @@ namespace rocsparse
         // therefore required to lay out the three buffers with that same
         // stride, and to broadcast A or B across batches the caller passes
         // batch_stride_A == 0 or batch_stride_B == 0.
-        rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
-            transA,
-            transB,
-            orderA,
-            orderB,
-            M,
-            N,
-            K,
-            nnz,
-            alpha,
-            load_pointer(dense_A, hipBlockIdx_y, batch_stride_A),
-            lda,
-            load_pointer(dense_B, hipBlockIdx_y, batch_stride_B),
-            ldb,
-            beta,
-            load_pointer(coo_val, hipBlockIdx_y, values_batch_stride_C),
-            load_pointer(coo_row_ind, hipBlockIdx_y, row_indices_batch_stride_C),
-            load_pointer(coo_col_ind, hipBlockIdx_y, col_indices_batch_stride_C),
-            coo_base);
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
+                transA,
+                transB,
+                orderA,
+                orderB,
+                M,
+                N,
+                K,
+                nnz,
+                alpha,
+                load_pointer(dense_A, batch, batch_stride_A),
+                lda,
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                beta,
+                load_pointer(coo_val, batch, values_batch_stride_C),
+                load_pointer(coo_row_ind, batch, row_indices_batch_stride_C),
+                load_pointer(coo_col_ind, batch, col_indices_batch_stride_C),
+                coo_base);
+        }
     }
 
     template <rocsparse_int BLOCKSIZE, bool AOS, typename T, typename I, typename J, typename C>

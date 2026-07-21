@@ -144,7 +144,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Batched computation is currently only supported for the COO format.
+        // Batched computation is currently only supported for the CSR and COO formats.
         if(batch_count > 1)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -262,6 +262,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
                                        n,                                                \
                                        k,                                                \
                                        nnz,                                              \
+                                       batch_count,                                      \
                                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha), \
                                        A_val,                                            \
                                        A_ld,                                             \
