@@ -3751,6 +3751,13 @@ class _Lowerer:
             f"  {op.result.name} = fptrunc {in_ty} {self._operand(v)} to {out_ty}"
         )
 
+    def _op_vector_ext_to_f32(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fpext {_llvm_type(v.type)} {self._operand(v)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
+
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
         vec = int(op.attrs["vec"])

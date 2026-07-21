@@ -155,7 +155,7 @@ def _fmt(r):
     vpe = c.waves_per_eu if c.waves_per_eu is not None else "def"
     return (
         f"w{c.n_waves} vpe={vpe:>3} {c.sched_mode:>8} ilp{c.qk_ilp} bn{c.block_n:>2} "
-        f"dg{int(c.dual_gather)} fx{int(c.fast_exp2)} qlds{int(c.q_lds)} | "
+        f"dg{int(c.dual_gather)} fx{int(c.fast_exp2)} pp{int(c.pipeline)} of{int(c.o_f16)} | "
         f"{'Y' if r['ok'] else 'N'} {r['max_abs']:.2e} "
         f"{r['us']:8.1f}us {r['tflops']:7.2f} TF | "
         f"gld={r.get('gld', '-')} dsld={r.get('dsld', '-')} dsst={r.get('dsst', '-')} "
@@ -225,6 +225,13 @@ def main():
         default=[0],
         help="q_lds (LDS-staged +prescale Q): 0/1",
     )
+    ap.add_argument(
+        "--of16",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="o_f16 (f16 O carry + reordered PV): 0/1",
+    )
     ap.add_argument("--no-verify", action="store_true")
     ap.add_argument("--arch", default="gfx1151")
     ap.add_argument("--emit", default=None)
@@ -248,7 +255,23 @@ def main():
     import itertools
 
     best = None
-    for w, wpe, sched, il, bn, pf, st, bg, dg, lz, fx, pp, qh, ql in itertools.product(
+    for (
+        w,
+        wpe,
+        sched,
+        il,
+        bn,
+        pf,
+        st,
+        bg,
+        dg,
+        lz,
+        fx,
+        pp,
+        qh,
+        ql,
+        of,
+    ) in itertools.product(
         args.waves,
         args.wpe,
         args.sched,
@@ -263,6 +286,7 @@ def main():
         args.pipe,
         args.qh,
         args.qlds,
+        args.of16,
     ):
         cfg = SwapQKCfg(
             head_size=shape.head_size,
@@ -283,6 +307,7 @@ def main():
             pipeline=bool(pp),
             q_hoist=bool(qh),
             q_lds=bool(ql),
+            o_f16=bool(of),
         )
         try:
             r = verify_and_time(

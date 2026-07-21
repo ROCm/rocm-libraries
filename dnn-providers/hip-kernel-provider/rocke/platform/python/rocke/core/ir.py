@@ -3265,6 +3265,19 @@ class IRBuilder:
         the bf16-output cshuffle epilogue."""
         return self.vec_cast_f32_to(v, BF16)
 
+    def vec_ext_to_f32(self, v: Value) -> Value:
+        """Element-wise `fpext <N x f16|bf16> -> <N x float>` — the widening
+        sibling of :meth:`vec_trunc_f32_to_f16`. Used to unpack an f16-carried
+        WMMA accumulator back to the f32 the WMMA c-operand requires."""
+        if not isinstance(v.type, VectorType):
+            raise ValueError("vec_ext_to_f32 expects a vector input")
+        return self._op(
+            "vector.ext_to_f32",
+            [v],
+            [VectorType(F32, v.type.count)],
+            result_name_hint="vext",
+        ).result
+
     def vec_cast_f32_to(self, v: Value, target: Type) -> Value:
         """Element-wise `fptrunc <N x float> -> <N x target>`.
 
@@ -3591,6 +3604,7 @@ PURE_OP_NAMES = {
     "vector.extract",
     "vector.trunc_f32_to_f16",
     "vector.trunc_f32_to",
+    "vector.ext_to_f32",
     "vector.bitcast",
     "vector.add",
     "vector.mul",

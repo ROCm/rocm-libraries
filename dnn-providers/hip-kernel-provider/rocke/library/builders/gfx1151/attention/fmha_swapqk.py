@@ -189,6 +189,22 @@ class SwapQKCfg:
     # pingpong), while LDS staging breaks the clause/pipeline structure -- vmcnt(0)
     # drains EXPLODE 20->77 and instr 1215->1689. L1-hit >= LDS here.
     q_lds: bool = False
+    # o_f16: carry the O accumulator across the K-loop as f16 (32 VGPR for D128)
+    # instead of f32 (64 VGPR), and REORDER the PV to d-pair-outer / ns-inner so
+    # each O d-pair is fully accumulated (both kv sub-tiles) then immediately
+    # truncated to f16 -- so only the CURRENT d-pair is f32 (16 VGPR) at a time,
+    # the rest stay f16. Shrinks the O-accumulator register peak (~64->~40 VGPR)
+    # to open headroom for the pipeline (which fits+wins whenever O is small, cf.
+    # D64). Costs n_dk f16<->f32 converts/block; f16 carry rounds each block ->
+    # precision must be verified. Forces lazy_rescale off (rescale fused into the
+    # per-d-pair convert).
+    # MEASURED: correct (1.07e-4, within tol) and DOES reclaim VGPR (184->164,
+    # -20). But (a) the 16 f16<->f32 converts/block cost more than the 20 freed
+    # regs buy -> slower standalone (23.2->18.5 TF), and (b) the pipeline needs
+    # ~92 VGPR of headroom (its next-QK accumulators), so o_f16+pipeline still
+    # spills (vgpr=256 + 111). Net dead-end for D=128; the register relief is real
+    # but an order of magnitude short of unblocking the pipeline.
+    o_f16: bool = False
     name: str = "wmma_fmha_swapqk"
 
     @property
@@ -226,6 +242,7 @@ class SwapQKCfg:
             "pipe" if self.pipeline else "nopipe",
             "qh" if self.q_hoist else "noqh",
             "qlds" if self.q_lds else "qglob",
+            "of16" if self.o_f16 else "of32",
         )
 
 
@@ -365,15 +382,19 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         return b.vec_bitcast(packed, VectorType(dtype_ir, a_frag))
 
     # ---- iter-args: m (scalar) | l (scalar) | acc (n_dk O^T tiles) ----
+    # o_f16 carries acc as <c_frag x f16>; otherwise <c_frag x f32> (zero_acc).
     iter_args = [("m", neg_inf), ("l", zero_f)]
     for d in range(n_dk):
-        iter_args.append((f"acc{d}", atom.zero_acc(b)))
+        acc0 = b.zero_vec(dtype_ir, c_frag) if cfg.o_f16 else atom.zero_acc(b)
+        iter_args.append((f"acc{d}", acc0))
 
     def unpack(state):
+        """Returns (m, l, acc_raw) where acc_raw are the raw carried vectors
+        (f16 if o_f16, else f32). Callers wrap into WmmaTensor as needed."""
         m_i = state[0]
         l_i = state[1]
-        accs = [WmmaTensor(atom, "c", v, arch) for v in state[2 : 2 + n_dk]]
-        return m_i, l_i, accs
+        acc_raw = list(state[2 : 2 + n_dk])
+        return m_i, l_i, acc_raw
 
     block_n = cfg.block_n
     n_kv_sub = block_n // 16  # 16-wide kv WMMA sub-tiles per K-loop iteration
@@ -659,73 +680,112 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         tile_sum = b.fadd(local_sum, permx16_f32(local_sum))
         l_new = b.fadd(b.fmul(l_i, alpha), tile_sum)
 
-        # rescale the O^T accumulators by alpha ONCE per block_n keys.
+        # ---- alpha (rescale factor) + P operand tiles (both O-carry paths) ----
         alpha_vec = b.zero_vec_f32(c_frag)
         for i in range(c_frag):
             alpha_vec = b.vec_insert(alpha_vec, alpha, i)
-        if cfg.lazy_rescale:
-            # wave-uniform 0/1-trip loop: run the n_dk rescale muls only when the
-            # max was re-anchored (skip_rescale False). scf.for carries the accs
-            # as iter-args, so a 0-trip genuinely skips the multiplies.
-            n_res = b.select(skip_rescale, c0, b.const_i32(1))
-            rloop = b.scf_for_iter(
-                c0,
-                n_res,
-                b.const_i32(1),
-                iter_args=[(f"ra{d}", accs[d].value) for d in range(n_dk)],
-                iv_name="rsc",
-            )
-            with rloop as (_rsc, rstate):
-                out = [
-                    WmmaTensor(atom, "c", rstate[d], arch).scale(b, alpha_vec).value
-                    for d in range(n_dk)
-                ]
-                b.scf_yield(*out)
-            new_accs = [WmmaTensor(atom, "c", v, arch) for v in rloop.results]
-        else:
-            new_accs = [accs[d].scale(b, alpha_vec) for d in range(n_dk)]
-
-        # ---- PV: O^T += V @ P for each kv sub-tile (register P-transpose, no LDS) ----
         p_tiles = [
             WmmaTensor(atom, "b", p_transpose_reg(ps_sub[ns]), arch)
             for ns in range(n_kv_sub)
         ]
-        if pingpong:
-            b.s_setprio(1)
-        if cfg.dual_gather:
-            # one gather feeds two adjacent d-subtiles (halved load count).
-            for ns in range(n_kv_sub):
-                for dp in range(0, n_dk, 2):
-                    frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
-                    new_accs[dp] = wmma_mma(
-                        b,
-                        WmmaTensor(atom, "a", frag_d, arch),
-                        p_tiles[ns],
-                        new_accs[dp],
-                    )
-                    new_accs[dp + 1] = wmma_mma(
-                        b,
-                        WmmaTensor(atom, "a", frag_d1, arch),
-                        p_tiles[ns],
-                        new_accs[dp + 1],
-                    )
-        elif cfg.prefetch_v:
-            # one-step-ahead prefetch: gather (idx+1) while WMMA(idx) runs.
-            for idx, (ns, d) in enumerate(pv_steps):
-                v_cur = v_next
-                if idx + 1 < len(pv_steps):
-                    n1, d1 = pv_steps[idx + 1]
-                    v_next = do_gather(n1, d1)
-                v_tile = WmmaTensor(atom, "a", v_cur, arch)
-                new_accs[d] = wmma_mma(b, v_tile, p_tiles[ns], new_accs[d])
-        else:
-            for ns, d in pv_steps:
-                v_tile = WmmaTensor(atom, "a", do_gather(ns, d), arch)
-                new_accs[d] = wmma_mma(b, v_tile, p_tiles[ns], new_accs[d])
-        if pingpong:
-            b.s_setprio(0)
 
-        yields = [m_new, l_new, *[a.value for a in new_accs]]
+        if cfg.o_f16:
+            # f16-carry, d-pair-outer PV: upgrade one d-pair's f16 carry to f32,
+            # fuse the alpha rescale, accumulate BOTH kv sub-tiles, truncate back
+            # to f16. Only the current d-pair is f32 -> small O register peak.
+            if pingpong:
+                b.s_setprio(1)
+            new_acc_vals = [None] * n_dk
+            for dp in range(0, n_dk, 2):
+                t0 = WmmaTensor(
+                    atom,
+                    "c",
+                    b.vector_mul(b.vec_ext_to_f32(accs[dp]), alpha_vec),
+                    arch,
+                )
+                t1 = WmmaTensor(
+                    atom,
+                    "c",
+                    b.vector_mul(b.vec_ext_to_f32(accs[dp + 1]), alpha_vec),
+                    arch,
+                )
+                for ns in range(n_kv_sub):
+                    frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
+                    t0 = wmma_mma(
+                        b, WmmaTensor(atom, "a", frag_d, arch), p_tiles[ns], t0
+                    )
+                    t1 = wmma_mma(
+                        b, WmmaTensor(atom, "a", frag_d1, arch), p_tiles[ns], t1
+                    )
+                new_acc_vals[dp] = b.vec_trunc_f32_to_f16(t0.value)
+                new_acc_vals[dp + 1] = b.vec_trunc_f32_to_f16(t1.value)
+            if pingpong:
+                b.s_setprio(0)
+        else:
+            accs_wt = [WmmaTensor(atom, "c", v, arch) for v in accs]
+            # rescale the O^T accumulators by alpha ONCE per block_n keys.
+            if cfg.lazy_rescale:
+                # wave-uniform 0/1-trip loop: run the n_dk rescale muls only when
+                # the max re-anchored (skip_rescale False) -> 0-trip skips them.
+                n_res = b.select(skip_rescale, c0, b.const_i32(1))
+                rloop = b.scf_for_iter(
+                    c0,
+                    n_res,
+                    b.const_i32(1),
+                    iter_args=[(f"ra{d}", accs_wt[d].value) for d in range(n_dk)],
+                    iv_name="rsc",
+                )
+                with rloop as (_rsc, rstate):
+                    out = [
+                        WmmaTensor(atom, "c", rstate[d], arch).scale(b, alpha_vec).value
+                        for d in range(n_dk)
+                    ]
+                    b.scf_yield(*out)
+                new_accs = [WmmaTensor(atom, "c", v, arch) for v in rloop.results]
+            else:
+                new_accs = [accs_wt[d].scale(b, alpha_vec) for d in range(n_dk)]
+
+            # ---- PV: O^T += V @ P per kv sub-tile (register P-transpose, no LDS) ----
+            if pingpong:
+                b.s_setprio(1)
+            if cfg.dual_gather:
+                for ns in range(n_kv_sub):
+                    for dp in range(0, n_dk, 2):
+                        frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
+                        new_accs[dp] = wmma_mma(
+                            b,
+                            WmmaTensor(atom, "a", frag_d, arch),
+                            p_tiles[ns],
+                            new_accs[dp],
+                        )
+                        new_accs[dp + 1] = wmma_mma(
+                            b,
+                            WmmaTensor(atom, "a", frag_d1, arch),
+                            p_tiles[ns],
+                            new_accs[dp + 1],
+                        )
+            elif cfg.prefetch_v:
+                for idx, (ns, d) in enumerate(pv_steps):
+                    v_cur = v_next
+                    if idx + 1 < len(pv_steps):
+                        n1, d1 = pv_steps[idx + 1]
+                        v_next = do_gather(n1, d1)
+                    new_accs[d] = wmma_mma(
+                        b, WmmaTensor(atom, "a", v_cur, arch), p_tiles[ns], new_accs[d]
+                    )
+            else:
+                for ns, d in pv_steps:
+                    new_accs[d] = wmma_mma(
+                        b,
+                        WmmaTensor(atom, "a", do_gather(ns, d), arch),
+                        p_tiles[ns],
+                        new_accs[d],
+                    )
+            if pingpong:
+                b.s_setprio(0)
+            new_acc_vals = [a.value for a in new_accs]
+
+        yields = [m_new, l_new, *new_acc_vals]
         if cfg.pipeline:
             yields.extend(s.value for s in next_subs)
         b.scf_yield(*yields)
@@ -744,10 +804,16 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         owin = make_tile_window(
             O_T_view, (1, 16, 16), origin=(head, b.const_i32(d * 16), q_token_base)
         )
+        acc_wt = WmmaTensor(
+            atom,
+            "c",
+            b.vec_ext_to_f32(accs_f[d]) if cfg.o_f16 else accs_f[d],
+            arch,
+        )
         store_wmma_tile(
             b,
             owin,
-            accs_f[d],
+            acc_wt,
             lane,
             col_offset=0,
             lead=[c0],
