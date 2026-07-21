@@ -2509,6 +2509,14 @@
       'len': 10,
       'type': 'list',
     }),
+    'StinkySubtile': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'StorePriorityOpt': dict({
       'head': list([
         False,
