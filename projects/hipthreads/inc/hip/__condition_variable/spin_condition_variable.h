@@ -105,22 +105,30 @@ class _LIBHIPTHREADS_TYPE_VIS spin_condition_variable : private condition_variab
         condition_variable_any::wait(__lk, __pred);
     }
 
-    // TODO: Uncomment these once we've implemented chrono
-    // template <class _Clock, class _Duration>
-    // __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
-    // wait_until(unique_lock<spin_mutex>& __lk, const chrono::time_point<_Clock, _Duration>& __t);
+    template <class _Clock, class _Duration>
+    __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
+    wait_until(unique_lock<spin_mutex> &__lk, const std::chrono::time_point<_Clock, _Duration> &__t) {
+        return condition_variable_any::wait_until(__lk, __t);
+    }
 
-    // template <class _Clock, class _Duration, class _Predicate>
-    // __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS bool
-    // wait_until(unique_lock<spin_mutex>& __lk, const chrono::time_point<_Clock, _Duration>& __t, _Predicate __pred);
+    template <class _Clock, class _Duration, class _Predicate>
+    __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS bool
+    wait_until(unique_lock<spin_mutex> &__lk, const std::chrono::time_point<_Clock, _Duration> &__t,
+                _Predicate __pred) {
+        return condition_variable_any::wait_until(__lk, __t, __pred);
+    }
 
-    // template <class _Rep, class _Period>
-    // __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
-    // wait_for(unique_lock<spin_mutex>& __lk, const chrono::duration<_Rep, _Period>& __d);
+    template <class _Rep, class _Period>
+    __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
+    wait_for(unique_lock<spin_mutex> &__lk, const std::chrono::duration<_Rep, _Period> &__d) {
+        return condition_variable_any::wait_for(__lk, __d);
+    }
 
-    // template <class _Rep, class _Period, class _Predicate>
-    // __device__ bool _LIBHIPTHREADS_HIDE_FROM_ABI
-    // wait_for(unique_lock<spin_mutex>& __lk, const chrono::duration<_Rep, _Period>& __d, _Predicate __pred);
+    template <class _Rep, class _Period, class _Predicate>
+    __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS bool
+    wait_for(unique_lock<spin_mutex> &__lk, const std::chrono::duration<_Rep, _Period> &__d, _Predicate __pred) {
+        return condition_variable_any::wait_for(__lk, __d, __pred);
+    }
 };
 
 } // namespace cuda

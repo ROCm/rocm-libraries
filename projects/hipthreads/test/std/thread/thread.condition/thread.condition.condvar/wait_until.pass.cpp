@@ -7,8 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: no-threads, c++03
-// XFAIL: *
-// REASON: wait_until() with chrono is not yet implemented in hipThreads
 
 // <condition_variable>
 
@@ -19,31 +17,34 @@
 //   wait_until(unique_lock<mutex>& lock,
 //              const chrono::time_point<Clock, Duration>& abs_time);
 
-#include <condition_variable>
-#include <atomic>
 #include <cassert>
+#include <hip/atomic>
 #include <hip/std/chrono>
-#include <mutex>
+#include <hip/condition_variable>
+#include <hip/mutex>
+#include <hip/std/memory>
 #include <hip/thread>
 
 #include "make_test_thread.h"
 #include "test_macros.h"
 
+#include "force_include_hip.h"
+
 struct TestClock {
-  typedef cuda::std::chrono::milliseconds duration;
+  typedef hip::std::chrono::milliseconds duration;
   typedef duration::rep rep;
   typedef duration::period period;
-  typedef cuda::std::chrono::time_point<TestClock> time_point;
+  typedef hip::std::chrono::time_point<TestClock> time_point;
   static const bool is_steady = true;
 
-  static time_point now() {
-    using namespace ::std::chrono;
-    return time_point(duration_cast<duration>(steady_clock::now().time_since_epoch()));
+  __device__ static time_point now() {
+    using namespace hip::std::chrono;
+    return time_point(duration_cast<duration>(system_clock::now().time_since_epoch()));
   }
 };
 
 template <class Clock>
-void test() {
+__device__ void test() {
   // Test unblocking via a call to notify_one() in another thread.
   //
   // To test this, we set a very long timeout in wait_until() and we wait
@@ -51,20 +52,25 @@ void test() {
   // happen that we get awoken spuriously and fail to recognize it
   // (making this test useless), but the likelihood should be small.
   {
-    ::std::atomic<bool> ready(false);
-    ::std::atomic<bool> likely_spurious(true);
-    auto timeout = Clock::now() + cuda::std::chrono::seconds(3600);
-    ::std::condition_variable cv;
-    ::std::mutex mutex;
+    auto ready_ptr           = hip::std::make_unique<hip::std::atomic<bool>>(false);
+    auto likely_spurious_ptr = hip::std::make_unique<hip::std::atomic<bool>>(true);
+    auto cv_ptr              = hip::std::make_unique<hip::spin_condition_variable>();
+    auto mutex_ptr           = hip::std::make_unique<hip::spin_mutex>();
 
-    hip::thread t1 = support::make_test_thread([&] {
-      hip::unique_lock<::std::mutex> lock(mutex);
+    hip::std::atomic<bool>&       ready           = *ready_ptr;
+    hip::std::atomic<bool>&       likely_spurious = *likely_spurious_ptr;
+    hip::spin_condition_variable& cv              = *cv_ptr;
+    hip::spin_mutex&              mutex           = *mutex_ptr;
+
+    auto timeout = Clock::now() + hip::std::chrono::seconds(3600);
+
+    hip::thread t1 = support::make_test_thread([&, timeout] {
+      hip::unique_lock<hip::spin_mutex> lock(mutex);
       ready = true;
       do {
         ::std::cv_status result = cv.wait_until(lock, timeout);
         assert(result == ::std::cv_status::no_timeout);
       } while (likely_spurious);
-
       // This can technically fail if we have many spurious awakenings, but in practice the
       // tolerance is so high that it shouldn't be a problem.
       assert(Clock::now() < timeout);
@@ -77,9 +83,9 @@ void test() {
 
       // Acquire the same mutex as t1. This blocks the condition variable inside its wait call
       // so we can notify it while it is waiting.
-      hip::unique_lock<::std::mutex> lock(mutex);
-      cv.notify_one();
+      hip::unique_lock<hip::spin_mutex> lock(mutex);
       likely_spurious = false;
+      cv.notify_one();
       lock.unlock();
     });
 
@@ -94,12 +100,16 @@ void test() {
   // spurious wakeups, we wait again whenever we are awoken for a reason
   // other than a timeout.
   {
-    auto timeout = Clock::now() + cuda::std::chrono::milliseconds(250);
-    ::std::condition_variable cv;
-    ::std::mutex mutex;
+    auto cv_ptr    = hip::std::make_unique<hip::spin_condition_variable>();
+    auto mutex_ptr = hip::std::make_unique<hip::spin_mutex>();
 
-    hip::thread t1 = support::make_test_thread([&] {
-      hip::unique_lock<::std::mutex> lock(mutex);
+    hip::spin_condition_variable& cv    = *cv_ptr;
+    hip::spin_mutex&              mutex = *mutex_ptr;
+
+    auto timeout = Clock::now() + hip::std::chrono::milliseconds(250);
+
+    hip::thread t1 = support::make_test_thread([&, timeout] {
+      hip::unique_lock<hip::spin_mutex> lock(mutex);
       ::std::cv_status result;
       do {
         result = cv.wait_until(lock, timeout);
@@ -113,7 +123,9 @@ void test() {
 }
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   test<TestClock>();
-  test<cuda::std::chrono::steady_clock>();
+  test<hip::std::chrono::system_clock>();
+#endif
   return 0;
 }

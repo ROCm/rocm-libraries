@@ -39,7 +39,7 @@
  * Characteristics / differences vs the standard host version:
  * - Implemented with spinning (no true sleep); suitable only when expected
  *   waits are short.
- * - Time-based waits (wait_for / wait_until) are not yet enabled (chrono TODOs).
+ * - Time-based waits (wait_for / wait_until) use hip::std::chrono clocks.
  * - All current members are device-qualified (__device__).
  * - Spurious wakeups can occur: always use the predicate overload when waiting
  *   for a condition.
@@ -48,6 +48,8 @@
 #include "hip/thread_config"
 
 #include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
+#include <condition_variable>
+#include <hip/std/chrono>
 
 namespace cuda {
 
@@ -123,32 +125,21 @@ class _LIBHIPTHREADS_TYPE_VIS condition_variable_any {
     template <class _Lock, class _Predicate>
     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI void wait(_Lock &__lock, _Predicate __pred);
 
-    // TODO: uncomment these once we implement chrono
-    // template <class _Lock, class _Clock, class _Duration>
-    //     _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    //     ::std::cv_status
-    //     wait_until(_Lock& __lock,
-    //                const chrono::time_point<_Clock, _Duration>& __t);
+    template <class _Lock, class _Clock, class _Duration>
+    __device__ _LIBHIPTHREADS_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS ::std::cv_status
+    wait_until(_Lock &__lock, const hip::std::chrono::time_point<_Clock, _Duration> &__t);
 
-    // template <class _Lock, class _Clock, class _Duration, class _Predicate>
-    //     bool
-    //     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI
-    //     wait_until(_Lock& __lock,
-    //                const chrono::time_point<_Clock, _Duration>& __t,
-    //                _Predicate __pred);
+    template <class _Lock, class _Clock, class _Duration, class _Predicate>
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI bool
+    wait_until(_Lock &__lock, const hip::std::chrono::time_point<_Clock, _Duration> &__t, _Predicate __pred);
 
-    // template <class _Lock, class _Rep, class _Period>
-    //     ::std::cv_status
-    //     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI
-    //     wait_for(_Lock& __lock,
-    //              const chrono::duration<_Rep, _Period>& __d);
+    template <class _Lock, class _Rep, class _Period>
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI ::std::cv_status
+    wait_for(_Lock &__lock, const hip::std::chrono::duration<_Rep, _Period> &__d);
 
-    // template <class _Lock, class _Rep, class _Period, class _Predicate>
-    //     bool
-    //     __device__ _LIBHIPTHREADS_HIDE_FROM_ABI
-    //     wait_for(_Lock& __lock,
-    //              const chrono::duration<_Rep, _Period>& __d,
-    //              _Predicate __pred);
+    template <class _Lock, class _Rep, class _Period, class _Predicate>
+    __device__ _LIBHIPTHREADS_HIDE_FROM_ABI bool
+    wait_for(_Lock &__lock, const hip::std::chrono::duration<_Rep, _Period> &__d, _Predicate __pred);
 };
 
 __device__ inline void condition_variable_any::notify_one() _NOEXCEPT {
@@ -195,6 +186,41 @@ template <class _Lock, class _Predicate>
 __device__ inline void condition_variable_any::wait(_Lock &__lock, _Predicate __pred) {
     while (!__pred())
         wait(__lock);
+}
+
+template <class _Lock, class _Clock, class _Duration>
+__device__ ::std::cv_status
+condition_variable_any::wait_until(_Lock &__lock, const hip::std::chrono::time_point<_Clock, _Duration> &__t) {
+    uint64_t myId = atomicAdd(&wait_counter, 1);
+    __lock.unlock();
+    while (myId >= atomicAdd(&notify_counter, 0) && _Clock::now() < __t) {
+    }
+    __lock.lock();
+    bool __notified = (myId < atomicAdd(&notify_counter, 0));
+    return __notified ? ::std::cv_status::no_timeout : ::std::cv_status::timeout;
+}
+
+template <class _Lock, class _Clock, class _Duration, class _Predicate>
+__device__ bool condition_variable_any::wait_until(_Lock &__lock,
+                                                   const hip::std::chrono::time_point<_Clock, _Duration> &__t,
+                                                   _Predicate __pred) {
+    while (!__pred()) {
+        if (wait_until(__lock, __t) == ::std::cv_status::timeout)
+            return __pred();
+    }
+    return true;
+}
+
+template <class _Lock, class _Rep, class _Period>
+__device__ ::std::cv_status condition_variable_any::wait_for(_Lock &__lock,
+                                                             const hip::std::chrono::duration<_Rep, _Period> &__d) {
+    return wait_until(__lock, hip::std::chrono::system_clock::now() + __d);
+}
+
+template <class _Lock, class _Rep, class _Period, class _Predicate>
+__device__ bool condition_variable_any::wait_for(_Lock &__lock, const hip::std::chrono::duration<_Rep, _Period> &__d,
+                                                 _Predicate __pred) {
+    return wait_until(__lock, hip::std::chrono::system_clock::now() + __d, __pred);
 }
 
 } // namespace cuda

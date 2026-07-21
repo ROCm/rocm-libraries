@@ -212,6 +212,7 @@ template<class Callable, class ...Args>
 // #include "hip/__memory/shared_ptr.h"
 #include "hip/__mutex/lock_guard.h"
 #include "hip/__mutex/spin_mutex.h"
+#include "hip/__mutex/timed_spin_mutex.h"
 #include "hip/__mutex/unique_lock.h"
 
 /**
