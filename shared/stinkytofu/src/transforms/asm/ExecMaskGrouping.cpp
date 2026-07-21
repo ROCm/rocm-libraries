@@ -138,6 +138,59 @@ void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder, uint32_t w
     }
 }
 
+void collapseClusterBarrierPairs(BasicBlock& bb, AsmIRBuilder& builder) {
+    for (auto it = bb.begin(); it != bb.end();) {
+        auto* pseudo = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (!pseudo || !isPseudoClusterBarrier(*pseudo)) {
+            ++it;
+            continue;
+        }
+
+        // The insert pass plants the placeholder immediately after its anchor
+        // `s_barrier_wait -1`. Recover that anchor as the placeholder's previous
+        // sibling and fold the two into one atomic group.
+        StinkyInstruction* anchor = nullptr;
+        auto prevIt = BasicBlock::iterator(pseudo);
+        if (prevIt != bb.begin()) {
+            --prevIt;
+            anchor = dyn_cast<StinkyInstruction>(prevIt.getNodePtr());
+        }
+        if (anchor == nullptr || !isBarrierWait(*anchor)) {
+            // Invariant broken (e.g. the anchor was already absorbed into an
+            // exec-mask group). Leave the placeholder standalone; it still
+            // orders after the wait via its copied MemTokenData.
+            PASS_DEBUG(std::cerr << "[collapseClusterBarrierPairs] no adjacent barrier wait "
+                                    "before placeholder; leaving ungrouped\n");
+            ++it;
+            continue;
+        }
+
+        std::vector<StinkyInstruction*> children{anchor, pseudo};
+        std::vector<StinkyRegister> unionSrc, unionDest;
+        int totalIssue = 0, totalLatency = 0;
+        for (StinkyInstruction* child : children) {
+            unionSrc.insert(unionSrc.end(), child->getSrcRegs().begin(), child->getSrcRegs().end());
+            unionDest.insert(unionDest.end(), child->getDestRegs().begin(),
+                             child->getDestRegs().end());
+            totalIssue += child->issueCycles;
+            totalLatency += child->latencyCycles;
+        }
+
+        auto afterPseudo = std::next(BasicBlock::iterator(pseudo));
+        IRBase* insertBefore = (afterPseudo != bb.end()) ? afterPseudo.getNodePtr() : nullptr;
+        StinkyInstruction* group = builder.createExecMaskGroup(insertBefore);
+        group->setSrcRegs(unionSrc);
+        group->setDestRegs(unionDest);
+        group->issueCycles = totalIssue;
+        group->latencyCycles = totalLatency;
+        group->addModifier<ExecGroupData>(ExecGroupData{children});
+
+        auto groupIt = IRList::iterator(group);
+        for (StinkyInstruction* child : children) bb.removeIR(child);
+        it = std::next(groupIt);
+    }
+}
+
 void expandExecMaskedGroups(BasicBlock& bb) {
     for (auto it = bb.begin(); it != bb.end();) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());

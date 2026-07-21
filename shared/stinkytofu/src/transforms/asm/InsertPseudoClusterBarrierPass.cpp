@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/InsertPseudoClusterBarrierPass.hpp"
 
+#include <iterator>
 #include <unordered_set>
 #include <vector>
 
@@ -33,27 +34,36 @@
 namespace stinkytofu {
 namespace {
 
-/// Workgroup-scope split-barrier literal id. `s_barrier_wait -1` is the
-/// workgroup completion the cluster handshake anchors on; the cluster-scope
+/// True if `inst` is a workgroup-scope barrier completion: `s_barrier_wait -1`
+/// (the LDS publication point the cluster handshake anchors on). The cluster
 /// `-3` wait our expansion synthesizes is intentionally not matched here.
-constexpr int kWorkgroupBarrierId = -1;
-
-/// True if `inst` is a workgroup-scope barrier completion: `s_barrier_wait -1`.
 bool isWorkgroupBarrierWait(const StinkyInstruction& inst) {
     return isBarrierWait(inst) && isSplitBarrierAllWave(inst);
 }
 
-/// Walk backward from \p anchor (exclusive) toward the containing basic block's
-/// entry to find the nearest preceding `s_barrier_wait -1`. Stops at the BB
-/// boundary so the trigger never crosses a CFG edge.
-StinkyInstruction* findPrecedingWorkgroupBarrierWaitInBB(StinkyInstruction* anchor) {
-    BasicBlock* parent = anchor->getParent();
-    if (parent == nullptr) return nullptr;
+/// A segment boundary is either a label (control-flow entry point) or a branch
+/// (control-flow exit point). This pass runs at kernel scope, where Tensile has
+/// lowered the whole kernel into a single flat entry basic block with inline
+/// label pseudos and branches instead of a real CFG. Treating both as
+/// boundaries recovers per-CFG-basic-block segmentation on that flat IR, which
+/// matters for unrolled loops where iter 1/2 and iter 2/2 share one
+/// `label_LoopBeginL` segment but are split by the odd-exit `s_cbranch`.
+bool isSegmentBoundary(const StinkyInstruction& inst) {
+    return isLabel(inst) || isBranch(inst);
+}
+
+/// Walk backward from \p anchor (exclusive) toward \p segmentBegin (inclusive)
+/// to find the nearest preceding `s_barrier_wait -1`. Stops as soon as a
+/// segment boundary is crossed so the trigger always lives in the same segment
+/// as \p anchor (never crossing a label/branch, i.e. a CFG edge).
+StinkyInstruction* findPrecedingWorkgroupBarrierWaitInSegment(BasicBlock::iterator segmentBegin,
+                                                              StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
-    while (it != parent->begin()) {
+    while (it != segmentBegin) {
         --it;
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
+        if (isSegmentBoundary(*inst)) return nullptr;
         if (isWorkgroupBarrierWait(*inst)) return inst;
     }
     return nullptr;
@@ -88,14 +98,24 @@ class InsertPseudoClusterBarrierPassImpl : public Pass {
         for (BasicBlock& bb : func) {
             // Collect the anchoring `s_barrier_wait -1` for each tensor load,
             // deduplicated by identity so loads sharing one wait yield exactly
-            // one placeholder. Gather first, insert after, to avoid mutating the
+            // one placeholder. Segment the flat kernel BB by labels/branches so
+            // each load's backward scan for its anchor wait stays within its own
+            // CFG segment. Gather first, insert after, to avoid mutating the
             // block while iterating it.
             std::unordered_set<StinkyInstruction*> seen;
             std::vector<StinkyInstruction*> anchors;
+            auto segBegin = bb.begin();
             for (auto it = bb.begin(); it != bb.end(); ++it) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst == nullptr || !isTensorLoad(*inst)) continue;
-                StinkyInstruction* wait = findPrecedingWorkgroupBarrierWaitInBB(inst);
+                if (inst == nullptr) continue;
+                if (isSegmentBoundary(*inst)) {
+                    // The boundary belongs to neither side; the next segment
+                    // starts right after it.
+                    segBegin = std::next(it);
+                    continue;
+                }
+                if (!isTensorLoad(*inst)) continue;
+                StinkyInstruction* wait = findPrecedingWorkgroupBarrierWaitInSegment(segBegin, inst);
                 if (wait != nullptr && seen.insert(wait).second) anchors.push_back(wait);
             }
 
@@ -109,14 +129,17 @@ class InsertPseudoClusterBarrierPassImpl : public Pass {
                 ++after;
                 IRBase* insertBefore = (after != bb.end()) ? after.getNodePtr() : nullptr;
 
-                // The placeholder carries IF_HasSideEffect, so the DAG scheduler
-                // treats it as a non-movable region boundary: its position is
-                // strictly preserved right here, immediately after the anchor
-                // `s_barrier_wait -1`. Being a boundary also stops the scheduler
-                // from moving any instruction across it, so no SCC (or other)
-                // def->use chain is split around the future expansion point.
-                irBuilder.createPseudoClusterBarrier(PseudoClusterBarrierData::Kind::SignalWait,
-                                                     insertBefore);
+                // Insert the movable placeholder right after the anchor wait.
+                // It models the future SCC clobber (IF_ImplicitWriteSCC) so the
+                // scheduler never splits an SCC def->use pair across it, and we
+                // copy the anchor wait's MemTokenData onto it so the DAG orders it
+                // immediately after that wait (adjacency) via matching LDS
+                // pseudo-regs materialized by BuildImplicitDependency.
+                StinkyInstruction* pseudo = irBuilder.createPseudoClusterBarrier(
+                    PseudoClusterBarrierData::Kind::SignalWait, insertBefore);
+                if (const auto* mt = wait->getModifier<MemTokenData>()) {
+                    pseudo->addModifier<MemTokenData>(MemTokenData{mt->tokens});
+                }
             }
         }
 

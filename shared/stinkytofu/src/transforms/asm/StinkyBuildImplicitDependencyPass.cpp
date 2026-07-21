@@ -132,7 +132,10 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
         if (!mt) continue;
         assert(!mt->tokens.empty() && "MemTokenData with empty tokens");
 
-        if (isBarrier(*inst))
+        if (isBarrier(*inst) || isPseudoClusterBarrier(*inst))
+            // The cluster-barrier placeholder copies its anchor wait's tokens; treat
+            // it like a barrier (LDS token to both src and dest) so the DAG orders it
+            // immediately after that wait and before the wait's LDS consumers.
             processBarrier(*inst, *mt, bb.getLabel());
         else if (isTensorLoad(*inst) || isDSWrite(*inst))
             processLdsWriter(*inst, *mt, bb.getLabel());

@@ -334,12 +334,17 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     /// by the post-DAG expansion pass.
     /// See docs/developer/pseudo-cluster-barrier-plan.md.
     ///
-    /// IF_HasSideEffect: like FENCE, this makes the DAG scheduler treat the
-    /// placeholder as a NON-movable region boundary whose position is strictly
-    /// preserved. That pins it exactly where the inserting pass places it (right
-    /// after its anchor `s_barrier_wait -1`) and, because nothing is scheduled
-    /// across a side-effect boundary, keeps any SCC (or other) def->use chain
-    /// from being split around the future expansion point.
+    /// The placeholder is MOVABLE (no IF_HasSideEffect) so the DAG scheduler can
+    /// keep it glued to its anchor. Two dependency handles drive that:
+    ///   - IF_ImplicitWriteSCC models it as an SCC writer. Its post-DAG expansion
+    ///     emits `s_cmp_eq_u32 s[sgprWaveIdx], 0`, which clobbers SCC, so modeling
+    ///     the clobber here makes the scheduler treat the placeholder as an SCC
+    ///     barrier: no SCC def->use pair may be scheduled straddling it, so the
+    ///     expansion can never land inside a live SCC range (no restore needed).
+    ///   - The inserting pass copies the anchor `s_barrier_wait -1`'s MemTokenData
+    ///     onto the placeholder; BuildImplicitDependency then materializes matching
+    ///     LDS pseudo-regs so the DAG orders it immediately after that wait
+    ///     (adjacency), while the wait itself stays free to move.
     StinkyInstruction* createPseudoClusterBarrier(
         PseudoClusterBarrierData::Kind kind = PseudoClusterBarrierData::Kind::SignalWait,
         IRBase* insertBefore = nullptr) {
@@ -347,7 +352,7 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
             GFX::PSEUDO_CLUSTER_BARRIER, GFX::PSEUDO_CLUSTER_BARRIER,
             0,                           0,
             0,                           "PSEUDO_CLUSTER_BARRIER",
-            makeFlagSet({InstFlag::IF_HasSideEffect})};
+            makeFlagSet({InstFlag::IF_ImplicitWriteSCC})};
         StinkyInstruction* inst = create(&pseudoClusterBarrierMCID, insertBefore);
         inst->addModifier<PseudoClusterBarrierData>(PseudoClusterBarrierData{kind});
         return inst;

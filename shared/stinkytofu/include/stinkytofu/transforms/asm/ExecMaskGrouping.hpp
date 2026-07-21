@@ -36,7 +36,16 @@ class AsmIRBuilder;
 STINKYTOFU_EXPORT void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder,
                                                  uint32_t wavefrontSize);
 
-/// Inverse of collapseExecMaskedRegions.
+/// Collapse each `s_barrier_wait -1` + immediately-following
+/// PSEUDO_CLUSTER_BARRIER placeholder pair into a single opaque ExecMaskGroup
+/// pseudo-instruction, so the DAG scheduler moves the pair as one atomic unit
+/// and can never interleave any instruction between the wait and the
+/// placeholder. The pair still moves freely (the group inherits no side effect
+/// from its children) subject to the union of their LDS-token / SCC deps.
+/// Undone by expandExecMaskedGroups() (shared with the exec-mask groups).
+STINKYTOFU_EXPORT void collapseClusterBarrierPairs(BasicBlock& bb, AsmIRBuilder& builder);
+
+/// Inverse of collapseExecMaskedRegions (also restores collapseClusterBarrierPairs).
 STINKYTOFU_EXPORT void expandExecMaskedGroups(BasicBlock& bb);
 
 }  // namespace stinkytofu

@@ -42,6 +42,7 @@
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertPseudoClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LowerClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
@@ -78,14 +79,6 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
         pm.addPass(createStinkyRemoveNopPass());
     }
 
-    // Plant PSEUDO_CLUSTER_BARRIER placeholders before scheduling so the DAG
-    // keeps them ordered via their SCC dependency, then a post-DAG pass expands
-    // them into concrete s_barrier_signal/wait -3. Runs after CFGBuilder (needs
-    // BBs for anchor detection) and before BuildImplicitDependency/DAG.
-    if (module.getModuleOptions().ClusterBarrier) {
-        pm.addPass(createInsertPseudoClusterBarrierPass());
-    }
-
     // addPeepholeOptPasses(pm, optLevel);
 
     // Instruction scheduling
@@ -117,6 +110,17 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         pm.addPass(createRemoveWaitAluPass(module.getFunctions()));
     }
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
+
+    // Plant PSEUDO_CLUSTER_BARRIER placeholders PRE-DAG at kernel scope, so both
+    // ScheduleIterAlg=0 (no region/DAG) and ScheduleIterAlg=4 (region/DAG) reach
+    // it. Running before the region adaptor means placeholders landing inside the
+    // extracted region are carried through the DAG scheduler; the IF_HasSideEffect
+    // flag pins them in place there. The kernel is still one flat block at this
+    // point, so anchor detection segments it by labels/branches. A post-DAG pass
+    // (LowerClusterBarrierPass) expands the placeholders later.
+    if (moduleOptions.ClusterBarrier) {
+        pm.addPass(createInsertPseudoClusterBarrierPass());
+    }
 
     // -- region: loopWithPrefetch + noLoadLoopBody --
     // Both the DAG scheduler (O3) and waitcnt insertion need the region-scoped CFG, so they
@@ -159,6 +163,14 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     PB.applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm, module);
 
     // -- kernel --
+
+    // Expand PSEUDO_CLUSTER_BARRIER placeholders into the concrete WaveIdx-gated
+    // cluster handshake now that scheduling (if any) is done and the region has
+    // been spliced back. Runs before InsertVgprMsbPass so the new branches/labels
+    // are present when MSB hardware state is materialized.
+    if (moduleOptions.ClusterBarrier) {
+        pm.addPass(createLowerClusterBarrierPass());
+    }
 
     // Build the CFG after the flat region splice-backs so RegionClonePass can match its
     // start BB by label. InsertVgprMsb runs after RegionClonePass so the cloned BB gets

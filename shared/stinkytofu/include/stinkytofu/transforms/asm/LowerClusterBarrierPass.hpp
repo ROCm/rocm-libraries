@@ -29,25 +29,20 @@
 namespace stinkytofu {
 class Pass;
 
-/// Creates a pass that plants PSEUDO_CLUSTER_BARRIER placeholders (Step B of the
-/// cluster-barrier reimplementation; see
-/// docs/developer/pseudo-cluster-barrier-plan.md).
+/// Creates a pass that expands PSEUDO_CLUSTER_BARRIER placeholders into the
+/// concrete cluster-barrier handshake (Step D of the cluster-barrier
+/// reimplementation; see docs/developer/pseudo-cluster-barrier-plan.md).
 ///
-/// Runs at KERNEL scope, PRE-DAG (before the region adaptor), so it is reached
-/// at every OptLevel — both ScheduleIterAlg=0 (no region/DAG) and
-/// ScheduleIterAlg=4 (region/DAG). Placeholders landing inside the extracted
-/// region are carried through the DAG scheduler; their IF_HasSideEffect flag
-/// pins them in place there so no def->use chain (e.g. SCC) is split around the
-/// future expansion point. A post-DAG pass (LowerClusterBarrierPass) expands
-/// them into the concrete handshake.
+/// Runs after the DAG scheduler (so placeholder positions are final) and before
+/// InsertVgprMsbPass (so the new branch/label are present when MSB is
+/// materialized). Each PSEUDO_CLUSTER_BARRIER of kind SignalWait expands to a
+/// WaveIdx-gated signal followed by an all-wave wait:
 ///
-/// Anchor detection mirrors the legacy InsertClusterBarrierPass Rule 4: for each
-/// `tensor_load_to_lds` the nearest preceding `s_barrier_wait -1` is the anchor,
-/// and a single placeholder is inserted immediately AFTER that wait. Anchors are
-/// deduplicated by identity so multiple loads sharing one wait yield one
-/// placeholder. At this point Tensile has lowered the whole kernel into one flat
-/// entry block, so the backward scan treats labels and branches as segment
-/// boundaries and never crosses a CFG edge.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertPseudoClusterBarrierPass();
+///   s_cmp_eq_u32 s[sgprWaveIdx], 0
+///   s_cbranch_scc0 label_skipCBPreSignal_<n>
+///   s_barrier_signal -3
+///   label_skipCBPreSignal_<n>:
+///   s_barrier_wait -3
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createLowerClusterBarrierPass();
 
 }  // namespace stinkytofu
