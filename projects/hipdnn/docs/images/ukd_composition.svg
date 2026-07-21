@@ -34,7 +34,7 @@
   <text x="395" y="246" text-anchor="middle" font-size="10" fill="#555">scratch</text>
   <!-- write / read edges -->
   <line x1="320" y1="168" x2="352" y2="210" stroke="#444" stroke-width="1.3" marker-end="url(#arrowCX)"/>
-  <text x="326" y="175" font-size="9" fill="#555">write</text>
+  <text x="328" y="173" font-size="9" fill="#555">write</text>
   <line x1="352" y1="240" x2="320" y2="236" stroke="#444" stroke-width="1.3" marker-end="url(#arrowCX)"/>
   <line x1="360" y1="268" x2="320" y2="300" stroke="#444" stroke-width="1.3" marker-end="url(#arrowCX)"/>
   <text x="346" y="292" font-size="9" fill="#555">read</text>
