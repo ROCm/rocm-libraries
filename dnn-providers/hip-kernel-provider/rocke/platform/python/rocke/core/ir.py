@@ -1102,6 +1102,21 @@ class IRBuilder:
             ).result
         raise ValueError(f"zero_vec unsupported elem {elem.name}")
 
+    def undef_vec(self, elem: Type, n: int) -> Value:
+        """An uninitialized `<n x elem>` (lowers to ``freeze <n x elem> poison``).
+
+        Use as the base of an insertelement chain that fully overwrites every
+        lane (e.g. a gather that loads all N elements): unlike :meth:`zero_vec`,
+        there is no zero to MATERIALIZE, so the backend drops the dead
+        zero-init ``v_mov`` sequence. Only valid when every lane is subsequently
+        defined -- reading an un-inserted lane is undefined."""
+        return self._op(
+            "vector.undef",
+            result_types=[VectorType(elem, n)],
+            attrs={"elem": elem.name, "vec": n},
+            result_name_hint=f"udf{n}",
+        ).result
+
     # ----- gpu / runtime -----
 
     def thread_id_x(self) -> Value:
@@ -3010,6 +3025,103 @@ class IRBuilder:
             result_name_hint="bld16",
         ).result
 
+    def buffer_load_d16_pack(
+        self, rsrc: Value, voffset: Value, soffset_lo: Value, soffset_hi: Value
+    ) -> Value:
+        """Pack two strided f16 buffer loads into one dword (`i32`) via inline
+        ``buffer_load_d16_b16`` + ``buffer_load_d16_hi_b16`` (hi tied to lo).
+
+        The buffer analogue of the flat ``global_load_d16_hi_b16``: writes the
+        two strided halves DIRECTLY into one register's lo/hi lanes, so the
+        per-dword ``v_mov_b16`` f16-pack (which the typed ``buffer_load_f16_d16``
+        path cannot avoid -- the backend never selects the D16-hi buffer form
+        from the intrinsic) disappears. Element 0 = load(soffset_lo), element 1
+        = load(soffset_hi); bitcast the result to ``<2 x half>``.
+
+        HAZARD: these inline-asm loads are outside the backend's ``vmcnt``
+        model. The caller MUST emit ``s_waitcnt(vmcnt=0)`` after the gather and
+        before consuming the fragment, or the WMMA reads stale registers.
+        """
+        return self._op(
+            "tile.buffer_load_d16_pack",
+            [rsrc, voffset, soffset_lo, soffset_hi],
+            [I32],
+            result_name_hint="d16pk",
+        ).result
+
+    def vmcnt0_fence(self, values: "Sequence[Value]") -> "list[Value]":
+        """Tie ``values`` through a verbatim ``s_waitcnt vmcnt(0)`` inline-asm
+        barrier and return the fenced values (same types, in order).
+
+        This is the correctness primitive for inline-asm VMEM loads (e.g.
+        :meth:`buffer_load_d16_pack`), which are OUTSIDE the backend's vmcnt
+        model: the auto-waitcnt pass neither inserts a wait before their
+        consumers NOR preserves a plain ``s_waitcnt`` intrinsic (it "knows"
+        vmcnt is already 0 because it never counted the asm loads, so it drops
+        the wait -> the consumer reads stale registers). Emitting the wait as
+        an inline-asm STRING makes it verbatim (never dropped), and tying each
+        value as an in/out operand (``=v,..,0,1,..``) forces every consumer of
+        the result to be scheduled AFTER the barrier. One drain per call.
+        """
+        vals = list(values)
+        n = len(vals)
+        if n == 0:
+            return []
+        constraints = ",".join(["=v"] * n + [str(i) for i in range(n)])
+        return self.inline_asm_multi(
+            "s_waitcnt vmcnt(0)",
+            constraints,
+            operands=vals,
+            result_types=[v.type for v in vals],
+            sideeffect=True,
+            result_name_hint="vfence",
+        )
+
+    def buffer_load_d16_gather(
+        self, rsrc: Value, voffset: Value, soffsets: "Sequence[Value]"
+    ) -> "list[Value]":
+        """Gather ``N = len(soffsets)//2`` packed dwords (`i32`) in ONE inline-asm
+        block: ``buffer_load_d16_b16`` + ``_hi_b16`` per dword (dword m packs the
+        halves at ``soffsets[2m]`` / ``soffsets[2m+1]``).
+
+        Batching every load into a single node makes them the NEWEST contiguous
+        outstanding VMEM, so :meth:`vmcnt_fence` can gate individual dwords with
+        exact counting-down partial waits (VMEM retires in issue order). Pair
+        with a per-dword :meth:`vmcnt_fence` before each consumer to recover the
+        load/compute overlap the coarse :meth:`vmcnt0_fence` gives up.
+        """
+        soffs = list(soffsets)
+        n = len(soffs) // 2
+        op = self._op(
+            "tile.buffer_load_d16_gather",
+            [rsrc, voffset, *soffs],
+            [I32] * n,
+            result_name_hint="d16g",
+        )
+        return list(op.results)
+
+    def vmcnt_fence(self, value: Value, k: int) -> Value:
+        """Tie ``value`` through a verbatim ``s_waitcnt vmcnt(k)`` inline-asm
+        barrier and return it, forcing every consumer AFTER a wait for "at most
+        ``k`` VMEM outstanding".
+
+        Partial-wait analogue of :meth:`vmcnt0_fence` for inline-asm loads
+        issued via :meth:`buffer_load_d16_gather`: emitting these in a
+        counting-down sequence (k = 2N-2, 2N-4, .., 0) releases dword 0 while
+        dwords 1..N-1 are still in flight, reproducing the backend's fine-grained
+        ``vmcnt(2)``-interleaved-with-WMMA schedule that the typed intrinsic path
+        gets for free. Verbatim asm => the auto-waitcnt pass cannot drop it; the
+        in/out tie => consumers cannot hoist above it.
+        """
+        return self.inline_asm(
+            f"s_waitcnt vmcnt({int(k)})",
+            "=v,0",
+            [value],
+            result_type=value.type,
+            sideeffect=True,
+            result_name_hint="vwait",
+        )
+
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
         """Scalar bf16 buffer load via `raw_ptr_buffer_load_u16` + bitcast.
 
@@ -3605,6 +3717,7 @@ PURE_OP_NAMES = {
     "vector.trunc_f32_to_f16",
     "vector.trunc_f32_to",
     "vector.ext_to_f32",
+    "vector.undef",
     "vector.bitcast",
     "vector.add",
     "vector.mul",

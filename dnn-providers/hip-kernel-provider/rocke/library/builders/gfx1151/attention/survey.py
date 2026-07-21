@@ -17,7 +17,6 @@ from .fmha_singlewave import SingleWaveCfg
 from .fmha_pipelined import PipelinedCfg
 from .tune import Shape
 from . import tune as opt_tune
-from . import sp_tune
 
 PEAK_TF = 59.0  # Radeon 8060S f16 WMMA peak: 40 CU * 512 FLOP/clk * 2.9 GHz
 
@@ -107,7 +106,7 @@ def _best_mine(shape: Shape, objdump):
         fuse_k=None,
     )
     try:
-        r = sp_tune.verify_and_time(sp, shape, objdump=objdump)
+        r = opt_tune.verify_and_time_pipelined(sp, shape, objdump=objdump)
         if r["ok"]:
             results.append(("sp", r))
     except Exception as e:  # noqa: BLE001

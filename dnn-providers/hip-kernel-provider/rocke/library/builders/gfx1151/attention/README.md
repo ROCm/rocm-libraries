@@ -1,5 +1,27 @@
 # gfx1151 WMMA FMHA-forward: an optimization case study
 
+> ## Update — the transposed-QK (`swapqk`) kernel is the new winner (~23 TF, ~2× the single-wave record)
+>
+> The case study below documents the single-wave campaign that topped out at
+> **~11 TF**. A later structural rewrite — **computing the scores transposed,
+> `S^T = K·Q^T`** — roughly **doubled** throughput to **~23 TF dense** (peak
+> **~24.7 TF at L=1024**), hardware-validated on a gfx1151 Strix Halo mini
+> (H24, B1, D128, bit-identical to the reference at max_abs 1.53e-5).
+>
+> - **Production kernel:** [`kernels/gfx1151/wmma_fmha_swapqk.py`](../../../kernels/gfx1151/wmma_fmha_swapqk.py)
+>   — clean `WmmaFmhaSwapQKSpec` + `build_wmma_fmha_swapqk_fwd`, winning knobs baked
+>   in (wave2, pingpong, buffer-D16 gather, dual-gather, lazy online rescale, fast exp2).
+> - **Long-sequence candidates:** `kernels/gfx1151/wmma_fmha_swapqk_persistent.py`
+>   (persistent work-queue grid) and `kernels/gfx1151/wmma_fmha_multiwave.py`.
+> - **Why it wins & how it's derived:** see the transposed-QK section in
+>   [`ALGORITHM.md`](ALGORITHM.md).
+> - **Tuning harness:** the unified [`tune.py`](tune.py) driver (`--kernel swapqk`,
+>   `--set`/`--grid`, `--emit`/`--prebuilt`) and [`harness.py`](harness.py); the
+>   dead-end levers (`d16_hi` inline-asm gather, `iglp_opt`, pipeline, LDS-Q, …)
+>   are kept as documented, off-by-default flags with their measured verdicts.
+> - **Scaling:** throughput peaks at L≈1024 and is cache/bandwidth-bound past
+>   ~L4096 on this APU (see the per-L table in the transposed-QK section below).
+
 ## TL;DR (executive summary)
 
 A native WMMA flash-attention-forward kernel for **gfx1151** (Strix Halo, Radeon
@@ -704,3 +726,76 @@ silent regression; the fragment and the accumulator have to stay packed.*
   reports TFLOP/s, % of the 59 TF peak, and speedup. The vehicle that surfaced
   the causal early-exit win (`fmha_pipelined`/`fmha_singlewave` `mask_mode=="causal"` clamp
   the K-loop to skip fully-masked tiles).
+
+---
+
+## The transposed-QK production kernel (`swapqk`)
+
+The structural rewrite that broke past the single-wave ~11 TF plateau. Full math
+derivation in [`ALGORITHM.md`](ALGORITHM.md); the short version:
+
+- **Compute the scores transposed, `S^T = K·Q^T`.** Query then lands *on the lane*
+  (`col = lane%16`) and kv on the 8 accumulator slots, so the online-softmax
+  reduction over kv is an **in-lane reduce over 8 slots + one `permlanex16`** — no
+  16-lane butterfly — and the running `m`/`l` are per-lane scalars.
+- **Register C→operand P-transpose** (CK's `PermuteWarpGemmCToA`): one
+  `permlanex16` + two `v_perm_b32`, **no LDS round-trip, no barrier** — feasible
+  precisely because query is already on the lane.
+- **PV transposed too, `O^T = V·P`**, so the softmax stats and the O accumulator
+  share a layout and the online rescale `O *= α` is a trivial in-lane vector-mul.
+
+**Production knobs (all hardware-validated, baked into `WmmaFmhaSwapQKSpec`):**
+wave2, pingpong `s_setprio` scheduling (the 2.25× lever), **buffer-descriptor D16
+V-gather** (returns `half`, keeps the strided gather clause-batched: `s_clause`
+121→38, +~14%), **dual-subtile gather** (lanes 16–31 load the adjacent d-subtile +
+`permlanex16` broadcast → halves V loads), **lazy online rescale** (skip the O
+rescale when the tile max doesn't re-anchor), and **fast exp2** (raw
+`v_exp_f32`, +2.7%).
+
+**Per-L sweep (gfx1151 Strix Halo mini, dense, H24 B1 D128; best config each):**
+
+| L | best config | TFLOPS |
+|---|---|---|
+| 512  | w2 bn64 ilp2 | 22.9 |
+| 1024 | w2 bn64 ilp2 | **24.7** |
+| 2048 | w2 bn32 ilp2 | 22.8 |
+| 4096 | w2 bn64 ilp2 | 17.4 |
+
+`w2 bn64 ilp2` is the robust default across shapes (ties `bn32` at L2048).
+Efficiency peaks at L≈1024 then declines — the KV working set spills the APU's
+last-level cache and the kernel goes memory-bound past ~L4096 (~256 GB/s LPDDR5),
+which is why the long-sequence regime wants the persistent / multi-wave
+candidates rather than a config tweak.
+
+**Documented dead-ends (kept as off-by-default flags with measured verdicts):**
+`d16hi` — inline-asm `buffer_load_d16_b16/_hi_b16` eliminates the 64 `v_mov_b16`
+f16-packs at the ISA level, but the loads sit outside the backend's `vmcnt` model
+so the mandatory wait is either coarse (`vmcnt(0)` → −5.3%) or hand-pipelined
+partial waits (→ GPU hang); the typed-intrinsic path's free, correct backend
+software-pipelining wins. `iglp_opt` 0/1/2 all regress ~3.5% (the loop is already
+pingpong-optimal). `pipeline`, `q_hoist`, `q_lds`, `o_f16`, `static_shape`,
+`prefetch_v` — see the flag comments in the kernel.
+
+### Tuning & board workflow
+
+The unified [`tune.py`](tune.py) driver replaces the per-kernel `*_tune.py`
+scripts. Pick a kernel and sweep any config field; the dense kernel compiles
+host-side (comgr targets gfx1151 regardless of the build GPU) but must *execute*
+on gfx1151, so build and run are split:
+
+```bash
+# 1. compile hsaco(s) on any host (no GPU needed):
+python -m builders.gfx1151.attention.tune --kernel swapqk --emit /tmp/art \
+    --seqlen-q 2048 --seqlen-k 2048 --head-size 128 --heads 24 --batch 1 \
+    --grid n_waves=2 --grid block_n=32,64 --set qk_ilp=2 \
+    --set buffer_gather=1 --set dual_gather=1 --set lazy_rescale=1 --set fast_exp2=1
+
+# 2. rsync /tmp/art -> gfx1151 board, then run the prebuilt objects there:
+python -m builders.gfx1151.attention.tune --kernel swapqk --prebuilt /tmp/art \
+    ...same shape/grid flags... --warmup 10 --iters 50
+```
+
+`--warmup`/`--iters` scale the timing loop (dense attention is O(L²): use small
+iters + `--no-verify` for long sequences, where the numpy reference is
+infeasible). [`harness.py`](harness.py) is the importable equivalent
+(`WmmaFmhaSwapQKSpec`, `build_wmma_fmha_swapqk_fwd`, `verify_and_time_swapqk`, …).

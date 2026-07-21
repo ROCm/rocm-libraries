@@ -3349,6 +3349,91 @@ class _Lowerer:
             f"i32 0)"
         )
 
+    def _op_tile_buffer_load_d16_pack(self, op: Op) -> None:
+        """Pack two strided f16 buffer loads into one dword via inline-asm
+        ``buffer_load_d16_b16`` + ``buffer_load_d16_hi_b16`` (result `i32`).
+
+        This is the buffer-path analogue of the flat ``global_load_d16_hi_b16``
+        the backend selects automatically. The typed ``raw.ptr.buffer.load.f16``
+        intrinsic will NOT select the D16-hi buffer form (verified: it always
+        lowers to ``buffer_load_u16`` + an explicit ``v_mov_b16`` pack), so the
+        only way to write both strided halves DIRECTLY into one VGPR's lo/hi
+        lanes -- eliminating the per-dword ``v_mov_b16`` -- is to pin the two
+        machine instructions with inline asm and tie the hi load's destination
+        to the lo load's result (``0`` constraint).
+
+        HAZARD: inline-asm loads are OUTSIDE the backend's ``vmcnt`` model, so
+        NO ``s_waitcnt`` is auto-inserted before the consumer. The caller MUST
+        emit an explicit ``s_waitcnt(vmcnt=0)`` fence after the gather and
+        before the WMMA that reads the fragment (see ``fmha_swapqk`` d16hi path).
+        """
+        rsrc, voffset, soffset_lo, soffset_hi = op.operands
+        voff = self._operand(voffset)
+        rs = self._operand(rsrc)
+        lo = self._fresh("d16lo")
+        # lo half: buffer_load_d16_b16 dst, voff, rsrc, soff_lo
+        self._current().emit(
+            f"  {lo} = call i32 asm sideeffect "
+            f'"buffer_load_d16_b16 $0, $1, $2, $3 offen", "=v,v,s,s"('
+            f"i32 {voff}, ptr addrspace(8) {rs}, i32 {self._operand(soffset_lo)})"
+        )
+        # hi half: buffer_load_d16_hi_b16 dst, voff, rsrc, soff_hi  (dst tied to lo)
+        self._current().emit(
+            f"  {op.result.name} = call i32 asm sideeffect "
+            f'"buffer_load_d16_hi_b16 $0, $2, $3, $4 offen", "=v,0,v,s,s"('
+            f"i32 {lo}, i32 {voff}, ptr addrspace(8) {rs}, "
+            f"i32 {self._operand(soffset_hi)})"
+        )
+
+    def _op_tile_buffer_load_d16_gather(self, op: Op) -> None:
+        """Emit N packed dwords (2 strided f16 each) as ONE inline-asm block:
+        ``buffer_load_d16_b16`` + ``buffer_load_d16_hi_b16`` per dword, N ``i32``
+        outputs (literal-struct return, unpacked with extractvalue).
+
+        Batching all 2N loads into a SINGLE sideeffect asm node guarantees they
+        are issued contiguously and are the NEWEST outstanding VMEM, which is
+        the precondition for the caller's counting-down partial ``vmcnt`` waits
+        (:meth:`vmcnt_fence`) to be exact: since VMEM retires in issue order,
+        ``s_waitcnt vmcnt(2N-2-2m)`` gates exactly dword ``m`` regardless of how
+        many OLDER loads are still in flight (they retire first, and cancel).
+
+        operands: (rsrc, voffset, soff_0, .. soff_{2N-1}).  $0..$(N-1) outputs;
+        inputs $N=voff, $(N+1)=rsrc, $(N+2+j)=soff_j.
+        """
+        rsrc, voffset, *soffs = op.operands
+        n = len(op.results)
+        assert len(soffs) == 2 * n, "buffer_load_d16_gather needs 2 soff per dword"
+        voff_i = n
+        rsrc_i = n + 1
+        lines = []
+        for m in range(n):
+            lo_i = n + 2 + 2 * m
+            hi_i = lo_i + 1
+            lines.append(
+                f"buffer_load_d16_b16 ${m}, ${voff_i}, ${rsrc_i}, ${lo_i} offen"
+            )
+            lines.append(
+                f"buffer_load_d16_hi_b16 ${m}, ${voff_i}, ${rsrc_i}, ${hi_i} offen"
+            )
+        template = _escape_llvm_asm_string("\n".join(lines))
+        constraints = ",".join(["=v"] * n + ["v", "s"] + ["s"] * (2 * n))
+        # Build the typed arg list, printing rsrc as the ptr addrspace(8) it
+        # really is (its rocke type is <4 x i32> for display only).
+        args = [
+            f"i32 {self._operand(voffset)}",
+            f"ptr addrspace(8) {self._operand(rsrc)}",
+        ]
+        args += [f"i32 {self._operand(s)}" for s in soffs]
+        arglist = ", ".join(args)
+        struct_ty = "{ " + ", ".join(["i32"] * n) + " }"
+        tmp = self._fresh("d16g")
+        self._current().emit(
+            f'  {tmp} = call {struct_ty} asm sideeffect "{template}", '
+            f'"{constraints}"({arglist})'
+        )
+        for i, r in enumerate(op.results):
+            self._current().emit(f"  {r.name} = extractvalue {struct_ty} {tmp}, {i}")
+
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
 
@@ -3757,6 +3842,13 @@ class _Lowerer:
             f"  {op.result.name} = fpext {_llvm_type(v.type)} {self._operand(v)} "
             f"to {_llvm_type(op.result.type)}"
         )
+
+    def _op_vector_undef(self, op: Op) -> None:
+        # freeze(poison): a defined-but-arbitrary vector with nothing to
+        # materialize -> the backend drops the dead zero-init when every lane is
+        # subsequently overwritten (e.g. a full gather).
+        t = _llvm_type(op.result.type)
+        self._current().emit(f"  {op.result.name} = freeze {t} poison")
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands

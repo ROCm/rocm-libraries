@@ -30,8 +30,6 @@ from .fmha_singlewave import SingleWaveCfg
 from .fmha_pipelined import PipelinedCfg
 from .tune import Shape
 from . import tune as opt_tune
-from . import sp_tune
-from . import bn_tune
 
 PEAK_TF = 59.0
 
@@ -126,8 +124,8 @@ def _label(kind, cfg):
 def sweep_shape(shape: Shape, objdump, *, verbose=True):
     runners = [
         ("opt", _opt_configs(shape), opt_tune.verify_and_time),
-        ("sp", _sp_configs(shape), sp_tune.verify_and_time),
-        ("bn", _bn_configs(shape), bn_tune.verify_and_time),
+        ("sp", _sp_configs(shape), opt_tune.verify_and_time_pipelined),
+        ("bn", _bn_configs(shape), opt_tune.verify_and_time_blockn),
     ]
     best = None
     for kind, cfgs, vt in runners:

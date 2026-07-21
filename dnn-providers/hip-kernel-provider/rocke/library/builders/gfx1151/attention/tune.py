@@ -1,10 +1,34 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Driver for the gfx1151 WMMA FMHA optimization campaign.
+"""Unified tuning / verify / benchmark driver for the gfx1151 WMMA FMHA campaign.
 
-Builds an :class:`~fmha_singlewave.SingleWaveCfg`, gates it on a numpy reference, times it
-with HIP events, and tallies the disassembly's memory/matmul instruction mix.
-Used both ad-hoc (``verify_and_time(cfg, shape)``) and as a sweep entry point.
+This single file consolidates what used to be one driver per kernel
+(``sq_tune`` / ``pers_tune`` / ``mw_tune`` / ``bn_tune`` / ``coop_tune`` /
+``sp_tune`` / ``prod_tune`` + this module's original single-wave driver). Every
+kernel shares the same build -> numpy-verify -> HIP-time -> ISA-tally loop; the
+only per-kernel differences are (a) the config class, (b) the build/grid calls,
+and (c) the persistent kernel's extra work-queue counter arg. Those live in the
+:data:`KERNELS` registry; the machinery is generic.
+
+CLI (pick the kernel, sweep any config field)::
+
+    python -m builders.gfx1151.attention.tune --kernel swapqk \\
+        --seqlen-q 2048 --seqlen-k 2048 --head-size 128 --heads 24 --batch 1 \\
+        --grid n_waves=2 --grid block_n=32,64 --set qk_ilp=2 \\
+        --set buffer_gather=1 --set dual_gather=1 --set lazy_rescale=1 \\
+        --set fast_exp2=1
+
+  * ``--set K=V``   pin config field K to V (typed from the dataclass).
+  * ``--grid K=V1,V2,...`` sweep field K over the values (cartesian across grids).
+  * ``--emit DIR``  compile each cfg -> DIR/<kernel_name>.hsaco, no GPU run
+                    (host-side comgr targets gfx1151 regardless of the build GPU).
+  * ``--prebuilt DIR`` load DIR/<kernel_name>.hsaco + run (the gfx1151 board leg
+                    of the compile-here / run-there workflow).
+  * ``--warmup`` / ``--iters`` scale the timing loop; ``--no-verify`` skips the
+                    numpy reference (required past L~4k where SxS is infeasible).
+
+The production kernel is ``swapqk`` (see ``kernels/gfx1151/wmma_fmha_swapqk.py``
+and ``README.md`` / ``ALGORITHM.md``).
 """
 
 from __future__ import annotations
@@ -14,6 +38,7 @@ import collections
 import ctypes
 import math
 import struct
+import typing
 from dataclasses import dataclass
 
 from rocke.helpers import compile_kernel
@@ -21,7 +46,21 @@ from rocke.runtime.hip_module import Runtime
 from rocke.runtime.launcher import time_launches
 
 from .bench_v_staging import _find_objdump, _ref_attention
+
+# Kernel builders (production + candidates come via the kernels/ tree through the
+# back-compat shims; the remaining experimental kernels stay under builders/).
 from .fmha_singlewave import SingleWaveCfg, build_wmma_fmha_singlewave, singlewave_grid
+from .fmha_swapqk import SwapQKCfg, build_wmma_fmha_swapqk, swapqk_grid
+from .fmha_persistent import (
+    PersistentCfg,
+    build_wmma_fmha_persistent,
+    num_work_items,
+    persistent_grid,
+)
+from .fmha_multiwave import MultiWaveCfg, build_wmma_fmha_multiwave, multiwave_grid
+from .fmha_blockn import BlockNCfg, build_wmma_fmha_blockn, blockn_grid
+from .fmha_pipelined import PipelinedCfg, build_wmma_fmha_pipelined, pipelined_grid
+from .fmha_regblocked import RegBlockedCfg, build_wmma_fmha_regblocked, regblocked_grid
 
 
 @dataclass(frozen=True)
@@ -39,6 +78,9 @@ class Shape:
         return self.kv_heads or self.heads
 
 
+# ---------------------------------------------------------------------------
+# ISA / resource tallies (decoded from the HSACO; no readelf dependency).
+# ---------------------------------------------------------------------------
 def _mem_counts(hsaco: bytes, name: str, objdump):
     if objdump is None:
         return {}
@@ -73,10 +115,7 @@ def _mem_counts(hsaco: bytes, name: str, objdump):
         if not s.startswith(("s_", "v_", "ds_", "global_", "buffer_")):
             continue
         m = s.split()[0]
-        # s_code_end is end-of-program padding the AMDGPU backend inserts to a
-        # fixed boundary; it never issues, so excluding it keeps the static
-        # instruction count a measure of real executed work (it otherwise shifts
-        # with code-size alignment and pollutes A/B instruction-count parity).
+        # s_code_end is end-of-program padding; it never issues.
         if m == "s_code_end":
             continue
         total += 1
@@ -117,8 +156,82 @@ def _resource_counts(hsaco: bytes):
     }
 
 
-def verify_and_time(
-    cfg: SingleWaveCfg,
+# ---------------------------------------------------------------------------
+# Per-kernel registry. Each entry knows how to build + launch its kernel; the
+# generic runner below handles compile / verify / time / emit / prebuilt.
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class KernelSpec:
+    cfg_cls: type
+    build: typing.Callable  # (cfg, arch, shape) -> KernelDef
+    grid: typing.Callable  # (cfg, shape) -> tuple
+    persistent: bool = False  # 5th (work-queue counter) kernel arg + per-launch reset
+    extra_result: typing.Optional[typing.Callable] = None  # (cfg, shape) -> dict
+
+
+KERNELS = {
+    "singlewave": KernelSpec(
+        SingleWaveCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_singlewave(cfg, arch=arch),
+        lambda cfg, shape: singlewave_grid(
+            cfg, seqlen_q=shape.seqlen_q, batch=shape.batch
+        ),
+    ),
+    "swapqk": KernelSpec(
+        SwapQKCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_swapqk(cfg, arch=arch),
+        lambda cfg, shape: swapqk_grid(cfg, seqlen_q=shape.seqlen_q, batch=shape.batch),
+    ),
+    "persistent": KernelSpec(
+        PersistentCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_persistent(
+            cfg,
+            arch=arch,
+            num_q_blocks=shape.seqlen_q // cfg.q_rows_per_cta,
+            batch=shape.batch,
+        ),
+        lambda cfg, shape: persistent_grid(cfg),
+        persistent=True,
+        extra_result=lambda cfg, shape: {
+            "num_tiles": num_work_items(cfg, seqlen_q=shape.seqlen_q, batch=shape.batch)
+        },
+    ),
+    "multiwave": KernelSpec(
+        MultiWaveCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_multiwave(cfg, arch=arch),
+        lambda cfg, shape: multiwave_grid(
+            cfg, seqlen_q=shape.seqlen_q, batch=shape.batch
+        ),
+    ),
+    "blockn": KernelSpec(
+        BlockNCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_blockn(cfg, arch=arch),
+        lambda cfg, shape: blockn_grid(cfg, seqlen_q=shape.seqlen_q, batch=shape.batch),
+    ),
+    "pipelined": KernelSpec(
+        PipelinedCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_pipelined(cfg, arch=arch),
+        lambda cfg, shape: pipelined_grid(
+            cfg, seqlen_q=shape.seqlen_q, batch=shape.batch
+        ),
+    ),
+    "regblocked": KernelSpec(
+        RegBlockedCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_regblocked(cfg, arch=arch),
+        lambda cfg, shape: regblocked_grid(
+            cfg, seqlen_q=shape.seqlen_q, batch=shape.batch
+        ),
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Generic build -> verify -> time core (shared by every kernel + the back-compat
+# verify_and_time* wrappers used by combo.py / survey.py).
+# ---------------------------------------------------------------------------
+def _run(
+    kspec: KernelSpec,
+    cfg,
     shape: Shape,
     *,
     warmup=15,
@@ -126,12 +239,43 @@ def verify_and_time(
     tol=2e-2,
     objdump=None,
     arch="gfx1151",
+    verify=True,
+    emit_dir=None,
+    prebuilt_dir=None,
 ):
     import numpy as np
+    import os
 
-    art = compile_kernel(build_wmma_fmha_singlewave(cfg, arch=arch), arch=arch)
-    isa = _mem_counts(art.hsaco, art.kernel_name, objdump)
-    isa.update(_resource_counts(art.hsaco))
+    kname = cfg.kernel_name()
+    if prebuilt_dir is not None:
+        with open(os.path.join(prebuilt_dir, kname + ".hsaco"), "rb") as f:
+            hsaco = f.read()
+
+        class _Art:
+            pass
+
+        art = _Art()
+        art.hsaco = hsaco
+        art.kernel_name = kname
+        isa = {}
+    else:
+        art = compile_kernel(kspec.build(cfg, arch, shape), arch=arch)
+        if emit_dir is not None:
+            os.makedirs(emit_dir, exist_ok=True)
+            path = os.path.join(emit_dir, art.kernel_name + ".hsaco")
+            with open(path, "wb") as f:
+                f.write(art.hsaco)
+            return {
+                "cfg": cfg,
+                "ok": True,
+                "max_abs": -1.0,
+                "us": 0.0,
+                "tflops": 0.0,
+                "grid": None,
+                "emit": path,
+            }
+        isa = _mem_counts(art.hsaco, art.kernel_name, objdump)
+        isa.update(_resource_counts(art.hsaco))
 
     B, Hq, Hk, D = shape.batch, shape.heads, shape.kvh, shape.head_size
     Sq, Sk = shape.seqlen_q, shape.seqlen_k
@@ -142,7 +286,7 @@ def verify_and_time(
     Out = np.zeros((B, Sq, Hq, D), dtype=np.float16)
     scale_log2 = float(1.0 / math.sqrt(D) * math.log2(math.e))
 
-    grid = singlewave_grid(cfg, seqlen_q=Sq, batch=B)
+    grid = kspec.grid(cfg, shape)
     block = (cfg.block_size, 1, 1)
 
     rt = Runtime()
@@ -153,57 +297,60 @@ def verify_and_time(
         return (ctypes.c_uint8 * int(a.nbytes)).from_buffer(np.ascontiguousarray(a))
 
     qd, kd, vd, od = (rt.alloc(x.nbytes) for x in (Q, Kk, Vv, Out))
+    cd = rt.alloc(4) if kspec.persistent else None  # work-queue counter (i32)
     rt.memcpy_h2d(qd, u8(Q), Q.nbytes)
     rt.memcpy_h2d(kd, u8(Kk), Kk.nbytes)
     rt.memcpy_h2d(vd, u8(Vv), Vv.nbytes)
     rt.memset(od, 0, Out.nbytes)
-    packed = struct.pack(
-        "<QQQQfiiiiiiiiii",
-        qd,
-        kd,
-        vd,
-        od,
-        scale_log2,
-        Sq,
-        Sk,
-        Hq * D,
-        D,
-        Hk * D,
-        D,
-        Hk * D,
-        D,
-        Hq * D,
-        D,
-    )
+    strides = (Sq, Sk, Hq * D, D, Hk * D, D, Hk * D, D, Hq * D, D)
+    if kspec.persistent:
+        packed = struct.pack(
+            "<QQQQQfiiiiiiiiii", qd, kd, vd, od, cd, scale_log2, *strides
+        )
+    else:
+        packed = struct.pack("<QQQQfiiiiiiiiii", qd, kd, vd, od, scale_log2, *strides)
 
-    rt.launch(fn, grid, block, packed)
+    def launch_once():
+        if kspec.persistent:
+            # counter must restart at 0 each launch or CTAs see an empty queue.
+            rt.memset(cd, 0, 4)
+        rt.launch(fn, grid, block, packed)
+
+    launch_once()
     rt.sync()
-    rt.memcpy_d2h(u8(Out), od, Out.nbytes)
-    ref = np.empty_like(Out)
-    for bi in range(B):
-        if Hk != Hq:
-            rep = Hq // Hk
-            Kb = np.repeat(Kk[bi], rep, axis=1)
-            Vb = np.repeat(Vv[bi], rep, axis=1)
-        else:
-            Kb, Vb = Kk[bi], Vv[bi]
-        ref[bi] = _ref_attention(Q[bi], Kb, Vb, causal=shape.causal)
-    max_abs = float(np.abs(Out.astype(np.float32) - ref.astype(np.float32)).max())
-    ok = max_abs <= tol
+    if verify:
+        rt.memcpy_d2h(u8(Out), od, Out.nbytes)
+        ref = np.empty_like(Out)
+        for bi in range(B):
+            if Hk != Hq:
+                rep = Hq // Hk
+                Kb = np.repeat(Kk[bi], rep, axis=1)
+                Vb = np.repeat(Vv[bi], rep, axis=1)
+            else:
+                Kb, Vb = Kk[bi], Vv[bi]
+            ref[bi] = _ref_attention(Q[bi], Kb, Vb, causal=shape.causal)
+        max_abs = float(np.abs(Out.astype(np.float32) - ref.astype(np.float32)).max())
+        ok = max_abs <= tol
+    else:
+        # timing-only: the numpy reference materializes a full SxS score matrix
+        # (infeasible past L~4k); kernel logic is seqlen-agnostic so correctness
+        # is covered by the exhaustive small-L sweeps.
+        max_abs = -1.0
+        ok = True
 
-    ms = time_launches(
-        lambda: rt.launch(fn, grid, block, packed), warmup=warmup, iters=iters
-    )
+    ms = time_launches(launch_once, warmup=warmup, iters=iters)
 
     for ptr in (qd, kd, vd, od):
         rt.free(ptr)
+    if cd is not None:
+        rt.free(cd)
     module.unload()
 
     flops = 4.0 * B * Hq * Sq * Sk * D
     if shape.causal:
         flops *= 0.5
     tflops = flops / (ms * 1e-3) / 1e12
-    return {
+    res = {
         "cfg": cfg,
         "ok": ok,
         "max_abs": max_abs,
@@ -212,21 +359,74 @@ def verify_and_time(
         "grid": grid,
         **isa,
     }
+    if kspec.extra_result is not None:
+        res.update(kspec.extra_result(cfg, shape))
+    return res
+
+
+# ---------------------------------------------------------------------------
+# Back-compat wrappers (combo.py / survey.py import these by name).
+# ---------------------------------------------------------------------------
+def verify_and_time(cfg, shape, **kw):
+    """Single-wave verify+time (the module's original entry point)."""
+    return _run(KERNELS["singlewave"], cfg, shape, **kw)
+
+
+def verify_and_time_pipelined(cfg, shape, **kw):
+    return _run(KERNELS["pipelined"], cfg, shape, **kw)
+
+
+def verify_and_time_blockn(cfg, shape, **kw):
+    return _run(KERNELS["blockn"], cfg, shape, **kw)
+
+
+def verify_and_time_swapqk(cfg, shape, **kw):
+    return _run(KERNELS["swapqk"], cfg, shape, **kw)
+
+
+def verify_and_time_persistent(cfg, shape, **kw):
+    return _run(KERNELS["persistent"], cfg, shape, **kw)
+
+
+def verify_and_time_multiwave(cfg, shape, **kw):
+    return _run(KERNELS["multiwave"], cfg, shape, **kw)
+
+
+# ---------------------------------------------------------------------------
+# CLI: generic --set / --grid config overrides typed from the dataclass fields.
+# ---------------------------------------------------------------------------
+def _coerce(field_type, value: str):
+    """Coerce a CLI string to the dataclass field's type."""
+    t = str(field_type)
+    if value.lower() == "none":
+        return None
+    if "bool" in t:
+        return value not in ("0", "false", "False", "")
+    if "int" in t:
+        return int(value)
+    if "float" in t:
+        return float(value)
+    return value  # str (mask_mode, sched_mode, kv_source, persist_decode, ...)
 
 
 def _fmt(r):
     c = r["cfg"]
+    label = c.kernel_name().split("_", 3)[-1] if hasattr(c, "kernel_name") else str(c)
+    extra = f" tiles={r['num_tiles']}" if "num_tiles" in r else ""
     return (
-        f"bm{c.bm_tiles} p={c.p_mode:<7} v={c.v_mode:<6} pf={int(c.prefetch_k)} | "
-        f"{'Y' if r['ok'] else 'N'} {r['max_abs']:.2e} {r['us']:8.1f}us {r['tflops']:7.2f} TF | "
-        f"gld={r.get('gld', '-')} dsld={r.get('dsld', '-')} dsst={r.get('dsst', '-')} "
-        f"wmma={r.get('wmma', '-')} instr={r.get('instr', '-')} "
-        f"vgpr={r.get('vgpr', '-')} spill={r.get('vspill', '-')}"
+        f"{label} | {'Y' if r['ok'] else 'N'} {r['max_abs']:.2e} "
+        f"{r['us']:8.1f}us {r['tflops']:7.2f} TF |{extra} "
+        f"gld={r.get('gld', '-')} wmma={r.get('wmma', '-')} "
+        f"instr={r.get('instr', '-')} vgpr={r.get('vgpr', '-')} "
+        f"spill={r.get('vspill', '-')}"
     )
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    import itertools
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--kernel", default="swapqk", choices=sorted(KERNELS))
     ap.add_argument("--seqlen-q", type=int, default=512)
     ap.add_argument("--seqlen-k", type=int, default=512)
     ap.add_argument("--head-size", type=int, default=128)
@@ -234,12 +434,30 @@ def main():
     ap.add_argument("--kv-heads", type=int, default=0)
     ap.add_argument("--batch", type=int, default=4)
     ap.add_argument("--causal", action="store_true")
-    ap.add_argument("--bm", type=int, nargs="+", default=[1, 2])
-    ap.add_argument("--pmode", nargs="+", default=["lds"])
-    ap.add_argument("--vmode", nargs="+", default=["gather"])
-    ap.add_argument("--qpreload", type=int, nargs="+", default=[1])
-    ap.add_argument("--fusek", type=int, nargs="+", default=[0])
+    ap.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="FIELD=VALUE",
+        help="pin a config field (repeatable)",
+    )
+    ap.add_argument(
+        "--grid",
+        action="append",
+        default=[],
+        metavar="FIELD=V1,V2,..",
+        help="sweep a config field over values (repeatable; cartesian product)",
+    )
+    ap.add_argument("--warmup", type=int, default=15)
+    ap.add_argument("--iters", type=int, default=100)
+    ap.add_argument("--no-verify", action="store_true")
+    ap.add_argument("--arch", default="gfx1151")
+    ap.add_argument("--emit", default=None)
+    ap.add_argument("--prebuilt", default=None)
     args = ap.parse_args()
+
+    kspec = KERNELS[args.kernel]
+    fields = kspec.cfg_cls.__dataclass_fields__
 
     shape = Shape(
         batch=args.batch,
@@ -250,36 +468,59 @@ def main():
         head_size=args.head_size,
         causal=args.causal,
     )
+
+    base = dict(
+        head_size=shape.head_size,
+        num_query_heads=shape.heads,
+        num_kv_heads=shape.kv_heads,
+        mask_mode="causal" if shape.causal else "none",
+    )
+    for item in args.set:
+        k, v = item.split("=", 1)
+        if k not in fields:
+            raise SystemExit(f"--set: {args.kernel} has no config field {k!r}")
+        base[k] = _coerce(fields[k].type, v)
+
+    grid_axes = []  # list of (field, [values])
+    for item in args.grid:
+        k, vs = item.split("=", 1)
+        if k not in fields:
+            raise SystemExit(f"--grid: {args.kernel} has no config field {k!r}")
+        grid_axes.append((k, [_coerce(fields[k].type, v) for v in vs.split(",")]))
+
     objdump = _find_objdump()
     print(
-        f"shape: B{shape.batch} Sq{shape.seqlen_q} Sk{shape.seqlen_k} D{shape.head_size} "
-        f"Hq{shape.heads} Hk{shape.kvh} causal={shape.causal}"
+        f"kernel={args.kernel} shape: B{shape.batch} Sq{shape.seqlen_q} "
+        f"Sk{shape.seqlen_k} D{shape.head_size} Hq{shape.heads} Hk{shape.kvh} "
+        f"causal={shape.causal}"
     )
+
+    keys = [k for k, _ in grid_axes]
+    combos = list(itertools.product(*[vs for _, vs in grid_axes])) or [()]
     best = None
-    for bm in args.bm:
-        for pm in args.pmode:
-            for vm in args.vmode:
-                for qp in args.qpreload:
-                    for fk in args.fusek:
-                        cfg = SingleWaveCfg(
-                            head_size=shape.head_size,
-                            num_query_heads=shape.heads,
-                            num_kv_heads=shape.kv_heads,
-                            mask_mode="causal" if shape.causal else "none",
-                            bm_tiles=bm,
-                            p_mode=pm,
-                            v_mode=vm,
-                            q_preload=bool(qp),
-                            fuse_k=bool(fk),
-                        )
-                        try:
-                            r = verify_and_time(cfg, shape, objdump=objdump)
-                        except Exception as e:  # noqa: BLE001
-                            print(f"bm{bm} p={pm} v={vm} qp={qp} fk={fk}: FAIL: {e}")
-                            continue
-                        print(f"qp={qp} fk={fk} " + _fmt(r))
-                        if r["ok"] and (best is None or r["tflops"] > best["tflops"]):
-                            best = r
+    for combo in combos:
+        overrides = dict(base)
+        overrides.update(dict(zip(keys, combo)))
+        try:
+            cfg = kspec.cfg_cls(**overrides)
+            r = _run(
+                kspec,
+                cfg,
+                shape,
+                warmup=args.warmup,
+                iters=args.iters,
+                objdump=objdump,
+                verify=not args.no_verify,
+                arch=args.arch,
+                emit_dir=args.emit,
+                prebuilt_dir=args.prebuilt,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"{dict(zip(keys, combo))}: FAIL: {e}")
+            continue
+        print(_fmt(r))
+        if r["ok"] and (best is None or r["tflops"] > best["tflops"]):
+            best = r
     if best:
         print("\nBEST:", _fmt(best))
 
