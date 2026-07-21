@@ -144,18 +144,28 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false,
+<<<<<<< HEAD
           bool UsePackedNumAccess            = false>
+=======
+          bool UsePackedNumAccess = false,
+          bool UseMxScale         = false>
+>>>>>>> 4488e238e41 (UseMxScale to avoid ambiguity in dispatch)
 struct UnificationDispatcher
 {
     static_assert(!IsScale16); // TODO: We can't deal with scale16 yet.
 
-    // TODO: The dispatcher currently determines whether microscaling intrinsics are requested based
-    // on the WaveTile sizes and types. This is potentially dangerous and we should add a dedicated
-    // parameter instead.
-    static constexpr bool IsMxSized = (MPerWave == 16 && NPerWave == 16 && KPerWave == 128) ||
-                                      (MPerWave == 32 && NPerWave == 32 && KPerWave == 64);
-    static constexpr bool IsMx =
-        (IsMxSized && std::is_same_v<AccType, float> && UseStructuredSparsity == false);
+    // pk_fp4_t/pk_fp6x16_t/pk_bf6x16_t are unambiguous (MX, block-scale only).
+    // fp8_t/bf8_t are ambiguous (check UseMxScale)
+    static constexpr bool HasUnambiguousMxType =
+        is_any_of<AType, pk_fp4_t, pk_fp6x16_t, pk_bf6x16_t>::value ||
+        is_any_of<BType, pk_fp4_t, pk_fp6x16_t, pk_bf6x16_t>::value;
+    static constexpr bool IsMx = UseMxScale || HasUnambiguousMxType;
+
+    static_assert(!IsMx || std::is_same_v<AccType, float>,
+                  "MX (block-scaled) MFMA requires a float accumulator");
+    static_assert(!IsMx || !UseStructuredSparsity,
+                  "MX (block-scaled) MFMA pipeline is not compatible with structured "
+                  "sparsity");
 
     // General checks. Structured sparsity Mma pipeline not adapted to UnificationDispatcher yet
     // since we have no sparse tests or examples in CK Tile.
