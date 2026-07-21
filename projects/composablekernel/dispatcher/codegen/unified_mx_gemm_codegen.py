@@ -189,10 +189,16 @@ def _make_builder(cfg: dict) -> Iterator["object"]:
         cfg_path = work_dir / "mx_gemm_codegen_config.json"
         cfg_path.write_text(json.dumps(tmp_cfg))
 
+        gpu_target = cfg.get("gpu_target")
+        if not gpu_target:
+            raise ValueError(
+                "mx_gemm codegen requires an explicit 'gpu_target' in the config; "
+                "do not default to a specific GPU architecture."
+            )
         yield MxGemmKernelBuilder(
             KERNEL_NAME_PREFIX,
             work_dir,
-            cfg.get("gpu_target", "gfx950"),
+            gpu_target,
             cfg["datatype"],
             cfg["layout"],
             config_json=str(cfg_path),

@@ -55,7 +55,8 @@
 #include "common/utils.hpp"
 
 #ifndef GFX_ARCH
-#define GFX_ARCH "gfx950"
+#error \
+    "GFX_ARCH must be defined at compile time (pass -DGFX_ARCH=<arch>); do not default to a specific GPU architecture."
 #endif
 
 static bool g_initialized = false;

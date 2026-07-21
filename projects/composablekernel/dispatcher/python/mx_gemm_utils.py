@@ -51,7 +51,25 @@ _CTYPES_LIB_SRC = (
 # ck root == the composablekernel dir (three levels up from dispatcher/python).
 _CK_ROOT = Path(__file__).parent.parent.parent
 _HIPCC = os.environ.get("CK_TILE_HIPCC", "/opt/rocm/bin/hipcc")
-_DEFAULT_ARCH = "gfx950"
+
+
+def _get_arch() -> str:
+    """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
+    import subprocess
+    arch = ""
+    try:
+        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if "Name:" in line and "gfx" in line:
+                arch = line.split()[-1].strip(); break
+    except Exception:
+        arch = ""
+    if not arch:
+        raise RuntimeError("Could not detect GPU architecture from rocminfo; refusing to default. Pass gfx_arch explicitly.")
+    _supported = ("gfx90a", "gfx942", "gfx950")
+    if arch not in _supported:
+        raise ValueError(f"Unsupported GPU architecture {arch!r}; supported: {list(_supported)}")
+    return arch
 
 # MX GEMM scales every 32 K-elements with one e8m0 byte.
 SCALE_BLOCK = 32
@@ -113,7 +131,7 @@ def fp8_ocp_is_default_for_arch(arch: str) -> bool:
     return a.startswith("gfx950") or a.startswith("gfx12")
 
 
-def assert_fp8_ocp_supported(arch: str = _DEFAULT_ARCH) -> None:
+def assert_fp8_ocp_supported(arch: Optional[str] = None) -> None:
     """Fail loudly if the fp8 OCP codec would silently disagree with the device.
 
     The fp8 quantize/dequantize helpers emit/decode OCP e4m3 bytes; that is only
@@ -121,6 +139,7 @@ def assert_fp8_ocp_supported(arch: str = _DEFAULT_ARCH) -> None:
     codec precondition above). Raise instead of producing bytes that mismatch a
     FNUZ-built kernel.
     """
+    arch = arch or _get_arch()
     if not fp8_ocp_is_default_for_arch(arch):
         raise ValueError(
             f"fp8 mx_gemm reference is OCP e4m3 only, but arch '{arch}' defaults to "
@@ -166,7 +185,7 @@ def float_to_e8m0(scale) -> np.ndarray:
 class MxGemmKernelConfig:
     datatype: str = "fp8"  # fp8 | fp4
     layout: str = "rcr"    # a/b/c ; only rcr supported by mx_gemm
-    gpu_target: str = _DEFAULT_ARCH
+    gpu_target: Optional[str] = None
     pipeline: str = "comp_async"
     epilogue: str = "cshuffle"
     scheduler: str = "intrawave"
@@ -194,7 +213,7 @@ class MxGemmKernelConfig:
         return {
             "datatype": self.datatype,
             "layout": self.layout,
-            "gpu_target": self.gpu_target,
+            "gpu_target": self.gpu_target or _get_arch(),
             "pipeline": self.pipeline,
             "epilogue": self.epilogue,
             "scheduler": self.scheduler,
@@ -368,7 +387,7 @@ class MxGemmDispatcherLib:
         # was constructed with dtype="fp8", fail loudly now rather than silently
         # diverging from the numpy reference on an FNUZ arch.
         if self._dtype == "fp8":
-            assert_fp8_ocp_supported(self._arch or _DEFAULT_ARCH)
+            assert_fp8_ocp_supported(self._arch or _get_arch())
         A = np.ascontiguousarray(A)
         B = np.ascontiguousarray(B)
         # C is the OUTPUT buffer: the kernel writes results into it in place via a
@@ -527,11 +546,12 @@ def mx_gemm_reference(A_deq, B_deq, scale_a_byte, scale_b_byte, prob: MxGemmProb
 
 
 class GpuMxGemmRunner:
-    def __init__(self, so_path: Path, dtype: str = "fp8", arch: str = _DEFAULT_ARCH):
+    def __init__(self, so_path: Path, dtype: str = "fp8", arch: Optional[str] = None):
         # The fp8 numpy reference (quantize_fp8/dequantize_fp8) emits OCP e4m3
         # bytes; that only matches the device when the lib was compiled with
         # CK_TILE_USE_OCP_FP8 == 1 (the gfx950 default). Guard loudly so an
         # FNUZ arch can't silently diverge from the reference.
+        arch = arch or _get_arch()
         if dtype == "fp8":
             assert_fp8_ocp_supported(arch)
         self._lib = MxGemmDispatcherLib(so_path)
@@ -686,7 +706,7 @@ def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
 def setup_multiple_mx_gemm_dispatchers(
     configs: List[MxGemmKernelConfig],
     output_dir: Optional[Path] = None,
-    gfx_arch: str = _DEFAULT_ARCH,
+    gfx_arch: Optional[str] = None,
     parallel: bool = True,
     max_workers: Optional[int] = None,
 ) -> List[Optional[Path]]:
@@ -694,7 +714,7 @@ def setup_multiple_mx_gemm_dispatchers(
     `configs` (None on failure). Dedups by .name; per-arch .so cache."""
     if not configs:
         return []
-    arch = gfx_arch or _DEFAULT_ARCH
+    arch = gfx_arch or _get_arch()
     base = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="mx_gemm_bridge_"))
     headers = base / "generated_kernels"
     libs = base / "libs"
@@ -739,7 +759,7 @@ def setup_multiple_mx_gemm_dispatchers(
     return results
 
 
-def default_fp8_config(gfx_arch: str = _DEFAULT_ARCH) -> MxGemmKernelConfig:
+def default_fp8_config(gfx_arch: Optional[str] = None) -> MxGemmKernelConfig:
     return MxGemmKernelConfig(
         datatype="fp8", layout="rcr", gpu_target=gfx_arch,
         pipeline="comp_async", epilogue="cshuffle", scheduler="intrawave",
@@ -748,7 +768,7 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_ARCH) -> MxGemmKernelConfig:
     )
 
 
-def default_fp4_config(gfx_arch: str = _DEFAULT_ARCH) -> MxGemmKernelConfig:
+def default_fp4_config(gfx_arch: Optional[str] = None) -> MxGemmKernelConfig:
     cfg = default_fp8_config(gfx_arch)
     cfg.datatype = "fp4"
     cfg._name_cache = None
