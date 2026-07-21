@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <miopen/solver/ck_impl_lib_loader.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/solver/ck_impl_error.hpp>
 #include <miopen/solver/ck_impl_interface.hpp>
 #include <miopen/conv_solution.hpp>
@@ -57,7 +56,7 @@ miopen::fs::path GetOwningModuleDirectory()
     HMODULE hmod = nullptr;
     if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<LPCWSTR>(miopenCreate_impl),
+                          reinterpret_cast<LPCWSTR>(miopenCreate),
                           &hmod) != 0)
     {
         std::wstring module_path(MAX_PATH, L'\0');
@@ -77,8 +76,8 @@ miopen::fs::path GetOwningModuleDirectory()
     }
 #else
     Dl_info info;
-    if(dladdr(reinterpret_cast<void*>(miopenCreate_impl), &info) != 0 &&
-       info.dli_fname != nullptr && info.dli_fname[0] != '\0')
+    if(dladdr(reinterpret_cast<void*>(miopenCreate), &info) != 0 && info.dli_fname != nullptr &&
+       info.dli_fname[0] != '\0')
     {
         return miopen::weakly_canonical(miopen::fs::path{info.dli_fname}).parent_path();
     }
