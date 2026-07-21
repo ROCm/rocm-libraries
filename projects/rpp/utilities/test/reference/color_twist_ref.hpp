@@ -25,18 +25,6 @@ namespace rpptest {
 // I8 clamp[-128,127](round(x*255)-128), F32/F16 clamp[0,1](x). For a 1-channel (PLN1) image
 // hue/saturation are no-ops (S==0, no hue), so only the brightness/contrast affine is applied.
 
-inline double ct_normalize(double v, DType dt) {
-    return (dt == DType::U8) ? v / 255.0 : (dt == DType::I8) ? (v + 128.0) / 255.0 : v;
-}
-
-inline double ct_quantize(double x, DType dt) {
-    switch (dt) {
-        case DType::U8: return clampd(std::nearbyint(x * 255.0), 0.0, 255.0);
-        case DType::I8: return clampd(std::nearbyint(x * 255.0) - 128.0, -128.0, 127.0);
-        default:        return clampd(x, 0.0, 1.0);  // F16/F32
-    }
-}
-
 // Writes the color_twist result into dst, reading each source pixel at the ROI offset and
 // writing packed at the destination origin (matching the region and placement the RPP op uses).
 // dst outside the written region is left as the caller initialized it.
@@ -45,30 +33,22 @@ void color_twist_reference(const T* src, T* dst, const RpptDesc& d, DType dt, co
                            RpptRoiType roiType, double brightness, double contrast, double hueDeg,
                            double satFactor) {
     const double beta = contrast / 255.0;
-    for (Rpp32u n = 0; n < d.n; ++n) {
-        const RoiBounds bnd = roi_bounds(roi[n], roiType);
-        for (Rpp32u j = 0; j < bnd.h; ++j)
-            for (Rpp32u i = 0; i < bnd.w; ++i) {
-                const std::size_t base = static_cast<std::size_t>(n) * d.strides.nStride;
-                const std::size_t srcPix =
-                    base + (bnd.y0 + j) * d.strides.hStride + (bnd.x0 + i) * d.strides.wStride;
-                const std::size_t dstPix = base + j * d.strides.hStride + i * d.strides.wStride;
-
-                if (d.c == 3) {
-                    double rgb[3];
-                    for (int c = 0; c < 3; ++c)
-                        rgb[c] = ct_normalize(to_double(src[srcPix + c * d.strides.cStride]), dt);
-                    hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);                    // Stage 1
-                    saturation_scale_rgb(rgb[0], rgb[1], rgb[2], satFactor);           // Stage 2
-                    for (int c = 0; c < 3; ++c) rgb[c] = brightness * rgb[c] + beta;  // Stage 3
-                    for (int c = 0; c < 3; ++c)
-                        dst[dstPix + c * d.strides.cStride] = from_double<T>(ct_quantize(rgb[c], dt));
-                } else {  // 1-channel: only the Stage 1 affine (hue/saturation are no-ops)
-                    const double x = brightness * ct_normalize(to_double(src[srcPix]), dt) + beta;
-                    dst[dstPix] = from_double<T>(ct_quantize(x, dt));
-                }
-            }
-    }
+    for_each_roi_pixel(d, roi, roiType,
+                       [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
+        if (d.c == 3) {
+            double rgb[3];
+            for (int c = 0; c < 3; ++c)
+                rgb[c] = to_unit(to_double(src[srcPix + c * d.strides.cStride]), dt);
+            hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);                    // Stage 1
+            saturation_scale_rgb(rgb[0], rgb[1], rgb[2], satFactor);           // Stage 2
+            for (int c = 0; c < 3; ++c) rgb[c] = brightness * rgb[c] + beta;  // Stage 3
+            for (int c = 0; c < 3; ++c)
+                dst[dstPix + c * d.strides.cStride] = from_double<T>(from_unit(rgb[c], dt));
+        } else {  // 1-channel: only the Stage 3 affine (hue/saturation are no-ops)
+            const double x = brightness * to_unit(to_double(src[srcPix]), dt) + beta;
+            dst[dstPix] = from_double<T>(from_unit(x, dt));
+        }
+    });
 }
 
 }  // namespace rpptest

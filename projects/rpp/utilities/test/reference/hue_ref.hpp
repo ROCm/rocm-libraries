@@ -29,40 +29,15 @@ namespace rpptest {
 template <typename T>
 void hue_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
                    RpptRoiType roiType, double hueDeg) {
-    for (Rpp32u n = 0; n < d.n; ++n) {
-        const RoiBounds bnd = roi_bounds(roi[n], roiType);
-        for (Rpp32u j = 0; j < bnd.h; ++j)
-            for (Rpp32u i = 0; i < bnd.w; ++i) {
-                const std::size_t base = static_cast<std::size_t>(n) * d.strides.nStride;
-                const std::size_t srcPix =
-                    base + (bnd.y0 + j) * d.strides.hStride + (bnd.x0 + i) * d.strides.wStride;
-                const std::size_t dstPix = base + j * d.strides.hStride + i * d.strides.wStride;
-
-                double rgb[3];
-                for (int c = 0; c < 3; ++c) {
-                    const double v = to_double(src[srcPix + c * d.strides.cStride]);
-                    rgb[c] = (dt == DType::U8) ? v / 255.0
-                             : (dt == DType::I8) ? (v + 128.0) / 255.0
-                                                 : v;  // F16/F32 already [0,1]
-                }
-                hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);
-                for (int c = 0; c < 3; ++c) {
-                    double out;
-                    switch (dt) {
-                        case DType::U8:
-                            out = clampd(std::nearbyint(rgb[c] * 255.0), 0.0, 255.0);
-                            break;
-                        case DType::I8:
-                            out = clampd(std::nearbyint(rgb[c] * 255.0) - 128.0, -128.0, 127.0);
-                            break;
-                        default:
-                            out = clampd(rgb[c], 0.0, 1.0);
-                            break;
-                    }
-                    dst[dstPix + c * d.strides.cStride] = from_double<T>(out);
-                }
-            }
-    }
+    for_each_roi_pixel(d, roi, roiType,
+                       [&](Rpp32u, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
+        double rgb[3];
+        for (int c = 0; c < 3; ++c)
+            rgb[c] = to_unit(to_double(src[srcPix + c * d.strides.cStride]), dt);
+        hue_rotate_rgb(rgb[0], rgb[1], rgb[2], hueDeg);
+        for (int c = 0; c < 3; ++c)
+            dst[dstPix + c * d.strides.cStride] = from_double<T>(from_unit(rgb[c], dt));
+    });
 }
 
 }  // namespace rpptest

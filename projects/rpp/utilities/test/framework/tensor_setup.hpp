@@ -3,6 +3,7 @@
 
 #include <rpp/rpp.h>
 
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -62,6 +63,23 @@ inline Rpp16f from_double<Rpp16f>(double v) {
 // Clamps v to [lo, hi]. Shared by the op reference models.
 inline double clampd(double v, double lo, double hi) {
     return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Normalized [0,1] "unit intensity" conversions, shared by the reference models that compute
+// in unit space (hue, saturation, color_twist, gamma_correction). to_unit maps a stored pixel
+// into [0,1]; from_unit quantizes a [0,1] result back to the stored dtype, rounding integers to
+// nearest (the intended round-to-nearest behavior the golden models hold to -- see the systemic
+// I8 round-vs-truncate finding in section 13 of the plan). I8 pixels are the same intensities
+// shifted by -128.
+inline double to_unit(double v, DType dt) {
+    return (dt == DType::U8) ? v / 255.0 : (dt == DType::I8) ? (v + 128.0) / 255.0 : v;
+}
+inline double from_unit(double x, DType dt) {
+    switch (dt) {
+        case DType::U8: return clampd(std::nearbyint(x * 255.0), 0.0, 255.0);
+        case DType::I8: return clampd(std::nearbyint(x * 255.0) - 128.0, -128.0, 127.0);
+        default:        return clampd(x, 0.0, 1.0);  // F16/F32
+    }
 }
 
 // ---- descriptor / ROI construction ----------------------------------------
@@ -171,6 +189,25 @@ void for_each_roi_io(const RpptDesc& d, const RpptROI* roi, RpptRoiType type, Fn
                         base + j * d.strides.hStride + i * d.strides.wStride;
                     fn(n, c, j, i, srcIdx, dstIdx);
                 }
+    }
+}
+
+// Invokes fn(n, j, i, srcPix, dstPix) once per pixel of each image's ROI, where srcPix/dstPix
+// are the channel-0 element offsets; the callback strides channels itself via d.strides.cStride.
+// Same source-at-ROI-offset / destination-at-origin mapping as for_each_roi_io (that mapping's
+// single definition), for ops that need a whole pixel's channels together (e.g. RGB<->HSV).
+template <typename Fn>
+void for_each_roi_pixel(const RpptDesc& d, const RpptROI* roi, RpptRoiType type, Fn fn) {
+    for (Rpp32u n = 0; n < d.n; ++n) {
+        const RoiBounds b = roi_bounds(roi[n], type);
+        for (Rpp32u j = 0; j < b.h; ++j)
+            for (Rpp32u i = 0; i < b.w; ++i) {
+                const std::size_t base = static_cast<std::size_t>(n) * d.strides.nStride;
+                const std::size_t srcPix =
+                    base + (b.y0 + j) * d.strides.hStride + (b.x0 + i) * d.strides.wStride;
+                const std::size_t dstPix = base + j * d.strides.hStride + i * d.strides.wStride;
+                fn(n, j, i, srcPix, dstPix);
+            }
     }
 }
 

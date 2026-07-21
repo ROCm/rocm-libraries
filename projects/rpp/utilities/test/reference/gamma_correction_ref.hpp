@@ -14,24 +14,14 @@ namespace rpptest {
 // (out = (pixel / max)^gamma * max), NOT from the RPP kernel. Used as the reference for both
 // backends so kernel bugs surface as diffs.
 //
-// Gamma is applied in normalized [0,1] intensity space. Integer types work in [0,255]
-// intensity space and round to nearest; I8 pixels are the same intensities shifted by -128:
+// Gamma is applied in normalized [0,1] intensity space (to_unit -> pow -> from_unit): integer
+// types round to nearest, I8 pixels are the same intensities shifted by -128:
 //   U8  : clamp[0,255]  ( round( (v/255)^gamma * 255 ) )
 //   I8  : clamp[-128,127]( round( ((v+128)/255)^gamma * 255 ) - 128 )
 //   F32 : clamp[0,1]    ( v^gamma )
 //   F16 : same as F32, stored as half
 inline double gamma_correction_scalar(double v, DType dt, double gamma) {
-    switch (dt) {
-        case DType::U8:
-            return clampd(std::nearbyint(std::pow(v / 255.0, gamma) * 255.0), 0.0, 255.0);
-        case DType::I8:
-            return clampd(std::nearbyint(std::pow((v + 128.0) / 255.0, gamma) * 255.0) - 128.0,
-                          -128.0, 127.0);
-        case DType::F16:
-        case DType::F32:
-            return clampd(std::pow(v, gamma), 0.0, 1.0);
-    }
-    return v;
+    return from_unit(std::pow(to_unit(v, dt), gamma), dt);
 }
 
 // Writes the gamma-correction result into dst, reading the source at the ROI offset and
