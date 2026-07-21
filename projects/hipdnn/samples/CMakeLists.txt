@@ -50,6 +50,21 @@ endif()
 # All sample targets are accumulated into this list for the umbrella build target
 set(HIPDNN_ALL_SAMPLES "")
 
+# Samples favor the explicit `config.<field>.size() > N` form over the .empty()
+# idiom so the parallel dimension-parsing blocks read uniformly. Append a
+# command-line check override to the clang-tidy properties set by
+# clang_tidy_check(); --checks= extends the -config-file= checks list, and the
+# leading '-' disables that single check for sample targets only.
+function(disable_container_size_empty_check TARGET)
+    foreach(_prop CXX_CLANG_TIDY C_CLANG_TIDY HIP_CLANG_TIDY)
+        get_target_property(_cmd ${TARGET} ${_prop})
+        if(_cmd)
+            list(APPEND _cmd "--checks=-readability-container-size-empty")
+            set_target_properties(${TARGET} PROPERTIES ${_prop} "${_cmd}")
+        endif()
+    endforeach()
+endfunction()
+
 # Helper macro to add a hipDNN sample executable NAME: The name of the executable target SOURCE:
 # The source file for the sample
 macro(add_hipdnn_sample NAME SOURCE)
@@ -63,6 +78,7 @@ macro(add_hipdnn_sample NAME SOURCE)
         ${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
     clang_tidy_check(${NAME})
+    disable_container_size_empty_check(${NAME})
     list(APPEND HIPDNN_ALL_SAMPLES ${NAME})
 endmacro()
 
@@ -84,6 +100,7 @@ set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
     BUILD_RPATH "$<TARGET_FILE_DIR:hipdnn_backend>"
 )
 clang_tidy_check(hipdnn_sample_dynamic_backend_loading)
+disable_container_size_empty_check(hipdnn_sample_dynamic_backend_loading)
 list(APPEND HIPDNN_ALL_SAMPLES hipdnn_sample_dynamic_backend_loading)
 
 add_hipdnn_sample(hipdnn_sample_bn_inference batchnorm/BnInference.cpp)
@@ -180,6 +197,12 @@ install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BI
 
 # Register dynamic backend-loading sample
 add_hipdnn_sample_test(hipdnn_sample_dynamic_backend_loading)
+# Under ASAN the dlopen interceptor ignores the executable RUNPATH, so
+# the bare-name backend .so is only found via LD_LIBRARY_PATH.
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+    set_property(TEST hipdnn_sample_dynamic_backend_loading APPEND PROPERTY
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:hipdnn_backend>")
+endif()
 
 # Register autotune sample
 add_hipdnn_sample_test(hipdnn_sample_autotune)

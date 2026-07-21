@@ -28,7 +28,9 @@
 #include "plugins/mocks/MockEnginePlugin.hpp"
 #include "plugins/mocks/MockEnginePluginManager.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_plugin_sdk/engine_api_version.h>
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::plugin;
@@ -1244,6 +1246,116 @@ TEST(TestEnginePluginResourceManager, ExecuteOpGraphSuccessWithValidDescriptors)
                                MatchesMemory(expectedDeviceBuffers.data(),
                                              expectedDeviceBuffers.size()
                                                  * sizeof(hipdnnPluginDeviceBuffer_t)),
+                               static_cast<uint32_t>(tensorIds.size())));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get());
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ExecuteOpGraphThrowsOnMisalignedTensorPointer)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = createDescriptor<MockVariantDescriptor>();
+
+    auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
+        executionPlanWrapper.get());
+    auto mockVariantPack
+        = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
+
+    std::vector<int64_t> tensorIds = {1, 2};
+    // Second tensor's pointer (0x1001) violates its 16-byte alignment requirement.
+    std::vector<const void*> dataPtrs
+        = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x1001)};
+    std::vector<int64_t> planUids = {1, 2};
+    std::vector<int64_t> planAlignments = {16, 16};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
+
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    EXPECT_CALL(*mockExecutionPlan, getTensorUids()).WillRepeatedly(::testing::ReturnRef(planUids));
+    EXPECT_CALL(*mockExecutionPlan, getTensorAlignments())
+        .WillRepeatedly(::testing::ReturnRef(planAlignments));
+
+    // The op graph must never be dispatched when alignment validation fails.
+    EXPECT_CALL(*mockPlugin, executeOpGraph(_, _, _, _, _)).Times(0);
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        ASSERT_THROW_HIPDNN_STATUS(
+            resourceManager.executeOpGraph(executionPlanWrapper.get(), variantWrapper.get()),
+            HIPDNN_STATUS_BAD_PARAM);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, ExecuteOpGraphSucceedsWhenTensorPointersAreAligned)
+{
+    const std::shared_ptr<MockEnginePlugin> mockPlugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{mockPlugin};
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+
+    auto executionPlanWrapper = createDescriptor<MockExecutionPlanDescriptor>();
+    auto variantWrapper = createDescriptor<MockVariantDescriptor>();
+
+    auto mockExecutionPlan = MockDescriptorUtility::asDescriptorUnsafe<MockExecutionPlanDescriptor>(
+        executionPlanWrapper.get());
+    auto mockVariantPack
+        = MockDescriptorUtility::asDescriptorUnsafe<MockVariantDescriptor>(variantWrapper.get());
+
+    std::vector<int64_t> tensorIds = {1, 2};
+    // 0x1000 satisfies 256-byte alignment, 0x2000 satisfies 64-byte alignment.
+    std::vector<const void*> dataPtrs
+        = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000)};
+    std::vector<int64_t> planUids = {1, 2};
+    std::vector<int64_t> planAlignments = {256, 64};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*mockPlugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*mockPlugin, getAllEngineIds())
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*mockPlugin, destroyHandle(testing::Eq(hipdnnEnginePluginHandle_t(0xdeadbeef))));
+
+    EXPECT_CALL(*mockExecutionPlan, isFinalized()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockVariantPack, isFinalized()).WillOnce(::testing::Return(true));
+
+    EXPECT_CALL(*mockExecutionPlan, getEngineId()).WillOnce(::testing::Return(int64_t(100)));
+    EXPECT_CALL(*mockVariantPack, getWorkspace())
+        .WillOnce(::testing::Return(reinterpret_cast<void*>(0x4000)));
+    EXPECT_CALL(*mockVariantPack, getTensorIds()).WillOnce(::testing::ReturnRef(tensorIds));
+    EXPECT_CALL(*mockVariantPack, getDataPointers()).WillOnce(::testing::ReturnRef(dataPtrs));
+    EXPECT_CALL(*mockExecutionPlan, getTensorUids()).WillRepeatedly(::testing::ReturnRef(planUids));
+    EXPECT_CALL(*mockExecutionPlan, getTensorAlignments())
+        .WillRepeatedly(::testing::ReturnRef(planAlignments));
+    EXPECT_CALL(*mockExecutionPlan, getExecutionContext())
+        .WillOnce(::testing::Return(hipdnnEnginePluginExecutionContext_t(0xcafebabe)));
+
+    EXPECT_CALL(*mockPlugin,
+                executeOpGraph(hipdnnEnginePluginHandle_t(0xdeadbeef),
+                               hipdnnEnginePluginExecutionContext_t(0xcafebabe),
+                               reinterpret_cast<void*>(0x4000),
+                               _,
                                static_cast<uint32_t>(tensorIds.size())));
 
     {
@@ -2488,3 +2600,241 @@ TEST(TestPluginBase, ParsedApiVersionReturnsParsedValueForWellFormedString)
     EXPECT_EQ(parsed->minor, 1);
     EXPECT_EQ(parsed->patch, 0);
 }
+
+// Ragged tensor version gating: a plugin at the baseline version is excluded
+// when the graph reports ragged tensors, and a plugin at
+// K_RAGGED_TENSOR_MIN_API_VERSION is included.
+TEST(TestEnginePluginResourceManager, RaggedTensorGraphExcludesBaselinePlugin)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("BaselinePlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_TRUE(engineIds.empty());
+}
+
+TEST(TestEnginePluginResourceManager, RaggedTensorGraphIncludesRaggedCapablePlugin)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("RaggedPlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors()).WillRepeatedly(::testing::Return(true));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 100);
+}
+
+TEST(TestEnginePluginResourceManager, NonRaggedGraphUnaffectedByRaggedVersionConstant)
+{
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("BaselinePlugin"));
+    EXPECT_CALL(*plugin, apiVersion())
+        .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+        .WillOnce(::testing::Return(std::vector<int64_t>{100}));
+
+    // Non-ragged graph: hasRaggedTensors() defaults to the real base-class
+    // accessor, which reports false for a descriptor with no ragged tensors.
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 100);
+}
+
+// =============================================================================
+// Ragged-tensor applicability filter (mock-based matrix).
+//
+// Mirrors the override-dispatch matrix (RoutesOrRejectsOverrideDispatch): drives
+// the version-gating logic in getApplicableEngineIds() in isolation by mocking
+// GraphDescriptor::hasRaggedTensors() directly, rather than building a descriptor
+// containing an actual ragged tensor (covered by the standalone tests above and
+// by TestGraphDescriptor). A graph reporting ragged tensors requires a plugin
+// advertising at least K_RAGGED_TENSOR_MIN_API_VERSION; otherwise the baseline
+// applies.
+// =============================================================================
+namespace
+{
+
+// Whether the plugin's hasOverrideExecute() capability is expected to be queried,
+// and with what result. It is only queried when the graph enables override-shape
+// and the plugin has already cleared the version gate.
+enum class OverrideExecuteQuery
+{
+    NOT_QUERIED,
+    RETURNS_FALSE,
+    RETURNS_TRUE,
+};
+
+struct RaggedApplicabilityCase
+{
+    const char* name;
+    bool raggedEnabled;
+    std::string_view apiVersion;
+    std::vector<int64_t> expectedEngineIds; // empty => plugin excluded
+    bool overrideEnabled = false;
+    OverrideExecuteQuery overrideExecuteQuery = OverrideExecuteQuery::NOT_QUERIED;
+};
+
+} // namespace
+
+class TestEnginePluginResourceManagerRaggedApplicabilityMatrix
+    : public ::testing::TestWithParam<RaggedApplicabilityCase>
+{
+};
+
+TEST_P(TestEnginePluginResourceManagerRaggedApplicabilityMatrix, RoutesOrRejectsRaggedApplicability)
+{
+    const auto& testCase = GetParam();
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+    EXPECT_CALL(*plugin, getAllEngineIds()).WillOnce(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("MockPlugin"));
+    EXPECT_CALL(*plugin, apiVersion()).WillRepeatedly(::testing::Return(testCase.apiVersion));
+    EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
+
+    MockGraphDescriptor mockGraphDesc;
+    const hipdnnPluginConstData_t fakeSerializedData
+        = {reinterpret_cast<const void*>("fake_graph_data"), 15};
+    EXPECT_CALL(mockGraphDesc, getSerializedGraph())
+        .WillOnce(::testing::Return(fakeSerializedData));
+    // The override-shape flag is read first (via getAttribute). Most cases keep it
+    // off so only the ragged-tensor gate decides applicability; the combined
+    // override+ragged cases turn it on to exercise the version-max composition.
+    programOverrideFlag(mockGraphDesc, testCase.overrideEnabled);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors())
+        .WillRepeatedly(::testing::Return(testCase.raggedEnabled));
+
+    switch(testCase.overrideExecuteQuery)
+    {
+    case OverrideExecuteQuery::NOT_QUERIED:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).Times(0);
+        break;
+    case OverrideExecuteQuery::RETURNS_FALSE:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).WillOnce(::testing::Return(false));
+        break;
+    case OverrideExecuteQuery::RETURNS_TRUE:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).WillOnce(::testing::Return(true));
+        break;
+    default:
+        FAIL();
+    }
+
+    if(!testCase.expectedEngineIds.empty())
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
+            .WillOnce(::testing::Return(testCase.expectedEngineIds));
+    }
+    else
+    {
+        EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
+    }
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    EXPECT_EQ(engineIds, testCase.expectedEngineIds);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RaggedApplicability,
+    TestEnginePluginResourceManagerRaggedApplicabilityMatrix,
+    ::testing::Values(
+        RaggedApplicabilityCase{"BaselineExcludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                {}},
+        RaggedApplicabilityCase{"OverrideMinExcludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                {}},
+        RaggedApplicabilityCase{"RaggedMinIncludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION,
+                                {100}},
+        RaggedApplicabilityCase{"AboveRaggedMinIncludedForRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                std::string_view{"1.3.0"},
+                                {100}},
+        RaggedApplicabilityCase{"BaselineIncludedForNonRaggedGraph",
+                                /*raggedEnabled=*/false,
+                                hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
+                                {100}},
+        // Combined override + ragged: the required version is the MAX of both
+        // features' minimums (ragged, 1.2.0), not whichever an if-chain checks
+        // first. An override-min (1.1.0) plugin is rejected by the version gate
+        // before its override capability is even queried.
+        RaggedApplicabilityCase{"OverrideMinExcludedForOverrideAndRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                {},
+                                /*overrideEnabled=*/true,
+                                OverrideExecuteQuery::NOT_QUERIED},
+        // A ragged-min (1.2.0) plugin clears the version gate; with override also
+        // enabled its override capability is then queried and, being present,
+        // the plugin is included.
+        RaggedApplicabilityCase{"RaggedMinIncludedForOverrideAndRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION,
+                                {100},
+                                /*overrideEnabled=*/true,
+                                OverrideExecuteQuery::RETURNS_TRUE}),
+    [](const auto& info) { return std::string(info.param.name); });
