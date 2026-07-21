@@ -27,8 +27,9 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason);
 /// Compute D_gold on the device: D = alpha * op(A)op(B) + beta * C, accumulated
 /// in float. A/B carry matching f32/f16/bf16 input types; C/D are f32/f16/bf16.
 /// Column-major, with the same transpose/leading-dim/batch-stride conventions as
-/// cblas_gemm(). All pointers are device pointers.
-void run_reference_gemm_device(bool        transA_is_n,
+/// cblas_gemm(). All pointers are device pointers. Returns false (after logging)
+/// if the launch hits a HIP error, so the caller can fail loudly.
+bool run_reference_gemm_device(bool        transA_is_n,
                                bool        transB_is_n,
                                int64_t     M,
                                int64_t     N,

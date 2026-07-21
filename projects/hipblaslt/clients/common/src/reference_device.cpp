@@ -212,7 +212,7 @@ bool gpu_ref_supported(const Arguments& arg, std::string& reason)
     return true;
 }
 
-void run_reference_gemm_device(bool        transA_is_n,
+bool run_reference_gemm_device(bool        transA_is_n,
                                bool        transB_is_n,
                                int64_t     M,
                                int64_t     N,
@@ -239,7 +239,7 @@ void run_reference_gemm_device(bool        transA_is_n,
                                hipStream_t stream)
 {
     if(M <= 0 || N <= 0 || batchCount <= 0)
-        return;
+        return true;
 
     // Float accumulate. A/B input types are runtime args to the loader, so only
     // (C type, D type) are dispatched here (a 3x3 over f32/bf16/f16).
@@ -271,5 +271,5 @@ void run_reference_gemm_device(bool        transA_is_n,
 #undef GPU_REF_LAUNCH_F32
 #undef GPU_REF_F32_ARGS
 
-    gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
+    return gpu_ref_hip_check(hipGetLastError(), "reference GEMM launch");
 }

@@ -5031,31 +5031,39 @@ void testing_matmul_with_bias(const Arguments& arg,
             const double alpha_r = get_computeInterface(h_alpha[gemmIdx], Tc);
             const double beta_r  = get_computeInterface(h_beta[gemmIdx], Tc);
 
-            run_reference_gemm_device(transA == HIPBLAS_OP_N,
-                                      transB == HIPBLAS_OP_N,
-                                      M[gemmIdx],
-                                      N[gemmIdx],
-                                      K[gemmIdx],
-                                      alpha_r,
-                                      beta_r,
-                                      dA[gemmIdx].buf(),
-                                      arg.a_type,
-                                      lda[gemmIdx],
-                                      stride_a[gemmIdx],
-                                      dB[gemmIdx].buf(),
-                                      arg.b_type,
-                                      ldb[gemmIdx],
-                                      stride_b[gemmIdx],
-                                      dC[gemmIdx].buf(),
-                                      arg.c_type,
-                                      ldc[gemmIdx],
-                                      stride_c[gemmIdx],
-                                      dD_gold[gemmIdx].buf(),
-                                      arg.d_type,
-                                      ldd[gemmIdx],
-                                      stride_d[gemmIdx],
-                                      num_batches[gemmIdx],
-                                      stream);
+            const bool ref_ok = run_reference_gemm_device(transA == HIPBLAS_OP_N,
+                                                          transB == HIPBLAS_OP_N,
+                                                          M[gemmIdx],
+                                                          N[gemmIdx],
+                                                          K[gemmIdx],
+                                                          alpha_r,
+                                                          beta_r,
+                                                          dA[gemmIdx].buf(),
+                                                          arg.a_type,
+                                                          lda[gemmIdx],
+                                                          stride_a[gemmIdx],
+                                                          dB[gemmIdx].buf(),
+                                                          arg.b_type,
+                                                          ldb[gemmIdx],
+                                                          stride_b[gemmIdx],
+                                                          dC[gemmIdx].buf(),
+                                                          arg.c_type,
+                                                          ldc[gemmIdx],
+                                                          stride_c[gemmIdx],
+                                                          dD_gold[gemmIdx].buf(),
+                                                          arg.d_type,
+                                                          ldd[gemmIdx],
+                                                          stride_d[gemmIdx],
+                                                          num_batches[gemmIdx],
+                                                          stream);
+            // Surface a reference-launch failure loudly rather than misattributing
+            // it later; execution errors still surface at the stream sync below.
+#ifdef GOOGLE_TEST
+            ASSERT_TRUE(ref_ok) << "gpu_ref: reference GEMM launch failed (HIP error)";
+#else
+            if(!ref_ok)
+                throw std::runtime_error("gpu_ref: reference GEMM launch failed (HIP error)");
+#endif
         }
         CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
