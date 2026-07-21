@@ -66,6 +66,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_sparse_to_dense_coo.cpp
     test_sparse_to_dense_csc.cpp
     test_sparse_to_dense_csr.cpp
+    test_spgeam_csr.cpp
     test_spgemm_csr.cpp
     test_spgemmreuse_csr.cpp
     test_spmat_descr.cpp
@@ -155,6 +156,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_sparse_to_dense_coo.yaml
     cuda/12.8/test_sparse_to_dense_csc.yaml
     cuda/12.8/test_sparse_to_dense_csr.yaml
+    cuda/12.8/test_spgeam_csr.yaml
     cuda/12.8/test_spgemm_csr.yaml
     cuda/12.8/test_spgemmreuse_csr.yaml
     cuda/12.8/test_spmm_batched_coo.yaml

@@ -109,7 +109,7 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Number of non-zeros step of the sparse matrix sparse matrix addition:
+*  \brief Computes the number of non-zero elements of \f$C\f$ for the sparse matrix-sparse matrix addition:
 *  \f[
 *    C := \alpha \cdot op(A) + \beta \cdot op(B),
 *  \f]

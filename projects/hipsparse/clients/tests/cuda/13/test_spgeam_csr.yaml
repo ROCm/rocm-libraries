@@ -62,6 +62,21 @@ Tests:
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO]
 
+# Quick: mixed index bases and complex scalars.
+- name: spgeam_csr
+  category: quick
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: [512]
+  N: [512]
+  alpha: [1.0]
+  alphai: [0.5]
+  beta: [2.0]
+  betai: [-0.5]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
+
 - name: spgeam_csr
   category: pre_checkin
   function: spgeam_csr
@@ -82,3 +97,52 @@ Tests:
              nos5,
              nos6,
              nos7]
+
+# Pre-checkin: medium random matrices with complex scalars.
+- name: spgeam_csr
+  category: pre_checkin
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: [2000, 5000]
+  N: [1500, 4000]
+  alpha: [1.5]
+  alphai: [0.7]
+  beta: [-2.0]
+  betai: [0.3]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+
+# Nightly: large real matrices (A from file, B independent random of the same size).
+- name: spgeam_csr
+  category: nightly
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [scircuit,
+             ASIC_320k,
+             bmwcra_1,
+             shipsec1]
+
+# Nightly: large random matrices.
+- name: spgeam_csr
+  category: nightly
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: [10000, 20000]
+  N: [10000, 20000]
+  alpha: [1.0]
+  alphai: [0.0]
+  beta: [-1.0]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
