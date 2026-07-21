@@ -23,16 +23,18 @@ import os
 import subprocess
 import sys
 
-# Make the co-located dapper_union importable (installed layout), with a
-# source-tree fallback to shared/ctest for local testing.
+# Make the co-located dapper_union importable (installed layout), with a source-tree
+# fallback to the dependency-parser package (its canonical home) for local testing.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import dapper_union
 except ImportError:
-    _shared = os.path.normpath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "shared", "ctest")
+    _src = os.path.normpath(
+        os.path.join(
+            os.path.dirname(__file__), "..", "script", "dependency-parser", "src"
+        )
     )
-    sys.path.insert(0, _shared)
+    sys.path.insert(0, _src)
     import dapper_union
 
 

@@ -152,13 +152,15 @@ Tooling (`script/dependency-parser/`):
   `fallback_mode`.
 - `src/symbol_graph.py` (`symbol` bridge).
 - `src/miopen_gtest_runner.py`, `src/dapper_diff.py` — native validate-mode analysis.
+- `src/dapper_union.py` — single source of truth for the pure union math (pattern
+  splitting/overlap + subtractive intersection, honoring `fallback_mode`). Imported by
+  `miopen_gtest_runner.py` for native, and installed standalone on the TheRock runner
+  (stdlib-only, so it stands alone next to the test binary).
 
 Shared (`<rocm-libraries>/shared/ctest/`):
 - `parse_test_categories.py` — generates the (install) CTestTestfile; `--dapper-json`
   activates the `gtest_runner` hook.
 - `TestCategories.cmake` — `apply_test_category_labels(... DAPPER_JSON ...)`.
-- `dapper_union.py` — self-contained union computation (honors `fallback_mode`);
-  co-installed on the runner.
 
 Per project:
 - `scripts/run_miopen_gtest.py` — the `gtest_runner` wrapper; co-installed on the runner.

@@ -3,9 +3,13 @@
 # SPDX-License-Identifier: MIT
 """Compute the Dapper union filter for a test category, honoring fallback_mode.
 
-Self-contained (no imports from the dependency-parser package) so it can be
-co-installed next to the test binary and run on a GPU runner that only has the
-installed artifact. Used by the per-project gtest_runner wrapper (e.g.
+Single source of truth for the pure union math (pattern splitting, overlap, and the
+subtractive intersection). The native pipeline (miopen_gtest_runner.calc_union_filter)
+imports these helpers directly; TheRock installs this file next to the test binary so
+the GPU runner can compute the filter with only the installed artifact.
+
+Kept import-free of the rest of the dependency-parser package (stdlib only) so it can
+stand alone once installed. Used by the per-project gtest_runner wrapper (e.g.
 run_miopen_gtest.py) that the generated CTestTestfile invokes.
 
 Dapper is strictly subtractive: the returned positive set is always a subset of

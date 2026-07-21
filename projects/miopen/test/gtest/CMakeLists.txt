@@ -455,7 +455,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
     install(
         PROGRAMS
           "${PROJECT_SOURCE_DIR}/scripts/run_miopen_gtest.py"
-          "${ROCM_LIBRARIES_ROOT}/shared/ctest/dapper_union.py"
+          "${PROJECT_SOURCE_DIR}/script/dependency-parser/src/dapper_union.py"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
         COMPONENT tests
     )

@@ -3,75 +3,14 @@ import sys
 if sys.version_info < (3, 10):
     sys.exit("Python 3.10 or later is required.")
 
-import fnmatch
 import json
 import os
 import subprocess
 from pathlib import Path
 
-
-def split_gtest_filter_includes(filter_str):
-    """
-    Splits a --gtest_filter style string into positive and negative filter lists.
-
-    Example:
-        "ABC.*:DEF.*:-XYZ.*:-123.*"
-        -> (['ABC.*', 'DEF.*'], ['XYZ.*', '123.*'])
-    """
-    if not filter_str:
-        return [], []
-
-    # Split into positive and negative parts
-    if "-" in filter_str:
-        positive_part, *negative_part = filter_str.split("-")
-        positives = [p for p in positive_part.split(":") if p]
-        negatives = negative_part
-    else:
-        positives = [p for p in filter_str.split(":") if p]
-        negatives = []
-
-    # If filter is negative-only, gtest includes all tests
-    if not positives:
-        positives = ["*"]
-
-    return positives, negatives
-
-
-def matches_any_filter(s, filters):
-    """
-    Checks if a string 's' matches any of the wildcard patterns in 'filters'.
-    """
-    return any(fnmatch.fnmatch(s, pattern) for pattern in filters)
-
-
-def _fixed_prefix(pattern):
-    """
-    Return the literal portion of a wildcard pattern up to the first wildcard
-    metacharacter ('*', '?', '['). Dapper patterns only wildcard at the end, so
-    for them this is the full fixture name; category patterns may wildcard
-    anywhere, so this is just their leading literal.
-    """
-    for i, ch in enumerate(pattern):
-        if ch in "*?[":
-            return pattern[:i]
-    return pattern
-
-
-def patterns_overlap(dapper_pattern, category_pattern):
-    """
-    Return True if a dapper (prefix-style) pattern and a category (arbitrary
-    wildcard) pattern could match a common gtest fixture name.
-
-    fnmatch needs a concrete string on one side and a pattern on the other, so a
-    single stripped comparison is asymmetric and misses real overlaps. We test
-    both directions: the dapper pattern's literal prefix against the category
-    glob, and the category pattern's literal prefix against the dapper glob.
-    Either match means gtest would run at least one shared fixture, so the dapper
-    pattern belongs in the union.
-    """
-    return fnmatch.fnmatch(
-        _fixed_prefix(dapper_pattern), category_pattern
-    ) or fnmatch.fnmatch(_fixed_prefix(category_pattern), dapper_pattern)
+# The pure union math (pattern splitting/overlap + subtractive intersection) is shared
+# with the TheRock runner; dapper_union.py is the single source of truth for it.
+from dapper_union import compute_union_filter
 
 
 def abort_missing_shards(missing, total):
@@ -144,14 +83,17 @@ def _convert_xml_shards(json_data):
 
 
 def calc_union_filter(gtest_filter_json: str, category_name: str, category_filter: str):
+    """Native (validate-mode) union: convert the shard XML, compute the subtractive
+    union via the shared dapper_union helper, and record it back into the shards JSON.
+
+    The union math itself lives in dapper_union.compute_union_filter (shared with the
+    TheRock runner); here we only own the shard-JSON I/O and the annotations that
+    dapper_diff reads back.
+    """
     with open(gtest_filter_json, "r") as f:
         json_data = json.load(f)
     _convert_xml_shards(json_data)
-    # super-minimal default test if there's nothing to do:
-    default_filter = "CPU_HandleHipDevice_NONE*"
-    dapper_filter = default_filter
-    if "dapper_filter" in json_data:
-        dapper_filter = json_data["dapper_filter"]
+    dapper_filter = json_data.get("dapper_filter", "")
 
     json_data["category_name"] = category_name
     category_filter_name = (
@@ -159,42 +101,7 @@ def calc_union_filter(gtest_filter_json: str, category_name: str, category_filte
     )
     json_data[category_filter_name] = category_filter
 
-    # The category filter can contain wildcards anywhere, but dapper only does at the
-    # end of each fixture, so it's easy to compare each dapper item for a category match.
-    # Also, dapper does not define negatives, so enforce this by ignoring them.
-    dapper_positives, _ = split_gtest_filter_includes(dapper_filter)
-    category_positives, category_exclude = split_gtest_filter_includes(category_filter)
-
-    union_positives = [
-        df
-        for df in dapper_positives
-        if any(patterns_overlap(df, cp) for cp in category_positives)
-    ]
-    deduped = list(dict.fromkeys(union_positives))
-    duplicates_removed = len(union_positives) - len(deduped)
-    if duplicates_removed:
-        print(f"Removed {duplicates_removed} duplicate entries from union_positives")
-    union_positives = deduped
-
-    # If the Dapper filter and the category filter share no fixtures, there is
-    # nothing meaningful to run. Fall back to the super-minimal default test and
-    # warn that coverage may be missing. This is a PASS and COMPLIANT situation,
-    # not a failure -- an empty positive filter would otherwise make gtest run
-    # everything, which is the opposite of what's intended.
-    if not union_positives:
-        print(
-            "WARNING: no overlap between the Dapper filter and category filter "
-            "'{0}'; falling back to super-minimal default test "
-            "'{1}'. Testing may be missing for this category, but "
-            "this is a PASS and COMPLIANT.".format(category_name, default_filter)
-        )
-        union_positives = [default_filter]
-
-    union_filter = ":".join(union_positives)
-    if category_exclude:
-        category_exclude_filter = ":".join(category_exclude)
-        union_filter = union_filter + "-" + category_exclude_filter
-
+    union_filter = compute_union_filter(dapper_filter, category_filter)
     json_data["union_filter"] = union_filter
 
     with open(gtest_filter_json, "w") as f:
