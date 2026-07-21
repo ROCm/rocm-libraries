@@ -24,13 +24,12 @@
  *
  *******************************************************************************/
 #include <array>
-#include <miopen/miopen_impl.h>
 #include <initializer_list>
 #include <miopen/errors.hpp>
 #include <miopen/lrn.hpp>
 #include <miopen/logger.hpp>
 
-extern "C" miopenStatus_t miopenCreateLRNDescriptor_impl(miopenLRNDescriptor_t* lrnDesc)
+extern "C" miopenStatus_t miopenCreateLRNDescriptor(miopenLRNDescriptor_t* lrnDesc)
 {
 
     return miopen::try_([&] {
@@ -39,12 +38,12 @@ extern "C" miopenStatus_t miopenCreateLRNDescriptor_impl(miopenLRNDescriptor_t* 
     });
 }
 
-extern "C" miopenStatus_t miopenSetLRNDescriptor_impl(miopenLRNDescriptor_t lrnDesc,
-                                                      miopenLRNMode_t mode,
-                                                      unsigned int lrnN,
-                                                      double lrnAlpha,
-                                                      double lrnBeta,
-                                                      double lrnK)
+extern "C" miopenStatus_t miopenSetLRNDescriptor(miopenLRNDescriptor_t lrnDesc,
+                                                 miopenLRNMode_t mode,
+                                                 unsigned int lrnN,
+                                                 double lrnAlpha,
+                                                 double lrnBeta,
+                                                 double lrnK)
 {
     MIOPEN_LOG_FUNCTION(lrnDesc, mode, lrnN, lrnAlpha, lrnBeta, lrnK);
     return miopen::try_([&] {
@@ -53,12 +52,12 @@ extern "C" miopenStatus_t miopenSetLRNDescriptor_impl(miopenLRNDescriptor_t lrnD
     });
 }
 
-extern "C" miopenStatus_t miopenGetLRNDescriptor_impl(const miopenLRNDescriptor_t lrnDesc,
-                                                      miopenLRNMode_t* mode,
-                                                      unsigned int* lrnN,
-                                                      double* lrnAlpha,
-                                                      double* lrnBeta,
-                                                      double* lrnK)
+extern "C" miopenStatus_t miopenGetLRNDescriptor(const miopenLRNDescriptor_t lrnDesc,
+                                                 miopenLRNMode_t* mode,
+                                                 unsigned int* lrnN,
+                                                 double* lrnAlpha,
+                                                 double* lrnBeta,
+                                                 double* lrnK)
 {
     MIOPEN_LOG_FUNCTION(lrnDesc);
     return miopen::try_([&] {
@@ -70,8 +69,8 @@ extern "C" miopenStatus_t miopenGetLRNDescriptor_impl(const miopenLRNDescriptor_
     });
 }
 
-extern "C" miopenStatus_t miopenLRNGetWorkSpaceSize_impl(const miopenTensorDescriptor_t yDesc,
-                                                         size_t* workSpaceSize)
+extern "C" miopenStatus_t miopenLRNGetWorkSpaceSize(const miopenTensorDescriptor_t yDesc,
+                                                    size_t* workSpaceSize)
 {
     MIOPEN_LOG_FUNCTION(yDesc);
 
@@ -109,16 +108,16 @@ LogCmdLRN(const miopenLRNDescriptor_t lrnDesc, const miopenTensorDescriptor_t xD
     }
 }
 
-extern "C" miopenStatus_t miopenLRNForward_impl(miopenHandle_t handle,
-                                                const miopenLRNDescriptor_t lrnDesc,
-                                                const void* alpha,
-                                                const miopenTensorDescriptor_t xDesc,
-                                                const void* x,
-                                                const void* beta,
-                                                const miopenTensorDescriptor_t yDesc,
-                                                void* y,
-                                                bool do_backward,
-                                                void* workSpace)
+extern "C" miopenStatus_t miopenLRNForward(miopenHandle_t handle,
+                                           const miopenLRNDescriptor_t lrnDesc,
+                                           const void* alpha,
+                                           const miopenTensorDescriptor_t xDesc,
+                                           const void* x,
+                                           const void* beta,
+                                           const miopenTensorDescriptor_t yDesc,
+                                           void* y,
+                                           bool do_backward,
+                                           void* workSpace)
 {
 
     MIOPEN_LOG_FUNCTION(handle, lrnDesc, alpha, xDesc, x, beta, yDesc, y, do_backward, workSpace);
@@ -145,19 +144,19 @@ extern "C" miopenStatus_t miopenLRNForward_impl(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenLRNBackward_impl(miopenHandle_t handle,
-                                                 const miopenLRNDescriptor_t lrnDesc,
-                                                 const void* alpha,
-                                                 const miopenTensorDescriptor_t yDesc,
-                                                 const void* y,
-                                                 const miopenTensorDescriptor_t dyDesc,
-                                                 const void* dy,
-                                                 const miopenTensorDescriptor_t xDesc,
-                                                 const void* x,
-                                                 const void* beta,
-                                                 const miopenTensorDescriptor_t dxDesc,
-                                                 void* dx,
-                                                 const void* workSpace)
+extern "C" miopenStatus_t miopenLRNBackward(miopenHandle_t handle,
+                                            const miopenLRNDescriptor_t lrnDesc,
+                                            const void* alpha,
+                                            const miopenTensorDescriptor_t yDesc,
+                                            const void* y,
+                                            const miopenTensorDescriptor_t dyDesc,
+                                            const void* dy,
+                                            const miopenTensorDescriptor_t xDesc,
+                                            const void* x,
+                                            const void* beta,
+                                            const miopenTensorDescriptor_t dxDesc,
+                                            void* dx,
+                                            const void* workSpace)
 {
 
     MIOPEN_LOG_FUNCTION(
@@ -189,7 +188,7 @@ extern "C" miopenStatus_t miopenLRNBackward_impl(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenDestroyLRNDescriptor_impl(miopenLRNDescriptor_t lrnDesc)
+extern "C" miopenStatus_t miopenDestroyLRNDescriptor(miopenLRNDescriptor_t lrnDesc)
 {
     MIOPEN_LOG_FUNCTION(lrnDesc);
     return miopen::try_([&] { miopen_destroy_object(lrnDesc); });
