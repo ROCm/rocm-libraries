@@ -77,6 +77,11 @@ else()
         if (CMAKE_${COMPILER}_COMPILER_ID MATCHES "Clang")
             list(APPEND CMAKE_COMPILER_WARNINGS
                 -Weverything
+                # prototype: newer CI-base clang emits -Wlifetime-safety-intra-tu-suggestions
+                # on nearly every CK header under -Weverything (7.0.2-era CK predates the
+                # [[clang::lifetimebound]] annotations); silence it to avoid a multi-GB warning
+                # flood that crawls the build.
+                -Wno-lifetime-safety-intra-tu-suggestions
                 -Wno-c++98-compat
                 -Wno-c++98-compat-pedantic
                 -Wno-conversion
