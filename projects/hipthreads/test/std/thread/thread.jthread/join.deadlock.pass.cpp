@@ -16,6 +16,7 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: no-exceptions
 // UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: hipthreads-no-self-join-throw
 // XFAIL: availability-synchronization_library-missing
 
 // void join();
@@ -30,6 +31,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 

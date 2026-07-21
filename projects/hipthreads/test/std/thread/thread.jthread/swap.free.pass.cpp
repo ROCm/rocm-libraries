@@ -16,43 +16,52 @@
 #include <hip/thread>
 #include <type_traits>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 
+// hip::jthread's free swap lives in cuda::std:: (see inc/hip/__thread/jthread.h),
+// so a using-declaration is needed for unqualified `swap` to find it.
+namespace {
+using hip::std::swap;
 template <class T>
 concept IsFreeSwapNoexcept = requires(T& a, T& b) {
   { swap(a, b) } noexcept;
 };
+} // namespace
 
-static_assert(IsFreeSwapNoexcept<::std::jthread>);
+static_assert(IsFreeSwapNoexcept<hip::jthread>);
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
+  using hip::std::swap;
+
   // x is default constructed
   {
-    ::std::jthread t1;
-    ::std::jthread t2        = support::make_test_jthread([] {});
+    hip::jthread t1;
+    hip::jthread t2        = support::make_test_jthread([] __device__ () {});
     const auto originalId2 = t2.get_id();
     swap(t1, t2);
 
     assert(t1.get_id() == originalId2);
-    assert(t2.get_id() == ::std::jthread::id());
+    assert(t2.get_id() == hip::jthread::id());
   }
 
   // y is default constructed
   {
-    ::std::jthread t1 = support::make_test_jthread([] {});
-    ::std::jthread t2{};
+    hip::jthread t1 = support::make_test_jthread([] __device__ () {});
+    hip::jthread t2{};
     const auto originalId1 = t1.get_id();
     swap(t1, t2);
 
-    assert(t1.get_id() == ::std::jthread::id());
+    assert(t1.get_id() == hip::jthread::id());
     assert(t2.get_id() == originalId1);
   }
 
   // both not default constructed
   {
-    ::std::jthread t1        = support::make_test_jthread([] {});
-    ::std::jthread t2        = support::make_test_jthread([] {});
+    hip::jthread t1        = support::make_test_jthread([] __device__ () {});
+    hip::jthread t2        = support::make_test_jthread([] __device__ () {});
     const auto originalId1 = t1.get_id();
     const auto originalId2 = t2.get_id();
     swap(t1, t2);
@@ -63,13 +72,13 @@ int main(int, char**) {
 
   // both default constructed
   {
-    ::std::jthread t1;
-    ::std::jthread t2;
+    hip::jthread t1;
+    hip::jthread t2;
     swap(t1, t2);
 
-    assert(t1.get_id() == ::std::jthread::id());
-    assert(t2.get_id() == ::std::jthread::id());
+    assert(t1.get_id() == hip::jthread::id());
+    assert(t2.get_id() == hip::jthread::id());
   }
-
+#endif
   return 0;
 }

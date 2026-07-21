@@ -12,19 +12,28 @@
 
 // [[nodiscard]] bool joinable() const noexcept;
 // [[nodiscard]] id get_id() const noexcept;
-// [[nodiscard]] native_handle_type native_handle();
-// [[nodiscard]] stop_source get_stop_source() noexcept;
-// [[nodiscard]] stop_token get_stop_token() const noexcept;
 // [[nodiscard]] static unsigned int hardware_concurrency() noexcept;
+//
+// Divergence from std::jthread: hip::jthread does not expose native_handle(),
+// get_stop_source(), or get_stop_token() (no stop-token support yet), so the
+// corresponding nodiscard checks from upstream libcxx are commented out.
 
 #include <hip/thread>
+// libhipcxx emits a #warning about TSC clock rate during device compile for
+// some gfx targets; whitelist it so -verify doesn't fail on this unrelated
+// environmental noise.
+// expected-warning@*:* 0+ {{realtime clock rate}}
 
 void test() {
-  ::std::jthread jt;
+  hip::jthread jt;
   jt.joinable();             // expected-warning {{ignoring return value of function}}
   jt.get_id();               // expected-warning {{ignoring return value of function}}
-  jt.native_handle();        // expected-warning {{ignoring return value of function}}
-  jt.get_stop_source();      // expected-warning {{ignoring return value of function}}
-  jt.get_stop_token();       // expected-warning {{ignoring return value of function}}
+  // TODO: Lines below are commented out because hip::jthread does not expose these
+  // methods (no native_handle / stop-token support yet). The "expected-warning"
+  // keyword is intentionally removed so clang -verify does not register stale
+  // directives that would never fire.
+  // jt.native_handle();        -- not exposed by hip::jthread
+  // jt.get_stop_source();      -- not exposed by hip::jthread
+  // jt.get_stop_token();       -- not exposed by hip::jthread
   jt.hardware_concurrency(); // expected-warning {{ignoring return value of function}}
 }

@@ -17,12 +17,13 @@
 #include <hip/thread>
 #include <type_traits>
 
+#include "force_include_hip.h"
 #include "test_macros.h"
 
-static_assert(noexcept(::std::jthread::hardware_concurrency()));
+static_assert(noexcept(hip::jthread::hardware_concurrency()));
 
 int main(int, char**) {
-  ::std::same_as<unsigned int> decltype(auto) result = ::std::jthread::hardware_concurrency();
+  ::std::same_as<unsigned int> decltype(auto) result = hip::jthread::hardware_concurrency();
   assert(result == hip::thread::hardware_concurrency());
 
   return 0;

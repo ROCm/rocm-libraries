@@ -12,30 +12,33 @@
 
 // void join();
 
-#include <atomic>
 #include <cassert>
-#include <hip/std/chrono>
 #include <concepts>
 #include <functional>
-#include <system_error>
+#include <hip/atomic>
+#include <hip/std/chrono>
+#include <hip/std/inplace_vector>
+#include <hip/std/memory>
 #include <hip/thread>
+#include <system_error>
 #include <type_traits>
-#include <vector>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   // Effects: Blocks until the thread represented by *this has completed.
   {
-    ::std::atomic_int calledTimes = 0;
-    ::std::vector<::std::jthread> jts;
+    auto calledTimes_ptr = hip::std::make_unique<hip::std::atomic<int>>(0);
+    auto& calledTimes    = *calledTimes_ptr;
     constexpr auto numberOfThreads = 10u;
-    jts.reserve(numberOfThreads);
+    hip::std::inplace_vector<hip::jthread, numberOfThreads> jts;
     for (auto i = 0u; i < numberOfThreads; ++i) {
-      jts.emplace_back(support::make_test_jthread([&] {
+      jts.emplace_back(support::make_test_jthread([&] __device__ () {
         hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(2));
-        calledTimes.fetch_add(1, ::std::memory_order_relaxed);
+        calledTimes.fetch_add(1, hip::std::memory_order_relaxed);
       }));
     }
 
@@ -49,31 +52,32 @@ int main(int, char**) {
     // be less than numberOfThreads.
     // This is not going to catch issues 100%. Creating more threads to increase
     // the probability of catching the issue
-    assert(calledTimes.load(::std::memory_order_relaxed) == numberOfThreads);
+    assert(calledTimes.load(hip::std::memory_order_relaxed) == numberOfThreads);
   }
 
   // Synchronization: The completion of the thread represented by *this synchronizes with
   // ([intro.multithread]) the corresponding successful join() return.
   {
-    bool flag       = false;
-    ::std::jthread jt = support::make_test_jthread([&] { flag = true; });
+    auto flag_ptr = hip::std::make_unique<bool>(false);
+    auto& flag    = *flag_ptr;
+    hip::jthread jt = support::make_test_jthread([&] __device__ () { flag = true; });
     jt.join();
     assert(flag); // non atomic write is visible to the current thread
   }
 
   // Postconditions: The thread represented by *this has completed. get_id() == id().
   {
-    ::std::jthread jt = support::make_test_jthread([] {});
-    assert(jt.get_id() != ::std::jthread::id());
+    hip::jthread jt = support::make_test_jthread([] __device__ () {});
+    assert(jt.get_id() != hip::jthread::id());
     jt.join();
-    assert(jt.get_id() == ::std::jthread::id());
+    assert(jt.get_id() == hip::jthread::id());
   }
 
 #if !defined(TEST_HAS_NO_EXCEPTIONS)
   // Throws: system_error when an exception is required ([thread.req.exception]).
   // invalid_argument - if the thread is not joinable.
   {
-    ::std::jthread jt;
+    hip::jthread jt;
     try {
       jt.join();
       assert(false);
@@ -83,6 +87,6 @@ int main(int, char**) {
   }
 
 #endif
-
+#endif
   return 0;
 }

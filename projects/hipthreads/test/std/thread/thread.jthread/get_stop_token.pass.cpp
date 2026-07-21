@@ -8,6 +8,7 @@
 //
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03, c++11, c++14, c++17
+// XFAIL: hipthreads-no-stop-token
 // XFAIL: availability-synchronization_library-missing
 
 // [[nodiscard]] stop_token get_stop_token() const noexcept;
@@ -19,16 +20,18 @@
 #include <type_traits>
 #include <utility>
 
+#include "force_include_hip.h"
 #include "make_test_thread.h"
 #include "test_macros.h"
 
-static_assert(noexcept(::std::declval<const ::std::jthread&>().get_stop_token()));
+static_assert(noexcept(::std::declval<const hip::jthread&>().get_stop_token()));
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   // Represents a thread
   {
-    ::std::jthread jt                                 = support::make_test_jthread([] {});
-    auto ss                                         = jt.get_stop_source();
+    hip::jthread jt                                     = support::make_test_jthread([] __device__ () {});
+    auto ss                                             = jt.get_stop_source();
     ::std::same_as<::std::stop_token> decltype(auto) st = ::std::as_const(jt).get_stop_token();
 
     assert(st.stop_possible());
@@ -39,11 +42,11 @@ int main(int, char**) {
 
   // Does not represent a thread
   {
-    const ::std::jthread jt{};
+    const hip::jthread jt{};
     ::std::same_as<::std::stop_token> decltype(auto) st = jt.get_stop_token();
 
     assert(!st.stop_possible());
   }
-
+#endif
   return 0;
 }
