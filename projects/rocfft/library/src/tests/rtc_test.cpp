@@ -22,6 +22,20 @@
 #include "rtc_cache.h"
 #include <gtest/gtest.h>
 
+#if __has_include(<filesystem>)
+#include <filesystem>
+#else
+#include <experimental/filesystem>
+namespace std
+{
+    namespace filesystem = experimental::filesystem;
+}
+#endif
+
+#ifndef _WIN32
+#include <errno.h> // program_invocation_name
+#endif
+
 namespace fs = std::filesystem;
 
 static const char* simple_kernel_jit = R"(
