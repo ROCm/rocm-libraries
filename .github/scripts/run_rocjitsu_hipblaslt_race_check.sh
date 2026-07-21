@@ -242,6 +242,21 @@ show_mirage_version() {
   "${MIRAGE_BIN}" --version
 }
 
+# Mirage intentionally launches non-containerized workloads with a minimal
+# inherited environment. Pass the fetched artifact and Python environment
+# explicitly so the workload resolves ROCm libraries and the setup-python
+# interpreter's shared library.
+mirage_environment=(
+  --env "PATH=${PATH}"
+  --env "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+  --env "PYTHONPATH=${PYTHONPATH}"
+  --env "ROCM_PATH=${ROCM_PATH}"
+  --env "ROCM_HOME=${ROCM_HOME}"
+)
+if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  mirage_environment+=(--env "VIRTUAL_ENV=${VIRTUAL_ENV}")
+fi
+
 run_hipblaslt_bench_check() {
   mkdir -p "${RACE_REPORT_DIR}/hipblaslt-bench"
   echo "running hipblaslt-bench under rocjitsu race detection"
@@ -258,6 +273,7 @@ run_hipblaslt_bench_check() {
       --env RJ_LOG=1 \
       --env RJ_SINKS=stderr,file \
       --env "RJ_SINK_DIR=${RACE_REPORT_DIR}/hipblaslt-bench" \
+      "${mirage_environment[@]}" \
       -- "${HIPBLASLT_BENCH}" \
         --precision f32_r \
         --initialization zero \
@@ -469,6 +485,7 @@ run_tensilelite_client_check() {
       --env RJ_LOG=1 \
       --env RJ_SINKS=stderr,file \
       --env "RJ_SINK_DIR=${sink_dir}" \
+      "${mirage_environment[@]}" \
       -- python3 "${TENSILE_DRIVER}" "${tensile_args[@]}" \
     2>&1 | tee "${RACE_REPORT_DIR}/tensilelite-client.log"
   local status=$?
