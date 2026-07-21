@@ -374,6 +374,23 @@ set(rocsparse_source
   src/level3/coomm/segmented/coommnn_device_segmented_remainder_256_4_4_1.cpp
   src/level3/coomm/segmented/coommnn_device_segmented_remainder_256_8_4_0.cpp
   src/level3/coomm/segmented/coommnn_device_segmented_remainder_256_8_4_1.cpp
+  # coomm segmented (RDNA/wave32 tuned 128-thread blocks)
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_1_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_1_4_1.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_2_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_2_4_1.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_4_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_4_4_1.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_8_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_main_128_8_4_1.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_1_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_1_4_1.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_2_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_2_4_1.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_4_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_4_4_1.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_8_4_0.cpp
+  src/level3/coomm/segmented/coommnn_device_segmented_remainder_128_8_4_1.cpp
 
   src/level3/rocsparse_csrmm_template_row_split.cpp
   src/level3/rocsparse_csrmm_template_nnz_split.cpp
