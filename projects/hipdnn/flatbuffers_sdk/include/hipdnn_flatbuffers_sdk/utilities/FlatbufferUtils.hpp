@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include <cstring>
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <cstring>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -182,9 +182,8 @@ inline double extractDoubleFromTensorValue(const data_objects::TensorAttributes*
 /// (DOUBLE/FLOAT/HALF/BFLOAT16/INT32/INT64/BOOLEAN). Throws std::runtime_error
 /// on UNSET/unsupported dtype or a null pointer.
 template <typename TargetType>
-TargetType readHostScalarAs(const void* hostPtr,
-                            data_objects::DataType dataType,
-                            const char* paramName)
+TargetType
+    readHostScalarAs(const void* hostPtr, data_objects::DataType dataType, const char* paramName)
 {
     if(hostPtr == nullptr)
     {
@@ -205,11 +204,9 @@ TargetType readHostScalarAs(const void* hostPtr,
     case data_objects::DataType::FLOAT:
         return readAs(float{});
     case data_objects::DataType::HALF:
-        return static_cast<TargetType>(
-            static_cast<float>(readAs(hipdnn_data_sdk::types::half{})));
+        return readAs(hipdnn_data_sdk::types::half{});
     case data_objects::DataType::BFLOAT16:
-        return static_cast<TargetType>(
-            static_cast<float>(readAs(hipdnn_data_sdk::types::bfloat16{})));
+        return readAs(hipdnn_data_sdk::types::bfloat16{});
     case data_objects::DataType::INT32:
         return readAs(int32_t{});
     case data_objects::DataType::INT64:
@@ -230,10 +227,9 @@ TargetType readHostScalarAs(const void* hostPtr,
 /// and ignores the pack. Throws std::runtime_error if a pure-runtime scalar's
 /// pack slot is missing or null.
 template <typename TargetType>
-TargetType resolveScalarFromVariantPack(
-    const data_objects::TensorAttributesT& tensorAttr,
-    const std::unordered_map<int64_t, void*>& variantPack,
-    const char* paramName)
+TargetType resolveScalarFromVariantPack(const data_objects::TensorAttributesT& tensorAttr,
+                                        const std::unordered_map<int64_t, void*>& variantPack,
+                                        const char* paramName)
 {
     if(tensorAttr.is_runtime_pass_by_value && tensorAttr.value.value == nullptr)
     {
@@ -249,10 +245,10 @@ TargetType resolveScalarFromVariantPack(
     return extractValueFromTensorValue<TargetType>(tensorAttr, paramName);
 }
 
-inline double resolveDoubleScalarFromVariantPack(
-    const data_objects::TensorAttributesT& tensorAttr,
-    const std::unordered_map<int64_t, void*>& variantPack,
-    const char* paramName)
+inline double
+    resolveDoubleScalarFromVariantPack(const data_objects::TensorAttributesT& tensorAttr,
+                                       const std::unordered_map<int64_t, void*>& variantPack,
+                                       const char* paramName)
 {
     return resolveScalarFromVariantPack<double>(tensorAttr, variantPack, paramName);
 }

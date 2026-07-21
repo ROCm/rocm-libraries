@@ -57,10 +57,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(uid++)
         .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1})
         .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
+        .set_value(static_cast<float>(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON));
 
     hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_train");
@@ -317,10 +317,10 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> buildBatchnormFwdInference
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(uid++)
         .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1})
         .set_stride({1})
-        .set_value(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
+        .set_value(static_cast<float>(hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON));
 
     hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_inference_with_variance");
