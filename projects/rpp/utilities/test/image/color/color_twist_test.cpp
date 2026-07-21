@@ -1,0 +1,128 @@
+#include <gtest/gtest.h>
+#include <rpp/rpp.h>
+
+#include <vector>
+
+#include "framework/backend_memory.hpp"
+#include "framework/compare_tensor.hpp"
+#include "framework/config_param.hpp"
+#include "framework/tensor_setup.hpp"
+#include "reference/color_twist_ref.hpp"
+
+using namespace rpptest;
+
+namespace {
+
+// Fused color_twist scalars (one value per axis, shared by every pixel of an image):
+// brightness 0 < b <= 20, contrast 0 < c <= 255, hue 0 <= h <= 359 (degrees), saturation s >= 0.
+struct ColorTwistParams {
+    float brightness, contrast, hue, saturation;
+    std::string name() const {
+        return "b" + num_token(brightness) + "_c" + num_token(contrast) + "_h" + num_token(hue) +
+               "_s" + num_token(saturation);
+    }
+};
+
+double color_twist_tolerance(DType dt) {
+    switch (dt) {
+        // The fused pipeline routes 3-channel pixels through two RGB->HSV->RGB round trips, so the
+        // integer result carries that float round trip's rounding on top of the final quantization;
+        // 1.0 covers that legitimate <=1 LSB difference (both reference and kernel round to nearest).
+        case DType::U8:
+            return 1.0;
+        case DType::I8:
+            return 1.0;
+        case DType::F32:
+            return 3e-3;
+        case DType::F16:
+            return 5e-3;
+    }
+    return 0.0;
+}
+
+template <typename T>
+void run_color_twist(const TestConfig& cfg, const ColorTwistParams& op) {
+    const TensorShape shape{cfg.size.n, static_cast<Rpp32u>(channels_of(cfg.layout)), cfg.size.h,
+                            cfg.size.w};
+    RpptDesc desc = make_descriptor(shape, cfg.dtype, cfg.layout);  // RPP takes a non-const ptr
+    const std::size_t count = element_count(desc);
+    const std::size_t bytes = byte_size(desc, cfg.dtype);
+
+    // Parameters live in host-accessible (pinned for HIP) memory.
+    PinnedArray<Rpp32f> brightness(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> contrast(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> hue(cfg.backend, shape.n);
+    PinnedArray<Rpp32f> saturation(cfg.backend, shape.n);
+    PinnedArray<RpptROI> roi(cfg.backend, shape.n);
+    const std::vector<RpptROI> roiVec = make_roi(desc, cfg.roi);
+    for (Rpp32u i = 0; i < shape.n; ++i) {
+        brightness[i] = op.brightness;
+        contrast[i] = op.contrast;
+        hue[i] = op.hue;
+        saturation[i] = op.saturation;
+        roi[i] = roiVec[i];
+    }
+
+    // (1) Host golden model. golden starts as a copy of the input so the untouched
+    // (outside-ROI) region is defined; only the ROI is overwritten by the reference.
+    std::vector<T> input(count), golden(count), actual(count);
+    fill_input<T>(input.data(), count, cfg.dtype);
+    golden = input;
+    color_twist_reference<T>(input.data(), golden.data(), desc, cfg.dtype, roi.data(), XYWH,
+                             op.brightness, op.contrast, op.hue, op.saturation);
+
+    // (2) Run RPP on the configured backend.
+    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
+    src.write(input.data(), bytes);
+    dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
+
+    RppHandle handle(cfg.backend, shape.n);
+    ASSERT_EQ(rppt_color_twist(src.ptr(), &desc, dst.ptr(), &desc, brightness.data(),
+                               contrast.data(), hue.data(), saturation.data(), roi.data(), XYWH,
+                               handle.get(), cfg.backend),
+              RPP_SUCCESS);
+
+    // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
+    handle.sync();  // drain the op's stream before copying results back
+    dst.read(actual.data(), bytes);
+
+    // (4) Compare within tolerance over the ROI.
+    EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,
+                               color_twist_tolerance(cfg.dtype)));
+}
+
+}  // namespace
+
+// Full name:
+// Image_Color/ColorTwistTest.Correctness/<Backend>_<DType>to<DType>_<Layout>_<Roi>_<Size>_<Params>
+class ColorTwistTest : public ::testing::TestWithParam<WithParams<ColorTwistParams>> {};
+
+TEST_P(ColorTwistTest, Correctness) {
+    const auto& p = GetParam();
+    switch (p.cfg.dtype) {
+        case DType::U8:
+            run_color_twist<Rpp8u>(p.cfg, p.op);
+            break;
+        case DType::F16:
+            run_color_twist<Rpp16f>(p.cfg, p.op);
+            break;
+        case DType::F32:
+            run_color_twist<Rpp32f>(p.cfg, p.op);
+            break;
+        case DType::I8:
+            run_color_twist<Rpp8s>(p.cfg, p.op);
+            break;
+    }
+}
+
+// Restricted to the 3-channel layouts. The API doc claims c = 1/3, but rppt_color_twist rejects
+// 1-channel (PLN1) input with RPP_ERROR_INVALID_CHANNELS (-19) on both backends -- a real
+// doc/kernel discrepancy logged in section 13 of the test-suite-revamp plan; hue/saturation are
+// undefined on greyscale, so 3-channel is the op's genuine support.
+INSTANTIATE_TEST_SUITE_P(
+    Image_Color, ColorTwistTest,
+    ::testing::ValuesIn(with_params<ColorTwistParams>(
+        make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
+                     {Layout::PKD3, Layout::PLN3}, {Roi::Full, Roi::Partial}),
+        {ColorTwistParams{1.5f, 20.0f, 90.0f, 1.2f}})),
+    op_config_name<ColorTwistParams>);
