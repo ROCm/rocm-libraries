@@ -14028,11 +14028,16 @@ class KernelWriterAssembly(KernelWriter):
     # partials index, and does an OOB workspace store (illegal memory access at
     # multi-tile sizes in hipblaslt-bench). The persistent loop counters
     # (StreamKIter/StreamKIterEnd) are likewise NOT lent (live across tiles).
-    # SrdWS (workspace SRD, 4-aligned) is dead for a full-tile owner (it writes D
-    # directly, no workspace), and is contiguous with Swap*/LocalWrite*/StreamKLocal*
-    # in the persistent layout -- lending it turns that region into a single ~14-reg
-    # Available run so the contiguous ~13-reg epilogue kernarg block (first-fit in
-    # checkOutMulti) packs in there instead of extending the pool past budget.
+    # SrdWS (workspace SRD, 4-aligned) must NOT be lent, even though it looks dead
+    # for a full-tile owner that writes D directly. In a persistent StreamK WG the
+    # SAME wave is a full owner for some tiles but a split contributor / fixup
+    # reducer for others, so SrdWS stays live across the persistent loop; reusing
+    # it as a transient store SGPR corrupts the workspace descriptor the wave later
+    # needs, giving an intermittent VM_L2_PROTECTION_FAULT (OOB workspace store) on
+    # StreamK-split shapes (e.g. 200x57344x8192, 256x256x16384). It is dropped from
+    # the lent set below at zero SGPR cost: the epilogue kernarg block first-fits
+    # into the remaining dead SRD holes (SrdA/SrdB/MXSA/MXSB), so next_free_sgpr is
+    # unchanged (96, still under the gfx950 MaxSgpr=102 cap).
     for _name in ("LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
                   "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
                   "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
