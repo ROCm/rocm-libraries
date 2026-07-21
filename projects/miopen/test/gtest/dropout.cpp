@@ -331,13 +331,7 @@ struct DropoutCommon : public testing::TestWithParam<TestCase>
         DropoutDesc.InitPRNGState(
             handle, DropoutDesc.pstates, DropoutDesc.stateSizeInBytes, DropoutDesc.seed);
 #if DROPOUT_DEBUG_CTEST
-        std::cout <<
-#if MIOPEN_BACKEND_OPENCL
-            "Use OpenCL backend."
-#elif MIOPEN_BACKEND_HIP
-            "Use HIP backend."
-#endif
-                  << std::endl;
+        std::cout << "Use HIP backend." << std::endl;
 #endif
 
         auto out = tensor<T>{in_dim};

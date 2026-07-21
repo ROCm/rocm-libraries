@@ -101,6 +101,11 @@
         "rtd_alias": "rocWMMA"
     },
     {
+        "folder":  "stinkytofu",
+        "rtd_slug": "advanced-micro-devices-stinkytofu",
+        "rtd_alias": "StinkyTofu"
+    },
+    {
         "folder":  "tensile",
         "rtd_slug": "advanced-micro-devices-tensile",
         "rtd_alias": "Tensile"

@@ -498,7 +498,7 @@ TEST_F(IntegrationGraphLifting, JsonRoundTripWithHandle)
 // blob, then deserializes with a handle. Verifies the graph is reconstructed
 // (1 ConvolutionFpropNode, 3 tensors), the plan is re-attached, and the object
 // reaches the execute path. No numerical check here; that gate lives in the GPU
-// test (IntegrationGpuConvForwardSerializeRoundTrip.cpp).
+// test (IntegrationConvForwardSerializeRoundTrip.cpp).
 TEST_F(IntegrationGraphLifting, GraphPlusPlanWithHandleAttachAndExecuteReachesPlugin)
 {
     auto originalGraph = buildConvFpropGraph();

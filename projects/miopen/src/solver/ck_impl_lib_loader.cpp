@@ -87,6 +87,7 @@ miopen::fs::path GetOwningModuleDirectory()
 
 void* OpenDynamicLibrary(const miopen::fs::path& library_path)
 {
+    MIOPEN_LOG_I("Loading Composable Kernel dynamic library: " << library_path.string());
 #ifdef _WIN32
     const auto native_path = library_path.wstring();
     return static_cast<void*>(LoadLibraryW(native_path.c_str()));
