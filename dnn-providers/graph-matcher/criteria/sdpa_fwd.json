@@ -1,0 +1,24 @@
+{
+  "schema": "hipdnn.criteria/v1",
+  "name": "rocke_sdpa_fwd_mfma",
+  "priority": 100,
+  "nodes": [
+    {
+      "id": "sdpa",
+      "op": "sdpa_fwd",
+      "operands": { "q": "$q", "k": "$k", "v": "$v" },
+      "results": { "o": "$o" }
+    }
+  ],
+  "constraints": [
+    { "on": "$q", "dtype": { "one_of": ["BFLOAT16", "FP8_E4M3"] }, "rank": 4 },
+    { "on": "$k", "rank": 4 },
+    { "on": "$v", "rank": 4 },
+    { "on": "$o", "dtype": { "one_of": ["BFLOAT16"] }, "rank": 4 },
+    { "on": "sdpa", "attr": { "alibi_mask": { "equals": 0 } } },
+    { "on": "sdpa", "attr": { "padding_mask": { "equals": 0 } } },
+    { "kind": "same_dtype", "args": ["$q", "$k"] },
+    { "kind": "same_dtype", "args": ["$q", "$v"] },
+    { "kind": "same_dim", "args": ["$k", 1, "$v", 1] }
+  ]
+}
