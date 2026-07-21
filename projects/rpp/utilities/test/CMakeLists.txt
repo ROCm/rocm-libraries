@@ -49,6 +49,7 @@ add_executable(rpp_tests
     image/bitwise/bitwise_xor_test.cpp
     image/bitwise/bitwise_not_test.cpp
     image/data_exchange/copy_test.cpp
+    image/geometric/crop_test.cpp
 )
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(rpp_INCLUDE_DIR)
