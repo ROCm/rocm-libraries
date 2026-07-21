@@ -68,22 +68,17 @@ endif()
 option(ENABLE_HIP_FLASH2_ENGINE "Build the HIP Flash-Attention 2 SDPA engine (FP16, gfx942/gfx950)" OFF)
 if(ENABLE_HIP_FLASH2_ENGINE)
     message(STATUS "HIP Flash2 SDPA engine enabled")
-    target_compile_definitions(hip_kernel_provider PRIVATE HIPDNN_ENGINE_HIP_FLASH2)
+    # Engine sources and compile definitions are wired onto the provider's object
+    # library in src/CMakeLists.txt (hip_kernel_provider target does not exist yet
+    # at this point — it is created by add_subdirectory(src) below).
     # The Flash2 kernel is shipped as precompiled .co files (gfx942 + gfx950).
-    # HipFlash2FwdPlan.hip is NOT compiled here — it is the source used to
-    # generate the .co files offline and requires rocWMMA headers.
+    # HipFlash2FwdPlan.hip is NOT compiled here — it is the offline source for
+    # the .co files and requires rocWMMA headers.
     # At runtime the .co is loaded via hipModuleLoad in HipFlash2KernelUtils.hpp.
-    target_sources(hip_kernel_provider PRIVATE
-        src/engines/hip_flash2_engine/HipFlash2Engine.cpp
-        src/engines/hip_flash2_engine/HipFlash2FwdPlan.cpp
-        src/engines/hip_flash2_engine/HipFlash2FwdPlanBuilder.cpp)
-    # Install precompiled kernel code objects
     install(FILES
         src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx942.co
         src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx950.co
         DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels)
-    target_compile_definitions(hip_kernel_provider PRIVATE
-        HIP_FLASH2_KERNEL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels")
 else()
     message(STATUS "HIP Flash2 SDPA engine disabled")
 endif()
