@@ -646,11 +646,31 @@ including restricting drop-in to prebuilt code objects, are deferred to the deli
 
 The SDPA path prototyped in the rocKE work ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)),
 a graph allowlist plus a grid-symbol table plus hand-written argument wiring, collapses into a match
-descriptor, a dispatch descriptor, and a kernel descriptor that binds them inside a KDP. It reuses the
-SDPA forward match descriptor from [Section 5](#5-matching-and-the-umd) (id `1180449020`); the dispatch
-descriptor and the packed kernel descriptor complete it:
+descriptor, a dispatch descriptor, and a kernel descriptor that binds them inside a KDP. All three are
+shown below so the example stands on its own; the match descriptor is the SDPA forward one from
+[Section 5](#5-matching-and-the-umd) (id `1180449020`), repeated here for reference:
 
 ```jsonc
+// --- UMD: when it applies + the vars it binds (same as Section 5; repeated so this example stands alone) ---
+{
+  "schema": "hipdnn.umd/v1",
+  "id":   1180449020,
+  "name": "SDPA forward (d128, bf16) match",
+  "nodes": [
+    {"kind": "op", "id": "root", "op": "sdpa_fwd",
+     "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
+  ],
+  "constraints": [
+    {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "layout": "bhsd",
+     "shape": ["batch", "num_heads", "seqlen_q", "head_size"]},  // binds batch, num_heads, seqlen_q, head_size
+    {"on": "$k", "dtype": {"one_of": ["BFLOAT16"]}, "shape": ["batch", "num_heads", "seqlen_k", "head_size"]},
+    {"on": "$v", "dtype": {"one_of": ["BFLOAT16"]}},
+    {"kind": "native_predicate", "name": "hipdnn.same_head_dim", "args": ["$q", "$k", "$v"]},
+    {"on": "root",   "attr": {"head_size": {"equals": 128}, "mask_mode": {"one_of": ["none"]}}},
+    {"on": "device", "arch": {"one_of": ["gfx942"]}}  // gate on GPU architecture
+  ]
+}
+
 // --- UDD: how to invoke it (referenced by ID; reusable across kernels) ---
 {
   "schema": "hipdnn.udd/v1",
