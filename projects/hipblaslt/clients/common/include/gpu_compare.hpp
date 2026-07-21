@@ -14,12 +14,16 @@
 // atol/rtol candidate grid, shared with allclose_check_general() in allclose.hpp
 // so the GPU allclose search reports the same effective (atol, rtol).
 //
-// Two limitations:
+// Two notes:
 //  (a) Serial-float accumulation diverges from the library reduction order by more
 //      than 4 ULP at large K (~71 ULP at K=16384 f32), so the exact (tol==0)
 //      unit_check is only meaningful at small K.
-//  (b) For f32/f64 outputs holding matching infinities, this near/norm path treats
-//      them as agreeing while the CPU ASSERT_NEAR(inf, inf) does not.
+//  (b) Matching non-finite values (matching same-signed inf, and both-nan pairs) count
+//      as agreement uniformly across the unit/near/norm paths, matching the CPU
+//      unit_check and near_check. This differs from CPU norm_check only, whose
+//      inf-inf / nan arithmetic yields nan and fails on matching inf/nan -- an
+//      intentional, more lenient but correct choice, since both references agreeing on
+//      a non-finite value is genuine agreement.
 inline constexpr int    GPU_REF_TOL_GRID_N = 6;
 inline constexpr double GPU_REF_TOL_GRID[GPU_REF_TOL_GRID_N]
     = {1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};

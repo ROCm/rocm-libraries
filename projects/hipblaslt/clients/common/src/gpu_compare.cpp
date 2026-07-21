@@ -267,9 +267,14 @@ namespace
                 if(isnan(gre) || isinf(gre) || isnan(gim) || isinf(gim) || isnan(rre)
                    || isinf(rre) || isnan(rim) || isinf(rim))
                 {
-                    // Exact component-wise equality lets matching infinities agree;
-                    // any other non-finite disagreement fails and poisons allclose.
-                    if(!(gre == rre && gim == rim))
+                    // Per-component agreement: matching infinities (equal bits) or a
+                    // both-nan pair; any other non-finite disagreement fails and
+                    // poisons allclose. Matches CPU near_check; slightly stricter than
+                    // CPU unit_check (which accepts any-nan-gold vs any-nan-gpu), so it
+                    // can only reject, never accept, a genuine disagreement.
+                    const bool re_ok = (gre == rre) || (isnan(gre) && isnan(rre));
+                    const bool im_ok = (gim == rim) || (isnan(gim) && isnan(rim));
+                    if(!(re_ok && im_ok))
                     {
                         ++l_nan;
                         for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
@@ -301,10 +306,13 @@ namespace
 
                 if(isnan(g) || isinf(g) || isnan(r) || isinf(r))
                 {
-                    // Matching same-signed infinities agree; any nan or inf disagreement
-                    // is a failure that also poisons the allclose grid. Non-finite values
-                    // stay out of the norm/ulp sums so they do not become nan.
-                    if(!(isinf(g) && isinf(r) && g == r))
+                    // Matching same-signed infinities and both-nan pairs agree (as the
+                    // CPU unit/near checks do); any other non-finite disagreement is a
+                    // failure that also poisons the allclose grid. Non-finite values stay
+                    // out of the norm/ulp sums so they do not become nan.
+                    const bool matching_inf = isinf(g) && isinf(r) && g == r;
+                    const bool both_nan     = isnan(g) && isnan(r);
+                    if(!(matching_inf || both_nan))
                     {
                         ++l_nan;
                         for(int k = 0; k < GPU_REF_TOL_GRID_N; ++k)
