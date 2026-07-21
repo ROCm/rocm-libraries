@@ -142,7 +142,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Batched computation is currently only supported for the ELL format.
+        // Batched computation is currently only supported for the CSR and ELL formats.
         if(batch_count > 1)
         {
             return rocsparse_status_not_implemented;
