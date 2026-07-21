@@ -46,9 +46,10 @@
 //   KERNEL_NAME     -- the byte-exact runtime kernel name
 //   NumATensors / NumBTensors / NumDTensors -- tensor counts baked into the type
 
-// GPU architecture - can be overridden via -DGFX_ARCH="gfx90a" at compile time
+// GPU architecture - must be supplied at compile time via -DGFX_ARCH=<arch>.
 #ifndef GFX_ARCH
-#define GFX_ARCH "gfx942"
+#error \
+    "GFX_ARCH must be defined at compile time (pass -DGFX_ARCH=<arch>); do not default to a specific GPU architecture."
 #endif
 
 // The force-included header exports the tensor counts into the global namespace
