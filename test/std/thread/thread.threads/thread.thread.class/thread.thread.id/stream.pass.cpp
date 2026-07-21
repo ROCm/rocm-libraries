@@ -9,6 +9,11 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: no-localization
 // UNSUPPORTED: GCC-ALWAYS_INLINE-FIXME
+// The test hard-codes the POSIX locale name "fr_FR.UTF-8" (via LOCALE_fr_FR_UTF_8),
+// which MSVC's CRT doesn't recognize - it names locales "French_France.1252" /
+// "fr-FR" - so std::locale("fr_FR.UTF-8") throws on Windows. The thread::id
+// streaming this test targets works on Windows; only the locale sub-check can't run.
+// UNSUPPORTED: windows
 
 // REQUIRES: locale.fr_FR.UTF-8
 
