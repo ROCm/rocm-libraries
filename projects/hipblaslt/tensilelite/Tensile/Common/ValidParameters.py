@@ -24,6 +24,7 @@
 
 import math
 from functools import lru_cache
+from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
 from .Types import IsaVersion
@@ -294,13 +295,7 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, including:
-    #   NumThreads must be power of 2
-    #   ClusterDim must be power of 2 and not [1,1]
-    #   DepthU must be power of 2
-    #   MacroTile must be power of 2
-    #   DataTypeA and DataTypeB must not be 6-bit float
-    # Also does not support GSU, StreamK and general batch yet. May remove these limitations in the future.
+    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
@@ -1158,7 +1153,7 @@ newMIValidParameters = {
 # Solution.py and imported back by ValidParameters extensions) would have
 # introduced a Common -> Solution reverse import.
 
-def _getExpectedTypes(validParams):
+def _getExpectedTypes(validParams: dict[str, Union[int, list[Any], Any]]) -> dict[str, set[type]]:
     """Build a map from parameter name to the set of allowed Python types.
 
     Uses the validParameters registry as the source of truth.  For each
@@ -1173,10 +1168,15 @@ def _getExpectedTypes(validParams):
     """
     typeMap = {}
     for name, allowedValues in validParams.items():
-        if allowedValues == -1:
+        if isinstance(allowedValues, list):
+            if len(allowedValues) == 0:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
+        else:  # Sentinel value -1 is allowed for all parameters
+            if allowedValues != -1:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
             continue
-        if isinstance(allowedValues, list) and len(allowedValues) > 0:
-            typeMap[name] = set(type(v) for v in allowedValues)
+
+        typeMap[name] = set(type(v) for v in allowedValues)
     return typeMap
 
 # Pre-compute once at import time so the per-Solution cost is a dict lookup.
@@ -1208,7 +1208,7 @@ def checkSpaceFillAlgoIsValid(name, value):
     else:
         maxOrderID = 5
         for orderId in value:
-            if orderId not in range(0,maxOrderID + 1):
+            if orderId not in range(0,maxOrderID + 1):  # pragma: no mutate
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
@@ -1225,7 +1225,7 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nMust be exactly 2 values per level"
                 raise Exception(msgBase.format(name, value))
             for dim in pair:
-                if dim not in range(0,256):
+                if dim not in range(0,256):  # pragma: no mutate
                     msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
                     raise Exception(msgBase.format(name, value, dim))
 
@@ -1342,5 +1342,3 @@ def validateInternalSupportParams(
         expectedTypes = {type(default)}
         if type(value) not in expectedTypes:
             raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
-
-

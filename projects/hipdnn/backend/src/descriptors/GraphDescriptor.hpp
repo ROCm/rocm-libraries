@@ -145,6 +145,8 @@ public:
     virtual hipdnnHandle_t getHandle() const;
     virtual bool isOverrideShapeEnabled() const;
 
+    virtual bool hasRaggedTensors() const;
+    virtual bool hasNonDefaultTensorAlignment() const;
     virtual bool isRuntimePassByValueEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
