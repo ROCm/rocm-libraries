@@ -3327,4 +3327,56 @@ Tests:
   requested_solution_num: 10
   gpu_arch: '950'
 
+###############################################################################
+# GPU correctness reference (check_ref) coverage.
+#
+# check_ref selects the verification reference: 1=gpu, 2=both (cpu+gpu). The GPU
+# reference (clients/common/src/reference_device.cpp) supports plain GEMM with
+# matching f32/f16/bf16 A/B and f32/f16/bf16 C/D on compute 32F, default
+# epilogue, strided batch, no scaling. integer_exact init keeps the serial
+# reference bit-exact against the library reduction at small K, so the GPU leg's
+# exact 4-ULP unit_check holds. Scoped to gfx950, where these entries run.
+###############################################################################
+
+# Plain GEMM across f32/f16/bf16, gpu and both references.
+- name: matmul_check_ref
+  category: pre_checkin
+  function:
+    matmul:
+    - *single_precision
+    - *hpa_half_precision
+    - *hpa_bf16_precision
+  M: [128]
+  N: [128]
+  K: [128]
+  transA: T
+  transB: N
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+  norm_check: 1
+  check_ref: [1, 2]
+  gpu_arch: '950'
+
+# Strided batched (batch_count > 1) exercises the per-batch norm path with both
+# references cross-checking the GPU output.
+- name: matmul_check_ref_batched
+  category: pre_checkin
+  function:
+    matmul:
+    - *single_precision
+    - *hpa_bf16_precision
+  M: [128]
+  N: [128]
+  K: [128]
+  batch_count: 3
+  transA: T
+  transB: N
+  alpha_beta: *integer_exact_alpha_beta
+  initialization: integer_exact
+  unit_check: 1
+  norm_check: 1
+  check_ref: 2
+  gpu_arch: '950'
+
 ...
