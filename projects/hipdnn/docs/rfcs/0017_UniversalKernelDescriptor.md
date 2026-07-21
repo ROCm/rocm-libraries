@@ -67,7 +67,7 @@ works from a small family of reusable descriptors, bound together for one kernel
 
 A family of near-identical kernels shares one engine (UED), one selector (UHD), a few matches, and a
 couple of dispatch descriptors, but is *many* kernels, so only kernels are batched: a **KDP
-(KernelDescriptorPack)** is one file holding `kernelDescriptors[]`, an array of UKDs. Every other
+(Kernel Descriptor Pack)** is one file holding `kernelDescriptors[]`, an array of UKDs. Every other
 descriptor is authored once and referenced by ID, so the family is a few shared descriptors plus one
 small UKD each, not hundreds of near-duplicate files.
 
@@ -134,7 +134,7 @@ only the Launch is unique to a kernel.
 
 ![A UKD is a thin binding of reusable descriptors; a Launch is a kernel source plus a UDD](../images/ukd_descriptor_decomposition.svg)
 
-Two more terms complete the set: a **KDP (KernelDescriptorPack)** batches many UKDs into one file
+Two more terms complete the set: a **KDP (Kernel Descriptor Pack)** batches many UKDs into one file
 (the deployment shape of [Section 1](#1-overview)), and a **UCD (Universal Composite Descriptor)**
 composes stages that each resolve to a UKD (future work, [Section 13](#13-multiple-kernels-and-composition)).
 
@@ -1086,7 +1086,7 @@ choices; none is a dependency.
   a graph and picks one.
 - **Launch:** a kernel source paired with a UDD; the unique, non-reused unit a UKD lists in
   `launches[]`. A simple kernel has one Launch; a multi-launch kernel has several.
-- **KDP (KernelDescriptorPack):** one file batching many UKDs as `kernelDescriptors[]`, so a family of
+- **KDP (Kernel Descriptor Pack):** one file batching many UKDs as `kernelDescriptors[]`, so a family of
   kernels is not hundreds of near-duplicate files. Only UKDs are batched; every other descriptor is
   individual and referenced by ID.
 - **UCD (Universal Composite Descriptor):** a pipeline of stages, each resolving to a UKD chosen by

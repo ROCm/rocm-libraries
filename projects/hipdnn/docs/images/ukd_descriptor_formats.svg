@@ -11,7 +11,7 @@
 
   <!-- ===================== KDP CONTAINER (left) ===================== -->
   <rect x="15" y="48" width="345" height="470" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5"/>
-  <text x="30" y="74" font-family="Consolas, monospace" font-size="13" fill="#8e5bc4" font-weight="600">KDP  KernelDescriptorPack</text>
+  <text x="30" y="74" font-family="Consolas, monospace" font-size="13" fill="#8e5bc4" font-weight="600">KDP  Kernel Descriptor Pack</text>
   <text x="30" y="94" font-family="Consolas, monospace" font-size="11" fill="#555">kernelDescriptors[] : [ UKD, UKD, ... ]</text>
 
   <!-- UKD #1 (detailed, the reference source) -->

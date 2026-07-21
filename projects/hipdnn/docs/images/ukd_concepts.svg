@@ -12,7 +12,7 @@
 
   <!-- CENTER: KDP with UKD entries -->
   <rect x="325" y="120" width="210" height="210" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="430" y="145" text-anchor="middle" font-weight="600">KDP: KernelDescriptorPack</text>
+  <text x="430" y="145" text-anchor="middle" font-weight="600">KDP: Kernel Descriptor Pack</text>
   <text x="430" y="163" text-anchor="middle" font-size="11" fill="#8a6d1f">kernelDescriptors[] : many UKDs</text>
   <rect x="345" y="176" width="170" height="30" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
   <text x="430" y="196" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UKD sdpa_d128_bf16</text>
