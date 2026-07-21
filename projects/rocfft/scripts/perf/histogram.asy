@@ -40,8 +40,6 @@ real[] b = fin;
 
 real bounds = infinity; //40000;
 
-bounds = 10000;
-
 real[] a;
 for(int i = 0; i < b.length; ++i) {
   if(abs(b[i]) < bounds) {
