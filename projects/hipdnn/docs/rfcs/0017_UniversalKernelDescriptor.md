@@ -132,8 +132,6 @@ kernel such as SDPA backward has several, all bound by the one UMD
 by ID, many UKDs share one UED (an engine is a group of kernels) and one UHD (a selection group), and
 only the Launch is unique to a kernel.
 
-![A UKD is a thin binding of reusable descriptors; a Launch is a kernel source plus a UDD](../images/ukd_descriptor_decomposition.svg)
-
 Two more terms complete the set: a **KDP (Kernel Descriptor Pack)** batches many UKDs into one file
 (the deployment shape of [Section 1](#1-overview)), and a **UCD (Universal Composite Descriptor)**
 composes stages that each resolve to a UKD (future work, [Section 13](#13-multiple-kernels-and-composition)).
