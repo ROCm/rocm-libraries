@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -851,6 +852,7 @@ private:
         // toHipdnnDataType() and are skipped by assembleGraphDescriptor().
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
+
         std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())
         {

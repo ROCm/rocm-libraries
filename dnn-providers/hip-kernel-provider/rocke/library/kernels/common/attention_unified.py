@@ -585,6 +585,81 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     return _enable_d128_small_tile(problem) and problem.block_size >= 32
 
 
+def _enable_softmax_mfma_interleave(problem: UnifiedAttentionProblem) -> bool:
+    """gfx950 single-batch d128 prefill: interleave the softmax VALU into the
+    MFMA window via ``iglp_opt(1)`` and widen to num_warps=4.
+
+    The shipped selector routes this cohort to num_warps=2 with no MFMA/softmax
+    interleave, which leaves the Matrix cores starved: rocprofv3 on D128 S8192
+    (Llama-3.1-405B, bf16) shows MFMA-busy ~5% / occupancy ~12% at 2 waves. The
+    ``use_softmax_mfma_interleave`` lever (``iglp_opt(1)`` at the loop top, which
+    lets the backend spread the causal-mask + softmax VALU across the MFMA gap)
+    combined with num_warps=4 lifts MFMA-busy to ~18% and occupancy to ~24%.
+
+    Measured (gfx950 MI355X, comgr llvm22, same-session vs the shipped auto path;
+    ``sweep_shapes_gfx950.py`` across the gap-doc cohort, correctness max_abs=0.0
+    vs the shipped kernel on every shape):
+      * D128 S8192: 122 -> 443 TF (3.6x); S4096 118 -> 412 (3.5x);
+        S2048 109 -> 350 (3.2x); S1024 108 -> 278 (2.6x); S512 105 -> 198 (1.9x).
+      * Holds across Llama-3-8B/70B, Llama-3.1-405B, Qwen2.5-7B, Qwen3-235B,
+        GPT-3-13B (MHA); bf16 and fp16 alike (no dtype cliff).
+
+    Occupancy (probe_occupancy / llvm-readelf on the produced HSACO): the widened
+    nw=4 + interleave kernel is 250 VGPR / 0 AGPR / 0 spill / 64 KB LDS -> 8
+    waves/CU, strictly BETTER than the shipped nw=2 kernel (296 VGPR / 40 AGPR,
+    4 waves/CU) -- so this does not trip the ``_enable_d128_small_tile`` nw=2
+    occupancy reconciliation (that concern was T=32 on llvm20; here T stays 128).
+
+    Scoped to the exact single-batch d128 combo cohort. The residual gap to
+    FlyDSL (~1090 TF) is structural (an 8-wave/32x32 dual-wave rewrite) and is
+    tracked separately; this is the hint-only ceiling and ships standalone.
+
+    **Why this cohort only (measured, not assumed).** The interleave lever pays
+    off wherever the loop is schedule-bound with a softmax-VALU/MFMA-idle window
+    to fill -- i.e. a 32x32-transposed (combo) geometry at nw>=2. The full
+    eligible space was swept (MI355X); adding ONLY the hint to each cohort's
+    SHIPPED spec:
+
+        cohort (shipped geometry)        S1024  S2048  S4096
+        d128 single-batch combo, nw4      1.10x  1.05x  1.03x  <- the gated win
+        d64  single-batch combo, nw4      0.97x  0.95x  0.93x  (regresses)
+        d128 multi-seq combo, nw2         1.00x  1.00x  0.99x  (neutral)
+        d256 single-seq plain, nw1        1.00x  1.00x  0.99x  (see note)
+        d128 sliding-window plain, nw2    0.83x  0.72x  0.73x  (see note)
+
+    The hint is inert on d128 multi-seq (already nw2-combo, no idle window to
+    exploit at that occupancy) and regresses d64 and d128-sliding-window on
+    their shipped geometry. It matches the runbook (arch/gfx950.md): iglp_opt
+    is neutral-to-negative without a real MFMA-idle window.
+
+    **d256 and d128-sliding-window ALSO benefit from this lever -- covered
+    elsewhere, not dropped.** On their SHIPPED plain geometry the hint alone is
+    inert/negative, but with the combo+nw geometry those cohorts want, the lever
+    helps there too and is being enabled by the cohort-owning PRs: d256 gfx950
+    via PR #9233 (AICK-1495, 32x32 combo + interleave mode2/g4, 1.1-1.94x vs
+    AOTriton), sliding-window d128 via AICK-1492 (wide-atom windowed path, in
+    progress). This gate stays scoped to the single-batch d128 combo so it does
+    not collide with those; the lever's d256/SWA coverage lives with the kernel
+    geometry work that unlocks it.
+
+    ESCAPE HATCH: ``HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0`` (or off/no/false)
+    force-DISABLES the lever, restoring the prior nw=2 / no-interleave routing.
+    """
+    env = (
+        __import__("os")
+        .environ.get("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE", "")
+        .strip()
+        .lower()
+    )
+    if env in ("0", "false", "no", "off"):
+        return False
+    return (
+        problem.head_size == 128
+        and not problem.use_fp8
+        and _enable_single_batch_combo(problem)
+    )
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -823,6 +898,13 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         # nw=2 here, overriding the S>=2048 -> nw=4 rule. When the small-tile
         # gate is OFF this branch is byte-for-byte the prior behavior.
         if problem.head_size == 64:
+            target = 4
+        elif _enable_softmax_mfma_interleave(problem):
+            # d128 softmax-MFMA-interleave cohort: widen to nw=4. The interleaved
+            # kernel is occupancy-BETTER than the shipped nw=2 (250 vs 296 VGPR,
+            # 8 vs 4 waves/CU -- see _enable_softmax_mfma_interleave), so the
+            # small-tile nw=2 reconciliation below does not apply. Overrides the
+            # _enable_d128_small_tile -> nw=2 rule for this cohort only.
             target = 4
         elif _enable_d128_small_tile(problem):
             target = 2

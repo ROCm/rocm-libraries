@@ -248,6 +248,8 @@ public:
                 tensorMap, nodeAttributes->in_1_tensor_uid(), Input1DataTypeEnum);
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 
