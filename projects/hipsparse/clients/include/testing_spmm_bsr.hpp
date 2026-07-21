@@ -47,7 +47,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spmm_bsr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12080)
     int64_t              mb         = 10;
     int64_t              kb         = 10;
     int64_t              n          = 10;
@@ -196,7 +196,7 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spmm_bsr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12080)
     J                    m         = argus.M;
     J                    n         = argus.N;
     J                    k         = argus.K;
@@ -375,15 +375,18 @@ void testing_spmm_bsr(Arguments argus)
     void* buffer;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
-    // Preprocess (host pointer mode)
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
-        handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, buffer));
+    if(argus.call_preprocess)
+    {
+        // Preprocess (host pointer mode)
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
+            handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, buffer));
 
-    // Preprocess (device pointer mode)
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
-        handle, transA, transB, d_alpha, matA, matB, d_beta, matC2, typeT, alg, buffer));
+        // Preprocess (device pointer mode)
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
+            handle, transA, transB, d_alpha, matA, matB, d_beta, matC2, typeT, alg, buffer));
+    }
 
     if(argus.unit_check)
     {
