@@ -181,6 +181,10 @@ bool rocke_unified_attn_enable_transposed_subflags(const rocke_unified_attn_prob
  * (T=block_size + nw=2 -> 2 WG/CU). DEFAULT-ON for the gfx950 single-batch
  * d128 no-FP8 combo; HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
 bool rocke_unified_attn_enable_d128_small_tile(const rocke_unified_attn_problem_t* p);
+/* Python: _enable_softmax_mfma_interleave(problem) -- d128 softmax<->MFMA
+ * interleave (iglp_opt(1)) + nw=4. DEFAULT-ON for the gfx950 single-batch d128
+ * no-FP8 combo; HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0 force-disables. */
+bool rocke_unified_attn_enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p);
 /* Python: _enable_v_double_buffer(problem) -- short single-batch combo prefill. */
 bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_t* p);
 /* Python: _enable_early_v_schedule(problem) -- long single-batch combo prefill. */
