@@ -65,12 +65,12 @@ function(add_rocthrust_test TEST)
     )
 
     if(GRAFT_THRUST_ONTO_BINARIES)
-        target_link_libraries(testing_common INTERFACE CCCL::CCCL)
+        target_link_libraries(${TEST_TARGET} INTERFACE CCCL::CCCL)
     elseif(USE_SYSTEM_LIB)
-        target_link_libraries(testing_common INTERFACE roc::rocthrust)
+        target_link_libraries(${TEST_TARGET} INTERFACE roc::rocthrust)
     else()
-        target_link_libraries(testing_common
-            INTERFACE
+        target_link_libraries(${TEST_TARGET}
+            PRIVATE
                 rocthrust
                 roc::rocprim_hip
         )
