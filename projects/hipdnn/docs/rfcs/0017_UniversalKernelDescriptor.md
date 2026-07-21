@@ -54,7 +54,7 @@ cross-cutting feature is written once and inherited by every descriptor-backed k
 works from a small family of reusable descriptors, bound together for one kernel by a UKD:
 
 - **UMD (Universal Match Descriptor).** When a kernel applies: the graph pattern and constraints,
-  which also bind the named variables a launch references.
+  which also bind the named variables and launch references.
 - **UDD (Universal Dispatch Descriptor).** How to invoke a kernel, the dispatch ABI: argument binding
   and ordering, grid, block, shared memory, and workspace.
 - **UED (Universal Engine Descriptor).** One engine: a stable identity plus the knobs it exposes and
