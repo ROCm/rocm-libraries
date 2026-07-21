@@ -22,6 +22,7 @@
 #define ROCFFT_CLIENT_EXCEPT_H
 
 #include <hip/hiprtc.h>
+#include <stdexcept>
 #include <string>
 
 // exception type to throw when we want to skip a problem

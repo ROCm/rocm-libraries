@@ -250,7 +250,7 @@ static std::string get_jit_callback_decls(fft_array_type itype, fft_precision pr
                       "// expected function signature exactly\n"
                       "#include <cuComplex.h>\n"
                       "typedef cuComplex callbackFloatComplex;\n"
-                      "typedef cuDoubleComplex callbackFloatComplex;\n"
+                      "typedef cuDoubleComplex callbackDoubleComplex;\n"
                       "#endif\n";
     switch(itype)
     {
@@ -339,7 +339,9 @@ std::vector<char> compile_jit_callback(const std::string& src)
     options.push_back("-O3");
     options.push_back("--offload-arch=amdgcnspirv");
 #else
-    options.push_back("-I/usr/local/cuda/include");
+#ifdef HIPFFT_CUDA_INCLUDE
+    options.push_back("-I" HIPFFT_CUDA_INCLUDE);
+#endif
     options.push_back("-dlto");
     options.push_back("--relocatable-device-code=true");
 #endif
@@ -916,32 +918,33 @@ void get_rank_load_callbacks_funcptr(const fft_params&                          
     }
 }
 
-void get_rank_callback_jit(const fft_params&                          params,
-                           std::vector<char>&                         cb_func,
-                           std::vector<void*>&                        cb_data,
-                           bool                                       round_trip_inverse,
-                           std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
-                           get_rank_callback                          type)
+std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params& params,
+                                                               const char*       symbol,
+                                                               bool              round_trip_inverse,
+                                                               jit_callback_op   type)
 {
+    auto state    = std::make_shared<fft_params::jit_cb_state_t>();
+    state->symbol = symbol;
+
     int mpi_rank = params.get_process_rank();
 
     switch(type)
     {
-    case get_rank_callback::LOAD:
-        cb_func = get_load_callback_jit(params.itype, params.precision, round_trip_inverse);
+    case jit_callback_op::LOAD:
+        state->func = get_load_callback_jit(params.itype, params.precision, round_trip_inverse);
         break;
-    case get_rank_callback::STORE:
-        cb_func = get_store_callback_jit(params.otype, params.precision, round_trip_inverse);
+    case jit_callback_op::STORE:
+        state->func = get_store_callback_jit(params.otype, params.precision, round_trip_inverse);
         break;
     }
 
-    cb_data.resize(rocfft_scoped_device::device_count());
+    state->data.resize(rocfft_scoped_device::device_count());
 
     // If specified does not already have a cbdata allocated for it,
     // alloc callback data pointer and set in the output vec,
     // assuming it's big enough for all devices
     auto add_cb_data_for_device = [&](int deviceID) {
-        if(cb_data[deviceID])
+        if(state->data[deviceID])
             return;
 
         rocfft_scoped_device dev(deviceID);
@@ -949,7 +952,7 @@ void get_rank_callback_jit(const fft_params&                          params,
 
         switch(type)
         {
-        case get_rank_callback::LOAD:
+        case jit_callback_op::LOAD:
             if(round_trip_inverse)
             {
                 cb_data_host.scalar = params.store_cb_scalar;
@@ -959,7 +962,7 @@ void get_rank_callback_jit(const fft_params&                          params,
                 cb_data_host.scalar = params.load_cb_scalar;
             }
             break;
-        case get_rank_callback::STORE:
+        case jit_callback_op::STORE:
             if(round_trip_inverse)
             {
                 cb_data_host.scalar = params.load_cb_scalar;
@@ -970,21 +973,21 @@ void get_rank_callback_jit(const fft_params&                          params,
             }
         }
 
-        auto& cb_data_dev = all_cb_data.emplace_back();
-        auto  hip_status  = cb_data_dev.alloc(sizeof(callback_test_data));
+        auto hip_status = state->data[deviceID].alloc(sizeof(callback_test_data));
         if(hip_status != hipSuccess)
         {
             throw hip_runtime_error("Error occurred when allocating device memory for callback",
                                     hip_status);
         }
-        hip_status = hipMemcpy(
-            cb_data_dev.data(), &cb_data_host, sizeof(callback_test_data), hipMemcpyHostToDevice);
+        hip_status = hipMemcpy(state->data[deviceID].data(),
+                               &cb_data_host,
+                               sizeof(callback_test_data),
+                               hipMemcpyHostToDevice);
         if(hip_status != hipSuccess)
         {
             throw hip_runtime_error("Error occurred when copying device memory for callback",
                                     hip_status);
         }
-        cb_data[deviceID] = cb_data_dev.data();
     };
 
     // user-specified decomposition - alloc data for each brick
@@ -1014,16 +1017,17 @@ void get_rank_callback_jit(const fft_params&                          params,
         // check i/o fields
         switch(type)
         {
-        case get_rank_callback::LOAD:
+        case jit_callback_op::LOAD:
             add_cb_data_for_fields(params.ifields);
             break;
-        case get_rank_callback::STORE:
+        case jit_callback_op::STORE:
             add_cb_data_for_fields(params.ofields);
             break;
         }
         // add cbdata for current device
         add_cb_data_for_device(rocfft_scoped_device::current_device());
     }
+    return state;
 }
 
 // For the current rank, get a vector of store callback function +

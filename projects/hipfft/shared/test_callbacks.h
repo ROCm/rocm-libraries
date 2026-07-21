@@ -91,17 +91,15 @@ void get_rank_store_callbacks_funcptr(const fft_params&                         
 // data pointers.  cb_data has an element for each visible HIP
 // device, though pointers are only set for devices that could
 // participate in the param's transform.
-enum class get_rank_callback
+enum class jit_callback_op
 {
     LOAD,
     STORE,
 };
-void get_rank_callback_jit(const fft_params&                          params,
-                           std::vector<char>&                         cb_func,
-                           std::vector<void*>&                        cb_data,
-                           bool                                       round_trip_inverse,
-                           std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
-                           get_rank_callback                          type);
+std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params& params,
+                                                               const char*       symbol,
+                                                               bool              round_trip_inverse,
+                                                               jit_callback_op   type);
 
 // Execute the load/store callback function on a host buffer, to
 // ensure that the reference host FFT is comparable to a device FFT

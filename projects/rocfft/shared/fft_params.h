@@ -499,14 +499,55 @@ public:
     // JIT callback parameters are specified at plan creation time, so
     // they need to be known and remembered before create_plan() is
     // called
-    const char*        load_cb_symbol = nullptr;
-    std::vector<char>  load_cb_func;
-    std::vector<void*> load_cb_data;
-    size_t             load_cb_shared_mem_bytes = 0;
-    const char*        store_cb_symbol          = nullptr;
-    std::vector<char>  store_cb_func;
-    std::vector<void*> store_cb_data;
-    size_t             store_cb_shared_mem_bytes = 0;
+    struct jit_cb_state_t
+    {
+        const char*         symbol = nullptr;
+        std::vector<char>   func;
+        std::vector<gpubuf> data;
+        size_t              shared_mem_bytes = 0;
+        // "convert" data to std::vector<void*> as needed in APIs
+        inline std::vector<void*> get_raw_data_ptrs() const
+        {
+            std::vector<void*> ret;
+            ret.reserve(data.size());
+            for(auto& buf : data)
+                ret.push_back(buf.data());
+            return ret;
+        }
+
+        // throw if this state is not usable (symbol/code/data missing,
+        // etc)
+        void check_valid() const
+        {
+            if(!symbol)
+                throw std::invalid_argument("missing JIT symbol");
+            if(func.empty())
+                throw std::invalid_argument("missing JIT code");
+            // data can be empty if the callback function doesn't need
+            // it, but if nonempty must have one ptr per device
+            if(!data.empty()
+               && data.size() != static_cast<size_t>(rocfft_scoped_device::device_count()))
+                throw std::invalid_argument("invalid number of JIT data ptrs");
+        }
+    };
+    std::shared_ptr<jit_cb_state_t> load_jit_cb_state;
+    std::shared_ptr<jit_cb_state_t> store_jit_cb_state;
+
+    // Check that JIT callback parameters have been specified properly,
+    // if JIT callbacks are required.  Throws an exception if the check
+    // fails.
+    void check_jit_callback_state() const
+    {
+        if(run_callbacks != fft_callback_type_jit)
+            return;
+
+        if(!load_jit_cb_state)
+            throw std::invalid_argument("missing JIT load state");
+        load_jit_cb_state->check_valid();
+        if(!store_jit_cb_state)
+            throw std::invalid_argument("missing JIT store state");
+        store_jit_cb_state->check_valid();
+    }
 
     enum fft_mp_lib
     {

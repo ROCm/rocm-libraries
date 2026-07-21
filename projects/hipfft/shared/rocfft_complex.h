@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,10 +28,14 @@
 #include <math.h>
 #include <type_traits>
 
-#ifdef __HIP_PLATFORM_NVIDIA__
+#if defined(__HIP_PLATFORM_NVIDIA__)
 typedef __half rocfft_fp16;
-#else
+#elif defined(__HIP_PLATFORM_AMD__)
 typedef _Float16 rocfft_fp16;
+#else
+// HIP AOT compilation or HIP RTC would set one of the two macros above
+// so if we're here, we must be doing NVRTC
+#define ROCFFT_COMPLEX_NVRTC
 #endif
 
 template <typename Treal>
@@ -205,13 +209,13 @@ struct rocfft_complex
         return (x -= Treal(rhs)), *this;
     }
 
-    __device__ __host__ auto operator+(const Treal& rhs)
+    __device__ __host__ auto operator+(const Treal& rhs) const
     {
         auto lhs = *this;
         return lhs += rhs;
     }
 
-    __device__ __host__ auto operator-(const Treal& rhs)
+    __device__ __host__ auto operator-(const Treal& rhs) const
     {
         auto lhs = *this;
         return lhs -= rhs;
@@ -257,7 +261,7 @@ struct rocfft_complex
 };
 
 // Stream operators
-#if !defined(__HIPCC_RTC__)
+#if !defined(__HIPCC_RTC__) && !defined(ROCFFT_COMPLEX_NVRTC)
 static std::ostream& operator<<(std::ostream& stream, const rocfft_fp16& f)
 {
     return stream << static_cast<double>(f);
@@ -328,10 +332,13 @@ namespace std
         return z.x;
     }
 
+    // NVRTC does not provide an fp16 type
+#ifndef ROCFFT_COMPLEX_NVRTC
     __device__ __host__ constexpr rocfft_fp16 real(const rocfft_fp16 x)
     {
         return x;
     }
+#endif
 
     template <typename Treal>
     __device__ __host__ constexpr Treal imag(const rocfft_complex<Treal>& z)

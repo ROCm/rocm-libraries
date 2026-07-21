@@ -278,25 +278,28 @@ public:
                 // - not implemented yet
                 throw unimplemented_exception("jit callbacks not implemented");
 #if 0
-                check_jit_callback_params();
+                check_jit_callback_state();
                 fft_status = rocfft.plan_description_set_load_callback(
                     desc,
-                    load_cb_symbol,
-                    load_cb_func.data(),
-                    load_cb_func.size(),
-                    load_cb_data.empty() ? nullptr : load_cb_data.data(),
-                    load_cb_shared_mem_bytes);
+                    load_jit_cb_state->symbol,
+                    load_jit_cb_state->func.data(),
+                    load_jit_cb_state->func.size(),
+                    load_jit_cb_state->data.empty() ? nullptr
+                                                    : load_jit_cb_state->get_raw_data_ptrs().data(),
+                    load_jit_cb_state->shared_mem_bytes);
                 if(fft_status != rocfft_status_success)
                 {
                     throw std::runtime_error("rocfft_plan_description_set_load_callback failed");
                 }
                 fft_status = rocfft.plan_description_set_store_callback(
                     desc,
-                    store_cb_symbol,
-                    store_cb_func.data(),
-                    store_cb_func.size(),
-                    store_cb_data.empty() ? nullptr : store_cb_data.data(),
-                    store_cb_shared_mem_bytes);
+                    store_jit_cb_state->symbol,
+                    store_jit_cb_state->func.data(),
+                    store_jit_cb_state->func.size(),
+                    store_jit_cb_state->data.empty()
+                        ? nullptr
+                        : store_jit_cb_state->get_raw_data_ptrs().data(),
+                    store_jit_cb_state->shared_mem_bytes);
                 if(fft_status != rocfft_status_success)
                 {
                     throw std::runtime_error("rocfft_plan_description_set_store_callback failed");
@@ -412,22 +415,6 @@ public:
             }
         }
         return expected_callbacks;
-    }
-
-    // Check that JIT callback parameters have been specified properly,
-    // if JIT callbacks are required.  Throws an exception if the check
-    // fails.
-    void check_jit_callback_params() const
-    {
-        if(run_callbacks != fft_callback_type_jit)
-            return;
-
-        // symbol was provided iff func is provided
-        if((load_cb_symbol && load_cb_func.empty()) || (!load_cb_symbol && !load_cb_func.empty()))
-            throw std::invalid_argument("missing load symbol/func");
-        if((store_cb_symbol && store_cb_func.empty())
-           || (!store_cb_symbol && !store_cb_func.empty()))
-            throw std::invalid_argument("missing store symbol/func");
     }
 
     fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,

@@ -344,26 +344,12 @@ inline void run_round_trip_inverse(Tparams&              params,
                                    std::vector<void*>&   pobuffer,
                                    std::vector<hostbuf>& gpu_output)
 {
-    // Vector of callback data - at function scope so they live until
-    // after the transform is completed
-    std::vector<gpubuf_t<callback_test_data>> all_cb_data;
-
     if(params.run_callbacks == fft_callback_type_jit)
     {
-        params.load_cb_symbol = "load_callback_round_trip_inverse";
-        get_rank_callback_jit(params,
-                              params.load_cb_func,
-                              params.load_cb_data,
-                              true,
-                              all_cb_data,
-                              get_rank_callback::LOAD);
-        params.store_cb_symbol = "store_callback_round_trip_inverse";
-        get_rank_callback_jit(params,
-                              params.store_cb_func,
-                              params.store_cb_data,
-                              true,
-                              all_cb_data,
-                              get_rank_callback::STORE);
+        params.load_jit_cb_state = get_rank_jit_state(
+            params, "load_callback_round_trip_inverse", true, jit_callback_op::LOAD);
+        params.store_jit_cb_state = get_rank_jit_state(
+            params, "store_callback_round_trip_inverse", true, jit_callback_op::STORE);
     }
 
     params.validate();
@@ -527,23 +513,12 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // returned by previous HIP runtime API calls.
     hipError_t hip_status = hipGetLastError();
 
-    std::vector<gpubuf_t<callback_test_data>> all_cb_data;
     if(params.run_callbacks == fft_callback_type_jit)
     {
-        params.load_cb_symbol = "load_callback";
-        get_rank_callback_jit(params,
-                              params.load_cb_func,
-                              params.load_cb_data,
-                              false,
-                              all_cb_data,
-                              get_rank_callback::LOAD);
-        params.store_cb_symbol = "store_callback";
-        get_rank_callback_jit(params,
-                              params.store_cb_func,
-                              params.store_cb_data,
-                              false,
-                              all_cb_data,
-                              get_rank_callback::STORE);
+        params.load_jit_cb_state
+            = get_rank_jit_state(params, "load_callback", false, jit_callback_op::LOAD);
+        params.store_jit_cb_state
+            = get_rank_jit_state(params, "store_callback", false, jit_callback_op::STORE);
     }
 
     // Make sure that the parameters make sense:
