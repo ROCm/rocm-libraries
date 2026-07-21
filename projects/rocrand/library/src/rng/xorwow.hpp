@@ -69,7 +69,12 @@ __host__ __device__
     }
 };
 
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution, bool PossibleMissAlign>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         bool PossibleMissAlign,
+         bool UseLDS>
 struct generate_xorwow
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -109,6 +114,8 @@ __host__ __device__ __forceinline__
 
         size_t index = thread_id;
 #ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
 #if defined(__gfx942__) || defined(__gfx908__)
@@ -124,7 +131,12 @@ __host__ __device__ __forceinline__
             {
                 input[i] = engine();
             }
-            distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+            if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                distribution.generate_lds(input, output);
+            else
+#endif
+                distribution(input, output);
 #if defined(__gfx90a__)
             // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops on MI200.
             // For some reason this decreases performance of uniform distributions.
@@ -148,7 +160,12 @@ __host__ __device__ __forceinline__
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -165,7 +182,12 @@ __host__ __device__ __forceinline__
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -403,8 +425,17 @@ public:
         const auto use_missaligned_variant
             = cpp_utils::constexpr_value_variant<bool, false, true>::create(possible_miss_align);
 
+        bool use_lds = false;
+        if constexpr(is_discrete_distribution_v<Distribution>)
+        {
+            use_lds = distribution.check_lds_size();
+        }
+
+        const auto use_lds_variant
+            = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
         status = std::visit(
-            [&](auto possibly_miss_aligned)
+            [&](auto possibly_miss_aligned, auto possible_lds_usage)
             {
                 return dynamic_dispatch(
                     m_order,
@@ -414,7 +445,8 @@ public:
                                                                             is_dynamic,
                                                                             T,
                                                                             Distribution,
-                                                                            possibly_miss_aligned>,
+                                                                            possibly_miss_aligned,
+                                                                            possible_lds_usage>,
                                                             ConfigProvider,
                                                             T,
                                                             is_dynamic>(target_arch,
@@ -432,7 +464,8 @@ public:
                                                                         misalignment);
                     });
             },
-            use_missaligned_variant);
+            use_missaligned_variant,
+            use_lds_variant);
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)

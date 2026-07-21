@@ -83,9 +83,109 @@ public:
         output[0] = (*this)(input[0]);
     }
 
+    template<class T>
+    __forceinline__ __device__ unsigned int generate_lds(T x) const
+    {
+        if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
+        {
+            return rocrand_device::detail::discrete_alias(x, *get_storage());
+        }
+        else
+        {
+            return rocrand_device::detail::discrete_cdf(x, *get_storage());
+        }
+    }
+
+    template<class T>
+    __forceinline__ __device__
+    void generate_lds(const T (&input)[1], unsigned int output[1]) const
+    {
+        output[0] = generate_lds(input[0]);
+    }
+
+    __device__
+    static rocrand_discrete_distribution_st* get_storage()
+    {
+        __shared__ rocrand_discrete_distribution_st s_dist;
+
+        if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
+        {
+            __shared__ double s_cdf[LDS_DISTR_MAX];
+
+            // Stash the array pointers into s_dist once, harmless if repeated.
+            s_dist.cdf = s_cdf;
+        }
+        if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
+        {
+            __shared__ double s_probability[LDS_DISTR_MAX];
+            __shared__ unsigned int s_alias[LDS_DISTR_MAX];
+
+            // Stash the array pointers into s_dist once, harmless if repeated.
+            s_dist.probability = s_probability;
+            s_dist.alias       = s_alias;
+        }
+
+        return &s_dist;
+    }
+
+    __forceinline__
+    __host__ __device__
+    bool check_lds_size()
+    {
+        return m_distribution.size <= LDS_DISTR_MAX;
+    }
+
+    __device__
+    void stage_to_lds(unsigned int tid, unsigned int block_size)
+    {
+        rocrand_discrete_distribution s_dist = get_storage();
+
+        const unsigned int dist_size = m_distribution.size;
+        if(dist_size > LDS_DISTR_MAX) // Should never be reached
+            return;
+
+        if(tid == 0)
+        {
+            s_dist->size   = dist_size;
+            s_dist->offset = m_distribution.offset;
+            if constexpr((Method & DISCRETE_METHOD_CDF) == 0)
+            {
+                s_dist->cdf = nullptr;
+            }
+            if constexpr((Method & DISCRETE_METHOD_ALIAS) == 0)
+            {
+                s_dist->probability = nullptr;
+                s_dist->alias       = nullptr;
+            }
+        }
+        for(unsigned int i = tid; i < dist_size; i += block_size)
+        {
+            if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
+            {
+                s_dist->cdf[i] = m_distribution.cdf[i];
+            }
+            if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
+            {
+                s_dist->probability[i] = m_distribution.probability[i];
+                s_dist->alias[i]       = m_distribution.alias[i];
+            }
+        }
+    }
+
 private:
+    static constexpr unsigned int    LDS_DISTR_MAX = 128;
     rocrand_discrete_distribution_st m_distribution;
 };
+
+template<typename Distribution>
+constexpr bool is_discrete_distribution_v
+    = std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_ALIAS>,
+                        Distribution>
+      || std::is_base_of_v<discrete_distribution_base<discrete_method::DISCRETE_METHOD_CDF>,
+                           Distribution>
+      || std::is_base_of_v<
+          discrete_distribution_base<discrete_method::DISCRETE_METHOD_UNIVERSAL>,
+          Distribution>; // TODO: I want to do this for all distributions that inherite discrete or only poisson?
 
 /// \brief A collection of static methods for constructing and destroying
 /// instances of `rocrand_discrete_distribution_st`.
