@@ -612,6 +612,16 @@ class AlgorithmDeviceSegmentedRadixSort(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceSegmentedTopkAir(Algorithm):
+    algorithm_name = "device_segmented_topk_air"
+    cpp_configuration_template_name = "segmented_topk_air_config_template"
+    config_selection_params = [
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+
 class AlgorithmDeviceTransform(Algorithm):
     algorithm_name = "device_transform"
     cpp_configuration_template_name = "transform_config_template"
@@ -804,6 +814,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceAdjacentFind(fallback_entries)
     elif algorithm_name == 'device_segmented_radix_sort':
         return AlgorithmDeviceSegmentedRadixSort(fallback_entries)
+    elif algorithm_name == 'device_segmented_topk_air':
+        return AlgorithmDeviceSegmentedTopkAir(fallback_entries)
     elif algorithm_name == 'device_transform':
         return AlgorithmDeviceTransform(fallback_entries)
     elif algorithm_name == 'device_transform_pointer':
