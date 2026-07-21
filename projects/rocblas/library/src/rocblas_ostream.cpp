@@ -265,7 +265,8 @@ void rocblas_internal_ostream::worker::send(std::string str)
         m_cond.notify_one();
     }
 
-// Wait for the task to be completed, to ensure flushed IO
+// Wait for the task to complete so IO is flushed. On Windows the wait is
+// bounded (see below) and may return before completion during shutdown.
 #ifdef WIN32
     // On Windows the worker thread may already have been terminated by the OS
     // before this runs: rocBLAS ships as a DLL, so static objects (such as the
