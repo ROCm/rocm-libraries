@@ -62,14 +62,15 @@ works from a small family of reusable descriptors, bound together for one kernel
 - **UHD (Universal Heuristic Descriptor).** One kernel-selection model: given many kernels that fit a
   graph, it picks the best one for the problem.
 - **UKD (Universal Kernel Descriptor).** One launchable kernel, a thin binding with no logic of its
-  own. It names one UMD, one UED, one UHD, and one or more Launches, where a **Launch pairs a kernel
-  source with a UDD**.
+  own. It names one match descriptor, one engine descriptor, one heuristic descriptor, and one or more
+  Launches, where a **Launch pairs a kernel source with a dispatch descriptor**.
 
-A family of near-identical kernels shares one engine (UED), one selector (UHD), a few matches, and a
-couple of dispatch descriptors, but is *many* kernels, so only kernels are batched: a **KDP
-(Kernel Descriptor Pack)** is one file holding `kernelDescriptors[]`, an array of UKDs. Every other
-descriptor is authored once and referenced by ID, so the family is a few shared descriptors plus one
-small UKD each, not hundreds of near-duplicate files.
+A family of near-identical kernels shares one engine descriptor, one heuristic descriptor (its
+selector), a few match descriptors, and a couple of dispatch descriptors, but is *many* kernels, so
+only kernels are batched: a **KDP (Kernel Descriptor Pack)** is one file holding `kernelDescriptors[]`,
+an array of kernel descriptors. Every other descriptor is authored once and referenced by ID, so the
+family is a few shared descriptors plus one small kernel descriptor each, not hundreds of
+near-duplicate files.
 
 A prototype for a single operation (SDPA) runs a kernel end-to-end from a generic launch core plus a
 thin operation-specific adapter (rocKE, [PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)).
@@ -86,8 +87,8 @@ a defined path for extending the system. The end state is one generalized descri
 ahead-of-time (AOT) and just-in-time (JIT) kernels; AOT is the focus here, and JIT is a future
 follow-on ([Section 8.3](#83-future-jit-and-normalized-providers)).
 
-**Scope.** This document frames the system and its direction; each descriptor format (UMD, UDD, UED,
-UHD) and subsystem (the matcher, the expression language, packaging, and the drop-in loader) is
+**Scope.** This document frames the system and its direction; each descriptor format (match, dispatch,
+engine, heuristic) and subsystem (the matcher, the expression language, packaging, and the drop-in loader) is
 designed in its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)). The first deliverable is the
 single-kernel path. Multi-kernel launch and composition
 ([Section 13](#13-multiple-kernels-and-composition)) are fast-follows, not part of this initial design.
@@ -125,12 +126,14 @@ becomes data instead of hand-written code.
 | **UED** (engine) | A stable engine identity with its knobs and behavior/numerical notes | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
 | **UHD** (heuristic) | Rank the kernels within one engine and pick one | A ranking model living inside an engine's dispatcher |
 
-A UKD carries no logic of its own. It binds one UMD, one UED, one UHD, and one or more Launches, where
-a **Launch** is a kernel source paired with a UDD. A simple kernel has one Launch; a multi-launch
-kernel such as SDPA backward has several, all bound by the one UMD
-([Section 13](#13-multiple-kernels-and-composition)). Because the UMD, UDD, UED, and UHD are referenced
-by ID, many UKDs share one UED (an engine is a group of kernels) and one UHD (a selection group), and
-only the Launch is unique to a kernel.
+A kernel descriptor carries no logic of its own. It binds one match descriptor, one engine descriptor,
+one heuristic descriptor, and one or more Launches, where a **Launch** is a kernel source paired with a
+dispatch descriptor. A simple kernel has one Launch; a multi-launch kernel such as SDPA backward has
+several, all bound by the one match descriptor
+([Section 13](#13-multiple-kernels-and-composition)). Because the match, dispatch, engine, and
+heuristic descriptors are referenced by ID, many kernel descriptors share one engine descriptor (an
+engine is a group of kernels) and one heuristic descriptor (a selection group), and only the Launch is
+unique to a kernel.
 
 Two more terms complete the set: a **KDP (Kernel Descriptor Pack)** batches many UKDs into one file
 (the deployment shape of [Section 1](#1-overview)), and a **UCD (Universal Composite Descriptor)**
@@ -162,8 +165,8 @@ selection, launch) is identical regardless of how a kernel arrived.
 ![Two ingestion paths converging on one generic engine and launcher](../images/ukd_flows.svg)
 
 At provider load, the generic engine discovers all available descriptors and wires them up: each UED
-becomes an engine, each UKD becomes a data-backed plan builder inside its engine, and each UHD
-becomes the selector its engine consults. No new host or plugin-ABI interfaces are introduced; the
+becomes an engine, each kernel descriptor becomes a data-backed plan builder inside its engine, and
+each heuristic descriptor becomes the selector its engine consults. No new host or plugin-ABI interfaces are introduced; the
 generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery it
 needs (the matcher, the expression interpreter, the selector, and the predicate and custom-plan
 registries) lives inside the provider behind those contracts.
@@ -263,8 +266,9 @@ examples keep them separate for clarity and reuse.
 }
 ```
 
-**KDP, a pack of kernels:** one file batches many UKDs so a family is not hundreds of near-duplicate
-files. Only UKDs are batched; UMD/UDD/UED/UHD stay individual and referenced by ID.
+**KDP, a pack of kernels:** one file batches many kernel descriptors so a family is not hundreds of
+near-duplicate files. Only kernel descriptors are batched; the match, dispatch, engine, and heuristic
+descriptors stay individual and referenced by ID.
 
 ```jsonc
 {
@@ -422,10 +426,11 @@ attributes bound during matching ([Section 5](#5-matching-and-the-umd)). Evaluat
 interpreter that fails closed on an unknown symbol or an invalid operation; it never executes
 arbitrary code, which is what keeps descriptors pure data.
 
-Because a UDD is referenced by ID and reused across kernels, a UMD publishes the set of symbols it
-binds, and every UKD that pairs a UDD with a UMD is checked at build and at drop-in load: a UDD that
-references a symbol its UMD does not bind is rejected then, rather than left to fail closed at plan time
-on a live graph. Plan-time fail-closed remains a backstop, not the first line of defense.
+Because a dispatch descriptor is referenced by ID and reused across kernels, its match descriptor
+publishes the set of symbols it binds, and every kernel descriptor that pairs the two is checked at
+build and at drop-in load: a dispatch descriptor that references a symbol its match descriptor does not
+bind is rejected then, rather than left to fail closed at plan time on a live graph. Plan-time
+fail-closed remains a backstop, not the first line of defense.
 
 ```jsonc
 {  // a UDD; every `sym` below is a dim the UMD binds (Section 5)
@@ -558,8 +563,8 @@ heuristic runs at selection time, so its adapter is always build-and-runtime, ne
 ### 8.3 Future: JIT and Normalized Providers
 
 JIT is deferred to its **own deeper follow-up RFC**; only its shape is sketched here. The same pieces
-built for this AOT ingestor (UMD, UDD, UHD, UED, and the source/adapter model) extend to JIT with no
-new vocabulary. A kernel source already gives a clear path: at build time (or,
+built for this AOT ingestor (the match, dispatch, heuristic, and engine descriptors, and the
+source/adapter model) extend to JIT with no new vocabulary. A kernel source already gives a clear path: at build time (or,
 for supported runtime sources, at load) convert the authored source into a launchable kernel module.
 A JIT source is the same seam, except instead of lowering a source straight to a module it either
 names custom functions to call (like the escape hatches of Sections
@@ -640,9 +645,10 @@ including restricting drop-in to prebuilt code objects, are deferred to the deli
 ## 11. Worked Example: SDPA as a UKD
 
 The SDPA path prototyped in the rocKE work ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)),
-a graph allowlist plus a grid-symbol table plus hand-written argument wiring, collapses into a UMD, a
-UDD, and a UKD that binds them inside a KDP. It reuses the SDPA forward UMD from
-[Section 5](#5-matching-and-the-umd) (id `1180449020`); the UDD and the packed UKD complete it:
+a graph allowlist plus a grid-symbol table plus hand-written argument wiring, collapses into a match
+descriptor, a dispatch descriptor, and a kernel descriptor that binds them inside a KDP. It reuses the
+SDPA forward match descriptor from [Section 5](#5-matching-and-the-umd) (id `1180449020`); the dispatch
+descriptor and the packed kernel descriptor complete it:
 
 ```jsonc
 // --- UDD: how to invoke it (referenced by ID; reusable across kernels) ---
@@ -703,7 +709,7 @@ Every SDPA-specific line of hand-written C++ maps to a field:
 | module load and launch | the generic launcher | `kernel_source: kpack` paired with the UDD |
 
 The generic launcher runs it with no SDPA-specific code, and a sibling kernel such as `d64` is one more
-small UKD in the same KDP, reusing or replacing the UMD and UDD as needed. This descriptor set is what
+small kernel descriptor in the same pack, reusing or replacing the match and dispatch descriptors as needed. This descriptor set is what
 the phased delivery ([Section 12](#12-phased-delivery)) produces: the pieces land and are used to
 implement SDPA for rocKE as the first real target, and the existing hand-written engines are replaced
 by their descriptor-backed equivalents over time.
@@ -786,7 +792,7 @@ a descriptor format with the subsystem it drives, and together they form the pla
 
 ## 13. Multiple Kernels and Composition
 
-So far a UKD is one kernel: one UMD, one Launch. That one kernel may already cover a *fused* multi-op
+So far a kernel descriptor is one kernel: one match descriptor, one Launch. That one kernel may already cover a *fused* multi-op
 subgraph, where the UMD matches the whole subgraph (for example Conv-Bias-ReLU) and the single Launch runs the
 fused kernel ([Section 5](#5-matching-and-the-umd)); fusion is not what this section is about. Two
 capabilities go further, and they differ in kind:
@@ -977,7 +983,7 @@ launch on the plan stream. Because a resolved program is a fixed launch sequence
 it is a natural capture-and-replay target when launch latency matters.
 
 Selection reuses the two levels defined in [Section 2](#2-the-descriptors): a program is one
-UKD ranked by its UHD, competing alternatives are separate engines ranked by the existing engine
+kernel descriptor ranked by its heuristic descriptor, competing alternatives are separate engines ranked by the existing engine
 chain, and within a composite each stage resolves in dependency order by its own heuristic. A
 mandatory stage with no candidate fails the composite closed, and engine selection falls through to
 another engine. Comparing whole pipelines against each other never arises, because those alternatives
@@ -1020,8 +1026,8 @@ follow-up RFCs rather than solved now.
   parse input that, on the drop-in path, may be untrusted or simply malformed. They must be bounded
   (recursion, step count, and size limits) and fail closed rather than crash, and shape and workspace
   arithmetic must use checked-width integers that fail closed on overflow rather than under-allocate.
-- **Identity collisions.** Descriptor ids are unique per kind (a UMD and a UED may share a string;
-  references are typed by field), validated at build; a colliding drop-in id is logged and ignored
+- **Identity collisions.** Descriptor ids are unique per kind (a match descriptor and an engine
+  descriptor may share a string; references are typed by field), validated at build; a colliding drop-in id is logged and ignored
   rather than taking down the provider. Overlapping matches that are not id collisions are handled by
   arbitration ([Section 5](#5-matching-and-the-umd)). Namespacing, for example a vendor prefix, is
   encouraged.
