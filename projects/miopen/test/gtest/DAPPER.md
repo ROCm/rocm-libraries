@@ -176,3 +176,12 @@ Build/runtime artifacts (`bin/<PROJECT>/` on the runner):
   and falls back to `entire_category`. A future data-derived (coverage/trace) map is the
   intended fix.
 - **Native `union`** is not yet a drop-in for `check`; it runs via `diff_check` today.
+- **Windows is unsupported (dapper is forced off).** `dapper_init()` sets
+  `MIOPEN_DAPPER_MODE=off` on Windows hosts, so the build falls back to the normal
+  full-category test flow. The build-time tooling is not yet Windows-ready; future work to
+  enable it must address:
+  - `symbol_graph.py` shells out to `nm`; Windows toolchains provide `llvm-nm` instead
+    (make the tool configurable / add a fallback).
+  - `extract_gtest_fixtures.py` parses `compile_commands.json` with `shlex` in POSIX mode
+    and invokes the compiler's preprocessor via subprocess; both need Windows-aware handling.
+  - Audit for other Unix-only assumptions (e.g. the `resource` module, path separators).

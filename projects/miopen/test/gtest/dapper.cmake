@@ -19,6 +19,15 @@ endmacro()
 #   validate : native shard + dapper_diff coverage validation (Jenkins/MICI default)
 #   union    : ACTIVE -- the reduced subtractive union filter actually runs (TheRock default)
 macro(dapper_init)
+    # Dapper's build-time tooling (Python + nm / C preprocessor) is not Windows-ready yet
+    # (see DAPPER.md "Known limitations"). Force the mode off on Windows; the rest of this
+    # macro then takes the 'off' path -- no python, no dapper wiring -- so the build falls
+    # back to the normal full-category / non-dapper test flow.
+    if(WIN32 OR CMAKE_HOST_WIN32)
+        set(MIOPEN_DAPPER_MODE "off" CACHE STRING
+            "Dapper mode: off | validate | union" FORCE)
+        message(STATUS "Dapper: disabled on Windows (build-time tooling not yet ported)")
+    endif()
     if(MIOPEN_BUILD_IN_THEROCK)
         set(_MIOPEN_DAPPER_MODE_DEFAULT "union")
     else()
