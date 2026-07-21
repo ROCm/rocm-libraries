@@ -140,6 +140,34 @@ namespace hipsparse
 
         return HIPSPARSE_STATUS_SUCCESS;
     }
+
+    // Only C = alpha * op(A) + beta * op(B) with non-transpose operations on CSR matrices is
+    // supported. Reject any other request with a well-defined error rather than silently
+    // computing an incorrect result.
+    static hipsparseStatus_t checkSpGEAMSupport(hipsparseOperation_t       opA,
+                                                hipsparseOperation_t       opB,
+                                                hipsparseConstSpMatDescr_t matA,
+                                                hipsparseConstSpMatDescr_t matB,
+                                                hipsparseSpMatDescr_t      matC)
+    {
+        if(opA != HIPSPARSE_OPERATION_NON_TRANSPOSE || opB != HIPSPARSE_OPERATION_NON_TRANSPOSE)
+        {
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
+        }
+
+        hipsparseFormat_t formatA, formatB, formatC;
+        RETURN_IF_HIPSPARSE_ERROR(hipsparseSpMatGetFormat(matA, &formatA));
+        RETURN_IF_HIPSPARSE_ERROR(hipsparseSpMatGetFormat(matB, &formatB));
+        RETURN_IF_HIPSPARSE_ERROR(hipsparseSpMatGetFormat(matC, &formatC));
+
+        if(formatA != HIPSPARSE_FORMAT_CSR || formatB != HIPSPARSE_FORMAT_CSR
+           || formatC != HIPSPARSE_FORMAT_CSR)
+        {
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
+        }
+
+        return HIPSPARSE_STATUS_SUCCESS;
+    }
 }
 
 hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
@@ -161,6 +189,8 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
+
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::checkSpGEAMSupport(opA, opB, matA, matB, matC));
 
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparse::setSpGEAMInputs(handle, spgeamDescr, opA, opB, computeType, alg, alpha, beta));
@@ -205,6 +235,8 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::checkSpGEAMSupport(opA, opB, matA, matB, matC));
+
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparse::setSpGEAMInputs(handle, spgeamDescr, opA, opB, computeType, alg, alpha, beta));
 
@@ -242,6 +274,8 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
+
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::checkSpGEAMSupport(opA, opB, matA, matB, matC));
 
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparse::setSpGEAMInputs(handle, spgeamDescr, opA, opB, computeType, alg, alpha, beta));

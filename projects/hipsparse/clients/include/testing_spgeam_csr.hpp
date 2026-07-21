@@ -233,6 +233,56 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
             handle, transA, transB, &alpha, A, &beta, B, nullptr, dataType, alg, descr, dbuf),
         "Error: C is nullptr");
 
+    // Unsupported cases must return a well-defined error rather than an incorrect result.
+    // Only non-transpose operations are supported.
+    verify_hipsparse_status_not_supported(
+        hipsparseSpGEAM_bufferSize(handle,
+                                   HIPSPARSE_OPERATION_TRANSPOSE,
+                                   transB,
+                                   &alpha,
+                                   A,
+                                   &beta,
+                                   B,
+                                   C,
+                                   dataType,
+                                   alg,
+                                   descr,
+                                   &bufferSize),
+        "Error: opA transpose is not supported");
+    verify_hipsparse_status_not_supported(
+        hipsparseSpGEAM_bufferSize(handle,
+                                   transA,
+                                   HIPSPARSE_OPERATION_TRANSPOSE,
+                                   &alpha,
+                                   A,
+                                   &beta,
+                                   B,
+                                   C,
+                                   dataType,
+                                   alg,
+                                   descr,
+                                   &bufferSize),
+        "Error: opB transpose is not supported");
+
+    // Only the CSR format is supported.
+    hipsparseSpMatDescr_t A_coo;
+    verify_hipsparse_status_success(hipsparseCreateCoo(&A_coo,
+                                                       m,
+                                                       n,
+                                                       nnz_A,
+                                                       dcsr_row_ptr_A,
+                                                       dcsr_col_ind_A,
+                                                       dcsr_val_A,
+                                                       idxType,
+                                                       idxBase,
+                                                       dataType),
+                                    "success");
+    verify_hipsparse_status_not_supported(
+        hipsparseSpGEAM_bufferSize(
+            handle, transA, transB, &alpha, A_coo, &beta, B, C, dataType, alg, descr, &bufferSize),
+        "Error: COO format is not supported");
+    verify_hipsparse_status_success(hipsparseDestroySpMat(A_coo), "success");
+
     verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(B), "success");
     verify_hipsparse_status_success(hipsparseDestroySpMat(C), "success");

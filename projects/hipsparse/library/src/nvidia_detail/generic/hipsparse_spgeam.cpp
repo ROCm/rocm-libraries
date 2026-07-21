@@ -29,6 +29,48 @@
 #include "../utility.h"
 
 #if(CUDART_VERSION >= 13030)
+namespace
+{
+    // Only C = alpha * op(A) + beta * op(B) with non-transpose operations on CSR matrices is
+    // supported. Reject any other request with a well-defined error rather than forwarding it.
+    hipsparseStatus_t checkSpGEAMSupport(hipsparseOperation_t       opA,
+                                         hipsparseOperation_t       opB,
+                                         hipsparseConstSpMatDescr_t matA,
+                                         hipsparseConstSpMatDescr_t matB,
+                                         hipsparseSpMatDescr_t      matC)
+    {
+        if(opA != HIPSPARSE_OPERATION_NON_TRANSPOSE || opB != HIPSPARSE_OPERATION_NON_TRANSPOSE)
+        {
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
+        }
+
+        hipsparseFormat_t formatA, formatB, formatC;
+        hipsparseStatus_t status;
+        if((status = hipsparseSpMatGetFormat(matA, &formatA)) != HIPSPARSE_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        if((status = hipsparseSpMatGetFormat(matB, &formatB)) != HIPSPARSE_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        if((status = hipsparseSpMatGetFormat(matC, &formatC)) != HIPSPARSE_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
+        if(formatA != HIPSPARSE_FORMAT_CSR || formatB != HIPSPARSE_FORMAT_CSR
+           || formatC != HIPSPARSE_FORMAT_CSR)
+        {
+            return HIPSPARSE_STATUS_NOT_SUPPORTED;
+        }
+
+        return HIPSPARSE_STATUS_SUCCESS;
+    }
+}
+#endif
+
+#if(CUDART_VERSION >= 13030)
 hipsparseStatus_t hipsparseSpGEAM_createDescr(hipsparseSpGEAMDescr_t* descr)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
@@ -58,6 +100,12 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
                                              hipsparseSpGEAMDescr_t     spgeamDescr,
                                              size_t*                    bufferSize)
 {
+    hipsparseStatus_t status = checkSpGEAMSupport(opA, opB, matA, matB, matC);
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEAM_bufferSize((cusparseHandle_t)handle,
                                   hipsparse::hipOperationToCudaOperation(opA),
@@ -88,6 +136,12 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
                                       hipsparseSpGEAMDescr_t     spgeamDescr,
                                       void*                      externalBuffer)
 {
+    hipsparseStatus_t status = checkSpGEAMSupport(opA, opB, matA, matB, matC);
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEAM_nnz((cusparseHandle_t)handle,
                            hipsparse::hipOperationToCudaOperation(opA),
@@ -118,6 +172,12 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
                                   hipsparseSpGEAMDescr_t     spgeamDescr,
                                   void*                      externalBuffer)
 {
+    hipsparseStatus_t status = checkSpGEAMSupport(opA, opB, matA, matB, matC);
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpGEAM((cusparseHandle_t)handle,
                        hipsparse::hipOperationToCudaOperation(opA),
