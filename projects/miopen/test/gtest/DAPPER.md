@@ -37,9 +37,10 @@ Selected with the CMake cache variable `MIOPEN_DAPPER_MODE`:
 - **dapper_filter** — the impact set: fixtures reachable from the files changed
   between the merge-base and HEAD, via the dependency graph. Computed on the builder.
 - **union_filter** — `dapper_filter` ∩ category positives, plus the category's
-  negatives. Always ⊆ the category (subtractive). Computed cheaply at run time.
-- **fallback_mode** — how the runner behaves when the impact set is unusable,
-  decided on the builder and written into the JSON:
+  negatives. Always ⊆ the category (subtractive). Computed on the builder and burned
+  into the install `CTestTestfile.cmake` (TheRock) / computed by `dapper_diff` (native).
+- **fallback_mode** — how the effective filter is chosen when the impact set is
+  unusable, decided on the builder and applied when the union is computed:
   - `union` — attributed changes exist → run the intersection.
   - `entire_category` — a change is compiled in but unattributable (common `.cpp`
     body a bridge could not resolve, a runtime-compiled kernel, or an
@@ -54,30 +55,38 @@ builder; only gtest execution happens on the GPU runner.**
 ### Builder (no GPU)
 
 1. **CMake configure** — `test/gtest/CMakeLists.txt` detects TheRock
-   (`THEROCK_SUBPROJECT_TARGET`), defaults `MIOPEN_DAPPER_MODE=union`, calls
-   `dapper_therock_generate_json()` and `apply_test_category_labels(... DAPPER_JSON=...)`.
-   The generated install `CTestTestfile.cmake` routes each dapper-enabled category
-   suite (`miopen_gtest_<category>_suite` and per-arch `..._<gfx>_suite`) through the
-   `gtest_runner` wrapper instead of the binary directly.
+   (`THEROCK_SUBPROJECT_TARGET`), defaults `MIOPEN_DAPPER_MODE=union`, and
+   `apply_test_category_labels(...)` generates the normal install `CTestTestfile.cmake`
+   (each `miopen_gtest_<category>_suite` invokes the binary directly with the full
+   category `--gtest_filter`). In `union` mode it then calls
+   `dapper_therock_generate_json()` (dapper.cmake) to set up the build-time steps below.
 2. **Compile** — build `miopen_gtest`, producing the final `build.ninja`,
    `compile_commands.json`, object files, and the `.ninja_deps` log.
-3. **Impact analysis** — the `dapper_therock_json` target (`DEPENDS miopen_gtest`) runs:
+3. **Impact analysis + finalize** — the `dapper_therock_json` target
+   (`DEPENDS miopen_gtest` and the configure-generated CTestTestfile) runs, in one
+   command:
    - `main.py shas --base-ref <ref> --source-dir <miopen source>` — git merge-base +
      HEAD (git runs in the source worktree; the build dir is not a git repo).
    - `extract_gtest_fixtures.py` — `compile_commands.json` → per-source fixtures
      (keyed `bin/test_<stem>`).
    - `main.py parse build.ninja --bridges=<...>` — `ninja -t deps` per object, plus the
      selected attribution bridge(s) → `file → {tests}` mapping.
-   - `main.py select ... --source-dir <miopen source>` — git diff → changed files →
+   - `main.py select ... --output miopen_dapper_tests.json` — git diff → changed files →
      affected fixtures → **`dapper_filter` + `fallback_mode`**.
+   - `main.py finalize-ctest --ctest-in <install CTestTestfile> --ctest-out <finalized>
+     --yaml test_categories.yaml --dapper-json miopen_dapper_tests.json` — for each
+     Dapper-enabled category (`enable_dapper`), compute the union (honoring
+     `fallback_mode`) and **burn it into `<category>_suite`'s `--gtest_filter`**, add a
+     `<category>_original_suite` that retains the full filter, and record
+     `category_<NAME>_filter` (original) + `category_<NAME>_union` (effective) in the JSON.
 
-   All CPU-only: git, `ninja -t deps`, `nm`, C-preprocessing.
-4. **Install** — `bin/miopen_gtest` and, under `bin/<PROJECT>/`:
-   `CTestTestfile.cmake`, `miopen_dapper_tests.json`, `run_miopen_gtest.py`,
-   `dapper_union.py`.
+   All CPU-only: git, `ninja -t deps`, `nm`, C-preprocessing. All dapper computation
+   happens here, single-process, atomic writes.
+4. **Install** — `bin/miopen_gtest` and, under `bin/<PROJECT>/`: the **finalized**
+   `CTestTestfile.cmake` (union burned in) and `miopen_dapper_tests.json` (reference /
+   downloadable record). **No** python is installed to the runner.
 5. **Package** — `miopen_test` (`bin/miopen_gtest*`) and `miopen_run`
-   (`bin/<PROJECT>/**`, via the artifact catch-all). No TheRock-repo change is needed
-   to ship the extra `bin/<PROJECT>/` files.
+   (`bin/<PROJECT>/**`, via the artifact catch-all). No TheRock-repo change is needed.
 
 ### Runner (GPU)
 
@@ -85,18 +94,17 @@ builder; only gtest execution happens on the GPU runner.**
    and `bin/<PROJECT>/*` sit next to each other.
 7. **Dispatch** — `test_runner.py` runs
    `ctest -L ^<category>$ [-L ^ex_gpu_<arch>$] --test-dir ./build/bin/<PROJECT>`.
-8. **Union + run** — the selected suite invokes
-   `run_miopen_gtest.py --dapper-json miopen_dapper_tests.json --category <name>
-   --category-filter "<patterns>" -- ../miopen_gtest`. The wrapper computes the filter
-   with `dapper_union.py` (honoring `fallback_mode`) and execs
-   `../miopen_gtest --gtest_filter=<result>`, propagating the exit code. **This is the
-   only step that uses the GPU.**
+8. **Run** — `ctest` invokes the selected suite directly:
+   `../miopen_gtest --gtest_filter=<union>` (the union was burned in at build time). No
+   dapper code runs at ctest time; this is exactly develop's direct-binary invocation,
+   only the filter value differs. Running `<category>_original_suite` runs the full
+   category. **This is the only step that uses the GPU.**
 
-If the dapper JSON is missing at run time, the wrapper fails open to the entire
-category — it never silently skips.
+`fallback_mode=entire_category` (unattributable change, or a missing/unreadable JSON at
+finalize) makes the burned-in filter the full category — it never silently skips.
 
-**Mental model:** builder = "diff → what could be affected"; runner = "intersect with
-the requested category → run exactly those fixtures."
+**Mental model:** builder = "diff → intersect with each category → burn the reduced
+filter into the CTestTestfile"; runner = "just run ctest."
 
 ## Native MIOpen-CI cycle
 
@@ -136,15 +144,16 @@ redundant (see `BRIDGE_SUPERSEDES` in `main.py`).
 | `MIOPEN_DAPPER_BASE_REF` | `origin/develop` | Ref to compute the impact diff against |
 | `MIOPEN_DAPPER_BRIDGES` | `symbol` | Additive attribution bridges: `symbol` (set to empty to disable) |
 
-Per category, `test_categories.yaml` provides `gtest_runner: scripts/run_miopen_gtest.py`
-and per-category `enable_dapper: "True"`. A category is routed through the wrapper only
-when `MIOPEN_DAPPER_MODE=union` (which passes `--dapper-json` to the generator) **and**
-that category has `enable_dapper` truthy.
+Per category, `test_categories.yaml` sets `enable_dapper: "True"` to opt in. A category's
+suite gets its union burned in only when `MIOPEN_DAPPER_MODE=union` **and** that category
+has `enable_dapper` truthy; otherwise it runs the full category unchanged.
 
 ## Files
 
-Tooling (`script/dependency-parser/`):
-- `main.py` — CLI: `shas`, `parse` (with `--bridges`), `select`, `audit`, `optimize`.
+Tooling (`script/dependency-parser/`, all builder-side):
+- `main.py` — CLI: `shas`, `parse` (with `--bridges`), `select`, `finalize-ctest`,
+  `audit`, `optimize`. `finalize-ctest` burns the per-category union into the install
+  CTestTestfile and records the filters in the JSON (TheRock).
 - `src/enhanced_ninja_parser.py` — build.ninja + `ninja -t deps` → mapping; single-gtest
   synthetic `bin/test_<stem>` keys; `compiled_sources`.
 - `src/extract_gtest_fixtures.py` — compile_commands → per-source fixtures.
@@ -153,21 +162,19 @@ Tooling (`script/dependency-parser/`):
 - `src/symbol_graph.py` (`symbol` bridge).
 - `src/miopen_gtest_runner.py`, `src/dapper_diff.py` — native validate-mode analysis.
 - `src/dapper_union.py` — single source of truth for the pure union math (pattern
-  splitting/overlap + subtractive intersection, honoring `fallback_mode`). Imported by
-  `miopen_gtest_runner.py` for native, and installed standalone on the TheRock runner
-  (stdlib-only, so it stands alone next to the test binary).
+  splitting/overlap + subtractive intersection + `fallback_mode` resolution). Used by
+  `miopen_gtest_runner.py` (native) and by `main.py finalize-ctest` (TheRock). Not shipped
+  to the runner.
 
-Shared (`<rocm-libraries>/shared/ctest/`):
-- `parse_test_categories.py` — generates the (install) CTestTestfile; `--dapper-json`
-  activates the `gtest_runner` hook.
-- `TestCategories.cmake` — `apply_test_category_labels(... DAPPER_JSON ...)`.
+Shared (`<rocm-libraries>/shared/ctest/`): unchanged from develop — dapper adds nothing
+here. `parse_test_categories.py` / `TestCategories.cmake` generate the normal (direct
+binary) install CTestTestfile; dapper rewrites it afterward on the builder.
 
-Per project:
-- `scripts/run_miopen_gtest.py` — the `gtest_runner` wrapper; co-installed on the runner.
-
-Build/runtime artifacts (`bin/<PROJECT>/` on the runner):
-`CTestTestfile.cmake`, `miopen_dapper_tests.json` (`dapper_filter` + `fallback_mode`),
-`run_miopen_gtest.py`, `dapper_union.py`.
+Build/runtime artifacts installed to `bin/<PROJECT>/` on the runner (union mode):
+`CTestTestfile.cmake` (union filters burned in, plus `<category>_original_suite` entries)
+and `miopen_dapper_tests.json` (`dapper_filter`, `fallback_mode`, and per-category
+`category_<NAME>_filter` / `category_<NAME>_union` — the downloadable record). No python
+ships to the runner; `ctest` invokes the binary directly.
 
 ## Known limitations
 

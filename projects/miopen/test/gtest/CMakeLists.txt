@@ -424,40 +424,29 @@ message(STATUS "YAML-based test categorization:")
 list(APPEND CMAKE_MESSAGE_INDENT "  ")
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         message(STATUS "YAML-based test categorization")
-        # In active (union) mode, tell the generator to route dapper-enabled categories
-        # through the co-installed gtest_runner wrapper (which injects the union filter).
-        # The basename must match the installed dapper JSON (see dapper_therock_generate_json).
-        set(_MIOPEN_DAPPER_JSON_ARG "")
+        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}")
+        # Active (union) mode: produce the impact JSON and burn each Dapper-enabled category's
+        # union filter into the install CTestTestfile (retaining the full filter as a
+        # '<name>_original_suite'). All heavy lifting is in dapper.cmake.
         if(MIOPEN_DAPPER_MODE STREQUAL "union")
-          set(_MIOPEN_DAPPER_JSON_ARG DAPPER_JSON "miopen_dapper_tests.json")
+          dapper_therock_generate_json("${INSTALL_TEST_FILE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         endif()
-        message(STATUS "apply_test_category_labels(miopen_gtest ${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR} ${INSTALL_TEST_FILE})")
-        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}" ${_MIOPEN_DAPPER_JSON_ARG})
 else()
         message(STATUS "No test categorization (${MIOPEN_TEST_CATEGORIES_CMAKE} missing)")
 endif()
 
 list(POP_BACK CMAKE_MESSAGE_INDENT)
 
-# Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution
+# Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution.
+# In union mode the finalized CTestTestfile (union burned in) is installed instead, by
+# dapper_therock_generate_json(); otherwise install the CTestTestfile as generated.
 if( NOT ENABLE_ASAN_PACKAGING )
-  install(
-      FILES "${INSTALL_TEST_FILE}"
-      DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
-      COMPONENT tests
-      RENAME "CTestTestfile.cmake"
-  )
-  # Active-union mode: co-install the dapper gtest_runner wrapper and its self-contained
-  # union helper next to the CTestTestfile so the runner can compute the filter with only
-  # the installed artifact (no source tree). The dapper JSON is installed by
-  # dapper_therock_generate_json().
-  if(MIOPEN_DAPPER_MODE STREQUAL "union")
+  if(NOT MIOPEN_DAPPER_MODE STREQUAL "union")
     install(
-        PROGRAMS
-          "${PROJECT_SOURCE_DIR}/scripts/run_miopen_gtest.py"
-          "${PROJECT_SOURCE_DIR}/script/dependency-parser/src/dapper_union.py"
+        FILES "${INSTALL_TEST_FILE}"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
         COMPONENT tests
+        RENAME "CTestTestfile.cmake"
     )
   endif()
 endif()

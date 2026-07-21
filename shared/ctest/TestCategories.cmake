@@ -12,7 +12,7 @@ function(_parse_test_category_optional_args)
     cmake_parse_arguments(
         ARG
         "USE_RTEST_DRIVER"
-        "INSTALL_TEST_FILE;RESOURCE_GROUP;TEST_NAME_PREFIX;INSTALL_EXECUTABLE;DAPPER_JSON"
+        "INSTALL_TEST_FILE;RESOURCE_GROUP;TEST_NAME_PREFIX;INSTALL_EXECUTABLE"
         "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS;ENVIRONMENT"
         ${ARGN}
     )
@@ -41,7 +41,6 @@ function(_parse_test_category_optional_args)
     set(_TEST_CATEGORY_USE_RTEST_DRIVER "${_use_rtest_driver}" PARENT_SCOPE)
     set(_TEST_CATEGORY_NAME_PREFIX "${ARG_TEST_NAME_PREFIX}" PARENT_SCOPE)
     set(_TEST_CATEGORY_INSTALL_EXECUTABLE "${ARG_INSTALL_EXECUTABLE}" PARENT_SCOPE)
-    set(_TEST_CATEGORY_DAPPER_JSON "${ARG_DAPPER_JSON}" PARENT_SCOPE)
     set(_TEST_CATEGORY_COMMAND_ARGS "${ARG_COMMAND_ARGS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_INSTALL_COMMAND_ARGS "${ARG_INSTALL_COMMAND_ARGS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_ADDITIONAL_LABELS "${ARG_ADDITIONAL_LABELS}" PARENT_SCOPE)
@@ -63,9 +62,6 @@ function(_build_test_category_parser_args out_var)
     endif()
     if(_TEST_CATEGORY_INSTALL_EXECUTABLE)
         list(APPEND extra_args "--install-executable" "${_TEST_CATEGORY_INSTALL_EXECUTABLE}")
-    endif()
-    if(_TEST_CATEGORY_DAPPER_JSON)
-        list(APPEND extra_args "--dapper-json" "${_TEST_CATEGORY_DAPPER_JSON}")
     endif()
     foreach(command_arg IN LISTS _TEST_CATEGORY_COMMAND_ARGS)
         list(APPEND extra_args "--command-arg=${command_arg}")

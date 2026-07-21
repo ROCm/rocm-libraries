@@ -95,28 +95,16 @@ def compute_union_filter(dapper_filter, category_filter):
     return result
 
 
-def compute_filter(dapper_json_path, category_name, category_filter):
-    """Resolve the gtest filter for a category given the dapper JSON.
+def resolve_filter(dapper_filter, fallback_mode, category_name, category_filter):
+    """Resolve the effective gtest filter for a category from already-loaded dapper data.
 
     fallback_mode:
       - 'minimal'         -> minimal default (nothing test-relevant changed)
       - 'entire_category' -> the category filter as-is (unattributable change; safe)
       - 'union' (default) -> dapper impact filter intersected with the category
-    Never returns a superset of the category (subtractive-only). If the dapper JSON
-    is missing or unreadable, fail open to the entire category (safe; never skips).
+    Never returns a superset of the category (subtractive-only). Pure (no file I/O), so
+    the build-time finalize step can reuse it without re-reading the JSON per category.
     """
-    try:
-        with open(dapper_json_path, "r") as f:
-            data = json.load(f)
-    except (OSError, ValueError) as e:
-        print(
-            f"dapper_union: cannot read '{dapper_json_path}' ({e}); "
-            f"falling back to entire category for '{category_name}'."
-        )
-        return category_filter
-    dapper_filter = data.get("dapper_filter", "")
-    fallback_mode = data.get("fallback_mode", "union")
-
     if fallback_mode == "minimal":
         final = DEFAULT_MINIMAL_FILTER
     elif fallback_mode == "entire_category":
@@ -129,3 +117,26 @@ def compute_filter(dapper_json_path, category_name, category_filter):
         f"-> --gtest_filter={final}"
     )
     return final
+
+
+def compute_filter(dapper_json_path, category_name, category_filter):
+    """Read the dapper JSON and resolve the effective filter for a category.
+
+    If the dapper JSON is missing or unreadable, fail open to the entire category
+    (safe; never skips).
+    """
+    try:
+        with open(dapper_json_path, "r") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(
+            f"dapper_union: cannot read '{dapper_json_path}' ({e}); "
+            f"falling back to entire category for '{category_name}'."
+        )
+        return category_filter
+    return resolve_filter(
+        data.get("dapper_filter", ""),
+        data.get("fallback_mode", "union"),
+        category_name,
+        category_filter,
+    )

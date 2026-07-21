@@ -47,11 +47,11 @@ macro(dapper_init)
 
     if(MIOPEN_BUILD_IN_THEROCK)
         _dapper_default_single_gtest()
-        # Produce the Dapper impact JSON on the (GPU-less) builder so the runner can compute the
-        # union filter. Only the JSON-producing steps run; no native shard/ctest dapper tests.
+        # The TheRock impact JSON + CTestTestfile finalize are produced later, once the install
+        # CTestTestfile exists, via dapper_therock_generate_json() (called from CMakeLists.txt
+        # after apply_test_category_labels). Here we only ensure the Python interpreter is found.
         if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
             find_package(Python 3 REQUIRED COMPONENTS Interpreter)
-            dapper_therock_generate_json()
         endif()
     else()
         # Native/Jenkins build. 'validate'/'union' set up the native pipeline; 'off' disables it.
@@ -279,28 +279,32 @@ macro(dapper_add_sharded_test)
     )
 endmacro()
 
-# Build-time production of the Dapper impact JSON for a single-gtest TheRock build.
-# GPU-less (git diff + ninja deps + nm + fixture extraction). The resulting
-# miopen_dapper_tests.json (dapper_filter + fallback_mode) is installed next to the
-# generated CTestTestfile so the runner wrapper can compute the union filter. The
-# native shard/ctest dapper machinery (above) stays inert in TheRock.
+# Build-time production of the Dapper artifacts for a single-gtest TheRock build. GPU-less
+# (git diff + ninja deps + nm + fixture extraction). Produces, in one build-time command:
+#   - miopen_dapper_tests.json : dapper_filter + fallback_mode, plus per dapper category
+#     category_<NAME>_filter (original) and category_<NAME>_union (effective) -- the
+#     downloadable record.
+#   - a finalized CTestTestfile: for each Dapper-enabled category the existing '<name>_suite'
+#     runs the subtractive union (burned directly into the add_test, exactly as develop's
+#     direct-binary invocation), and a '<name>_original_suite' is added retaining the full
+#     filter. Nothing dapper runs at ctest time; no runner/helper is installed.
 #
-# Uses source-tree script paths (PROJECT_SOURCE_DIR) since TheRock builds out-of-source,
-# and passes --source-dir so git runs in the MIOpen source worktree (the build dir is not
-# a git repo). --workspace-root is intentionally omitted: TheRock build.ninja dep paths are
-# absolute, which the current normalizer maps correctly. (When the path-normalization branch
-# is integrated, pass --workspace-root ${PROJECT_SOURCE_DIR}.)
-macro(dapper_therock_generate_json)
+# Called from CMakeLists.txt AFTER apply_test_category_labels (so install_ctest_file exists).
+# Args: install_ctest_file = the configure-generated install CTestTestfile; test_yaml = the
+# category yaml (for enable_dapper). Uses source-tree script paths (PROJECT_SOURCE_DIR) since
+# TheRock builds out-of-source, and --source-dir so git runs in the MIOpen source worktree.
+macro(dapper_therock_generate_json install_ctest_file test_yaml)
     set(_dapper_src "${PROJECT_SOURCE_DIR}/script/dependency-parser")
     set(_dapper_out "${CMAKE_BINARY_DIR}")
     set(_dapper_tests_json "${_dapper_out}/miopen_dapper_tests.json")
     set(_dapper_mapping_json "${_dapper_out}/miopen_dapper_mapping.json")
     set(_dapper_fixtures_json "${_dapper_out}/miopen_dapper_fixtures.json")
     set(_dapper_build_ninja "${_dapper_out}/build.ninja")
+    set(_dapper_ctest_final "${_dapper_out}/dapper_CTestTestfile.cmake")
 
     add_custom_command(
-        OUTPUT ${_dapper_tests_json}
-        COMMENT "Dapper: generating ${_dapper_tests_json} (mode=${MIOPEN_DAPPER_MODE}, bridges=${MIOPEN_DAPPER_BRIDGES})"
+        OUTPUT ${_dapper_tests_json} ${_dapper_ctest_final}
+        COMMENT "Dapper: impact JSON + burning union into CTestTestfile (mode=${MIOPEN_DAPPER_MODE}, bridges=${MIOPEN_DAPPER_BRIDGES})"
         COMMAND ${Python_EXECUTABLE} ${_dapper_src}/main.py shas
             --base-ref ${MIOPEN_DAPPER_BASE_REF} --source-dir ${PROJECT_SOURCE_DIR}
         COMMAND ${Python_EXECUTABLE} ${_dapper_src}/src/extract_gtest_fixtures.py
@@ -309,15 +313,24 @@ macro(dapper_therock_generate_json)
         COMMAND ${Python_EXECUTABLE} ${_dapper_src}/main.py select ${_dapper_mapping_json}
             --fixturemap=${_dapper_fixtures_json} --source-dir ${PROJECT_SOURCE_DIR}
             --output ${_dapper_tests_json}
+        COMMAND ${Python_EXECUTABLE} ${_dapper_src}/main.py finalize-ctest
+            --ctest-in ${install_ctest_file} --ctest-out ${_dapper_ctest_final}
+            --yaml ${test_yaml} --dapper-json ${_dapper_tests_json}
         WORKING_DIRECTORY ${_dapper_out}
-        DEPENDS miopen_gtest
+        DEPENDS miopen_gtest ${install_ctest_file}
         VERBATIM
     )
-    add_custom_target(dapper_therock_json ALL DEPENDS ${_dapper_tests_json})
+    add_custom_target(dapper_therock_json ALL
+        DEPENDS ${_dapper_tests_json} ${_dapper_ctest_final})
 
     if(NOT ENABLE_ASAN_PACKAGING)
+        # Install the reference JSON and the finalized CTestTestfile (with union burned in).
         install(FILES ${_dapper_tests_json}
             DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
             COMPONENT tests)
+        install(FILES ${_dapper_ctest_final}
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+            COMPONENT tests
+            RENAME "CTestTestfile.cmake")
     endif()
 endmacro()

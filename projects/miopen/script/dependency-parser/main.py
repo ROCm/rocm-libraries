@@ -147,6 +147,148 @@ def read_shas_file(context, shas_file):
     return (base_sha, feature_sha)
 
 
+def _finalize_truthy(value):
+    return value is not None and str(value).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _atomic_write(path, text):
+    """Write text to path via a temp file + os.replace so a concurrent reader on the
+    shared filesystem never observes a half-written file."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def run_finalize_ctest(args):
+    """TheRock builder step: burn each Dapper-enabled category's union filter into the
+    install CTestTestfile, and retain the full category as a '<name>_original_suite'.
+
+    For each Dapper-enabled category (yaml 'enable_dapper'), the existing '<name>_suite'
+    keeps its name but its --gtest_filter is replaced with the subtractive union (honoring
+    fallback_mode); a '<name>_original_suite' entry is added that keeps the full original
+    filter. Both the original and union filters are recorded in the dapper JSON for
+    reference (downloadable record). All computation happens here, at build time, in one
+    process; the runner just runs ctest with the burned-in filters (no dapper code ships).
+
+    Fails open: if the yaml or dapper JSON can't be read, the CTestTestfile is copied
+    through unchanged so the full categories still run.
+    """
+    import json
+    import re
+
+    from src.dapper_union import resolve_filter
+
+    def _passthrough(reason):
+        print(f"finalize-ctest: {reason}; leaving CTestTestfile unmodified.")
+        with open(args.ctest_in, "r") as fin:
+            _atomic_write(args.ctest_out, fin.read())
+
+    try:
+        import yaml
+
+        with open(args.yaml, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception as e:  # noqa: BLE001 - fail open on any yaml problem
+        _passthrough(f"cannot read yaml '{args.yaml}' ({e})")
+        return
+
+    dapper_cats = {
+        name
+        for name, info in (cfg.get("test_categories") or {}).items()
+        if _finalize_truthy((info or {}).get("enable_dapper"))
+    }
+    if not dapper_cats:
+        _passthrough("no Dapper-enabled categories in yaml")
+        return
+
+    try:
+        with open(args.dapper_json, "r") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        _passthrough(f"cannot read dapper json '{args.dapper_json}' ({e})")
+        return
+    dapper_filter = data.get("dapper_filter", "")
+    fallback_mode = data.get("fallback_mode", "union")
+
+    add_test_re = re.compile(r"^\s*add_test\((\S+)\s")
+    setprops_re = re.compile(r"^\s*set_tests_properties\((\S+)\s")
+    filter_re = re.compile(r"--gtest_filter=([^\s)]+)")
+
+    def match_category(name):
+        # Suite names are '<prefix>_<category>_suite'; match by category suffix so we do
+        # not depend on the prefix. Prefer the longest matching category name.
+        if not name.endswith("_suite"):
+            return None
+        base = name[: -len("_suite")]
+        best = None
+        for cat in dapper_cats:
+            if (base == cat or base.endswith("_" + cat)) and (
+                best is None or len(cat) > len(best)
+            ):
+                best = cat
+        return best
+
+    def original_name(name):
+        return name[: -len("_suite")] + "_original_suite"
+
+    with open(args.ctest_in, "r") as f:
+        lines = f.readlines()
+
+    rewritten = {}  # union-suite name -> original-suite name
+    processed = set()  # category names finalized
+    out = []
+    for line in lines:
+        m = add_test_re.match(line)
+        if m:
+            name = m.group(1)
+            cat = match_category(name)
+            fm = filter_re.search(line) if cat else None
+            if cat and fm:
+                original_filter = fm.group(1)
+                union = resolve_filter(
+                    dapper_filter, fallback_mode, cat, original_filter
+                )
+                name_orig = original_name(name)
+                out.append(
+                    line.replace(
+                        f"--gtest_filter={original_filter}",
+                        f"--gtest_filter={union}",
+                        1,
+                    )
+                )
+                out.append(
+                    line.replace(f"add_test({name} ", f"add_test({name_orig} ", 1)
+                )
+                rewritten[name] = name_orig
+                processed.add(cat)
+                data[f"category_{cat}_filter"] = original_filter
+                data[f"category_{cat}_union"] = union
+                continue
+        sm = setprops_re.match(line)
+        if sm and sm.group(1) in rewritten:
+            name = sm.group(1)
+            out.append(line)  # properties for the union suite (name unchanged)
+            out.append(
+                line.replace(name, rewritten[name], 1)
+            )  # ...and the _original suite
+            continue
+        out.append(line)
+
+    _atomic_write(args.ctest_out, "".join(out))
+    data["dapper_categories"] = sorted(processed)
+    _atomic_write(args.dapper_json, json.dumps(data, indent=2))
+    print(
+        f"finalize-ctest: burned union into {len(rewritten)} dapper suite(s) "
+        f"({', '.join(sorted(processed)) or 'none'}); wrote {args.ctest_out}"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Unified Ninja Dependency & Selective Testing Tool"
@@ -242,6 +384,27 @@ def main():
     parser_opt.add_argument("depmap_json", help="Path to dependency mapping JSON")
     parser_opt.add_argument("changed_files", nargs="+", help="List of changed files")
 
+    # TheRock: burn per-category union filters into the install CTestTestfile.
+    parser_finalize = subparsers.add_parser(
+        "finalize-ctest",
+        help="Burn per-category Dapper union filters into the install CTestTestfile "
+        "and add '<name>_original_suite' entries retaining the full filters (TheRock).",
+    )
+    parser_finalize.add_argument(
+        "--ctest-in", required=True, help="Configure-generated install CTestTestfile"
+    )
+    parser_finalize.add_argument(
+        "--ctest-out", required=True, help="Path to write the finalized CTestTestfile"
+    )
+    parser_finalize.add_argument(
+        "--yaml", required=True, help="test_categories.yaml (for 'enable_dapper')"
+    )
+    parser_finalize.add_argument(
+        "--dapper-json",
+        required=True,
+        help="miopen_dapper_tests.json (dapper_filter + fallback_mode; augmented in place)",
+    )
+
     args = parser.parse_args()
     shas_file = "miopen_dapper_shas.txt"
 
@@ -278,6 +441,8 @@ def main():
         run_selective_test_filter(
             [args.depmap_json, "--optimize-build"] + args.changed_files
         )
+    elif args.command == "finalize-ctest":
+        run_finalize_ctest(args)
     else:
         parser.print_help()
 

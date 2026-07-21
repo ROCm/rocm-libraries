@@ -1,18 +1,10 @@
 import yaml
 import sys
 import re
-import os
 import platform
 import argparse
 import contextlib
 import shlex
-
-
-def _is_truthy(value):
-    """Interpret a yaml scalar (bool or string like 'True'/'1'/'on') as truthy."""
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 
 def _format_extra_args(extra_args):
@@ -136,9 +128,6 @@ def _format_install_add_test_line(
     install_executable=None,
     install_command_args_string="",
     is_windows=False,
-    dapper_active=False,
-    gtest_runner=None,
-    dapper_json=None,
 ):
     """One-line add_test(...) for install-time CTestTestfile fragments."""
     suffix = f"_{gpu_arch}" if gpu_arch else ""
@@ -156,29 +145,6 @@ def _format_install_add_test_line(
             f"-t {rtest_set}{extra_args_string})\n"
         )
     exe = install_executable if install_executable is not None else f"../{target_name}"
-    if dapper_active:
-        # Dapper-active: route through the co-installed gtest_runner wrapper, which
-        # computes the subtractive union filter (impact filter intersected with this
-        # category, honoring fallback_mode) and injects it as --gtest_filter. The
-        # gtest command is emitted WITHOUT --gtest_filter (pattern_string is passed
-        # to the wrapper as --category-filter instead).
-        py = (
-            shlex.quote(cmake_python3)
-            if cmake_python3
-            else _ctest_python_command(is_windows)
-        )
-        gtest_tail = _format_gtest_command_tail(
-            _cmake_quote(exe),
-            "",
-            extra_args_string,
-            install_command_args_string,
-            test_yaml,
-        )
-        return (
-            f'add_test({test_name} {py} "{gtest_runner}" '
-            f'--dapper-json "{dapper_json}" --category {category_name} '
-            f'--category-filter "{pattern_string}" -- {gtest_tail})\n'
-        )
     gtest_tail = _format_gtest_command_tail(
         _cmake_quote(exe),
         pattern_string,
@@ -468,16 +434,6 @@ def main():
         default=None,
         help="Absolute path to Python3 interpreter (for install-tree add_test lines).",
     )
-    parser.add_argument(
-        "--dapper-json",
-        default=None,
-        help=(
-            "Enable Dapper for install-tree suites: basename of the co-installed "
-            "dapper tests JSON (e.g. miopen_dapper_tests.json). Categories with a "
-            "truthy 'enable_dapper' are routed through the yaml 'gtest_runner' "
-            "wrapper, which injects the computed subtractive union --gtest_filter."
-        ),
-    )
 
     args = parser.parse_args()
 
@@ -527,21 +483,6 @@ def main():
     )
 
     config = load_yaml(yaml_file)
-
-    # Dapper wiring: enabled for install-tree suites when --dapper-json is passed AND the
-    # yaml declares a gtest_runner. Per-category 'enable_dapper' opts each category in.
-    # Mutually exclusive with the rtest driver.
-    gtest_runner_script = os.path.basename(config.get("gtest_runner", "") or "")
-    dapper_json = args.dapper_json
-    dapper_master = (
-        bool(dapper_json) and bool(gtest_runner_script) and not use_rtest_driver
-    )
-    if args.dapper_json and not gtest_runner_script:
-        print(
-            "Warning: --dapper-json given but yaml has no 'gtest_runner'; "
-            "Dapper install suites disabled.",
-            file=sys.stderr,
-        )
 
     # Open install test file if provided, using context manager for automatic cleanup
     try:
@@ -638,12 +579,6 @@ def main():
             positive_string = ":".join(patterns)
             exclude_string = ":".join(exclude) if exclude else ""
 
-            # This category runs through the Dapper wrapper iff the master switch is on
-            # and the category opts in via 'enable_dapper'.
-            category_dapper = dapper_master and _is_truthy(
-                category_info.get("enable_dapper")
-            )
-
             # Store positive and exclude strings separately for GPU exclusion processing
             category_data[category_name] = {
                 "positive_string": positive_string,
@@ -651,7 +586,6 @@ def main():
                 "labels": labels[:],  # Make a copy
                 "timeout": timeout,
                 "test_yaml": test_yaml,
-                "dapper": category_dapper,
                 "extra_args": (
                     list(extra_args) if isinstance(extra_args, list) else extra_args
                 ),
@@ -715,9 +649,6 @@ def main():
                             install_executable=install_executable,
                             install_command_args_string=install_command_args_string,
                             is_windows=is_windows,
-                            dapper_active=category_dapper,
-                            gtest_runner=gtest_runner_script,
-                            dapper_json=dapper_json,
                         )
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
@@ -889,9 +820,6 @@ def main():
                                 install_executable=install_executable,
                                 install_command_args_string=install_command_args_string,
                                 is_windows=is_windows,
-                                dapper_active=cat_data.get("dapper", False),
-                                gtest_runner=gtest_runner_script,
-                                dapper_json=dapper_json,
                             )
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
