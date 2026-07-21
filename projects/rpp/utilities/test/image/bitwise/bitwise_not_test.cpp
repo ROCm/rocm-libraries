@@ -44,6 +44,7 @@ void run_bitwise_not(const TestConfig& cfg) {
               RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
+    handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
     // (4) Compare over the ROI. bitwise_not is bit-exact, so the tolerance is zero.

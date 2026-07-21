@@ -63,6 +63,8 @@ void run_solarize(const TestConfig& cfg, const SolarizeParams& op) {
                             handle.get(), cfg.backend),
               RPP_SUCCESS);
 
+    handle.sync();  // drain the op's stream before copying results back
+
     dst.read(actual.data(), bytes);
 
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roi.data(), XYWH,

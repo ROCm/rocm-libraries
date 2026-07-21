@@ -39,6 +39,20 @@ class RppHandle {
 
     rppHandle_t get() const { return handle_; }
 
+    // Blocks the host until all work on this handle's accelerator stream completes; no-op for
+    // HOST. Mirrors what a downstream user does before reading results back: synchronize the
+    // op's own stream (not the whole device) after launching an op.
+    void sync() const {
+        if (backend_ == RPP_HIP_BACKEND) {
+#if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
+            rppAcceleratorQueue_t stream = nullptr;
+            if (rppGetStream(handle_, &stream) != rppStatusSuccess)
+                throw std::runtime_error("rppGetStream failed");
+            RPP_TEST_CHECK_HIP(hipStreamSynchronize(stream));
+#endif
+        }
+    }
+
    private:
     RppBackend backend_;
     rppHandle_t handle_ = nullptr;
@@ -82,7 +96,8 @@ class PinnedArray {
 
 // IO tensor storage passed to RPP: host memory for HOST, device memory for HIP.
 // write()/read() move bytes between a host buffer and this storage (memcpy on HOST,
-// hipMemcpy on HIP); read() synchronizes the device first.
+// hipMemcpy on HIP). read() does not synchronize: the caller must first drain the op's
+// stream with RppHandle::sync() so the kernel has finished before the copy reads its output.
 class DeviceTensor {
    public:
     DeviceTensor(RppBackend backend, std::size_t bytes) : backend_(backend), bytes_(bytes) {
@@ -121,7 +136,6 @@ class DeviceTensor {
     void read(void* host, std::size_t bytes) const {
         if (backend_ == RPP_HIP_BACKEND) {
 #if defined(RPP_TEST_HAVE_HIP) && RPP_TEST_HAVE_HIP
-            RPP_TEST_CHECK_HIP(hipDeviceSynchronize());
             RPP_TEST_CHECK_HIP(hipMemcpy(host, data_, bytes, hipMemcpyDeviceToHost));
 #endif
         } else {

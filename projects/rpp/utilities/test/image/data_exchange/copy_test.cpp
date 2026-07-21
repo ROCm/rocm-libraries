@@ -45,6 +45,7 @@ void run_copy(const TestConfig& cfg) {
     ASSERT_EQ(rppt_copy(src.ptr(), &desc, dst.ptr(), &desc, handle.get(), cfg.backend), RPP_SUCCESS);
 
     // (3) Retrieve the result on the host (no-op copy for HOST, device->host for HIP).
+    handle.sync();  // drain the op's stream before copying results back
     dst.read(actual.data(), bytes);
 
     // (4) Compare over the frame. copy is bit-exact, so the tolerance is zero.
