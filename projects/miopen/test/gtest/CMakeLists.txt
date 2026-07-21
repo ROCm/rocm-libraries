@@ -50,10 +50,6 @@ if(MIOPEN_BUILD_IN_THEROCK)
   if(NOT MIOPEN_DAPPER_MODE STREQUAL "off")
     find_package(Python 3 REQUIRED COMPONENTS Interpreter)
     include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
-    # MIOPEN_DAPPER_USE_CACHED is a local-iteration tool only; the TheRock builder must
-    # always regenerate the impact JSON. Force it OFF so it can never leak in.
-    set(MIOPEN_DAPPER_USE_CACHED OFF CACHE BOOL
-        "Forced OFF for TheRock (builder always regenerates dapper inputs)" FORCE)
     dapper_therock_generate_json()
   endif()
 else()

@@ -257,30 +257,17 @@ def extract_gtext_fixtures(compile_commands: str, output_file: str, pp_folder: s
 
 
 def main():
-    # --use-cached: reuse an existing fixtures file (skip); error if missing. Filter it out
-    # before positional parsing so it never gets mistaken for the compile_commands path.
-    use_cached = "--use-cached" in sys.argv
-    positional = [a for a in sys.argv[1:] if a != "--use-cached"]
+    positional = sys.argv[1:]
 
     compile_commands = positional[0] if positional else "compile_commands.json"
     output_file = (
         positional[1] if len(positional) > 1 else "miopen_dapper_fixtures.json"
     )
 
-    if use_cached:
-        if os.path.exists(output_file):
-            print(f"dapper(cached): using existing {output_file}")
-            return
-        sys.exit(
-            f"dapper(cached): {output_file} not found. MIOPEN_DAPPER_USE_CACHED reuses "
-            "existing dapper inputs; reconfigure once with -DMIOPEN_DAPPER_USE_CACHED=OFF "
-            "to generate them."
-        )
-
     compile_commands_path = Path(compile_commands)
     if not compile_commands_path.is_file():
         print(
-            f"Usage: {sys.argv[0]} [--use-cached] [<path_to_compile_commands.json> [<path_to_miopen_dapper_fixtures.json>]]",
+            f"Usage: {sys.argv[0]} [<path_to_compile_commands.json> [<path_to_miopen_dapper_fixtures.json>]]",
             file=sys.stderr,
         )
         sys.exit(1)
