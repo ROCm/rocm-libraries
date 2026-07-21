@@ -12,9 +12,13 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "Fast external integration coverage: Smoke GPU cases plus quick CPU golden-reference bundles"
+    description: "Fast external integration coverage: Smoke GPU cases, smoke-tier bundle sweeps, plus quick CPU golden-reference bundles"
     test_patterns:
+      # "Smoke/*" (slash) matches the C++ parameterised smoke suites; "Smoke_*"
+      # (underscore) matches the migrated bundle sweep suites. GTest treats '/'
+      # and '_' as literal chars, so both patterns are required to cover both.
       - "Smoke/*"
+      - "Smoke_*"
       - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
@@ -26,6 +30,7 @@ test_categories:
     description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
     test_patterns:
       - "Smoke/*"
+      - "Smoke_*"
       - "TestCpu*GoldenReference*"
       - "TestCpu*GoldenRefStd*"
     exclude: *common_excludes
