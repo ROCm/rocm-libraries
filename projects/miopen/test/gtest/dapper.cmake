@@ -6,9 +6,9 @@ macro(dapper_init)
     # Respect whatever MIOPEN_TEST_DISCRETE the user/CI set (default off) instead of forcing it.
 
     # Additive attribution bridges run during 'parse' (see dependency-parser/main.py).
-    # Empty = none (base behavior). e.g. -DMIOPEN_DAPPER_BRIDGES=symbol.
+    # Default 'symbol' (nm-based, correctness-dominant); set to "" to disable all bridges.
     # The bridge module must exist on the current branch.
-    set(MIOPEN_DAPPER_BRIDGES "" CACHE STRING
+    set(MIOPEN_DAPPER_BRIDGES "symbol" CACHE STRING
         "Comma-separated dapper attribution bridges to run during 'parse' (symbol)")
 
     # Local-iteration cache: when ON (default) reuse existing dapper input files and skip

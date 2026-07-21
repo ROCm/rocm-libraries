@@ -123,9 +123,10 @@ passes that close that gap; select one with `MIOPEN_DAPPER_BRIDGES` (comma list)
 | `symbol` | `src/symbol_graph.py` | `nm` provider→consumer symbol graph: attribute a source to the tests that reference the out-of-line symbols it defines. | Precise (mirrors the linker); also handles library `.cpp`. |
 
 Bridges only *add* edges to the mapping; the include graph is never modified.
-Empty (default) runs no bridge. A future runtime-kernel bridge plugs into the
-same registry. When multiple bridges can coexist, a superseding bridge drops the
-ones it makes redundant (see `BRIDGE_SUPERSEDES` in `main.py`).
+`symbol` runs by default; set `MIOPEN_DAPPER_BRIDGES` to empty to disable all
+bridges. A future runtime-kernel bridge plugs into the same registry. When
+multiple bridges can coexist, a superseding bridge drops the ones it makes
+redundant (see `BRIDGE_SUPERSEDES` in `main.py`).
 
 ## Configuration
 
@@ -133,7 +134,7 @@ ones it makes redundant (see `BRIDGE_SUPERSEDES` in `main.py`).
 |-----------------|---------|---------|
 | `MIOPEN_DAPPER_MODE` | `union` (TheRock) / `validate` (native) | `off` \| `validate` \| `union` |
 | `MIOPEN_DAPPER_BASE_REF` | `origin/develop` | Ref to compute the impact diff against |
-| `MIOPEN_DAPPER_BRIDGES` | (empty) | Additive attribution bridges: `symbol` |
+| `MIOPEN_DAPPER_BRIDGES` | `symbol` | Additive attribution bridges: `symbol` (set to empty to disable) |
 
 Per category, `test_categories.yaml` provides `gtest_runner: scripts/run_miopen_gtest.py`
 and per-category `enable_dapper: "True"`. A category is routed through the wrapper only
