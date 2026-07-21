@@ -150,7 +150,7 @@ static void host_csrildlt0_ref(J M,
             }
 
             diag[ai]   = d_i;
-            csr_val[j] = static_cast<T>(0); // unit diagonal stored as 0
+            csr_val[j] = static_cast<T>(d_i); // D stored in-place on L's (implicit unit) diagonal
         }
 
         for(j = row_begin; j < row_end; ++j)
@@ -668,9 +668,6 @@ void testing_spildlt0(const Arguments& arg)
 
     const int64_t M = A.get_nrows();
 
-    // Device diagonal output (size = M per batch)
-    device_dense_vector<floating_data_t<T>> d_diag(M * batch_count);
-
     rocsparse_clients::spildlt0_descr spildlt0_descr(handle, batch_count);
 
     const rocsparse_spildlt0_alg    alg              = rocsparse_spildlt0_alg_default;
@@ -694,14 +691,8 @@ void testing_spildlt0(const Arguments& arg)
                                                        sizeof(compute_datatype),
                                                        p_error));
 
-    // Set the diag device pointer
-    void* d_diag_ptr = (void*)d_diag;
-    CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(handle,
-                                                       spildlt0_descr,
-                                                       rocsparse_spildlt0_input_diag,
-                                                       &d_diag_ptr,
-                                                       sizeof(d_diag_ptr),
-                                                       p_error));
+    // Note: the optional diagonal output vector (rocsparse_spildlt0_input_diag) is deliberately
+    // NOT set here. D must be recoverable directly from the diagonal of the L factor.
 
     //
     // Perform analysis.
@@ -820,16 +811,14 @@ void testing_spildlt0(const Arguments& arg)
             {
                 auto& host_csr = A.template as<rocsparse_format_csr>().host();
 
-                // Copy current device values back to host for comparison
-                host_vector<T>                  h_csr_val_gpu(host_csr.val.size());
-                host_vector<floating_data_t<T>> h_diag_gpu(M * batch_count);
+                // Copy the factored device values back to host for comparison. D is stored
+                // in-place on L's diagonal, so this single array carries both L and D: the
+                // value comparison below validates D on the diagonal without any host-side
+                // gather.
+                host_vector<T> h_csr_val_gpu(host_csr.val.size());
                 CHECK_HIP_ERROR(hipMemcpy(h_csr_val_gpu,
                                           A.get_device_values(),
                                           sizeof(T) * host_csr.val.size(),
-                                          hipMemcpyDeviceToHost));
-                CHECK_HIP_ERROR(hipMemcpy(h_diag_gpu,
-                                          d_diag,
-                                          sizeof(floating_data_t<T>) * M * batch_count,
                                           hipMemcpyDeviceToHost));
 
                 // CPU reference (run on a copy of the original host values)
@@ -887,12 +876,6 @@ void testing_spildlt0(const Arguments& arg)
                 }
                 if(no_pivot)
                 {
-                    if(ROCSPARSE_REPRODUCIBILITY)
-                    {
-                        rocsparse_reproducibility::save(
-                            "L values", h_csr_val_gpu, "D values", h_diag_gpu);
-                    }
-
                     // For complex types, accumulation error is larger.
                     constexpr bool is_complex = std::is_same<T, rocsparse_float_complex>::value
                                                 || std::is_same<T, rocsparse_double_complex>::value;
@@ -901,9 +884,54 @@ void testing_spildlt0(const Arguments& arg)
                               ? static_cast<floating_data_t<T>>(100) * default_tolerance<T>::value
                               : default_tolerance<T>::value;
 
-                    // Compare L values (off-diagonal CSR entries)
+                    // Compare L values (off-diagonal CSR entries, plus D on the diagonal). This
+                    // validates D-on-diagonal directly, with nothing gathered on the host.
                     h_csr_val_ref.near_check(h_csr_val_gpu, tol_ildlt);
-                    // Compare D values
+
+                    // Validate the OPTIONAL external diagonal output vector, which is a *device*
+                    // buffer filled by the kernel (no host round-trip to produce D). Re-run the
+                    // compute with it set to also exercise the per-batch copy: each batch must
+                    // receive its own D into its own m-entry slice (offset b * m).
+                    device_dense_vector<floating_data_t<T>> d_diag(M * batch_count);
+                    {
+                        // Compute is in-place and destructive: restore the original values.
+                        // host_csr.val is still pristine (the reference ran on h_csr_val_ref).
+                        A.get_device_values().transfer_from(host_csr.val);
+
+                        void* d_diag_ptr = (void*)d_diag;
+                        CHECK_ROCSPARSE_ERROR(
+                            rocsparse_spildlt0_set_input(handle,
+                                                         spildlt0_descr,
+                                                         rocsparse_spildlt0_input_diag,
+                                                         &d_diag_ptr,
+                                                         sizeof(d_diag_ptr),
+                                                         p_error));
+
+                        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0(handle,
+                                                                 spildlt0_descr,
+                                                                 A,
+                                                                 A,
+                                                                 rocsparse_spildlt0_stage_compute,
+                                                                 buffer_size_in_bytes,
+                                                                 buffer,
+                                                                 p_error));
+                        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+                    }
+
+                    // Copy the device D vector to host only for the reference comparison.
+                    host_vector<floating_data_t<T>> h_diag_gpu(M * batch_count);
+                    CHECK_HIP_ERROR(hipMemcpy(h_diag_gpu,
+                                              d_diag,
+                                              sizeof(floating_data_t<T>) * M * batch_count,
+                                              hipMemcpyDeviceToHost));
+
+                    if(ROCSPARSE_REPRODUCIBILITY)
+                    {
+                        rocsparse_reproducibility::save(
+                            "L values", h_csr_val_gpu, "D values", h_diag_gpu);
+                    }
+
+                    // Every batch's D must land in its own slice of the device vector.
                     h_diag_ref.near_check(h_diag_gpu, tol_ildlt);
                 }
             }

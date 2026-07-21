@@ -40,8 +40,11 @@ namespace rocsparse
     //   D_i = real(A_{ii} - sum_{k<i} |L_{ik}|^2 * D_k)   (D is always real for Hermitian A)
     //   L_{ij} = (A_{ij} - sum_{k<j} L_{ik} * D_k * conj(L_{jk})) / D_j   (off-diagonal)
     //
-    // The diagonal D is stored as floating_data_t<T> (real scalar) in a separate dense array.
-    // csr_val stores the strictly lower-triangular entries of L (unit diagonal implicit).
+    // D is the real diagonal (each entry D_i is a real scalar of type floating_data_t<T>).
+    // csr_val stores the strictly lower-triangular entries of L (unit diagonal implicit), and
+    // each D_i is stored in-place on that otherwise-unused diagonal slot. Copying D out to an
+    // optional user vector is a separate step performed once the factorization is complete
+    // (see csrildlt0_copy_diag).
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASH,
@@ -52,7 +55,6 @@ namespace rocsparse
                                                     const I* __restrict__ csr_row_ptr,
                                                     const J* __restrict__ csr_col_ind,
                                                     T* csr_val,
-                                                    floating_data_t<T>* __restrict__ diag,
                                                     const I* __restrict__ csr_diag_ind,
                                                     int32_t* __restrict__ done,
                                                     const J* __restrict__ map,
@@ -145,8 +147,9 @@ namespace rocsparse
             // Beginning of row local_col
             I local_begin = csr_row_ptr[local_col] - idx_base;
 
-            // Diagonal position of row local_col
-            I local_diag = csr_diag_ind[local_col];
+            // Diagonal position of row local_col (holds D_{local_col} once done)
+            const I local_diag_pos = csr_diag_ind[local_col];
+            I       local_diag     = local_diag_pos;
 
             // Accumulate: sum_{k<local_col} L_{row,k} * D_k * L_{local_col,k}
             T local_sum = static_cast<T>(0);
@@ -162,8 +165,11 @@ namespace rocsparse
 
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
-            // Load D_{local_col} from the diagonal array (real scalar)
-            floating_data_t<T> d_j = diag[local_col];
+            // Load D_{local_col} from the diagonal of L (real scalar). A missing diagonal
+            // entry means a zero pivot, handled below.
+            floating_data_t<T> d_j = (local_diag_pos >= 0)
+                                         ? rocsparse::real(csr_val[local_diag_pos])
+                                         : static_cast<floating_data_t<T>>(0);
 
             if(d_j == static_cast<floating_data_t<T>>(0))
             {
@@ -188,10 +194,12 @@ namespace rocsparse
                     else if(table[hash] == key)
                     {
                         // L_{row,k} is at data[hash], L_{j,k} is at csr_val[k]
-                        // D_k is at diag[key] (real scalar)
+                        // D_k lives on the diagonal of L (real scalar)
                         // Update: L_{row,k} * D_k * conj(L_{j,k})
                         I                  idx_row_k = data[hash];
-                        floating_data_t<T> d_k       = diag[key - idx_base];
+                        const I            dk_pos    = csr_diag_ind[key - idx_base];
+                        floating_data_t<T> d_k = (dk_pos >= 0) ? rocsparse::real(csr_val[dk_pos])
+                                                               : static_cast<floating_data_t<T>>(0);
                         local_sum
                             = rocsparse::fma(csr_val[idx_row_k],
                                              static_cast<T>(d_k) * rocsparse::conj(csr_val[k]),
@@ -239,9 +247,9 @@ namespace rocsparse
                     d_i = boost_val;
                 }
 
-                // Store D_i (real scalar); zero the diagonal slot in csr_val (unit diagonal)
-                diag[row]         = d_i;
-                csr_val[row_diag] = static_cast<T>(0);
+                // Store D_i on the diagonal of L (its unit diagonal is implicit). This must
+                // happen before the done[] release store below so other rows can read it back.
+                csr_val[row_diag] = static_cast<T>(d_i);
 
                 if(d_i == static_cast<floating_data_t<T>>(0))
                 {
@@ -268,8 +276,6 @@ namespace rocsparse
                                const J* __restrict__ csr_col_ind,
                                T*      csr_val,
                                int64_t csr_val_stride,
-                               floating_data_t<T>* __restrict__ diag,
-                               int64_t diag_stride,
                                const I* __restrict__ csr_diag_ind,
                                int32_t* __restrict__ done,
                                int64_t done_stride,
@@ -315,7 +321,6 @@ namespace rocsparse
             csr_row_ptr,
             csr_col_ind,
             csr_val + batch_index * csr_val_stride,
-            diag + batch_index * diag_stride, // floating_data_t<T>* stride in real elements
             csr_diag_ind,
             done + batch_index * done_stride,
             map,
@@ -386,8 +391,6 @@ namespace rocsparse
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
             A->batch_stride,
-            reinterpret_cast<floating_data_t<T>*>(diag),
-            static_cast<int64_t>(A->rows),
             reinterpret_cast<const I*>(trm_info->get_diag_ind()),
             done_array,
             done_array_stride,
@@ -408,6 +411,10 @@ namespace rocsparse
             (boost_tol_pointer_mode == rocsparse_pointer_mode_host),
             ROCSPARSE_SCALAR_HOST_DEVICE_PERMISSIVE_ARGUMENT(boost_val_pointer_mode, boost_val_ptr),
             (boost_val_pointer_mode == rocsparse_pointer_mode_host));
+
+        // Copy the real diagonal D out to the optional user vector once the factorization is done.
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrildlt0_copy_diag<T, I, J>(handle, csrildlt0_info, A, diag)));
 
         return rocsparse_status_success;
     }

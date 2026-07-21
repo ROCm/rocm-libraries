@@ -78,6 +78,14 @@ source_group("Header Files\\Public" FILES ${rocsparse_headers_public})
 # Include sources
 include(src/CMakeLists.txt)
 
+# rocsparse_spildlt0_set_input.cpp must still handle the deprecated
+# rocsparse_spildlt0_input_diag enum value (so callers that set it keep working). Referencing
+# the [[deprecated]] enumerator would otherwise raise -Wdeprecated-declarations under -Wall, so
+# suppress that warning for this single translation unit.
+set_source_files_properties(
+    src/generic/spildlt0/rocsparse_spildlt0_set_input.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
+
 # Create rocSPARSE library
 add_library(rocsparse ${rocsparse_source} ${rocsparse_headers_public})
 add_library(roc::rocsparse ALIAS rocsparse)

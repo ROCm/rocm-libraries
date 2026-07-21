@@ -38,6 +38,9 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spildlt0_input value)
     case rocsparse_spildlt0_input_boost_value:
     case rocsparse_spildlt0_input_boost_tolerance:
     case rocsparse_spildlt0_input_singularity_tolerance:
+    // rocsparse_spildlt0_input_diag is deprecated but must still be recognized as a valid input.
+    // The deprecation warning it would raise here is suppressed for this file via
+    // -Wno-deprecated-declarations (see library/CMakeLists.txt).
     case rocsparse_spildlt0_input_diag:
     {
         return false;
@@ -174,6 +177,10 @@ try
         return rocsparse_status_success;
     }
 
+    // rocsparse_spildlt0_input_diag is deprecated but must still be handled here so callers that
+    // still set it keep working (D is additionally copied into the provided vector). The
+    // deprecation warning it would raise here is suppressed for this file via
+    // -Wno-deprecated-declarations (see library/CMakeLists.txt).
     case rocsparse_spildlt0_input_diag:
     {
         ROCSPARSE_CHECKARG(4,
