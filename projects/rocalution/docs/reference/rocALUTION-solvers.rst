@@ -10,6 +10,8 @@ rocALUTION solvers
 
 This document provides a category-wise listing of the solver APIs along with the information required to use them.
 
+Complete member documentation for each solver class is on the :ref:`api` page. The sections below group solvers by category and document commonly used configuration routines.
+
 Code structure
 ==============
 
@@ -123,34 +125,83 @@ Some preconditioners require two phases in the their construction: an algebraic 
 Fixed-Point iteration
 =====================
 
+:cpp:class:`rocalution::FixedPoint`
+
 .. doxygenfunction:: rocalution::FixedPoint::SetRelaxation
 
 Krylov subspace solvers
 =======================
 
+CG
+--
+:cpp:class:`rocalution::CG`
+
+CR
+--
+:cpp:class:`rocalution::CR`
+
 GMRES
 -----
+:cpp:class:`rocalution::GMRES`
+
 .. doxygenfunction:: rocalution::GMRES::SetBasisSize
 
 FGMRES
 ------
+:cpp:class:`rocalution::FGMRES`
+
 .. doxygenfunction:: rocalution::FGMRES::SetBasisSize
+
+BiCGStab
+--------
+:cpp:class:`rocalution::BiCGStab`
 
 IDR
 ---
+:cpp:class:`rocalution::IDR`
+
 .. doxygenfunction:: rocalution::IDR::SetShadowSpace
+
+FCG
+---
+:cpp:class:`rocalution::FCG`
+
+QMRCGStab
+---------
+:cpp:class:`rocalution::QMRCGStab`
 
 BiCGStab(l)
 -----------
+:cpp:class:`rocalution::BiCGStabl`
+
 .. doxygenfunction:: rocalution::BiCGStabl::SetOrder
+
+Chebyshev iteration scheme
+==========================
+
+:cpp:class:`rocalution::Chebyshev`
+
+Mixed-precision defect correction scheme
+========================================
+
+:cpp:class:`rocalution::MixedPrecisionDC`
 
 MultiGrid solvers
 =================
 
 The library provides algebraic multigrid and a skeleton for geometric multigrid methods. The ``BaseMultigrid`` class itself doesn't construct data for the method. It contains the solution procedure for V, W and K-cycles. The AMG has two different versions for Local (non-MPI) and for Global (MPI) type of computations.
 
+:cpp:class:`rocalution::BaseMultiGrid`
+
+Geometric multiGrid
+-------------------
+
+:cpp:class:`rocalution::MultiGrid`
+
 Algebraic multiGrid
 -------------------
+
+:cpp:class:`rocalution::BaseAMG`
 
 .. doxygenfunction:: rocalution::BaseAMG::BuildHierarchy
 .. doxygenfunction:: rocalution::BaseAMG::BuildSmoothers
@@ -164,11 +215,15 @@ Algebraic multiGrid
 Unsmoothed aggregation AMG
 ==========================
 
+:cpp:class:`rocalution::UAAMG`
+
 .. doxygenfunction:: rocalution::UAAMG::SetCouplingStrength
 .. doxygenfunction:: rocalution::UAAMG::SetOverInterp
 
 Smoothed aggregation AMG
 ========================
+
+:cpp:class:`rocalution::SAAMG`
 
 .. doxygenfunction:: rocalution::SAAMG::SetCouplingStrength
 .. doxygenfunction:: rocalution::SAAMG::SetInterpRelax
@@ -176,10 +231,14 @@ Smoothed aggregation AMG
 Ruge-stueben AMG
 ================
 
+:cpp:class:`rocalution::RugeStuebenAMG`
+
 .. doxygenfunction:: rocalution::RugeStuebenAMG::SetStrengthThreshold
 
 Pairwise AMG
 ============
+
+:cpp:class:`rocalution::PairwiseAMG`
 
 .. doxygenfunction:: rocalution::PairwiseAMG::SetBeta
 .. doxygenfunction:: rocalution::PairwiseAMG::SetOrdering
@@ -187,6 +246,8 @@ Pairwise AMG
 
 Direct linear solvers
 =====================
+
+:cpp:class:`rocalution::DirectLinearSolver`, :cpp:class:`rocalution::LU`, :cpp:class:`rocalution::QR`, and :cpp:class:`rocalution::Inversion`
 
 .. note::
 

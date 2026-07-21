@@ -10,13 +10,19 @@ rocALUTION Preconditioners
 
 This document provides a category-wise listing of the preconditioners. All preconditioners support local operators. They can be used as a global preconditioner via block-jacobi scheme, which works locally on each interior matrix. To provide fast application, all preconditioners require extra memory to keep the approximated operator.
 
+Complete member documentation for each class is on the :ref:`api` page. The sections below highlight configuration routines and usage notes.
+
 Code structure
 ==============
 
 The preconditioners provide a solution to the system :math:`Mz = r`, where the solution :math:`z` is either directly computed by the approximation scheme or iteratively obtained with :math:`z = 0` initial guess.
 
+:cpp:class:`rocalution::Preconditioner` is the base class for all preconditioners.
+
 Jacobi method
 =============
+
+:cpp:class:`rocalution::Jacobi`
 
 .. note::
 
@@ -24,6 +30,8 @@ Jacobi method
 
 (Symmetric) Gauss-Seidel or (S)SOR method
 ==========================================
+
+:cpp:class:`rocalution::GS` and :cpp:class:`rocalution::SGS`
 
 .. note::
 
@@ -35,10 +43,14 @@ Incomplete factorizations
 ILU
 ---
 
+:cpp:class:`rocalution::ILU`
+
 .. doxygenfunction:: rocalution::ILU::Set
 
 ILUT
 ----
+
+:cpp:class:`rocalution::ILUT`
 
 .. doxygenfunction:: rocalution::ILUT::Set(double)
 .. doxygenfunction:: rocalution::ILUT::Set(double, int)
@@ -46,15 +58,19 @@ ILUT
 IC
 ---
 
-.. doxygenclass:: rocalution::IC
+:cpp:class:`rocalution::IC`
 
 AI Chebyshev
 ============
+
+:cpp:class:`rocalution::AIChebyshev`
 
 .. doxygenfunction:: rocalution::AIChebyshev::Set
 
 FSAI
 ====
+
+:cpp:class:`rocalution::FSAI`
 
 .. doxygenfunction:: rocalution::FSAI::Set(int)
 .. doxygenfunction:: rocalution::FSAI::Set(const OperatorType&)
@@ -63,10 +79,14 @@ FSAI
 SPAI
 ====
 
+:cpp:class:`rocalution::SPAI`
+
 .. doxygenfunction:: rocalution::SPAI::SetPrecondMatrixFormat
 
 TNS
 ===
+
+:cpp:class:`rocalution::TNS`
 
 .. doxygenfunction:: rocalution::TNS::Set
 .. doxygenfunction:: rocalution::TNS::SetPrecondMatrixFormat
@@ -74,11 +94,15 @@ TNS
 MultiColored preconditioners
 ============================
 
+:cpp:class:`rocalution::MultiColored`
+
 .. doxygenfunction:: rocalution::MultiColored::SetPrecondMatrixFormat
 .. doxygenfunction:: rocalution::MultiColored::SetDecomposition
 
 MultiColored (symmetric) Gauss-Seidel / (S)SOR
 ----------------------------------------------
+
+:cpp:class:`rocalution::MultiColoredGS` and :cpp:class:`rocalution::MultiColoredSGS`
 
 .. doxygenfunction:: rocalution::MultiColoredSGS::SetRelaxation
 
@@ -88,6 +112,8 @@ MultiColored (symmetric) Gauss-Seidel / (S)SOR
 
 MultiColored power(q)-pattern method ILU(p,q)
 ---------------------------------------------
+
+:cpp:class:`rocalution::MultiColoredILU`
 
 .. doxygenfunction:: rocalution::MultiColoredILU::Set(int)
 .. doxygenfunction:: rocalution::MultiColoredILU::Set(int, int, bool)
@@ -99,6 +125,8 @@ MultiColored power(q)-pattern method ILU(p,q)
 Multi-elimination incomplete LU
 ===============================
 
+:cpp:class:`rocalution::MultiElimination`
+
 .. doxygenfunction:: rocalution::MultiElimination::GetSizeDiagBlock
 .. doxygenfunction:: rocalution::MultiElimination::GetLevel
 .. doxygenfunction:: rocalution::MultiElimination::Set
@@ -107,10 +135,14 @@ Multi-elimination incomplete LU
 Diagonal preconditioner for saddle-point problems
 =================================================
 
+:cpp:class:`rocalution::DiagJacobiSaddlePointPrecond`
+
 .. doxygenfunction:: rocalution::DiagJacobiSaddlePointPrecond::Set
 
 (Restricted) Additive Schwarz preconditioner
 ============================================
+
+:cpp:class:`rocalution::AS` and :cpp:class:`rocalution::RAS`
 
 .. doxygenfunction:: rocalution::AS::Set
 
@@ -126,6 +158,8 @@ See the overlapped area in the figure below:
 Block-Jacobi (MPI) preconditioner
 =================================
 
+:cpp:class:`rocalution::BlockJacobi`
+
 .. doxygenfunction:: rocalution::BlockJacobi::Set
 
 See the Block-Jacobi (MPI) preconditioner in the figure below:
@@ -140,6 +174,8 @@ See the Block-Jacobi (MPI) preconditioner in the figure below:
 Block preconditioner
 ====================
 
+:cpp:class:`rocalution::BlockPreconditioner`
+
 .. doxygenfunction:: rocalution::BlockPreconditioner::Set
 .. doxygenfunction:: rocalution::BlockPreconditioner::SetDiagonalSolver
 .. doxygenfunction:: rocalution::BlockPreconditioner::SetLSolver
@@ -149,5 +185,7 @@ Block preconditioner
 
 Variable preconditioner
 =======================
+
+:cpp:class:`rocalution::VariablePreconditioner`
 
 .. doxygenfunction:: rocalution::VariablePreconditioner::SetPreconditioner

@@ -83,6 +83,11 @@ Base Classes
 .. doxygenclass:: rocalution::AcceleratorVector
    :members:
 
+Parallel Manager
+================
+.. doxygenclass:: rocalution::ParallelManager
+   :members:
+
 Solvers
 =======
 .. doxygenclass:: rocalution::Solver
