@@ -172,6 +172,26 @@ int dispatcher_run_mx_gemm(const void* A,
         return -1;
     }
 
+    // MX block-scale pre-shuffle is gfx950-only (preShuffleScaleBuffer_gfx950).
+    // The compile-time static_assert already pins the build to gfx950; also guard
+    // at runtime so a gfx950-built .so run on a non-gfx950 device fails clearly
+    // instead of launching an arch-mismatched kernel.
+    {
+        int dev = 0;
+        hipDeviceProp_t props{};
+        if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&props, dev) != hipSuccess)
+        {
+            std::cerr << "dispatcher_run_mx_gemm: could not query device architecture\n";
+            return -1;
+        }
+        if(std::string_view(props.gcnArchName).substr(0, 6) != "gfx950")
+        {
+            std::cerr << "dispatcher_run_mx_gemm: MX GEMM is gfx950-only; running device is "
+                      << props.gcnArchName << "\n";
+            return -1;
+        }
+    }
+
     const ALayout layout_a = ALayout{};
     const BLayout layout_b = BLayout{};
     const CLayout layout_c = CLayout{};
