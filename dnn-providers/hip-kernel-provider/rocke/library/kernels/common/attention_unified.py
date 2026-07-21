@@ -812,6 +812,13 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     #     GQA-8 d64 S2048 (1.19-2.68x over prod).
     if _enable_single_batch_combo(problem):
         if problem.head_size == 64:
+            # fast_paged_kv_desc (needs T=64) is a ~1.3-1.4x win for the bf16
+            # h64kv8 no-SW family -> beats the T=128 early-V path (measured on
+            # MI355X). Force T=64 there so the combo's fast_paged enablement is
+            # valid; other d64 single-batch shapes keep the wider T=128 tile.
+            if (problem.dtype == "bf16" and problem.num_query_heads == 64
+                    and problem.num_kv_heads == 8 and problem.sliding_window == 0):
+                return 64
             return 128
         # d128 occupancy lever (supersedes the small-tile pick for the
         # LONG-context holdout): at num_warps=2 the d128 combo is LDS-bound

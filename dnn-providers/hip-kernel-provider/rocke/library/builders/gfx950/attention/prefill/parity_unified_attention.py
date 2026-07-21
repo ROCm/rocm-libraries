@@ -1374,16 +1374,15 @@ def _run_rocke(
 
     hip_stream = _bench_stream_handle()
 
-    # NOTE: the ``"2d"`` lane force-builds the hand-tuned MFMA-32x32 /
-    # half-local-PV 2D kernel directly so we can measure the *best* 2D
-    # variant for a shape (this is the aspirational ceiling for the 2D
-    # path, including the d64/b32/h64kv8 trace family). The ``"auto"``
-    # lane must instead exercise the *production* dispatcher
+    # NOTE: the ``"2d"`` lane builds and launches the PRODUCTION 2D spec
+    # (``_tiled_spec_from_problem``) directly -- GPU-time only, no
+    # ``run_unified_attention_torch`` dispatcher overhead -- so it measures the
+    # exact kernel production selects for a shape. The ``"auto"`` lane instead
+    # exercises the *production* dispatcher
     # (``run_unified_attention_torch(backend="auto")`` -> ``select_path``),
-    # otherwise we'd be reporting forced-2D timings as if they were what
-    # production launches -- which mis-measures decode shapes by ~6x
-    # (production correctly routes them to the 3D split-KV path). Keep the
-    # two lanes strictly separate.
+    # otherwise we'd report forced-2D timings as if they were what production
+    # launches -- which mis-measures decode shapes by ~6x (production correctly
+    # routes them to the 3D split-KV path). Keep the two lanes strictly separate.
     if path == "2d":
         from rocke import compile_kernel
         from kernels import (
@@ -1492,66 +1491,7 @@ def _run_rocke(
         if not ok:
             raise NotImplementedError(reason)
 
-        def use_hlpv_variant() -> bool:
-            if dtype_str != "bf16":
-                return False
-            if s.head_size != 64 or s.block_size != 32:
-                return False
-            if s.num_query_heads != 64 or s.num_kv_heads != 8:
-                return False
-            if (
-                s.softcap > 0
-                or problem.use_fp8
-                or problem.use_alibi
-                or problem.use_qq_bias
-            ):
-                return False
-            if data["max_query_len"] <= 256:
-                return False
-            # The half-local PV path regresses on the high-num-seq SW tail.
-            if (s.sliding_window or 0) > 0 and len(s.seq_lens) >= 450:
-                return False
-            return True
-
-        use_hlpv = use_hlpv_variant()
-        # Measured best local policy for the d64/b32/h64kv8 bf16+sinks family:
-        #   * no-SW: R4_s1mask_hlpv + mask-limit + fast paged-KV + skip legacy Q
-        #   * SW:    R4_s1mask_hlpv + fast paged-KV + skip legacy Q
-        #   * SW high-num-seq tail falls back to plain R4 in use_hlpv_variant().
-        use_transposed_mask_limit = use_hlpv and (s.sliding_window or 0) == 0
-        use_mfma32_skip_legacy_qreg = use_hlpv
-        use_fast_paged_kv_desc = use_hlpv
-        # AGPR0 is still experimental and did not improve this path broadly; keep
-        # it as an explicit environment opt-in for microbench work only.
-        use_agpr_alloc_zero = (
-            use_hlpv and os.environ.get("ROCKE_ATTENTION_AGPR_ALLOC_ZERO") == "1"
-        )
-        spec = UnifiedAttention2DTiledSpec(
-            head_size=s.head_size,
-            block_size=s.block_size,
-            num_query_heads=s.num_query_heads,
-            num_kv_heads=s.num_kv_heads,
-            dtype=dtype_str,
-            use_sinks=data["sinks"] is not None,
-            sliding_window=s.sliding_window or 0,
-            has_softcap=s.softcap > 0,
-            use_alibi=data["alibi_slopes"] is not None,
-            use_qq_bias=qq_bias is not None,
-            num_seqs=len(s.seq_lens),
-            num_warps=4,
-            waves_per_eu=2,
-            tile_size=2 * s.block_size,
-            block_m_per_warp=32,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=use_hlpv,
-            use_transposed_mask_once=use_hlpv,
-            use_transposed_half_local_pv=use_hlpv,
-            use_mfma32_skip_legacy_qreg=use_mfma32_skip_legacy_qreg,
-            use_transposed_mask_limit=use_transposed_mask_limit,
-            use_fast_paged_kv_desc=use_fast_paged_kv_desc,
-            use_agpr_alloc_zero=use_agpr_alloc_zero,
-        )
+        spec = _tiled_spec_from_problem(problem)
         kernel = build_unified_attention_2d_tiled(spec)
         if _select_2d_compile_backend(problem) == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
@@ -1565,14 +1505,7 @@ def _run_rocke(
             signature=_attn_signature(
                 dtype_str, include_bt_stride=True, include_qq_bias_stride=True
             ),
-            cache_key=(
-                "r4_hlpv_parity",
-                spec.kernel_name(),
-                use_agpr_alloc_zero,
-                use_mfma32_skip_legacy_qreg,
-                use_transposed_mask_limit,
-                use_fast_paged_kv_desc,
-            ),
+            cache_key=("prod_2d_direct", spec.kernel_name()),
         )
         vals = _attn_values(
             problem=problem,

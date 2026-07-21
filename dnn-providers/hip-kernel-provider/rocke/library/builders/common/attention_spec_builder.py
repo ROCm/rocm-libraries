@@ -279,6 +279,11 @@ def _tiled_spec_from_problem(
             and not problem.use_fp8
             and problem.num_query_heads == 64
             and problem.num_kv_heads == 8
+            # self-consistency: fast_paged_kv_desc requires T==64. Only enable it
+            # when the tile selector actually picks 64 for this shape, so the flag
+            # can never be set with an incompatible tile (which trips the spec
+            # validator). _select_2d_tile_size forces T=64 for this family.
+            and _select_2d_tile_size(problem) == 64
         ),
         use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
