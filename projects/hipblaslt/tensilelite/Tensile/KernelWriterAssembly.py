@@ -9503,7 +9503,7 @@ class KernelWriterAssembly(KernelWriter):
             for inst in ccInsts:
               if inst is not None:
                 imod.add(inst)
-            variant = [kernel["MatrixInstM"], kernel["MatrixInstN"], kernel["MatrixInstK"], kernel["MatrixInstB"]]
+            variant = [kernel["MIBlock"][0], kernel["MIBlock"][1], kernel["MatrixInstK"], kernel["MatrixInstB"]]
             imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
                      acc=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
                      comment="Cr += Ar*Br"))
@@ -9539,7 +9539,7 @@ class KernelWriterAssembly(KernelWriter):
               miInScale1InstType = miInScaleBInstType
 
 
-            variant = [kernel["MatrixInstM"], kernel["MatrixInstN"], kernel["MatrixInstK"], kernel["MatrixInstB"]]
+            variant = [kernel["MIBlock"][0], kernel["MIBlock"][1], kernel["MatrixInstK"], kernel["MatrixInstB"]]
 
             waits = self.mfmaIter_waitCount(kernel)
             if waits > 0 and prevAccIdx == accIdx:
