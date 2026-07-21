@@ -23,17 +23,22 @@ step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
     it wins issue slots; paired with the prefetch this is a measured ~+3.5%.
   * **vectorized O store**.
 
-Measured on MI355X (bf16, D=128, causal, 0 spill, err ~1.46e-3 vs SDPA):
-**~543 TFLOPS @ Sq=8192** for the default one-CTA-per-query-block grid, and
-**~877 TFLOPS @ Sq=8192** for the persistent grid-stride variant
-(``persistent=True``). Shape (batch/seqlen/heads/head_dim) is baked at build time
-(dense, compile-time-sized ABI); the KV tile, occupancy hint, and persistent knobs
-are the tunable parameters.
+Measured on MI355X (bf16, D=128, causal, 128/8 GQA, Sq=8192, 0 spill, err ~1.46e-3
+vs SDPA). Absolute TFLOPS swing +/-25-30% with auto-clock, so only SAME-SESSION
+ratios are load-bearing; one representative session, each number pinned to its
+config (grid / decode / V-pad / lazy):
 
-Lazy online-softmax rescale (skip the O/l rescale when every lane's tile-max is
-within 8 log2 of the running max) is ALWAYS-ON by default (``lazy_rescale=True``):
-parity-identical (1.46e-3) and ~+2% (bf16, Sq=8192, GQA -> ~970 TFLOPS with the
-hkv-major decode + V-pad).
+    default grid            (one-CTA/q-block, V-pad 32, lazy on) : ~543 TFLOPS
+    persistent baseline     (qb-major,        V-pad 0,  lazy off): ~877 TFLOPS
+    persistent + V-pad      (qb-major,        V-pad 32, lazy off): ~912 TFLOPS
+    persistent (SHIPPED)    (hkv-major,       V-pad 32, lazy on) : ~948 TFLOPS
+
+Clock-invariant deltas (the load-bearing part): hkv/qb ~1.04x, V-pad 0->32 ~+5%,
+lazy ~+2%. Shape (batch/seqlen/heads/head_dim) is baked at build time (dense,
+compile-time-sized ABI); the KV tile, occupancy hint, and persistent knobs are the
+tunable parameters. Lazy online-softmax rescale (skip the O/l rescale when every
+lane's tile-max is within 8 log2 of the running max) is ALWAYS-ON by default
+(``lazy_rescale=True``): parity-identical (1.46e-3) and ~+2%.
 
 Head-size / seqlen coverage:
   * ``head_size`` is 64 or 128 (bf16/fp16, MHA + GQA incl. non-power-of-2 NQK).
@@ -1566,18 +1571,22 @@ def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
 
 
 def attention_dense_signature(spec: AttentionDenseSpec):
-    """ABI signature (q/k/v/o pointers + f32 scale) for :class:`KernelLauncher`."""
+    """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
+    plus the two ``cu_seqlens`` i32 pointers when ``spec.varlen`` (the kernel
+    emits a 7-arg ABI in that case -- see :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
         .ptr("v_ptr", spec.dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
-        .build()
     )
+    if spec.varlen:
+        sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    return sig.build()
 
 
 _DENSE_LAUNCHER_CACHE: dict = {}
@@ -1598,6 +1607,8 @@ def run_attention_dense_torch(
     scale: float,
     stream: int = 0,
     arch: str = "gfx950",
+    cu_seqlens_q=None,
+    cu_seqlens_kv=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -1611,10 +1622,21 @@ def run_attention_dense_torch(
     q/k/v/out tensors. The kernel pads the boundary tiles on-chip (register-zero
     OOB query rows, LDS-zero OOB keys) and drops the partial O rows; the grid is
     ceil-sized automatically. See the ``ragged`` spec field.
-    """
+
+    Varlen (``spec.varlen``): the kernel emits a 7-arg ABI (packed
+    ``[total_tok, H, D]`` q/k/v/o + two int32 ``cu_seqlens`` [batch+1]); pass both
+    ``cu_seqlens_q`` and ``cu_seqlens_kv`` or a ``ValueError`` is raised (they are
+    required — never silently launch the 5-arg ABI against a 7-arg kernel)."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
+    if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
+        raise ValueError(
+            "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
+            "the varlen kernel has a 7-arg ABI and cannot be launched with q/k/v/o/scale"
+        )
+    if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
+        raise ValueError("cu_seqlens_* provided but spec.varlen is False")
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
@@ -1634,6 +1656,9 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.varlen:
+        vals["cu_seqlens_q"] = cu_seqlens_q
+        vals["cu_seqlens_kv"] = cu_seqlens_kv
     launcher(
         vals,
         config=LaunchConfig(

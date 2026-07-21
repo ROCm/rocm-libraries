@@ -395,10 +395,23 @@ $(\text{qb}, h_q, \text{bt})$ decides load balance *and* L2 locality:
   ($g>1$), else `qb_major`. Strictly ≥ `qb_major`.
 
 **Measured (MI355X, bf16, D=128, causal, $S = 8192$, 128/8 GQA, 0 spill, err
-≈1.46e-3):** default grid ≈543 TFLOPS; **persistent ≈877 TFLOPS**, and
-**≈948 TFLOPS with the `auto`→`hkv_major` decode + V-pad + lazy rescale**
-(byte-identical IR ⇒ this number is schedule, not luck). The persistent variant
-is the production choice for dense prefill.
+≈1.46e-3).** Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only
+**same-session ratios are load-bearing**; the numbers below are one representative
+session, each pinned to its config (grid / decode / V-pad / lazy):
+
+| config | grid | decode | V-pad | lazy | TFLOPS |
+|---|---|---|---|---:|---:|
+| default grid | one-CTA/q-block | — | 32 | on | ≈543 |
+| persistent baseline | persistent NP=256 | qb-major | 0 | off | ≈877 |
+| persistent + V-pad | persistent NP=256 | qb-major | 32 | off | ≈912 |
+| **persistent (shipped default)** | persistent NP=256 | **hkv-major** | 32 | on | **≈948** |
+
+The clock-invariant deltas are the load-bearing part: **hkv/qb ≈ 1.04×** (L2 hit
+57%→~93%), **V-pad 0→32 ≈ +5%**, **lazy ≈ +2%** — and the shipped default
+(`persistent=True`, `persist_decode="auto"`, `lazy_rescale=True`,
+`ROCKE_DENSE_VPAD=32`, the last row) is byte-identical IR to a re-measure, so the
+ratio reproduces regardless of the absolute clock. The persistent variant is the
+production choice for dense prefill.
 
 ### 8.3 Ragged sequence lengths — on-chip boundary padding
 

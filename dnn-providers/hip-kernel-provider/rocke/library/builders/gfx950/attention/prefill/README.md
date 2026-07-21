@@ -31,21 +31,33 @@ performance knobs.
 
 `AttentionDenseSpec(persistent=True, num_persistent=256)` emits a persistent variant:
 a 1-D grid of `num_persistent` long-lived CTAs grid-strides over the
-`W = (seqlen_q // 256) * Hq * B` work items (qb-major decode for causal
-load-balance), so the per-CTA launch/dispatch + scalar setup + K/V-prime cold-start
-is amortized once per CU instead of once per query-block. This closes the causal
-fixed-cost amortization gap. `num_persistent=256` = one 8-wave block per CU on MI355X
-(256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail loss).
+`W = (seqlen_q // 256) * Hq * B` work items, so the per-CTA launch/dispatch + scalar
+setup + K/V-prime cold-start is amortized once per CU instead of once per query-block.
+This closes the causal fixed-cost amortization gap. `num_persistent=256` = one 8-wave
+block per CU on MI355X (256 CUs) at 2 waves/SIMD; larger oversubscribes the CUs (tail
+loss). The work-item decode is `persist_decode="auto"` by default: it resolves to the
+**hkv-major** L2-locality decode when balance-safe (GQA and `gqa*NQB*B >= 2*NP`, e.g.
+128/8 at Sq=8192) and falls back to **qb-major** otherwise.
 
-## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal)
+## Measured (MI355X, bf16, D=128, Hq=128, Hkv=8, causal, Sq=8192)
 
-| Sq | default | persistent (NP=256) |
-|----|--------:|--------------------:|
-| 2048 | ~410 TFLOPS | ~565 TFLOPS |
-| 8192 | ~521 TFLOPS | **~850 TFLOPS** |
+Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only **same-session
+ratios are load-bearing**; the table below is one representative session, with each
+number pinned to its exact config (grid / decode / V-pad / lazy):
 
-Both paths are 0 VGPR spill and bit-identical vs `torch.nn.functional.
-scaled_dot_product_attention` (max abs err ~1.46e-3 at Sq=8192).
+| config | grid | decode | V-pad | lazy | TFLOPS |
+|---|---|---|---|---:|---:|
+| default grid | one-CTA/q-block | — | 32 | on | ~543 |
+| persistent baseline | persistent NP=256 | qb-major | 0 | off | ~877 |
+| persistent + V-pad | persistent NP=256 | qb-major | 32 | off | ~912 |
+| **persistent (shipped default)** | persistent NP=256 | **hkv-major** | 32 | on | **~948** |
+
+The load-bearing, clock-invariant deltas: hkv-major vs qb-major ≈ **1.04×** (L2 hit
+57%→~93%), V-pad 0→32 ≈ **+5%** (clears the transposed-PV bank conflicts), lazy ≈
+**+2%**. The shipped default (`persistent=True`, `persist_decode="auto"`,
+`lazy_rescale=True`, `ROCKE_DENSE_VPAD=32`) is the last row. All configs are 0 VGPR
+spill and parity-identical vs `torch.nn.functional.scaled_dot_product_attention`
+(max abs err ~1.46e-3 at Sq=8192).
 
 ## Usage
 
@@ -71,6 +83,28 @@ spec = AttentionDenseSpec(
 kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend="python"
 ```
 
+Through the dispatcher (opt-in; picks the persistent best-config for large Sq):
+
+```python
+from dispatch.attention import AttentionRequest, dispatch_attention, dense_spec_for_request
+from kernels.gfx950.attention_dense import run_attention_dense_torch
+
+req = AttentionRequest(
+    batch=1, nhead_q=128, nhead_k=8, seqlen_q=8192, seqlen_k=8192,
+    hdim_q=128, hdim_v=128, arch="gfx950", dtype="bf16", mask_type=1,
+    algorithm="attention_dense",   # opt-in; "auto" keeps the unified 2D/3D path
+    # dense_persistent="auto"      # "auto"|"on"|"off"; auto => persistent for large Sq
+    # dense_persist_decode="auto"  # "auto"|"qb_major"|"hkv_major"
+)
+res  = dispatch_attention(req)                 # res.spec.kernel_name() -> ...persist256_hkvmaj
+spec = dense_spec_for_request(req)             # launch-ready best-config AttentionDenseSpec
+run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1/128**0.5)
+```
+
+`dense_persistent="auto"` turns on the persistent grid-stride variant once there is
+enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq
+prefill regime — so the dispatcher reaches the ~948-TFLOPS path, not the default grid.
+
 ## TODO / follow-ups
 
 1. **Q-reload (enables the inner-loop unroll)** — the QK B-operand (`q_packs`,
@@ -93,5 +127,7 @@ kernel = build_attention_dense(spec)       # -> KernelDef; compile with backend=
 
 - gfx950-only (uses `ds_read_b64_tr_b16` and `v_exp_f32`).
 - Compiles through the rocke LLVM-direct (`backend="python"`) path. The `exp2_fast`
-  op is currently lowered on the LLVM-direct backend only (not yet mirrored in the
-  C++ engine); byte-identity coverage for it is a follow-up.
+  op is mirrored in the **C++ engine** and covered by a `backend="both"`
+  byte-identity gate (`tests/test_attention_dense_golden.py::
+  test_attention_dense_cpp_python_byte_identity`) — the Python and C++ lowerings
+  are byte-for-byte identical across every dense variant.
