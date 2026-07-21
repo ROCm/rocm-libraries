@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <type_traits>
 
-#include "FloatConversion.hpp"
+#include "VectorTypes.hpp"
 
 using InputType = HIP_PLUGIN_RESAMPLE_INPUT_TYPE;
 using OutputType = HIP_PLUGIN_RESAMPLE_OUTPUT_TYPE;
@@ -143,7 +143,7 @@ extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
                 if(valid)
                 {
                     const int64_t xOffset = inputOffset(n, c, inD, inH, inW);
-                    candidate = hip_kernel_provider::to_float32<InputType>(x[xOffset]);
+                    candidate = hip_kernel_provider::cast<float>(x[xOffset]);
                     candidateIndex = flattenSpatialIndex(inD, inH, inW);
                     ++validCount;
                 }
@@ -180,7 +180,7 @@ extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
     }
 
     const int64_t yOffset = outputOffset(n, c, outD, outH, outW);
-    y[yOffset] = hip_kernel_provider::from_float32<OutputType>(result);
+    y[yOffset] = hip_kernel_provider::cast<OutputType>(result);
 
     if constexpr(HAS_INDEX && GENERATE_INDEX && RESAMPLE_MODE == MODE_MAXPOOL)
     {

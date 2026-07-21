@@ -1973,6 +1973,37 @@ TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
     EXPECT_EQ(index->get_stride(), y->get_stride());
 }
 
+TEST_F(TestGraph, ResampleFwdPreservesLegacyNoIndexApi)
+{
+    GraphTestUtils graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("LegacyResampleNode")
+        .set_resample_mode(ResampleMode::MAXPOOL)
+        .set_padding_mode(PaddingMode::ZERO_PAD)
+        .set_pre_padding({0, 0})
+        .set_post_padding({0, 0})
+        .set_stride({2, 2})
+        .set_window({2, 2})
+        .set_generate_index(true);
+
+    auto y = graph.resample_fwd(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "LegacyResampleNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    ASSERT_EQ(graph.getPrivateGraphSubnodes().size(), 1);
+    EXPECT_EQ(graph.getPrivateGraphSubnodes().front()->getNodeOutputTensorAttributes().size(), 1);
+}
+
 TEST_F(TestGraph, RMSNormBackwardNodeCreationWithDbias)
 {
     Graph graph;
@@ -3624,7 +3655,6 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     else
     {
         EXPECT_EQ(subNodes[1], sortedSubnodesDueToGraphConstructionOrderCopy[2]);
-        // NOLINTNEXTLINE(readability-misleading-indentation)
         EXPECT_EQ(subNodes[2], sortedSubnodesDueToGraphConstructionOrderCopy[1]);
     }
 
@@ -4874,7 +4904,6 @@ static void
     else if(valueType == HIPDNN_TYPE_DOUBLE)
     {
         auto doubleVal = std::get<double>(defaultValue);
-        // NOLINTNEXTLINE(readability-misleading-indentation)
         mockScalarDouble(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, doubleVal);
 
         // No constraints (all absent)
@@ -4884,7 +4913,6 @@ static void
     else if(valueType == HIPDNN_TYPE_CHAR)
     {
         auto strVal = std::get<std::string>(defaultValue);
-        // NOLINTNEXTLINE(readability-misleading-indentation)
         mockString(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, strVal);
 
         // No string max length
@@ -8606,7 +8634,6 @@ static void setupKnobDescriptorMockRepeated(
             mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64);
         }
 
-        // NOLINTNEXTLINE(readability-misleading-indentation)
         if(maxValue.has_value())
         {
             mockOptPresent(
@@ -8617,7 +8644,6 @@ static void setupKnobDescriptorMockRepeated(
             mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64);
         }
 
-        // NOLINTNEXTLINE(readability-misleading-indentation)
         mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64);
         mockEmptyVec(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT);
     }
@@ -9862,20 +9888,17 @@ TEST_F(TestGraph, AutotuneMixedBarredAndWorkspaceCeilingReportsCompositionAndSur
         else if(std::find(barredEngineIds.begin(), barredEngineIds.end(), r.engineId)
                 != barredEngineIds.end())
         {
-            // NOLINTNEXTLINE(readability-misleading-indentation)
             ++sawBarred;
             EXPECT_NE(r.errorMessage.find("Plan barred"), std::string::npos) << r.errorMessage;
         }
         else if(r.engineId == filteredEngineId)
         {
             ++sawFiltered;
-            // NOLINTNEXTLINE(readability-misleading-indentation)
             EXPECT_NE(r.errorMessage.find("engineIdFilter"), std::string::npos) << r.errorMessage;
         }
         else if(std::find(skippedEngineIds.begin(), skippedEngineIds.end(), r.engineId)
                 != skippedEngineIds.end())
         {
-            // NOLINTNEXTLINE(readability-misleading-indentation)
             ++sawSkipped;
             EXPECT_NE(r.errorMessage.find("exceeds limit"), std::string::npos) << r.errorMessage;
         }
@@ -9997,7 +10020,6 @@ TEST_F(TestGraph, AutotunePlanSpecFinalizeFailuresReportedInCompositionSummary)
         else if(r.engineId == workspaceSkipEngineId)
         {
             ++sawWorkspaceSkipped;
-            // NOLINTNEXTLINE(readability-misleading-indentation)
             EXPECT_NE(r.errorMessage.find("exceeds limit"), std::string::npos) << r.errorMessage;
             // Capability carried on this post-priming skip; STANDARD mode, no priming.
             EXPECT_TRUE(r.supportsExhaustive);
@@ -11613,7 +11635,6 @@ void setupSuccessfulPointwiseGraphUnpack(::testing::NiceMock<Mock_hipdnn_backend
                 else
                 {
                     setCount(1);
-                    // NOLINTNEXTLINE(readability-misleading-indentation)
                     *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = fakeOpDesc;
                 }
                 return HIPDNN_STATUS_SUCCESS;
@@ -11666,7 +11687,6 @@ void setupSuccessfulPointwiseGraphUnpack(::testing::NiceMock<Mock_hipdnn_backend
                 {
                     setCount(4);
                     auto* dims = static_cast<int64_t*>(arrayOfElements);
-                    // NOLINTNEXTLINE(readability-misleading-indentation)
                     for(int64_t i = 0; i < requestedCount && i < 4; ++i)
                     {
                         dims[i] = 1;

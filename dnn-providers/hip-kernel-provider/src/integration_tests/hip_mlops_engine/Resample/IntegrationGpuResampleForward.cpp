@@ -2,10 +2,13 @@
 // SPDX-License-Identifier:  MIT
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include <type_traits>
 
 #include "../../IntegrationGraphVerificationHarness.hpp"
 
@@ -130,6 +133,24 @@ std::vector<ResampleFwdTestCase> getResampleFwdTestCases()
     return testCases;
 }
 
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-3f;
+    }
+    else
+    {
+        static_assert(std::is_same_v<T, bfloat16>);
+        return 1e-2f;
+    }
+}
+
 template <typename XDataType, typename YDataType, typename ComputeDataType>
 class ResampleForward : public IntegrationGraphVerificationHarness<XDataType, ResampleFwdTestCase>
 {
@@ -156,24 +177,38 @@ protected:
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         graph::ResampleFwdAttributes resampleAttrs;
+        const bool generateIndex = testCase.mode == ResampleMode::MAXPOOL;
         resampleAttrs.set_pre_padding(testCase.prePadding)
             .set_post_padding(testCase.postPadding)
             .set_stride(testCase.stride)
             .set_window(testCase.window)
             .set_resample_mode(testCase.mode)
-            .set_padding_mode(testCase.paddingMode);
+            .set_padding_mode(testCase.paddingMode)
+            .set_generate_index(generateIndex);
 
         auto [yTensorAttr, indexTensorAttr] = graphObj.resample(xTensorAttr, resampleAttrs);
-        (void)indexTensorAttr;
         yTensorAttr->set_output(true);
         yTensorAttr->set_data_type(yDataType);
-        this->registerValidator(yTensorAttr, 1e-5f);
+        this->registerValidator(yTensorAttr, getTolerance<YDataType>());
+
+        if(generateIndex)
+        {
+            ASSERT_NE(indexTensorAttr, nullptr);
+            indexTensorAttr->set_output(true);
+            this->registerValidator(indexTensorAttr, 0.0f);
+        }
+        else
+        {
+            EXPECT_EQ(indexTensorAttr, nullptr);
+        }
 
         this->verifyGraph(graphObj, hipdnn_test_sdk::utilities::getGlobalTestSeed());
     }
 };
 
 using IntegrationGpuResampleForwardFp32 = ResampleForward<float, float, float>;
+using IntegrationGpuResampleForwardFp16 = ResampleForward<half, half, float>;
+using IntegrationGpuResampleForwardBfp16 = ResampleForward<bfloat16, bfloat16, float>;
 
 TEST_P(IntegrationGpuResampleForwardFp32, Correctness)
 {
@@ -182,6 +217,24 @@ TEST_P(IntegrationGpuResampleForwardFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuResampleForwardFp32,
+                         testing::ValuesIn(getResampleFwdTestCases()));
+
+TEST_P(IntegrationGpuResampleForwardFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuResampleForwardFp16,
+                         testing::ValuesIn(getResampleFwdTestCases()));
+
+TEST_P(IntegrationGpuResampleForwardBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuResampleForwardBfp16,
                          testing::ValuesIn(getResampleFwdTestCases()));
 
 } // namespace

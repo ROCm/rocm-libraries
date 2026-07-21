@@ -309,14 +309,17 @@ void ResampleFwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "ResampleFwdPlan::execute() called before compile()");
     }
 
-    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer = findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer
+        = hipdnn_plugin_sdk::findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
 
     void* indexBufferPtr = nullptr;
     if(_params.index() != nullptr)
     {
-        indexBufferPtr
-            = findDeviceBuffer(_params.index()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+        indexBufferPtr = hipdnn_plugin_sdk::findDeviceBuffer(
+                             _params.index()->uid(), deviceBuffers, numDeviceBuffers)
+                             .ptr;
     }
 
     _runnableKernel->launch(handle.getStream(), xBuffer.ptr, yBuffer.ptr, indexBufferPtr);
