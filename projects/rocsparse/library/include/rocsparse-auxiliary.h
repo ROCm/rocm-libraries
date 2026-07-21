@@ -29,6 +29,7 @@
 #define ROCSPARSE_AUXILIARY_H
 
 #include "rocsparse-types.h"
+#include "rocsparse-version.h"
 #include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus
@@ -54,6 +55,48 @@ extern "C" {
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+/*! \ingroup aux_module
+ *  \brief Create a rocSPARSE handle on a user-defined stream.
+ *
+ *  \details
+ *  \p rocsparse_handle_create associates the handle with the user-provided \p stream
+ *  before performing any setup work. All device memory allocation and initialization are
+ *  enqueued on \p stream using stream-ordered operations, so handle creation is
+ *  asynchronous with respect to the host: it returns to the caller without blocking the
+ *  calling CPU thread or any GPU stream.
+ *
+ *  \note
+ *  This routine is not compatible with HIP graph stream capture. It performs
+ *  stream-ordered device allocations and a warm-up kernel launch, so it must not be
+ *  called while \p stream (or any other stream) is being captured into a HIP graph.
+ *
+ *  \note
+ *  The handle is fully initialized for operations submitted on \p stream (stream
+ *  ordering guarantees correctness). If the handle must be used on a different stream
+ *  before \p stream has finished executing, the caller must first synchronize \p stream
+ *  (e.g. via \p hipStreamSynchronize or a HIP event dependency).
+ *
+ *  The handle should be destroyed at the end using \ref rocsparse_handle_destroy or
+ *  \ref rocsparse_destroy_handle.
+ *
+ *  @param[out]
+ *  handle  the pointer to the handle to the rocSPARSE library context.
+ *  @param[in]
+ *  stream   the user-defined stream to associate with the handle and to use for
+ *           all stream-ordered setup work during creation.
+ *  @param[out]
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the initialization succeeded.
+ *  \retval rocsparse_status_invalid_pointer \p handle pointer is invalid.
+ *  \retval rocsparse_status_internal_error an internal error occurred.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status
+    rocsparse_handle_create(rocsparse_handle* handle, hipStream_t stream, rocsparse_error* p_error);
+#endif
+
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
  *
@@ -70,6 +113,26 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
+
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+/*! \ingroup aux_module
+ *  \brief Destroy a rocSPARSE handle.
+ *
+ *  \details
+ *  \p rocsparse_handle_destroy destroys the rocSPARSE library context and releases
+ *  all resources used by the rocSPARSE library.
+ *
+ *  @param[in]
+ *  handle   the handle to the rocSPARSE library context, which can be a null pointer.
+ *  @param[out]
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_internal_error an internal error occurred.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_handle_destroy(rocsparse_handle handle, rocsparse_error* p_error);
+#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE error descriptor.
@@ -1392,7 +1455,7 @@ rocsparse_status rocsparse_destroy_sparse_to_sparse_descr(rocsparse_sparse_to_sp
 *
 *  \details
 *  \p rocsparse_create_extract_descr creates the descriptor of the extract algorithm.
-
+*
 *  @param[out]
 *  descr        pointer to the descriptor of the extract algorithm.
 *  @param[in]
@@ -1432,7 +1495,7 @@ rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
 *  \details
 *  \p rocsparse_create_spgeam_descr creates the descriptor of the \ref rocsparse_spgeam_buffer_size and
 *  \ref rocsparse_spgeam routines.
-
+*
 *  @param[out]
 *  descr        pointer to the descriptor of the SpGEAM routine.
 *
@@ -1520,7 +1583,7 @@ rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
    *  \details
    *  \p rocsparse_create_spmv_descr creates the descriptor of the \ref rocsparse_v2_spmv_buffer_size and
    *  \ref rocsparse_v2_spmv routines.
-
+   *
    *  @param[out]
    *  descr        pointer to the descriptor of the SpMV routine.
    *
@@ -1579,14 +1642,14 @@ rocsparse_status rocsparse_spmv_set_input(rocsparse_handle     handle,
 *  \details
 *  \p rocsparse_create_sptrsv_descr creates the descriptor of the \ref rocsparse_sptrsv_buffer_size and
 *  \ref rocsparse_sptrsv routines.
-
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[out]
 *  p_sptrsv_descr        pointer to the descriptor of the sptrsv routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
- *
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
@@ -1604,13 +1667,13 @@ rocsparse_status rocsparse_sptrsv_descr_create(rocsparse_handle        handle,
 *  \p rocsparse_destroy_sptrsv_descr destroys the descriptor of the \ref rocsparse_sptrsv_buffer_size and
 *  \ref rocsparse_sptrsv routines.
 *
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[in]
 *  sptrsv_descr        descriptor of the sptrsv routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
- *
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
@@ -1625,7 +1688,7 @@ rocsparse_status rocsparse_sptrsv_descr_destroy(rocsparse_handle       handle,
 *  \details
 *  \p rocsparse_create_sptrsv_descr creates the descriptor of the \ref rocsparse_sptrsv_buffer_size and
 *  \ref rocsparse_sptrsv routines.
-
+*
 *  @param[out]
 *  descr        pointer to the descriptor of the sptrsv routine.
 *
@@ -1714,7 +1777,7 @@ rocsparse_status rocsparse_sptrsv_get_output(rocsparse_handle        handle,
 *  \details
 *  \p rocsparse_create_sptrsm_descr creates the descriptor of the \ref rocsparse_sptrsm_buffer_size and
 *  \ref rocsparse_sptrsm routines.
-
+*
 *  @param[out]
 *  descr        pointer to the descriptor of the sptrsm routine.
 *
@@ -1801,12 +1864,12 @@ rocsparse_status rocsparse_sptrsm_get_output(rocsparse_handle        handle,
 *
 *  \details
 *  \p rocsparse_spic0_descr_create creates the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[out]
 *  p_spic0_descr        pointer to the descriptor of the Spic0 routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -1823,12 +1886,12 @@ rocsparse_status rocsparse_spic0_descr_create(rocsparse_handle       handle,
 *  \details
 *  \p rocsparse_spic0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
 *
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[in]
 *  spic0_descr        descriptor of the spic0 routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
@@ -1912,13 +1975,13 @@ rocsparse_status rocsparse_spic0_get_output(rocsparse_handle       handle,
 *
 *  \details
 *  \p rocsparse_spilu0_descr_create creates the descriptor of the configuration of the sparse Incomplete LU of level 0.
-
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[out]
 *  p_spilu0_descr        pointer to the descriptor of the Spilu0 routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success.  A null pointer can be passed if an error descriptor is not required.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success.  A null pointer can be passed if an error descriptor is not required.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -1935,12 +1998,12 @@ rocsparse_status rocsparse_spilu0_descr_create(rocsparse_handle        handle,
 *  \details
 *  \p rocsparse_spilu0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.
 *
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[in]
 *  spilu0_descr        descriptor of the spilu0 routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
@@ -2025,12 +2088,12 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
 *
 *  \details
 *  \p rocsparse_spildlt0_descr_create creates the descriptor of the configuration of the sparse Incomplete \f$LDL^H\f$ of level 0.
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[out]
 *  p_spildlt0_descr        pointer to the descriptor of the SpILDLT0 routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -2047,12 +2110,12 @@ rocsparse_status rocsparse_spildlt0_descr_create(rocsparse_handle          handl
 *  \details
 *  \p rocsparse_spildlt0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete \f$LDL^H\f$ of level 0.
 *
- *  @param[in]
- *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  handle  the handle to the rocSPARSE library context.
 *  @param[in]
 *  spildlt0_descr        descriptor of the SpILDLT0 routine.
- *  @param[out]
- *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
 *  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
 *  \retval      rocsparse_status_success the operation completed successfully.
 */
@@ -2632,7 +2695,7 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
  *  \brief Set the row indices, column indices, and values array in the sparse COO matrix descriptor.
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  coo_row_ind row indices of the COO matrix. Must be an array of length \p nnz.
  *  @param[in]
@@ -2653,7 +2716,7 @@ rocsparse_status rocsparse_coo_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the <row, column> indices and values array in the sparse COO AoS matrix descriptor.
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  coo_ind <row, column> indices of the COO matrix. Must be an array of length \p nnz.
  *  @param[in]
@@ -2670,7 +2733,7 @@ rocsparse_status
  *  \brief Set the row offsets, column indices, and values array in the sparse CSR matrix descriptor.
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  csr_row_ptr  row offsets of the CSR matrix. Must be an array of length \p rows+1.
  *  @param[in]
@@ -2691,7 +2754,7 @@ rocsparse_status rocsparse_csr_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the column offsets, row indices, and values array in the sparse CSC matrix descriptor.
  *
  *  @param[inout]
- *  descr       the pointer to the sparse vector descriptor.
+ *  descr       the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  csc_col_ptr column offsets of the CSC matrix. Must be an array of length \p cols+1.
  *  @param[in]
@@ -2712,7 +2775,7 @@ rocsparse_status rocsparse_csc_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the column indices and values array in the sparse ELL matrix descriptor.
  *
  *  @param[inout]
- *  descr       the pointer to the sparse vector descriptor.
+ *  descr       the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  ell_col_ind column indices of the ELL matrix. Must be an array of length \p rows*ell_width.
  *  @param[in]
@@ -2729,7 +2792,7 @@ rocsparse_status
  *  \brief Set the row offsets, column indices, and values array in the sparse BSR matrix descriptor
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  bsr_row_ptr  row offsets of the BSR matrix. Must be an array of length \p rows+1.
  *  @param[in]
@@ -2745,6 +2808,23 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
                                             void*                 bsr_row_ptr,
                                             void*                 bsr_col_ind,
                                             void*                 bsr_val);
+
+/*! \ingroup aux_module
+ *  \brief Set the column indices and values array in the sparse Blocked ELL matrix descriptor
+ *
+ *  @param[inout]
+ *  descr   the pointer to the sparse matrix descriptor.
+ *  @param[in]
+ *  bell_col_ind  column indices of the Blocked ELL matrix. Must be an array of length \p mb*ell_cols/ell_block_size.
+ *  @param[in]
+ *  bell_val      values of the Blocked ELL matrix. Must be an array of length \p m*ell_cols.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr, \p bell_col_ind, or \p bell_val is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status
+    rocsparse_bell_set_pointers(rocsparse_spmat_descr descr, void* bell_col_ind, void* bell_val);
 
 /*! \ingroup aux_module
  *  \brief Get the number of rows, columns, and non-zeros from the sparse matrix descriptor.
