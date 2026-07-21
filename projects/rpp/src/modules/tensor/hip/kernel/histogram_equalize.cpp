@@ -393,6 +393,7 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
             reinterpret_cast<Rpp8u*>(handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     } else {
         // Reallocate overflow buffer if needed
+        printf("hit overflow path");
         RPP_HIP_RETURN_IF_ERROR(hipMalloc(&scratchBuffer, requiredSize));
         scratchOverflowGuard.reset(scratchBuffer);
     }
