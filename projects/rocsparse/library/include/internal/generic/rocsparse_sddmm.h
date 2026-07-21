@@ -229,8 +229,9 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  This routine supports execution in a hipGraph context only when \p alg == \ref rocsparse_sddmm_alg_default.
 *
 *  \note
-*  Batched computation is supported for the \ref rocsparse_format_csr and
-*  \ref rocsparse_format_ell formats when \p alg == \ref rocsparse_sddmm_alg_default.
+*  Batched computation is supported for the \ref rocsparse_format_csr,
+*  \ref rocsparse_format_coo and \ref rocsparse_format_ell formats when
+*  \p alg == \ref rocsparse_sddmm_alg_default.
 *  The batch count is taken from the sparse matrix \f$C\f$. Each of the dense
 *  matrices \f$A\f$ and \f$B\f$ must either use the same batch count as \f$C\f$,
 *  or be configured with batch count 1 and batch stride 0 in order to broadcast
@@ -247,7 +248,8 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  Per-batch strides for the dense operands are configured via
 *  \ref rocsparse_dnmat_set_strided_batch, while the per-batch strides for the
 *  sparse output \f$C\f$ are configured with the format-specific routine:
-*  \ref rocsparse_csr_set_strided_batch for \ref rocsparse_format_csr and
+*  \ref rocsparse_csr_set_strided_batch for \ref rocsparse_format_csr,
+*  \ref rocsparse_coo_set_strided_batch for \ref rocsparse_format_coo and
 *  \ref rocsparse_ell_set_strided_batch for \ref rocsparse_format_ell.
 *
 *  For CSR, \ref rocsparse_csr_set_strided_batch sets two independent per-batch
@@ -258,6 +260,13 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  batch \f$i\f$ by adding \p i * \p columns_values_batch_stride. The offsets
 *  stride must be at least \f$m + 1\f$, and the columns/values stride must be at
 *  least the per-batch nnz of \f$C\f$; both may be larger to allow padding.
+*
+*  For COO, \ref rocsparse_coo_set_strided_batch sets a single per-batch stride
+*  that applies to all three COO buffers (row indices, column indices and
+*  values); i.e. the row-index, column-index and value buffers of batch \f$i\f$
+*  are obtained from the base pointers by adding \p i * \p batch_stride, and must
+*  therefore be laid out with the same stride. The stride must be at least the
+*  per-batch nnz of \f$C\f$, and may be larger to allow padding.
 *
 *  For ELL, \ref rocsparse_ell_set_strided_batch sets a single per-batch stride
 *  that applies to both the column-index and value buffers; i.e. the column-index

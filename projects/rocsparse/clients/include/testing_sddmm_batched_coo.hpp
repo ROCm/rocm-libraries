@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -26,7 +26,7 @@
 #include "rocsparse_arguments.hpp"
 
 template <typename I, typename A, typename B, typename C, typename T>
-void testing_spmm_batched_coo_bad_arg(const Arguments& arg);
-void testing_spmm_batched_coo_extra(const Arguments& arg);
+void testing_sddmm_batched_coo_bad_arg(const Arguments& arg);
+void testing_sddmm_batched_coo_extra(const Arguments& arg);
 template <typename I, typename A, typename B, typename C, typename T>
-void testing_spmm_batched_coo(const Arguments& arg);
+void testing_sddmm_batched_coo(const Arguments& arg);

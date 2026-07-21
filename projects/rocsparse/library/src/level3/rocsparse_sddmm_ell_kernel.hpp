@@ -143,8 +143,9 @@ namespace rocsparse
                           int64_t batch_stride_B,
                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                           C* __restrict__ val,
+                          int64_t values_batch_stride_C,
                           const J* __restrict__ ind,
-                          int64_t              batch_stride_C,
+                          int64_t              indices_batch_stride_C,
                           rocsparse_index_base base,
                           bool                 is_host_mode)
     {
@@ -178,8 +179,8 @@ namespace rocsparse
                 load_pointer(dense_B, batch, batch_stride_B),
                 ldb,
                 beta,
-                load_pointer(val, batch, batch_stride_C),
-                load_pointer(ind, batch, batch_stride_C),
+                load_pointer(val, batch, values_batch_stride_C),
+                load_pointer(ind, batch, indices_batch_stride_C),
                 base);
         }
     }
