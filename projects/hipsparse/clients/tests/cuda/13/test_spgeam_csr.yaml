@@ -61,7 +61,8 @@ Tests:
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO]
 
-# Quick: mixed index bases and complex scalars.
+# Quick: base-one indexing with complex scalars. cuSPARSE requires all matrices to share
+# the same base index, so mixed-base coverage is only run on the rocSPARSE backend.
 - name: spgeam_csr
   category: quick
   function: spgeam_csr
@@ -73,7 +74,7 @@ Tests:
   beta: [2.0]
   betai: [-0.5]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
   baseC: [HIPSPARSE_INDEX_BASE_ONE]
 
 - name: spgeam_csr
