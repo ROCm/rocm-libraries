@@ -130,7 +130,7 @@ macro(_dapper_native_init)
 endmacro()
 
 macro(dapper_dev_filters)
-# TODO Fix Dapper default minimal run if no work to do. It's in calc_union_filter but in mici this is ran by dapper_diff which does not run until after miopen-check
+# TODO: This is a development feature that will be removed following phase 3.
 
     message(STATUS "================== DAPPER DEVELOPMENT FILTERS")
 
