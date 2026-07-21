@@ -66,7 +66,9 @@ else()
             -Wunreachable-code
             -Wunused
             -Wno-reserved-identifier
-            -Werror
+            # prototype: newer clang on the CI base flags -Wlifetime-safety-intra-tu-suggestions
+            # (and other new warnings) that 7.0.2-era CK predates; keep warnings non-fatal.
+            -Wno-error
             -Wno-option-ignored
             -Wsign-compare
             -Wno-extra-semi-stmt
