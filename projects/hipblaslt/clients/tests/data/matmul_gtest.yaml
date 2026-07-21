@@ -3338,7 +3338,8 @@ Tests:
 # exact 4-ULP unit_check holds. Scoped to gfx950, where these entries run.
 ###############################################################################
 
-# Plain GEMM across f32/f16/bf16, gpu and both references.
+# Plain GEMM across f32/f16/bf16 and all four transpose combinations, gpu and
+# both references.
 - name: matmul_check_ref
   category: pre_checkin
   function:
@@ -3349,8 +3350,8 @@ Tests:
   M: [128]
   N: [128]
   K: [128]
-  transA: T
-  transB: N
+  transA: [ N, T ]
+  transB: [ N, T ]
   alpha_beta: *integer_exact_alpha_beta
   initialization: integer_exact
   unit_check: 1
