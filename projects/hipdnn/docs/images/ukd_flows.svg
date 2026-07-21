@@ -46,8 +46,8 @@
   <rect x="335" y="210" width="250" height="60" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="460" y="234" text-anchor="middle" font-size="12">runtime-drop folder</text>
   <text x="460" y="254" text-anchor="middle" font-family="Consolas, monospace" font-size="10">*.kdp + code objects (or JIT source)</text>
-  <!-- runtime-drop -> runtime provider -->
-  <path d="M585 232 L775 232 L775 176" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrow5)"/>
+  <!-- runtime-drop -> runtime provider (enters bottom edge left of the core downflow) -->
+  <path d="M585 232 L710 232 L710 176" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrow5)"/>
 
   <!-- hipDNN core box -->
   <rect x="110" y="310" width="700" height="60" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>

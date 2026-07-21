@@ -173,9 +173,10 @@ registries) lives inside the provider behind those contracts.
 ## 4. Descriptor Formats
 
 Descriptors are authored in a human-readable, diffable text format and compiled to a compact binary
-form for fast loading. Each format has a defined schema (a JSON Schema or FlatBuffer definition) and a
+form for fast loading. Each format has a defined schema and a
 version; a descriptor is refused, never silently reinterpreted, if its version is newer than the
-runtime understands, and the concrete schema for each format lands in that format's follow-up RFC.
+runtime understands. The concrete serialization and schema for each format are deferred to that
+format's follow-up RFC.
 Every descriptor also carries a stable, opaque `id` used for cross-references and a `name` that is mandatory for
 logging and diagnostics; both appear in the examples. The examples are illustrative, and the
 `schema`/version plumbing is shown once here and elided elsewhere.
