@@ -427,7 +427,7 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}")
         # Active (union) mode: produce the impact JSON and burn each Dapper-enabled category's
         # union filter into the install CTestTestfile (retaining the full filter as a
-        # '<name>_original_suite'). All heavy lifting is in dapper.cmake.
+        # '<name>_unfiltered_suite'). All heavy lifting is in dapper.cmake.
         if(MIOPEN_DAPPER_MODE STREQUAL "union")
           dapper_therock_generate_json("${INSTALL_TEST_FILE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         endif()

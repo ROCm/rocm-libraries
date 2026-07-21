@@ -77,7 +77,7 @@ builder; only gtest execution happens on the GPU runner.**
      --yaml test_categories.yaml --dapper-json miopen_dapper_tests.json` — for each
      Dapper-enabled category (`enable_dapper`), compute the union (honoring
      `fallback_mode`) and **burn it into `<category>_suite`'s `--gtest_filter`**, add a
-     `<category>_original_suite` that retains the full filter, and record
+     `<category>_unfiltered_suite` that retains the full filter, and record
      `category_<NAME>_filter` (original) + `category_<NAME>_union` (effective) in the JSON.
 
    All CPU-only: git, `ninja -t deps`, `nm`, C-preprocessing. All dapper computation
@@ -97,7 +97,7 @@ builder; only gtest execution happens on the GPU runner.**
 8. **Run** — `ctest` invokes the selected suite directly:
    `../miopen_gtest --gtest_filter=<union>` (the union was burned in at build time). No
    dapper code runs at ctest time; this is exactly develop's direct-binary invocation,
-   only the filter value differs. Running `<category>_original_suite` runs the full
+   only the filter value differs. Running `<category>_unfiltered_suite` runs the full
    category. **This is the only step that uses the GPU.**
 
 `fallback_mode=entire_category` (unattributable change, or a missing/unreadable JSON at
@@ -171,7 +171,7 @@ here. `parse_test_categories.py` / `TestCategories.cmake` generate the normal (d
 binary) install CTestTestfile; dapper rewrites it afterward on the builder.
 
 Build/runtime artifacts installed to `bin/<PROJECT>/` on the runner (union mode):
-`CTestTestfile.cmake` (union filters burned in, plus `<category>_original_suite` entries)
+`CTestTestfile.cmake` (union filters burned in, plus `<category>_unfiltered_suite` entries)
 and `miopen_dapper_tests.json` (`dapper_filter`, `fallback_mode`, and per-category
 `category_<NAME>_filter` / `category_<NAME>_union` — the downloadable record). No python
 ships to the runner; `ctest` invokes the binary directly.

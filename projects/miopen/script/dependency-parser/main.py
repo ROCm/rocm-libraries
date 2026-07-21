@@ -167,11 +167,11 @@ def _atomic_write(path, text):
 
 def run_finalize_ctest(args):
     """TheRock builder step: burn each Dapper-enabled category's union filter into the
-    install CTestTestfile, and retain the full category as a '<name>_original_suite'.
+    install CTestTestfile, and retain the full category as a '<name>_unfiltered_suite'.
 
     For each Dapper-enabled category (yaml 'enable_dapper'), the existing '<name>_suite'
     keeps its name but its --gtest_filter is replaced with the subtractive union (honoring
-    fallback_mode); a '<name>_original_suite' entry is added that keeps the full original
+    fallback_mode); a '<name>_unfiltered_suite' entry is added that keeps the full original
     filter. Both the original and union filters are recorded in the dapper JSON for
     reference (downloadable record). All computation happens here, at build time, in one
     process; the runner just runs ctest with the burned-in filters (no dapper code ships).
@@ -234,13 +234,13 @@ def run_finalize_ctest(args):
                 best = cat
         return best
 
-    def original_name(name):
-        return name[: -len("_suite")] + "_original_suite"
+    def unfiltered_name(name):
+        return name[: -len("_suite")] + "_unfiltered_suite"
 
     with open(args.ctest_in, "r") as f:
         lines = f.readlines()
 
-    rewritten = {}  # union-suite name -> original-suite name
+    rewritten = {}  # union-suite name -> unfiltered-suite name
     processed = set()  # category names finalized
     out = []
     for line in lines:
@@ -254,7 +254,7 @@ def run_finalize_ctest(args):
                 union = resolve_filter(
                     dapper_filter, fallback_mode, cat, original_filter
                 )
-                name_orig = original_name(name)
+                name_unfiltered = unfiltered_name(name)
                 out.append(
                     line.replace(
                         f"--gtest_filter={original_filter}",
@@ -263,9 +263,9 @@ def run_finalize_ctest(args):
                     )
                 )
                 out.append(
-                    line.replace(f"add_test({name} ", f"add_test({name_orig} ", 1)
+                    line.replace(f"add_test({name} ", f"add_test({name_unfiltered} ", 1)
                 )
-                rewritten[name] = name_orig
+                rewritten[name] = name_unfiltered
                 processed.add(cat)
                 data[f"category_{cat}_filter"] = original_filter
                 data[f"category_{cat}_union"] = union
@@ -276,7 +276,7 @@ def run_finalize_ctest(args):
             out.append(line)  # properties for the union suite (name unchanged)
             out.append(
                 line.replace(name, rewritten[name], 1)
-            )  # ...and the _original suite
+            )  # ...and the _unfiltered suite
             continue
         out.append(line)
 
@@ -388,7 +388,7 @@ def main():
     parser_finalize = subparsers.add_parser(
         "finalize-ctest",
         help="Burn per-category Dapper union filters into the install CTestTestfile "
-        "and add '<name>_original_suite' entries retaining the full filters (TheRock).",
+        "and add '<name>_unfiltered_suite' entries retaining the full filters (TheRock).",
     )
     parser_finalize.add_argument(
         "--ctest-in", required=True, help="Configure-generated install CTestTestfile"

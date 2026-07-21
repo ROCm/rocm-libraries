@@ -286,7 +286,7 @@ endmacro()
 #     downloadable record.
 #   - a finalized CTestTestfile: for each Dapper-enabled category the existing '<name>_suite'
 #     runs the subtractive union (burned directly into the add_test, exactly as develop's
-#     direct-binary invocation), and a '<name>_original_suite' is added retaining the full
+#     direct-binary invocation), and a '<name>_unfiltered_suite' is added retaining the full
 #     filter. Nothing dapper runs at ctest time; no runner/helper is installed.
 #
 # Called from CMakeLists.txt AFTER apply_test_category_labels (so install_ctest_file exists).
