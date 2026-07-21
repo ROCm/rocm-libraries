@@ -952,13 +952,6 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
         const void* beta_g
             = static_cast<const char*>(beta_array) + static_cast<size_t>(g) * scalar_stride;
 
-        auto stride_a = rocblas_stride(lda_array[g])
-                        * (transa_array[g] == rocblas_operation_none ? k_array[g] : m_array[g]);
-        auto stride_b = rocblas_stride(ldb_array[g])
-                        * (transb_array[g] == rocblas_operation_none ? n_array[g] : k_array[g]);
-        auto stride_c = rocblas_stride(ldc_array[g]) * n_array[g];
-        auto stride_d = rocblas_stride(ldd_array[g]) * n_array[g];
-
         rocblas_status status = rocblas_gemm_ex_template<true>(
             handle,
             transa_array[g],
@@ -971,23 +964,23 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
             a_type,
             0,
             lda_array[g],
-            stride_a,
+            0,
             reinterpret_cast<const void*>(Barray + idx),
             b_type,
             0,
             ldb_array[g],
-            stride_b,
+            0,
             beta_g,
             reinterpret_cast<const void*>(Carray + idx),
             c_type,
             0,
             ldc_array[g],
-            stride_c,
+            0,
             const_cast<void*>(reinterpret_cast<const void*>(Darray + idx)),
             d_type,
             0,
             ldd_array[g],
-            stride_d,
+            0,
             group_size[g],
             compute_type,
             algo,
