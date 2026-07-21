@@ -49,8 +49,11 @@ The packaged command surface should be defined and completed as part of this tra
 - `tensilelite create-library`
 - `tensilelite logic`
 - `tensilelite run`
+- `tensilelite asm`
 
 `tensilelite run` covers the benchmark and tuning workflow. Its command contract should be the current `Tensile` command contract, moved behind the new package CLI rather than redesigned during this migration. Making it public means this transition must also fix the compiled client artifact contract: `tensilelite-client` should be installed under `ROCM_PATH`, the Python package should find it there, and `--prebuilt-client` should become an override rather than the normal packaged path.
+
+`tensilelite asm` should own the assembly-rebuild workflow currently being added as `invoke asm`: rebuild edited `.s` files under a generated Tensile output tree and relink the corresponding `.co` files with the ROCm compiler. `invoke asm` can remain as a source-checkout convenience wrapper, but packaged users should not need `tasks.py` or a hipBLASLt checkout for that tuning workflow.
 
 ## Non-Goals
 
@@ -106,6 +109,7 @@ The public names should describe the fork people are actually using:
 | `TensileCreateLibrary` | `tensilelite create-library` |
 | `TensileLogic` | `tensilelite logic` |
 | `python -m Tensile.TensileCreateLibrary ...` | `python -m tensilelite create-library ...` |
+| `invoke asm ...` | `tensilelite asm ...` |
 
 Temporary `Tensile*` command aliases are reasonable during migration, but they should be provided by `tensilelite-tensile-compat`, not by the default `tensilelite` wheel. They should route through the new CLI and print deprecation warnings.
 
@@ -157,11 +161,13 @@ The Python wheel should be intentionally small. It should include the generator 
 | Static headers copied by `create-library` | `tensilelite` package data | Generated libraries need these headers in the output tree. |
 | `CustomKernels/*.s` | `tensilelite` package data | Configs and logic files can reference custom kernels by name; codegen must be able to read the matching assembly. |
 | `TensileLogic/known_bugs.yaml` | `tensilelite` package data | Default documented exception list for `tensilelite logic --check-all`; CMake and downstream callers should not need to pass a source-tree path. |
+| Assembly rebuild helper | `tensilelite` wheel as `tensilelite asm` | Tuning workflow that operates on generated output files and ROCm compiler tools; it should not require `tasks.py` or a checkout. |
 | `rocisa` Python package and `_rocisa` extension | Separate `rocisa` package | Native extension with its own ABI and ROCm/TheRock dependency contract. |
 | `libstinkytofu` | ROCm/TheRock package or vendored `rocisa` wheel dependency, depending on build mode | Runtime dependency of `_rocisa`; it must be intentionally resolved. |
 | ROCm compiler tools and system libraries | ROCm/system packages | `pip` cannot install `amdclang++`, HIP runtime libraries, `hipconfig`, or similar system tools. |
 | `tensilelite-host` and `tensilelite-client` | ROCm/system runtime artifacts | These are compiled artifacts, not Python generator resources. |
 | `cpu-gemm-driver` and C++ tests | Source tree and CI test builds only | Test-only artifacts; do not package into release artifacts. |
+| `tasks.py` Invoke tasks | Source tree and CI only, except wrappers around packaged commands | Developer build tasks such as editable `rocisa`, `build-client`, coverage, and pre-commit are not release package interfaces. |
 
 The static header set currently copied by library generation should be packaged explicitly:
 
@@ -178,6 +184,7 @@ The wheel should not include:
 - `Tensile/Tests/**`; tests belong in source, CI, or explicit test artifacts, not the runtime wheel.
 - `rocisa/` source or `rocisa/build`; `rocisa` is a separate package.
 - C++ executables or shared libraries unless we deliberately create a platform wheel that owns that binary contract.
+- source-checkout Invoke task files such as `tasks.py`; packaged workflows should be normal `tensilelite` subcommands.
 - local build outputs such as `build/`, `build_tmp/`, `CMakeCache.txt`, and `install_manifest.txt`.
 - broad legacy `MANIFEST.in` globs such as `recursive-include Tensile ...` or `recursive-include rocisa ...`.
 - CMake helper files from `Tensile/Source` unless a supported packaged workflow still uses them.
@@ -207,8 +214,9 @@ The migration should happen in stages so reviewers can validate each boundary in
 3. Add a real CLI.
    - Add `tensilelite.cli`.
    - Add `tensilelite/__main__.py` so `python -m tensilelite ...` works.
-   - Expose `create-library`, `logic`, and `run` as the supported command set.
+   - Expose `create-library`, `logic`, `run`, and `asm` as the supported command set.
    - Make `run` use the `ROCM_PATH` `tensilelite-client` discovery path, with `--prebuilt-client` as an explicit override.
+   - Move the assembly rebuild implementation behind `tensilelite asm`; keep `invoke asm` as a thin source-checkout wrapper if it remains useful for developers.
    - Keep legacy `Tensile*` console-script aliases out of the default wheel; implement them only in `tensilelite-tensile-compat`.
    - Avoid adding a second command family such as `tensilelite-create-library`.
 
@@ -245,6 +253,8 @@ These are the main places where the old source-tree contract or binary-artifact 
 | `cmake/hipblaslt_python.cmake` | Stop constructing a `PYTHONPATH`-patched command environment. |
 | `cmake/HipBLASLtCodegen.cmake` | Call `python -m tensilelite logic` and `python -m tensilelite create-library`. |
 | `device-library/extops/CMakeLists.txt` | Either package ext-op generators as `tensilelite` modules/subcommands or declare them out of scope for the packaged path. |
+| `tensilelite/tasks.py` | Classify Invoke tasks as source/CI tooling. Move user-facing tuning functionality, including the new assembly rebuild flow, behind package subcommands. |
+| `tensilelite/README.md` | Document `tensilelite asm` for packaged tuning workflows; keep `invoke asm` documented only as a source-checkout shortcut if needed. |
 | `scripts/run_tensile_logic_check.py` | Call the installed package API or `python -m tensilelite logic`. |
 | `Tensile/Tensile.py` | Remove checkout/build-tree default client paths from the public packaged path. |
 | `Tensile/ClientWriter.py` and `Tensile/GenerateSummations.py` | Stop shelling out to `Tensile/bin/TensileCreateLibrary`; use the new dispatcher or an in-process API. |
@@ -277,6 +287,7 @@ This refactor should not be considered done until it passes package-level, binar
 - Verify `_rocisa` can load its native dependencies in the clean environment that represents the target ROCm/TheRock artifact set.
 - Run `tensilelite --help`, `tensilelite create-library --help`, and `tensilelite logic --help`.
 - Run `tensilelite run --help` and a smoke path that proves it finds the installed `tensilelite-client` or honors an explicit `--prebuilt-client` override.
+- Run `tensilelite asm --help` and a package-installed smoke test that reassembles a generated-output fixture without importing `tasks.py` or adding the source tree to `PYTHONPATH`.
 - Verify `import Tensile` fails in an environment with only the default `tensilelite` wheel installed.
 - Run `tensilelite-tensile-compat` smoke tests while that package exists.
 - Run unit tests and installed-wheel tests without adding the source tree to `PYTHONPATH`.
