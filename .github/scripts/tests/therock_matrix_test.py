@@ -19,6 +19,14 @@ class TheRockMatrixTest(unittest.TestCase):
             "hipsparselt",
             blas_entry["projects_to_test"].split(","),
         )
+        self.assertIn(
+            "-DTHEROCK_ENABLE_ROCJITSU=ON",
+            blas_entry["cmake_options"].split(),
+        )
+        self.assertIn(
+            "-DTHEROCK_ENABLE_MIRAGE=ON",
+            blas_entry["cmake_options"].split(),
+        )
 
     def test_collect_projects_to_run(self):
         subtrees = ["projects/rocsparse", "projects/hipblaslt"]

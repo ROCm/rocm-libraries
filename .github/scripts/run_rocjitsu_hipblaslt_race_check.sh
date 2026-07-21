@@ -1,35 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The workflow that calls this script fetches hipBLASLt/TensileLite artifacts
-# from the current TheRock build, then checks out rocm-systems.
-#
-# TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
-# artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
+# The workflow that calls this script fetches hipBLASLt/TensileLite, Mirage,
+# and rocjitsu artifacts from the current TheRock build.
 #
 # The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
 # TODO(newling) expand the GEMM-space tested.
 #
 # Basic flow:
 #   1. Use the TheRock artifact tree unpacked at ROCM_PATH.
-#   2. Build rocjitsu from the rocm-systems checkout in ROCJITSU_SOURCE_DIR.
-#   3. Select a rocjitsu config for gfx942, gfx950, or gfx1151.
-#   4. Run hipblaslt-bench and a reduced TensileLite smoke under RJ_RACE=1.
+#   2. Select a packaged rocjitsu config for gfx942, gfx950, or gfx1151.
+#   3. Run hipblaslt-bench and a reduced TensileLite smoke through Mirage with
+#      rocjitsu race detection enabled.
 
-# These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
-# unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
-# rocm-systems source tree, ROCJITSU_BUILD_DIR is a local build directory, and
-# RACE_REPORT_DIR is uploaded at the end of the job. They can be overridden for
-# local reproduction. The brittle part is not the path names themselves, but the
-# artifact layout underneath ROCM_PATH; the checks below fail early if
-# hipBLASLt/TensileLite files move in TheRock artifacts.
+# These defaults match the GitHub Actions workspace layout. They can be
+# overridden for local reproduction. The checks below fail early if an expected
+# TheRock artifact moves or is missing.
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
 AMDGPU_FAMILIES="${AMDGPU_FAMILIES:-}"
 ROCJITSU_GPU_TARGET="${ROCJITSU_GPU_TARGET:-}"
-ROCJITSU_SOURCE_DIR="${ROCJITSU_SOURCE_DIR:-${PWD}/rocm-systems/emulation/rocjitsu}"
-ROCJITSU_BUILD_DIR="${ROCJITSU_BUILD_DIR:-${PWD}/rocjitsu-build}"
+ROCJITSU_CONFIG_DIR="${ROCJITSU_CONFIG_DIR:-${ROCM_PATH}/share/rocjitsu/configs}"
 ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-}"
 RACE_REPORT_DIR="${RACE_REPORT_DIR:-${PWD}/race-reports}"
+MIRAGE_BIN="${MIRAGE_BIN:-${ROCM_PATH}/bin/mirage}"
+ROCJITSU_LIB="${ROCJITSU_LIB:-${ROCM_PATH}/lib/librocjitsu.so}"
 HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
 TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/Tensile/bin/Tensile}"
@@ -74,25 +68,25 @@ select_rocjitsu_config() {
       # in flight: target-specific vs family-generic, and KMD vs non-KMD.
       # Prefer the target-specific KMD config when it exists.
       candidates=(
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna3.json"
+        "${ROCJITSU_CONFIG_DIR}/gfx942_cdna3_kmd.json"
+        "${ROCJITSU_CONFIG_DIR}/amdgpu_cdna3_kmd.json"
+        "${ROCJITSU_CONFIG_DIR}/gfx942_cdna3.json"
+        "${ROCJITSU_CONFIG_DIR}/amdgpu_cdna3.json"
       )
       ;;
     gfx950)
       # Same four-name compatibility pattern as gfx942: target-specific before
       # family-generic, and KMD before non-KMD.
       candidates=(
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4.json"
-        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4.json"
+        "${ROCJITSU_CONFIG_DIR}/gfx950_cdna4_kmd.json"
+        "${ROCJITSU_CONFIG_DIR}/amdgpu_cdna4_kmd.json"
+        "${ROCJITSU_CONFIG_DIR}/gfx950_cdna4.json"
+        "${ROCJITSU_CONFIG_DIR}/amdgpu_cdna4.json"
       )
       ;;
     gfx1151)
       candidates=(
-        "${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
+        "${ROCJITSU_CONFIG_DIR}/gfx1151.json"
       )
       ;;
     *)
@@ -163,6 +157,21 @@ if [[ ! -d "${ROCM_PATH}" ]]; then
   exit 1
 fi
 
+if [[ ! -x "${MIRAGE_BIN}" ]]; then
+  echo "Mirage executable not found or not executable: ${MIRAGE_BIN}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${ROCJITSU_LIB}" ]]; then
+  echo "rocjitsu runtime library not found: ${ROCJITSU_LIB}" >&2
+  exit 1
+fi
+
+if [[ ! -d "${ROCJITSU_CONFIG_DIR}" ]]; then
+  echo "rocjitsu config directory not found: ${ROCJITSU_CONFIG_DIR}" >&2
+  exit 1
+fi
+
 if [[ ! -x "${HIPBLASLT_BENCH}" ]]; then
   echo "hipblaslt-bench not found or not executable: ${HIPBLASLT_BENCH}" >&2
   exit 1
@@ -189,7 +198,7 @@ derive_rocjitsu_gpu_target
 select_rocjitsu_config
 
 if [[ -z "${ROCJITSU_CONFIG}" || ! -f "${ROCJITSU_CONFIG}" ]]; then
-  echo "rocjitsu ${ROCJITSU_GPU_TARGET} config not found under ${ROCJITSU_SOURCE_DIR}/configs" >&2
+  echo "rocjitsu ${ROCJITSU_GPU_TARGET} config not found under ${ROCJITSU_CONFIG_DIR}" >&2
   exit 1
 fi
 
@@ -204,15 +213,18 @@ mkdir -p "${RACE_REPORT_DIR}"
 # happens to be installed in the CI image. ROCM_PATH is exported for subprocesses
 # that use it to find the ROCm install root.
 export ROCM_PATH
+export ROCM_HOME="${ROCM_PATH}"
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "ROCM_PATH=${ROCM_PATH}"
+echo "ROCM_HOME=${ROCM_HOME}"
 echo "AMDGPU_FAMILIES=${AMDGPU_FAMILIES}"
 echo "ROCJITSU_GPU_TARGET=${ROCJITSU_GPU_TARGET}"
-echo "ROCJITSU_SOURCE_DIR=${ROCJITSU_SOURCE_DIR}"
-echo "ROCJITSU_BUILD_DIR=${ROCJITSU_BUILD_DIR}"
+echo "MIRAGE_BIN=${MIRAGE_BIN}"
+echo "ROCJITSU_LIB=${ROCJITSU_LIB}"
+echo "ROCJITSU_CONFIG_DIR=${ROCJITSU_CONFIG_DIR}"
 echo "ROCJITSU_CONFIG=${ROCJITSU_CONFIG}"
 echo "HIPBLASLT_BENCH=${HIPBLASLT_BENCH}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
@@ -225,66 +237,9 @@ echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 echo "PYTHONPATH=${PYTHONPATH}"
 
 
-# TODO(newling): Track migration to a packaged rocjitsu once TheRock provides a
-# complete runnable artifact. Until then, build rocjitsu from the rocm-systems
-# checkout selected by the workflow so this job controls the tool source.
-# rocjitsu is still consumed from a source checkout in this workflow. Build only
-# the CLI and optional runtime/shim targets needed to launch the test workloads;
-# this keeps the job independent of full rocm-systems packaging.
-#
-# The warning suppressions keep the local rocjitsu build from failing on
-# compiler/header warning mismatches. `nested-anon-types` is a Clang warning for
-# anonymous structs/unions nested inside another type; use -Wno-error so those
-# warnings remain visible but do not fail this bridge build.
-cmake_args=(
-  -S "${ROCJITSU_SOURCE_DIR}"
-  -B "${ROCJITSU_BUILD_DIR}"
-  -G Ninja
-  -DCMAKE_BUILD_TYPE=Release
-  -DBUILD_TESTING=OFF
-  -DROCM_PATH="${ROCM_PATH}"
-  -DCMAKE_PREFIX_PATH="${ROCM_PATH}"
-  -DCMAKE_CXX_FLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
-)
-
-if ! command -v amdclang >/dev/null 2>&1 || ! command -v amdclang++ >/dev/null 2>&1; then
-  echo "amdclang and amdclang++ must be available from the fetched ROCm payload" >&2
-  exit 1
-fi
-cmake_args+=(
-  -DCMAKE_C_COMPILER="$(command -v amdclang)"
-  -DCMAKE_CXX_COMPILER="$(command -v amdclang++)"
-)
-
-run_timed "configure rocjitsu" cmake "${cmake_args[@]}"
-
-# The CLI is required. The shared library and KMD shim target names have existed
-# in some rocm-systems revisions and not others; build them when available, but
-# do not make this bridge job depend on optional target names.
-cmake_target_exists() {
-  local target="$1"
-  cmake --build "${ROCJITSU_BUILD_DIR}" --target help \
-    | grep -Eq "(^|[[:space:]])${target}([:[:space:]]|$)"
-}
-
-build_targets=(rocjitsu_bin)
-if cmake_target_exists rocjitsu_shared; then
-  build_targets+=(rocjitsu_shared)
-fi
-if cmake_target_exists rocjitsu_kmd_shim; then
-  build_targets+=(rocjitsu_kmd_shim)
-fi
-run_timed "build rocjitsu" cmake --build "${ROCJITSU_BUILD_DIR}" --target "${build_targets[@]}"
-
-ROCJITSU_BIN="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
-if [[ ! -x "${ROCJITSU_BIN}" ]]; then
-  echo "rocjitsu binary not found after build: ${ROCJITSU_BIN}" >&2
-  exit 1
-fi
-
-show_rocjitsu_version() {
-  echo "rocjitsu version:"
-  "${ROCJITSU_BIN}" --version
+show_mirage_version() {
+  echo "Mirage version:"
+  "${MIRAGE_BIN}" --version
 }
 
 run_hipblaslt_bench_check() {
@@ -294,22 +249,23 @@ run_hipblaslt_bench_check() {
   # triggers a separate device-fill kernel race report that needs independent
   # investigation. This check is scoped to the hipBLASLt GEMM dispatch path.
   timeout "${RACE_TIMEOUT_SECONDS}" \
-    env \
-      HSA_ENABLE_SDMA=1 \
-      RJ_RACE=1 \
-      RJ_LOG=1 \
-      RJ_SINKS=stderr,file \
-      RJ_SINK_DIR="${RACE_REPORT_DIR}/hipblaslt-bench" \
-      "${ROCJITSU_BIN}" \
-        --config "${ROCJITSU_CONFIG}" \
-        -- "${HIPBLASLT_BENCH}" \
-          --precision f32_r \
-          --initialization zero \
-          -m 128 \
-          -n 128 \
-          -k 128 \
-          --iters 1 \
-          --cold_iters 0 \
+    "${MIRAGE_BIN}" run \
+      --emulator rocjitsu \
+      --config "${ROCJITSU_CONFIG}" \
+      --in-process \
+      --env HSA_ENABLE_SDMA=1 \
+      --env RJ_RACE=1 \
+      --env RJ_LOG=1 \
+      --env RJ_SINKS=stderr,file \
+      --env "RJ_SINK_DIR=${RACE_REPORT_DIR}/hipblaslt-bench" \
+      -- "${HIPBLASLT_BENCH}" \
+        --precision f32_r \
+        --initialization zero \
+        -m 128 \
+        -n 128 \
+        -k 128 \
+        --iters 1 \
+        --cold_iters 0 \
     2>&1 | tee "${RACE_REPORT_DIR}/hipblaslt-bench.log"
   local status=$?
   if [[ "${status}" -ne 0 ]]; then
@@ -504,15 +460,16 @@ run_tensilelite_client_check() {
   # setup, rocisa imports, generated client config, and the standalone
   # tensilelite-client runtime path.
   timeout "${TENSILELITE_TIMEOUT_SECONDS}" \
-    env \
-      HSA_ENABLE_SDMA=1 \
-      RJ_RACE=1 \
-      RJ_LOG=1 \
-      RJ_SINKS=stderr,file \
-      RJ_SINK_DIR="${sink_dir}" \
-      "${ROCJITSU_BIN}" \
-        --config "${ROCJITSU_CONFIG}" \
-        -- python3 "${TENSILE_DRIVER}" "${tensile_args[@]}" \
+    "${MIRAGE_BIN}" run \
+      --emulator rocjitsu \
+      --config "${ROCJITSU_CONFIG}" \
+      --in-process \
+      --env HSA_ENABLE_SDMA=1 \
+      --env RJ_RACE=1 \
+      --env RJ_LOG=1 \
+      --env RJ_SINKS=stderr,file \
+      --env "RJ_SINK_DIR=${sink_dir}" \
+      -- python3 "${TENSILE_DRIVER}" "${tensile_args[@]}" \
     2>&1 | tee "${RACE_REPORT_DIR}/tensilelite-client.log"
   local status=$?
   if [[ "${status}" -ne 0 ]]; then
@@ -542,7 +499,7 @@ run_tensilelite_client_check() {
   fi
 }
 
-run_timed "rocjitsu version" show_rocjitsu_version
+run_timed "Mirage version" show_mirage_version
 
 check_status=0
 

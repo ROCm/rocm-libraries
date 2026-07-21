@@ -48,7 +48,13 @@ project_map = {
         "projects_to_test": ["rocrand", "hiprand"],
     },
     "blas": {
-        "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
+        # The hipBLASLt race-check sidecar consumes these target-neutral
+        # artifacts from the same TheRock run instead of rebuilding rocjitsu.
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_BLAS=ON",
+            "-DTHEROCK_ENABLE_ROCJITSU=ON",
+            "-DTHEROCK_ENABLE_MIRAGE=ON",
+        ],
         "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "tensilelite"],
     },
     "miopen": {

@@ -45,19 +45,15 @@ jobs:
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
-      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
-      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
       # Per-workload timeouts are below the job timeout so the script can report
       # which workload failed and still upload race-reports on exit.
       RACE_TIMEOUT_SECONDS: "180"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
-      # The job needs three inputs in one workspace:
+      # The job needs two inputs in one workspace:
       #   1. TheRock actions/scripts to fetch the exact artifacts from this run.
       #   2. This rocm-libraries checkout for the race-check driver script.
-      #   3. rocm-systems source for rocjitsu until rocjitsu is packaged as a
-      #      complete runnable artifact.
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -71,32 +67,8 @@ jobs:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: true
 
-      - name: Checkout rocm-systems for rocjitsu
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: ROCm/rocm-systems
-          ref: develop
-          path: rocm-systems
-          sparse-checkout: |
-            emulation/rocjitsu
-            shared/machine-readable-isa/isa
-          sparse-checkout-cone-mode: true
-
-      # The pinned base image already provides CA certificates, CMake, Git, and
-      # Ninja. Install only the remaining host development files needed for the
-      # local rocjitsu source build. ROCm runtime pieces come from TheRock
-      # artifacts.
-      - name: Install rocjitsu build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            libdrm-dev
-
-      # Pull the BLAS runtime and test payload from the current TheRock build.
-      # This is what keeps the check aligned with the exact hipBLASLt and
-      # TensileLite artifacts produced by the PR, rather than an image-local or
-      # previously installed ROCm tree.
+      # Pull the BLAS runtime/test payload and the target-neutral Mirage +
+      # rocjitsu artifacts from the current TheRock build.
       - name: Run setup test environment workflow
         timeout-minutes: 15
         uses: ./.github/actions/setup_test_environment
@@ -105,7 +77,7 @@ jobs:
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: --blas --tests
+          FETCH_ARTIFACT_ARGS: --blas --tests --rocjitsu --mirage
 
       - name: Run rocjitsu race check
         timeout-minutes: 75

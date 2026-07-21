@@ -175,9 +175,10 @@ jobs:
   rocjitsu-race-check-linux:
     name: rocjitsu race check (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
-    # Run the narrow rocjitsu sidecar only for hipBLASLt rows and GPU families
-    # that rocjitsu can emulate here.
-    if: ${{ inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(inputs.projects_to_test, 'hipblaslt') }}
+    # Start the packaged Mirage/rocjitsu experiment on gfx950. The current
+    # TheRock rocm-systems pin predates the gfx1151 D16 false-positive fix;
+    # expand the matrix after the packaged path is proven and the pin advances.
+    if: ${{ inputs.build_runs_on != '' && inputs.amdgpu_families == 'gfx950-dcgpu' && contains(inputs.projects_to_test, 'hipblaslt') }}
     uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
