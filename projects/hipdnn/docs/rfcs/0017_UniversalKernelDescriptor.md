@@ -740,28 +740,29 @@ by their descriptor-backed equivalents over time.
 
 The plan begins by publishing the follow-up RFC series ([Section 12.2](#122-follow-up-rfcs)), one per
 descriptor format bundled with the subsystem it drives, so the design is agreed before code lands.
-Implementation then follows that series in dependency order. Each phase is independently shippable and
-validated against the SDPA path from the rocKE work with the checks of
-[Section 12.1](#121-testing-and-performance) before any hand-written code is removed. Adoption is
-incremental: a hand-written engine and its descriptor-backed replacement coexist, the generic one is
-enabled once it reaches parity on the graphs that engine covers, and the hand-written code is retired
-last.
+Implementation then builds the system up in dependency order, each phase validated against the SDPA
+path from the rocKE work with the checks of [Section 12.1](#121-testing-and-performance). The system is
+brought to full support before real engines are migrated onto it in earnest; that migration is then
+incremental and non-disruptive, with a hand-written engine and its descriptor-backed replacement
+coexisting until the generic one reaches parity on the graphs that engine covers, at which point the
+hand-written code is retired.
 
-1. **Dispatch (UDD + expression language).** Lift the prototype's launch core into a shared,
-   operation-agnostic module and add the symbolic grid, block, workspace, and argument language, so
-   SDPA launches from data.
-2. **Formats and registry (UKD, UED, UHD, KDP).** Define the descriptor formats and populate the
-   generic engine and plan builders from data, replacing static registration for descriptor-backed
-   engines.
-3. **Matching (UMD + graph matcher).** Declarative pattern and constraint model, native-predicate
+1. **AOT packaging (KDP), lifting the prototype.** Ship the rocKE prototype as descriptor data plus
+   code objects: the producer, packer, and per-architecture manifest for arbitrary descriptor sets,
+   with build-time validation and duplicate detection. The opt-in runtime drop-in path
+   ([Section 10](#10-packaging-and-delivery)), loading custom bundles with source-trust and
+   compatibility gating, uses the same loader and becomes exercisable once the pieces below run.
+2. **Matching (UMD + graph matcher).** The declarative pattern and constraint model, native-predicate
    escape hatch, compile-once matcher, and deterministic arbitration, replacing the SDPA graph decode
-   with a UMD.
-4. **AOT packaging (KDP).** Producer, packer, and per-architecture manifest for arbitrary descriptor
-   sets, with build-time validation and duplicate detection.
-5. **Runtime drop-in.** Opt-in loading of custom bundles from a dedicated location, prebuilt sources,
-   and compatibility gating ([Section 10](#10-packaging-and-delivery)).
-6. **Kernel selection (UHD).** The generic selector driven by UHD content, consulted by the engine to
-   rank matching kernels.
+   with a match descriptor.
+3. **Engine registry (UED).** The engine format plus the registry that discovers descriptors at load
+   and populates the generic engine and its plan builders from data, replacing static registration for
+   descriptor-backed engines.
+4. **Dispatch (UDD + expression language).** Lift the prototype's launch core into a shared,
+   operation-agnostic module and add the symbolic grid, block, workspace, and argument language. With
+   matching and the registry already in place, SDPA now runs end to end from descriptor data.
+5. **Kernel selection (UHD).** The generic selector driven by heuristic-descriptor content, consulted
+   by the engine to rank the kernels that fit a graph and optimize which one runs when several apply.
 
 Multi-kernel launch and composition ([Section 13](#13-multiple-kernels-and-composition)) are
 fast-follows, not committed in this plan.
@@ -799,10 +800,11 @@ a descriptor format with the subsystem it drives, and together they form the pla
 
 | Follow-up RFC | Covers |
 |---|---|
-| UMD + graph matcher | The match format plus the pattern and constraint model, compile-once matcher, native-predicate registry, and arbitration ([§5](#5-matching-and-the-umd)) |
-| UDD + expression language | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument language and its safe interpreter ([§6](#6-dispatch-and-workspace)) |
-| UED + UHD + selection | The engine and heuristic formats plus the registry and the generic kernel selector |
 | KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§10](#10-packaging-and-delivery)) |
+| UMD + graph matcher | The match format plus the pattern and constraint model, compile-once matcher, native-predicate registry, and arbitration ([§5](#5-matching-and-the-umd)) |
+| UED + engine registry | The engine format plus the registry that populates the generic engine and its plan builders from descriptor data |
+| UDD + expression language | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument language and its safe interpreter ([§6](#6-dispatch-and-workspace)) |
+| UHD + kernel selection | The heuristic format plus the generic selector that ranks the kernels matching a graph |
 | Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules ([§10](#10-packaging-and-delivery)) |
 | Adapters | Registering kernel-source and heuristic adapters ([§8](#8-adapters-and-extensibility)) |
 | Composition | Multi-kernel launch, intermediate buffers, and UCD pipelines ([§13](#13-multiple-kernels-and-composition)) |
