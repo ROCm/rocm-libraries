@@ -816,8 +816,12 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
             # h64kv8 no-SW family -> beats the T=128 early-V path (measured on
             # MI355X). Force T=64 there so the combo's fast_paged enablement is
             # valid; other d64 single-batch shapes keep the wider T=128 tile.
-            if (problem.dtype == "bf16" and problem.num_query_heads == 64
-                    and problem.num_kv_heads == 8 and problem.sliding_window == 0):
+            if (
+                problem.dtype == "bf16"
+                and problem.num_query_heads == 64
+                and problem.num_kv_heads == 8
+                and problem.sliding_window == 0
+            ):
                 return 64
             return 128
         # d128 occupancy lever (supersedes the small-tile pick for the
