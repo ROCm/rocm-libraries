@@ -178,6 +178,11 @@ if (NOT WIN32)
   endif()
 endif()
 
+# CSC triangular solve support (rocsparse_spsv / rocsparse_sptrsv)
+if(BUILD_WITH_CSC_TRSV)
+  target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_CSC_TRSV)
+endif()
+
 # Target properties
 
 # Offload compression ?
