@@ -68,7 +68,7 @@ TEST(rocfft_internal, rtc_helper_crash)
     auto generator_func = [](const std::string&) { return std::string(simple_kernel_jit); };
     kernel_src_gen_t generator(generator_func);
     const auto       code = RTCCache::cached_compile(
-        "simple_kernel", "gfx1201", generator, std::array<char, 32>{}, crasher_exe);
+        "simple_kernel", "gfx1201", generator, std::array<char, 32>{}, crasher_exe.string());
 
     // we should get compiled code back
     ASSERT_FALSE(code.empty());
