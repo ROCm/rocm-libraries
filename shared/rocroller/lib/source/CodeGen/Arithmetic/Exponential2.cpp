@@ -1,0 +1,38 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <rocRoller/CodeGen/Arithmetic/Exponential2.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+
+namespace rocRoller
+{
+    template <>
+    std::shared_ptr<UnaryArithmeticGenerator<Expression::Exponential2>>
+        GetGenerator<Expression::Exponential2>(Register::ValuePtr dst,
+                                               Register::ValuePtr arg,
+                                               Expression::Exponential2 const&)
+    {
+        return Component::Get<UnaryArithmeticGenerator<Expression::Exponential2>>(
+            getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);
+    }
+
+    template <>
+    Generator<Instruction> Exponential2Generator<Register::Type::Vector, DataType::Float>::generate(
+        Register::ValuePtr dest, Register::ValuePtr arg, Expression::Exponential2 const&)
+    {
+        AssertFatal(arg != nullptr);
+        AssertFatal(dest != nullptr);
+
+        co_yield_(Instruction("v_exp_f32", {dest}, {arg}, {}, ""));
+    }
+
+    template <>
+    Generator<Instruction> Exponential2Generator<Register::Type::Vector, DataType::Half>::generate(
+        Register::ValuePtr dest, Register::ValuePtr arg, Expression::Exponential2 const&)
+    {
+        AssertFatal(arg != nullptr);
+        AssertFatal(dest != nullptr);
+
+        co_yield_(Instruction("v_exp_f16", {dest}, {arg}, {}, ""));
+    }
+}

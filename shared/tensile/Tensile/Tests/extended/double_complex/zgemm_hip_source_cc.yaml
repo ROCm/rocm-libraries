@@ -1,0 +1,43 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  NumElementsToValidate: -1
+  KernelTime: True
+
+BenchmarkProblems:
+  - # zgemm CC
+    - # ProblemType
+      OperationType: GEMM
+      DataType: z
+      DestDataType: z
+      ComputeDataType: z
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      ComplexConjugateA: True
+      ComplexConjugateB: True
+
+    - # BenchmarkProblemSizeGroup - Source
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - LoopTail: [True]
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Source"]
+      ForkParameters:
+        - GlobalSplitU: [1, 3]
+        - PrefetchLocalRead: [True]
+        - PrefetchGlobalRead: [False]
+        - ThreadTile:
+          - [ 4, 2 ]
+          - [ 4, 8 ]
+        - WorkGroup:
+          - [ 16, 16,  1 ]
+          - [ 32,  4,  1 ]
+        - DepthU: [8]
+        - VectorWidth: [-1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [126,1,130], 0, [2], [62,1,66] ]

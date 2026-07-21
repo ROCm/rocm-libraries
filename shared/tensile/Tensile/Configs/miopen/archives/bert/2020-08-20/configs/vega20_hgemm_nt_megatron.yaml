@@ -1,0 +1,202 @@
+GlobalParameters: {CMakeBuildType: Release, DataInitTypeAB: 0, DataInitTypeBeta: 0, Device: 0, EnqueuesPerSync: 1, ForceRedoBenchmarkProblems: true, ForceRedoLibraryClient: true, ForceRedoLibraryLogic: true, KernelTime: true, LibraryPrintDebug: false, MergeFiles: true, MinimumRequiredVersion: 4.2.0, NewClient: 0, NumElementsToValidate: 0, PinClocks: false, Platform: 0, PrintSolutionRejectionReason: true, PrintWinnersOnly: 1, ShortNames: false, SleepPercent: 50, SolutionSelectionAlg: 1, SyncsPerBenchmark: 1, ValidationMaxToPrint: 4, ValidationPrintValids: false}
+BenchmarkProblems:
+- - {Batched: true, DataType: h, OperationType: GEMM, HighPrecisionAccumulate: true, TransposeA: false, TransposeB: true,
+    UseBeta: true}
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - GlobalSplitU: [1]
+    - FractionalLoad: [1]
+    - PrefetchLocalRead: [true]
+    - PrefetchGlobalRead: [true]
+    - TransposeLDS: [0]
+    - AssertSummationElementMultiple: [2]
+    - AssertFree0ElementMultiple: [2]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [2048, 2, 1, 2, 2048, 2048, 2048, 2]
+      - Exact: [1024, 2, 1, 4, 1024, 1024, 1024, 2]
+      - Exact: [1024, 2, 1, 8, 1024, 1024, 1024, 2]
+      - Exact: [2560, 2, 1, 4, 2560, 2560, 2560, 2]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [16, 24, 32]
+    - ThreadTile:
+      - [4, 4]
+      - [4, 6]
+      - [6, 4]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [8, 8, 1]
+    InitialSolutionParameters: null
+    JoinParameters: null
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - FractionalLoad: [1]
+    - PrefetchLocalRead: [true]
+    - PrefetchGlobalRead: [true]
+    - TransposeLDS: [0]
+    - AssertSummationElementMultiple: [2]
+    - AssertFree0ElementMultiple: [2]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [1024, 2, 1, 16, 1024, 1024, 1024, 2]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [16, 24, 32]
+    - GlobalSplitU: [1, 16]
+    - ThreadTile:
+      - [4, 4]
+      - [4, 6]
+      - [6, 4]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [8, 8, 1]
+    InitialSolutionParameters: null
+    JoinParameters: null
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - GlobalSplitU: [1]
+    - FractionalLoad: [1]
+    - PrefetchLocalRead: [true]
+    - PrefetchGlobalRead: [true]
+    - TransposeLDS: [0]
+    - AssertSummationElementMultiple: [2]
+    - AssertFree0ElementMultiple: [2]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [2048, 2048, 1, 1024, 2048, 2048, 2048, 2048]
+      - Exact: [2048, 2048, 1, 2, 2048, 2048, 1048576, 2048]
+      - Exact: [2048, 30592, 1, 1024, 2048, 2048, 2048, 30592]
+      - Exact: [2048, 6144, 1, 1024, 2048, 2048, 2048, 6144]
+      - Exact: [2048, 8192, 1, 1024, 2048, 2048, 2048, 8192]
+      - Exact: [8192, 2048, 1, 1024, 8192, 8192, 8192, 2048]
+      - Exact: [1024, 1024, 1, 16, 1024, 1024, 524288, 1024]
+      - Exact: [1024, 1024, 1, 8192, 1024, 1024, 1024, 1024]
+      - Exact: [1024, 30592, 1, 8192, 1024, 1024, 1024, 30592]
+      - Exact: [1024, 3072, 1, 8192, 1024, 1024, 1024, 3072]
+      - Exact: [1024, 4096, 1, 8192, 1024, 1024, 1024, 4096]
+      - Exact: [4096, 1024, 1, 8192, 4096, 4096, 4096, 1024]
+      - Exact: [1024, 1024, 1, 2048, 1024, 1024, 1024, 1024]
+      - Exact: [1024, 1024, 1, 4, 1024, 1024, 524288, 1024]
+      - Exact: [1024, 30592, 1, 2048, 1024, 1024, 1024, 30592]
+      - Exact: [1024, 3072, 1, 2048, 1024, 1024, 1024, 3072]
+      - Exact: [1024, 4096, 1, 2048, 1024, 1024, 1024, 4096]
+      - Exact: [4096, 1024, 1, 2048, 4096, 4096, 4096, 1024]
+      - Exact: [1024, 1024, 1, 4096, 1024, 1024, 1024, 1024]
+      - Exact: [1024, 1024, 1, 8, 1024, 1024, 524288, 1024]
+      - Exact: [1024, 30592, 1, 4096, 1024, 1024, 1024, 30592]
+      - Exact: [1024, 3072, 1, 4096, 1024, 1024, 1024, 3072]
+      - Exact: [1024, 4096, 1, 4096, 1024, 1024, 1024, 4096]
+      - Exact: [4096, 1024, 1, 4096, 4096, 4096, 4096, 1024]
+      - Exact: [2560, 1920, 1, 2048, 2560, 2560, 2560, 1920]
+      - Exact: [2560, 2560, 1, 2048, 2560, 2560, 2560, 2560]
+      - Exact: [2560, 2560, 1, 4, 2560, 2560, 1310720, 2560]
+      - Exact: [2560, 7680, 1, 2048, 2560, 2560, 2560, 7680]
+      - Exact: [640, 2560, 1, 2048, 640, 640, 640, 2560]
+      - Exact: [1536, 1536, 1, 4096, 1536, 1536, 1536, 1536]
+      - Exact: [1536, 4608, 1, 4096, 1536, 1536, 1536, 4608]
+      - Exact: [1536, 50304, 1, 4096, 1536, 1536, 1536, 50304]
+      - Exact: [1536, 6144, 1, 4096, 1536, 1536, 1536, 6144]
+      - Exact: [6144, 1536, 1, 4096, 6144, 6144, 6144, 1536]
+      - Exact: [1536, 1536, 1, 8192, 1536, 1536, 1536, 1536]
+      - Exact: [1536, 4608, 1, 8192, 1536, 1536, 1536, 4608]
+      - Exact: [1536, 50304, 1, 8192, 1536, 1536, 1536, 50304]
+      - Exact: [1536, 6144, 1, 8192, 1536, 1536, 1536, 6144]
+      - Exact: [6144, 1536, 1, 8192, 6144, 6144, 6144, 1536]
+      - Exact: [1024, 1024, 1, 16384, 1024, 1024, 1024, 1024]
+      - Exact: [1024, 3072, 1, 16384, 1024, 1024, 1024, 3072]
+      - Exact: [1024, 4096, 1, 16384, 1024, 1024, 1024, 4096]
+      - Exact: [1024, 50304, 1, 16384, 1024, 1024, 1024, 50304]
+      - Exact: [4096, 1024, 1, 16384, 4096, 4096, 4096, 1024]
+      - Exact: [1024, 50304, 1, 2048, 1024, 1024, 1024, 50304]
+      - Exact: [1024, 50304, 1, 4096, 1024, 1024, 1024, 50304]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [16, 24, 32]
+    - ThreadTile:
+      - [4, 4]
+      - [6, 4]
+      - [4, 6]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [8, 8, 1]
+    InitialSolutionParameters: null
+    JoinParameters: null
+  - BenchmarkCommonParameters:
+    - EdgeType: [ShiftPtr]
+    - KernelLanguage: [Assembly]
+    - LoopTail: [true]
+    - VectorWidth: [-1]
+    - FractionalLoad: [1]
+    - PrefetchLocalRead: [true]
+    - PrefetchGlobalRead: [true]
+    - TransposeLDS: [0]
+    - AssertSummationElementMultiple: [2]
+    - AssertFree0ElementMultiple: [2]
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [512, 64, 64, 512, 512, 512, 512, 64]
+      - Exact: [64, 512, 64, 512, 64, 64, 64, 512]
+      - Exact: [512, 64, 256, 512, 512, 512, 512, 64]
+      - Exact: [64, 512, 256, 512, 64, 64, 64, 512]
+      - Exact: [512, 64, 128, 512, 512, 512, 512, 64]
+      - Exact: [64, 512, 128, 512, 64, 64, 64, 512]
+      - Exact: [512, 64, 40, 512, 512, 512, 512, 64]
+      - Exact: [64, 512, 40, 512, 64, 64, 64, 512]
+      - Exact: [1024, 96, 64, 1024, 1024, 1024, 1024, 96]
+      - Exact: [96, 1024, 64, 1024, 96, 96, 96, 1024]
+      - Exact: [1024, 96, 128, 1024, 1024, 1024, 1024, 96]
+      - Exact: [96, 1024, 128, 1024, 96, 96, 96, 1024]
+      - Exact: [1024, 64, 256, 1024, 1024, 1024, 1024, 64]
+      - Exact: [64, 1024, 256, 1024, 64, 64, 64, 1024]
+      - Exact: [1024, 64, 32, 1024, 1024, 1024, 1024, 64]
+      - Exact: [64, 1024, 32, 1024, 64, 64, 64, 1024]
+      - Exact: [1024, 64, 64, 1024, 1024, 1024, 1024, 64]
+      - Exact: [64, 1024, 64, 1024, 64, 64, 64, 1024]
+    BenchmarkForkParameters: null
+    BenchmarkJoinParameters: null
+    ForkParameters:
+    - WorkGroupMapping: [1, 8]
+    - DepthU: [16, 24, 32]
+    - GlobalSplitU: [1, 8, 16]
+    - ThreadTile:
+      - [4, 4]
+      - [4, 6]
+      - [6, 4]
+      - [4, 8]
+      - [8, 4]
+      - [8, 8]
+    - WorkGroup:
+      - [16, 16, 1]
+      - [8, 8, 1]
+    InitialSolutionParameters: null
+    JoinParameters: null
+LibraryLogic:
+  ArchitectureName: gfx906
+  DeviceNames: [Device 66a0, Device 66a1, Device 66a7, Device 66af, Vega 20]
+  ScheduleName: vega20
+LibraryClient:

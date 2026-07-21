@@ -1,0 +1,56 @@
+TestParameters:
+  marks: [emulation, emulation3]
+
+BenchmarkProblems:
+  - # sgemm NT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: False
+      TransposeB: True
+      UseBeta: False
+
+  - # sgemm NN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+
+  - # sgemm TN
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+
+  - # sgemm TT
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+
+LibraryLogic:
+    ScheduleName: "vega10"
+    DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861"]
+    ArchitectureName: "gfx900"
+
+#   ScheduleName: "mi25"
+#   DeviceNames: ["Device 6860"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "r9nano"
+#   DeviceNames: ["Device 7300"]
+#   ArchitectureName: "gfx803"
+
+#   ScheduleName: "hip"
+#   DeviceNames: ["Device 0000"]
+#   ArchitectureName: "fallback"

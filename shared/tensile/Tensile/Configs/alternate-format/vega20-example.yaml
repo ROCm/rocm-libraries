@@ -1,0 +1,31 @@
+GlobalParameters: {CSVExportWinner: 1, CSVMergeSameProblemID: 1, DataInitTypeAlpha: 1,
+  DataInitTypeBeta: 0, EnqueuesPerSync: 1, KernelTime: true, LegacyComponents: 0,
+  LibraryFormat: yaml, MaxWorkspaceSize: 8388608, MinimumRequiredVersion: 4.14.0,
+  NumBenchmarks: 1, NumElementsToValidate: 0, PrintLevel: 3, ShortNames: 1,
+  SleepPercent: 50, SyncsPerBenchmark: 1, WavefrontWidth: 64, numWarmups: 1}
+ProblemType: {Batched: true, DataType: s, OperationType: GEMM, TransposeA: false,
+  TransposeB: false, UseBeta: true}
+BenchmarkCommonParameters:
+- KernelLanguage: [Assembly]
+- EdgeType: [ShiftPtr]
+- ScheduleIterAlg: [0]
+ForkParameters:
+- LdcEqualsLdd: [1, 0]
+- FractionalLoad: [0, 1]
+- TransposeLDS: [1, 0]
+- WaveSeparateGlobalReadB: [1, false]
+- LdsBlockSizePerPad: [0, 128]
+- WaveSeparateGlobalReadA: [1, false]
+- StaggerUStride: [256, 128]
+- PrefetchGlobalRead: [true, 2]
+- Groups:
+  - - WorkGroup: [8, 8, 1]
+      ThreadTile: [8, 8]
+    - WorkGroup: [16, 16, 1]
+      ThreadTile: [4, 4]
+  - - DepthU: 16
+      WorkGroupMapping: 1
+    - DepthU: 16
+      WorkGroupMapping: 15
+    - DepthU: 8
+      WorkGroupMapping: 8

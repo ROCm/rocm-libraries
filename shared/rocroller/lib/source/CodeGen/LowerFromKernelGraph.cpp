@@ -1,0 +1,1189 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include <iostream>
+#include <memory>
+#include <set>
+#include <variant>
+
+#include <rocRoller/CodeGen/Annotate.hpp>
+#include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/BranchGenerator.hpp>
+#include <rocRoller/CodeGen/ConditionalGenerator.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
+#include <rocRoller/CodeGen/ExchangeGenerator.hpp>
+#include <rocRoller/CodeGen/GenerateNodes.hpp>
+#include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/InstructionValues/LabelAllocator.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+#include <rocRoller/KernelGraph/ScopeManager.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
+
+namespace rocRoller
+{
+    namespace KernelGraph
+    {
+        namespace Expression = rocRoller::Expression;
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
+        using namespace Expression;
+
+        /*
+         * Code generation
+         */
+        struct CodeGeneratorVisitor
+        {
+            CodeGeneratorVisitor(KernelGraphPtr                           graph,
+                                 AssemblyKernelPtr                        kernel,
+                                 std::optional<ControlFlowArgumentTracer> argTracer)
+                : m_graph(std::move(graph))
+                , m_kernel(kernel)
+                , m_context(kernel->context())
+                , m_fastArith{kernel->context()}
+                , m_loadStoreTileGenerator(
+                      m_graph, kernel->context(), kernel->max_flat_workgroup_size())
+                , m_exchangeGenerator(m_graph, kernel->context())
+                , m_conditionalGenerator(kernel->context())
+                , m_argumentTracer(std::move(argTracer))
+            {
+            }
+
+            Generator<Instruction> generate()
+            {
+                m_kernel->startCodeGeneration();
+
+                // TODO: Remove this when RemoveSetCoordinate transformation is enabled
+                //       as RemoveSetCoordinate will build all transformers.
+                //
+                if(!m_context->kernelOptions()->removeSetCoordinate)
+                    m_graph->buildAllTransformers();
+
+                //
+                // Rebind the transducer and coordinate graph to the ones in m_graph
+                //
+                m_graph->initializeTransformersForCodeGen(m_fastArith);
+
+                co_yield Instruction::Comment("CodeGeneratorVisitor::generate() begin");
+                auto candidates = m_graph->control.roots().to<std::set>();
+                AssertFatal(candidates.size() == 1,
+                            "The control graph should only contain one root node, the Kernel node.",
+                            ShowValue(candidates.size()));
+
+                for(auto const& xform : m_graph->appliedTransforms())
+                    co_yield Instruction::Comment(xform);
+
+                co_yield generate(candidates);
+                co_yield Instruction::Comment("CodeGeneratorVisitor::generate() end");
+            }
+
+            /**
+             * Generate an index from `expr` and store in `dst`
+             * register.  Destination register should be an Int64.
+             */
+            Generator<Instruction> generateOffset(Register::ValuePtr&       dst,
+                                                  Expression::ExpressionPtr expr,
+                                                  DataType                  dtype,
+                                                  Expression::ExpressionPtr offsetInBytes)
+            {
+                // TODO Audit bytes/bits
+                auto const& info = DataTypeInfo::Get(dtype);
+                auto        numBytes
+                    = Expression::literal(static_cast<uint>(CeilDivide(info.elementBits, 8u)));
+
+                // TODO: Consider moving numBytes into input of this function.
+                if(offsetInBytes)
+                    co_yield Expression::generate(dst, expr * numBytes + offsetInBytes, m_context);
+                else
+                    co_yield Expression::generate(dst, expr * numBytes, m_context);
+            }
+
+            bool hasGeneratedInputs(int const& tag)
+            {
+                auto inputTags = m_graph->control.getInputNodeIndices<Sequence>(tag);
+                for(auto const& itag : inputTags)
+                {
+                    if(m_completedControlNodes.find(itag) == m_completedControlNodes.end())
+                        return false;
+                }
+                return true;
+            }
+
+            /**
+             * Partitions `candidates` into nodes that are ready to be generated and nodes that aren't ready.
+             * A node is ready if all the upstream nodes connected via `Sequence` edges have been generated.
+             * Nodes that are ready will be removed from `candidates` and will be in the returned set.
+             * Nodes that are not ready will remain in `candidates`.
+             */
+            std::set<int> findAndRemoveSatisfiedNodes(std::set<int>& candidates)
+            {
+                std::set<int> nodes;
+
+                // Find all candidate nodes whose inputs have been satisfied
+                for(auto const& tag : candidates)
+                    if(hasGeneratedInputs(tag))
+                        nodes.insert(tag);
+
+                // Delete nodes about to be generated from candidates.
+                for(auto node : nodes)
+                    candidates.erase(node);
+
+                return nodes;
+            }
+
+            /**
+             * Generate code for the specified nodes and their standard (Sequence) dependencies.
+             */
+            Generator<Instruction> generate(std::set<int> candidates)
+            {
+                auto const& options = m_context->kernelOptions();
+
+                rocRoller::Log::getLogger()->debug(
+                    concatenate("KernelGraph::CodeGenerator::generate: ", candidates));
+
+                auto message = concatenate("generate(", candidates, ")");
+                co_yield Instruction::Comment(message);
+
+                candidates = m_graph->control.followEdges<Sequence>(candidates);
+
+                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
+
+                auto generateNode = [&](int tag) -> Generator<Instruction> {
+                    auto op = m_graph->control.getNode(tag);
+                    co_yield call(tag, op);
+                };
+
+                auto nodeIsReady = [this](int tag) { return hasGeneratedInputs(tag); };
+
+                auto nodeCategory = [this, &options](int tag) -> size_t {
+                    if(options->maxConcurrentControlOps)
+                    {
+                        auto op = m_graph->control.getNode(tag);
+                        return op.index();
+                    }
+
+                    return 0;
+                };
+
+                auto categoryLimit = [&options](size_t category) -> size_t {
+                    size_t unlimited = std::numeric_limits<int>::max();
+
+                    if(category == variantIndex<Operation, Deallocate>())
+                        return unlimited;
+
+                    return options->maxConcurrentControlOps.value_or(unlimited);
+                };
+
+                auto comparePriorities = [](int a, int b) { return a > b; };
+
+                co_yield generateNodes<int, size_t>(scheduler,
+                                                    candidates,
+                                                    m_completedControlNodes,
+                                                    generateNode,
+                                                    nodeIsReady,
+                                                    nodeCategory,
+                                                    categoryLimit,
+                                                    comparePriorities);
+
+                co_yield Instruction::Comment("end: " + message);
+            }
+
+            /**
+             * Note that `operation` must be passed by value (not by reference) to avoid a
+             * dangling reference issue if call() is sent into a scheduler instead of being
+             * yielded directly.
+             */
+            Generator<Instruction> call(int tag, Operation operation)
+            {
+                auto opName = toString(operation);
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::{}({})", opName, tag);
+                co_yield Instruction::Comment(concatenate(opName, "(", tag, ") BEGIN"));
+
+                AssertFatal(m_completedControlNodes.find(tag) == m_completedControlNodes.end(),
+                            ShowValue(operation),
+                            ShowValue(tag));
+
+                try
+                {
+                    std::set<std::string> allReferencedArgs;
+
+                    for(auto inst :
+                        std::visit(*this, std::variant<int>(tag), operation).map(AddControlOp(tag)))
+                    {
+                        if(m_argumentTracer && inst.innerControlOp() == tag)
+                        {
+                            if(!inst.referencedArg().empty())
+                            {
+                                allReferencedArgs.insert(inst.referencedArg());
+                            }
+                        }
+                        co_yield inst;
+                    }
+
+                    if(m_argumentTracer)
+                    {
+                        std::set<std::string> expectedArgs, extraArgs, missedArgs;
+
+                        {
+                            auto const& tmp = m_argumentTracer->referencedArguments(tag);
+                            expectedArgs.insert(tmp.begin(), tmp.end());
+                        }
+
+                        std::set_difference(expectedArgs.begin(),
+                                            expectedArgs.end(),
+                                            allReferencedArgs.begin(),
+                                            allReferencedArgs.end(),
+                                            std::inserter(extraArgs, extraArgs.end()));
+
+                        std::set_difference(allReferencedArgs.begin(),
+                                            allReferencedArgs.end(),
+                                            expectedArgs.begin(),
+                                            expectedArgs.end(),
+                                            std::inserter(missedArgs, missedArgs.end()));
+
+                        if(!missedArgs.empty())
+                        {
+                            auto msg = fmt::format(
+                                "Tag {} ({}) Missed referenced args!", tag, toString(operation));
+
+                            for(auto const& argName : missedArgs)
+                            {
+                                auto arg = m_context->kernel()->findArgument(argName);
+
+                                msg += fmt::format(
+                                    "\n\t- {}: {}\n", argName, toString(arg.getExpression()));
+                            }
+
+                            Throw<FatalError>(msg,
+                                              ShowValue(expectedArgs),
+                                              ShowValue(extraArgs),
+                                              ShowValue(m_context->kernel()->arguments()),
+                                              ShowValue(operation));
+                        }
+
+                        if(!extraArgs.empty())
+                            co_yield Instruction::Comment(
+                                concatenate(" Tag ", tag, "non referenced ", ShowValue(extraArgs)));
+                    }
+                }
+                catch(rocRoller::Error& exc)
+                {
+                    auto newMsg = fmt::format("(from node {})", tag, exc.what());
+                    exc.annotate(newMsg);
+                    throw;
+                }
+
+                co_yield Instruction::Comment(concatenate(opName, "(", tag, ") END"));
+
+                m_completedControlNodes.insert(tag);
+            }
+
+            Generator<Instruction> operator()(int tag, Kernel const& edge)
+            {
+                m_context->registerTagManager()->initialize(*m_graph);
+
+                auto scope = std::make_shared<ScopeManager>(m_context, m_graph);
+                m_context->setScopeManager(scope);
+                scope->pushNewScope();
+
+                //
+                // Fill in workgroup indexes and workitem indexes for each transformer
+                //
+                auto coord = m_graph->buildTransformer(tag);
+                coord.fillExecutionCoordinates(m_context);
+                for(auto const& [node, _] : m_graph->getAllTransformers())
+                {
+                    for(auto const& [coord, expr] : coord.getIndexes())
+                        m_graph->updateTransformer(node, coord, expr);
+                }
+
+                auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
+                co_yield generate(init);
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body);
+                scope->popAndReleaseScope();
+
+                m_context->setScopeManager(nullptr);
+            }
+
+            Generator<Instruction> operator()(int tag, Scope const&)
+            {
+                auto scope   = m_context->getScopeManager();
+                auto message = concatenate("Scope ", tag);
+
+                // Under the current implementation,
+                //  - All new DataFlow allocations are associated with the top scope
+                //    regardless of if this is correct
+                //  - When the scope is popped, all DataFlow registers in that are freed.
+                //
+                // Until this is changed, we need to lock the scheduler here.
+
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock " + message);
+                scope->pushNewScope();
+
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body);
+
+                scope->popAndReleaseScope();
+                co_yield Instruction::Unlock("Unlock " + message);
+            }
+
+            Generator<Instruction> operator()(int tag, ConditionalOp const& op)
+            {
+                AssertFatal(op.mode < ConditionalMode::Count,
+                            "Unsupported mode for ConditionalOp: ",
+                            ShowValue(op.mode));
+                Log::debug("ConditionalOp tag {}: mode {}, condition {}",
+                           tag,
+                           toString(op.mode),
+                           op.conditionName);
+
+                auto trueBody   = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                auto elseBody   = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
+                auto trueBodyFn = [this, trueBody]() { return generate(trueBody); };
+                std::function<Generator<Instruction>()> elseBodyFn;
+                if(!elseBody.empty())
+                    elseBodyFn = [this, elseBody]() { return generate(elseBody); };
+                auto condition = m_fastArith(op.condition);
+                auto labelBase = fmt::format("{}_{}", op.conditionName, tag);
+
+                co_yield m_conditionalGenerator.genConditional(
+                    condition, labelBase, trueBodyFn, elseBodyFn, op.mode);
+            }
+
+            Generator<Instruction> operator()(int tag, AssertOp const& op)
+            {
+                auto assertOpKind = m_context->kernelOptions()->assertOpKind;
+                AssertFatal(assertOpKind < AssertOpKind::Count, "Invalid AssertOpKind");
+
+                if(assertOpKind == AssertOpKind::NoOp)
+                {
+                    co_yield Instruction::Comment(
+                        concatenate("AssertOpKind == NoOp ", op.assertName));
+                }
+                else
+                {
+                    if(op.condition == nullptr) // Unconditional Assert
+                    {
+                        co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                                   "Assert nullptr");
+                        co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+                        co_yield Instruction::Unlock("Assert nullptr");
+                    }
+                    else
+                    {
+                        co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                                   concatenate("Lock for Assert ", op.assertName));
+                        auto passedLabel = m_context->labelAllocator()->label(
+                            fmt::format("AssertPassed_{}_{}", op.assertName, tag));
+                        auto failedLabel = m_context->labelAllocator()->label(
+                            fmt::format("AssertFailed_{}_{}", op.assertName, tag));
+
+                        auto expr            = m_fastArith(op.condition);
+                        auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                        co_yield Expression::generate(conditionResult, expr, m_context);
+
+                        co_yield m_context->brancher()->branchIfNonZero(
+                            passedLabel,
+                            conditionResult,
+                            concatenate("Assert ",
+                                        op.assertName,
+                                        ": Passed, jump to ",
+                                        passedLabel->toString()));
+
+                        co_yield Instruction::Label(failedLabel,
+                                                    concatenate("For ", op.assertName));
+                        co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+
+                        co_yield Instruction::Label(passedLabel,
+                                                    concatenate("For ", op.assertName));
+                        co_yield Instruction::Unlock(
+                            concatenate("Unlock for Assert ", op.assertName));
+                    }
+                }
+            }
+
+            Generator<Instruction> operator()(int tag, DoWhileOp const& op)
+            {
+                auto topLabel = m_context->labelAllocator()->label(
+                    fmt::format("DoWhileTop_{}_{}", op.loopName, tag));
+
+                co_yield Instruction::Comment("Initialize DoWhileLoop");
+
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock DoWhile");
+
+                //Do Body at least once
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+
+                co_yield Instruction::Label(topLabel);
+
+                co_yield generate(body);
+
+                auto expr = op.condition;
+
+                // For some reason this has to be called after generate(body, coords)
+                auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                //Check Condition
+                co_yield Expression::generate(conditionResult, expr, m_context);
+
+                co_yield m_context->brancher()->branchIfNonZero(
+                    topLabel,
+                    conditionResult,
+                    concatenate("Condition: Bottom (jump to " + topLabel->toString()
+                                + " if true)"));
+
+                co_yield Instruction::Unlock("Unlock DoWhile");
+            }
+
+            Generator<Instruction> operator()(int tag, ForLoopOp const& op)
+            {
+                auto topLabel = m_context->labelAllocator()->label(
+                    fmt::format("ForLoopTop_{}_{}", op.loopName, tag));
+                auto botLabel = m_context->labelAllocator()->label(
+                    fmt::format("ForLoopBottom_{}_{}", op.loopName, tag));
+
+                co_yield Instruction::Comment("Initialize For Loop");
+                auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
+                co_yield generate(init);
+
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop");
+
+                auto expr            = m_fastArith(op.condition);
+                auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                co_yield Instruction::Wait(WaitCount::SyncQueue(m_context->targetArchitecture(),
+                                                                GPUWaitQueueType::SMemQueue,
+                                                                "DEBUG: Wait for scalar queue"));
+
+                co_yield Expression::generate(conditionResult, expr, m_context);
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across loops
+                if(op.loopName == rocRoller::KLOOPTAIL)
+                {
+                    co_yield Instruction::Wait(WaitCount::Zero(
+                        m_context->targetArchitecture(),
+                        "REMOVEME: Wait before branching into Bottom of TailLoop!"));
+                }
+                // -------------------------------------------------------------------------------
+                co_yield m_context->brancher()->branchIfZero(
+                    botLabel,
+                    conditionResult,
+                    concatenate("Condition: Top (jump to " + botLabel->toString() + " if false)"));
+                // -------------------------------------------------------------------------------
+                // TODO: remove this once we better handle data-flow across loops
+                if(op.loopName == rocRoller::KLOOPTAIL)
+                {
+                    co_yield Instruction::Wait(
+                        WaitCount::Zero(m_context->targetArchitecture(),
+                                        "REMOVEME: Wait before falling through to TailLoop!"));
+                }
+                // -------------------------------------------------------------------------------
+
+                co_yield Instruction::Label(topLabel);
+
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body);
+
+                co_yield Instruction::Comment("For Loop Increment");
+                auto incr
+                    = m_graph->control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
+                co_yield generate(incr);
+                co_yield Instruction::Comment("Condition: Bottom (jump to " + topLabel->toString()
+                                              + " if true)");
+
+                co_yield Expression::generate(conditionResult, expr, m_context);
+                co_yield m_context->brancher()->branchIfNonZero(
+                    topLabel,
+                    conditionResult,
+                    concatenate("Condition: Bottom (jump to " + topLabel->toString()
+                                + " if true)"));
+                co_yield Instruction::Label(botLabel);
+
+                co_yield Instruction::Unlock("Unlock For Loop");
+            }
+
+            Generator<Instruction> operator()(int tag, UnrollOp const& unroll)
+            {
+                Throw<FatalError>("CodeGeneratorVisitor UnrollOp not implemented yet.");
+            }
+
+            struct ExpressionHasNoneDTVisitor
+            {
+                bool operator()(ScaledMatrixMultiply const& expr) const
+                {
+                    return call(expr.matA) || call(expr.matB) || call(expr.matC)
+                           || call(expr.scaleA) || call(expr.scaleB);
+                }
+
+                template <CTernary Expr>
+                bool operator()(Expr const& expr) const
+                {
+                    return call(expr.lhs) || call(expr.r1hs) || call(expr.r2hs);
+                }
+
+                template <CBinary Expr>
+                bool operator()(Expr const& expr) const
+                {
+                    return call(expr.lhs) || call(expr.rhs);
+                }
+
+                template <CUnary Expr>
+                bool operator()(Expr const& expr) const
+                {
+                    return call(expr.arg);
+                }
+
+                template <typename T>
+                bool operator()(T const& expr) const
+                {
+                    return false;
+                }
+
+                bool operator()(Register::ValuePtr const& expr) const
+                {
+                    if(!expr)
+                        return false;
+
+                    return expr->variableType() == DataType::None;
+                }
+
+                bool operator()(DataFlowTag const& expr) const
+                {
+                    return expr.varType == DataType::None;
+                }
+
+                bool call(Expression::Expression const& expr) const
+                {
+                    return std::visit(*this, expr);
+                }
+
+                bool call(ExpressionPtr expr) const
+                {
+                    if(!expr)
+                        return false;
+
+                    return call(*expr);
+                }
+            };
+
+            /**
+             * @brief Returns true if an expression has any values with
+             *        a datatype of None.
+             *
+             * @param expr
+             * @return true
+             * @return false
+             */
+            bool expressionHasNoneDT(ExpressionPtr const& expr)
+            {
+                auto visitor = ExpressionHasNoneDTVisitor();
+                return visitor.call(expr);
+            }
+
+            Generator<Instruction> operator()(int tag, Assign const& assign)
+            {
+                auto dimTag = m_graph->mapper.get(tag, NaryArgument::DEST);
+
+                rocRoller::Log::getLogger()->debug("  assigning dimension: {}", dimTag);
+                co_yield Instruction::Comment(
+                    concatenate("Assign dim(", dimTag, ") = ", assign.expression));
+
+                auto scope = m_context->getScopeManager();
+
+                if(assign.strideExpressionAttributes)
+                {
+                    co_yield Instruction::Comment("Assign stride expression");
+                    m_context->registerTagManager()->addExpression(
+                        dimTag,
+                        m_fastArith(assign.expression),
+                        assign.strideExpressionAttributes.value());
+                    scope->addRegister(dimTag);
+                }
+                else
+                {
+                    scope->addRegister(dimTag);
+
+                    auto deferred = expressionHasNoneDT(assign.expression)
+                                    && !m_context->registerTagManager()->hasRegister(dimTag);
+
+                    Register::ValuePtr dest;
+                    if(!deferred)
+                    {
+                        auto valueCount = assign.valueCount;
+                        if(valueCount == 0)
+                        {
+                            auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
+                            valueCount = tmp->valueCount();
+                        }
+
+                        auto varType = resultVariableType(assign.expression);
+                        if(assign.variableType)
+                        {
+                            varType = assign.variableType.value();
+                            // For non-packed types, the denominator is 1.
+                            valueCount /= DataTypeInfo::Get(varType).packing;
+                        }
+
+                        Log::debug("  immediate: count {}", assign.valueCount);
+
+                        if(assign.regType == Register::Type::Accumulator
+                           || assign.regType == Register::Type::Vector)
+                        {
+                            auto const& typeInfo              = DataTypeInfo::Get(varType);
+                            int         physicalRegisterCount = valueCount * typeInfo.registerCount;
+
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag,
+                                assign.regType,
+                                varType,
+                                valueCount,
+                                Register::AllocationOptions{.contiguousChunkWidth
+                                                            = physicalRegisterCount});
+                        }
+                        else
+                        {
+                            dest = m_context->registerTagManager()->getRegister(
+                                dimTag, assign.regType, varType, valueCount);
+                        }
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
+
+                    co_yield Expression::generate(dest, assign.expression, m_context);
+
+                    if(deferred)
+                    {
+                        m_context->registerTagManager()->addRegister(dimTag, dest);
+                        if(dest->name().empty())
+                            dest->setName(concatenate("DataFlowTag", dimTag));
+                    }
+                }
+            }
+
+            Generator<Instruction> operator()(int tag, Deallocate const& deallocate)
+            {
+                for(auto const& c : m_graph->mapper.getConnections(tag))
+                {
+                    Log::debug("  deallocate dimension: {} tag {}", c.coordinate, tag);
+                    co_yield Instruction::Comment(concatenate("Deallocate ", c.coordinate));
+                    m_context->registerTagManager()->deleteTag(c.coordinate);
+                }
+
+                for(auto const& argument : deallocate.arguments)
+                {
+                    Log::debug("Deallocate argument {}", argument);
+                    co_yield Instruction::Comment(concatenate("Deallocate ", argument));
+                    m_context->argLoader()->releaseArgument(argument);
+                }
+            }
+
+            Generator<Instruction> operator()(int tag, Barrier const&)
+            {
+                std::vector<Register::ValuePtr> srcs;
+                for(auto const& c : m_graph->mapper.getConnections(tag))
+                {
+                    auto srcTag = c.coordinate;
+                    // Barriers that are connected to coordinates without allocated
+                    // register values are legal but do not require waits as they
+                    // are used to sync threads across loop iterations.
+                    if(m_context->registerTagManager()->hasRegister(srcTag))
+                    {
+                        auto reg = m_context->registerTagManager()->getRegister(srcTag);
+                        srcs.push_back(std::move(reg));
+                    }
+                }
+
+                co_yield m_context->mem()->barrier(srcs);
+            }
+
+            Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::SetCoordinate({}): {}",
+                    tag,
+                    Expression::toString(setCoordinate.value));
+
+                auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
+                co_yield generate(init);
+
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body);
+            }
+
+            Generator<Instruction> operator()(int tag, LoadLinear const& edge)
+            {
+                Throw<FatalError>("LoadLinear present in kernel graph.");
+            }
+
+            Generator<Instruction> operator()(int tag, LoadTiled const& load)
+            {
+                co_yield m_loadStoreTileGenerator.genLoadTile(
+                    tag, load, m_graph->buildTransformer(tag));
+            }
+
+            Generator<Instruction> operator()(int tag, LoadLDSTile const& load)
+            {
+                co_yield m_loadStoreTileGenerator.genLoadLDSTile(
+                    tag, load, m_graph->buildTransformer(tag));
+            }
+
+            Generator<Instruction> operator()(int tag, LoadSGPR const& load)
+            {
+                auto [userTag, user] = m_graph->getDimension<User>(tag);
+                auto [vgprTag, vgpr] = m_graph->getDimension<VGPR>(tag);
+
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadSGPR({}): User({}), VGPR({})",
+                    tag,
+                    userTag,
+                    vgprTag);
+
+                auto dst = m_context->registerTagManager()->getRegister(
+                    vgprTag, Register::Type::Scalar, load.varType.dataType);
+
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, DataType::Int64, 1);
+
+                co_yield Instruction::Comment("GEN: LoadSGPR; user index");
+
+                auto indexes = m_graph->buildTransformer(tag).reverse({userTag});
+                co_yield generateOffset(
+                    offset, indexes[0], dst->variableType().dataType, user.offset);
+
+                Register::ValuePtr vPtr;
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Scalar);
+                }
+
+                auto numBytes = CeilDivide(DataTypeInfo::Get(dst->variableType()).elementBits, 8u);
+                co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Scalar,
+                                                dst,
+                                                vPtr,
+                                                offset,
+                                                numBytes,
+                                                "",
+                                                false,
+                                                nullptr,
+                                                load.bufOpts);
+            }
+
+            Generator<Instruction> operator()(int tag, LoadVGPR const& load)
+            {
+                auto [userTag, user] = m_graph->getDimension<User>(tag);
+                auto [vgprTag, vgpr] = m_graph->getDimension<VGPR>(tag);
+
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadVGPR({}): User({}), VGPR({})",
+                    tag,
+                    userTag,
+                    vgprTag);
+
+                auto dst = m_context->registerTagManager()->getRegister(
+                    vgprTag, Register::Type::Vector, load.varType.dataType);
+
+                if(load.scalar)
+                {
+                    if(load.varType.isPointer())
+                        co_yield loadVGPRFromScalarPointer(user, dst);
+                    else
+                        co_yield loadVGPRFromScalarValue(user, dst);
+                }
+                else
+                {
+                    co_yield loadVGPRFromGlobalArray(userTag, user, dst);
+                }
+            }
+
+            Generator<Instruction> loadVGPRFromScalarValue(User user, Register::ValuePtr vgpr)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadVGPR(): scalar value");
+                co_yield Instruction::Comment("GEN: LoadVGPR; scalar value");
+
+                Register::ValuePtr s_value;
+                co_yield m_context->argLoader()->getValue(user.argumentName, s_value);
+                co_yield m_context->copier()->copy(vgpr, s_value, "Move value");
+            }
+
+            Generator<Instruction> loadVGPRFromScalarPointer(User user, Register::ValuePtr vgpr)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadVGPR(): scalar pointer");
+                co_yield Instruction::Comment("GEN: LoadVGPR; scalar pointer");
+
+                Register::ValuePtr vPtr;
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+                }
+
+                auto numBytes = CeilDivide(DataTypeInfo::Get(vgpr->variableType()).elementBits, 8u);
+                co_yield m_context->mem()->load(
+                    MemoryInstructions::MemoryKind::Global, vgpr, vPtr, nullptr, numBytes);
+            }
+
+            Generator<Instruction>
+                loadVGPRFromGlobalArray(int userTag, User user, Register::ValuePtr vgpr)
+            {
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int64, 1);
+
+                co_yield Instruction::Comment("GEN: LoadVGPR; user index");
+
+                auto indexes = m_graph->buildTransformer(userTag).reverse({userTag});
+                co_yield generateOffset(
+                    offset, indexes[0], vgpr->variableType().dataType, user.offset);
+
+                Register::ValuePtr vPtr;
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+                }
+
+                auto numBytes = CeilDivide(DataTypeInfo::Get(vgpr->variableType()).elementBits, 8u);
+                co_yield m_context->mem()->load(
+                    MemoryInstructions::MemoryKind::Global, vgpr, vPtr, offset, numBytes);
+            }
+
+            Generator<Instruction> operator()(int tag, Multiply const& mult)
+            {
+                auto getWaveTile = [&](NaryArgument arg) -> std::shared_ptr<WaveTile> {
+                    auto hasWave
+                        = m_graph->mapper.get(tag, Connections::typeArgument<WaveTile>(arg)) != -1;
+                    if(!hasWave)
+                        return nullptr;
+
+                    auto [waveTag, wave] = m_graph->getDimension<WaveTile>(
+                        tag, Connections::typeArgument<WaveTile>(arg));
+                    auto [macTag, mac] = m_graph->getDimension<MacroTile>(
+                        tag, Connections::typeArgument<MacroTile>(arg));
+
+                    wave.vgpr = m_context->registerTagManager()->getRegister(macTag);
+
+                    return std::make_shared<WaveTile>(wave);
+                };
+
+                auto waveA = getWaveTile(NaryArgument::LHS);
+                auto waveB = getWaveTile(NaryArgument::RHS);
+
+                AssertFatal(waveA && waveB, "Wavetile for LHS and/or RHS not found");
+
+                AssertFatal(mult.scaleA == Operations::ScaleMode::None
+                                || mult.scaleA == Operations::ScaleMode::SingleScale
+                                || mult.scaleA == Operations::ScaleMode::Separate,
+                            ShowValue(mult.scaleA));
+                AssertFatal(mult.scaleB == Operations::ScaleMode::None
+                                || mult.scaleB == Operations::ScaleMode::SingleScale
+                                || mult.scaleB == Operations::ScaleMode::Separate,
+                            ShowValue(mult.scaleB));
+
+                AssertFatal((mult.scaleA == Operations::ScaleMode::None
+                             && mult.scaleB == Operations::ScaleMode::None)
+                                || (mult.scaleA != Operations::ScaleMode::None
+                                    && mult.scaleB != Operations::ScaleMode::None),
+                            "Both A and B must be scaled, or neither.");
+
+                bool scaled = mult.scaleA != Operations::ScaleMode::None
+                              || mult.scaleB != Operations::ScaleMode::None;
+
+                auto [DTag, _D] = m_graph->getDimension<MacroTile>(
+                    tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
+
+                auto D = m_context->registerTagManager()->getRegister(DTag);
+                auto A = std::make_shared<Expression::Expression>(waveA);
+                auto B = std::make_shared<Expression::Expression>(waveB);
+
+                Expression::ExpressionPtr expr;
+
+                if(!scaled)
+                {
+                    // If no scales provided, we use regular matrix multiplication
+                    expr = std::make_shared<Expression::Expression>(
+                        Expression::MatrixMultiply(A, B, D->expression()));
+                }
+                else
+                {
+                    auto waveScaleA = getWaveTile(NaryArgument::LHS_SCALE);
+                    auto waveScaleB = getWaveTile(NaryArgument::RHS_SCALE);
+
+                    ExpressionPtr scaleA;
+                    if(waveScaleA)
+                    {
+                        scaleA = std::make_shared<Expression::Expression>(waveScaleA);
+                    }
+                    else
+                    {
+                        auto vgprTag = m_graph->mapper.get(tag, NaryArgument::LHS_SCALE);
+                        AssertFatal(vgprTag != -1);
+                        scaleA
+                            = m_context->registerTagManager()->getRegister(vgprTag)->expression();
+                    }
+
+                    ExpressionPtr scaleB;
+                    if(waveScaleB)
+                    {
+                        scaleB = std::make_shared<Expression::Expression>(waveScaleB);
+                    }
+                    else
+                    {
+                        auto vgprTag = m_graph->mapper.get(tag, NaryArgument::RHS_SCALE);
+                        AssertFatal(vgprTag != -1);
+                        scaleB
+                            = m_context->registerTagManager()->getRegister(vgprTag)->expression();
+                    }
+
+                    AssertFatal(scaleA);
+                    AssertFatal(scaleB);
+
+                    expr = std::make_shared<Expression::Expression>(
+                        Expression::ScaledMatrixMultiply(A, B, D->expression(), scaleA, scaleB));
+                }
+
+                co_yield Expression::generate(D, expr, m_context);
+            }
+
+            Generator<Instruction> operator()(int tag, NOP const&)
+            {
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body);
+            }
+
+            Generator<Instruction> operator()(int tag, Block const& op)
+            {
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Block");
+
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body);
+
+                co_yield Instruction::Unlock("Unlock Block");
+            }
+
+            Generator<Instruction> operator()(int tag, TensorContraction const& mul)
+            {
+                Throw<FatalError>("TensorContraction present in kernel graph.");
+            }
+
+            Generator<Instruction> operator()(int tag, StoreLinear const& edge)
+            {
+                Throw<FatalError>("StoreLinear present in kernel graph.");
+            }
+
+            Generator<Instruction> operator()(int tag, StoreTiled const& store)
+            {
+                co_yield m_loadStoreTileGenerator.genStoreTile(
+                    tag, store, m_graph->buildTransformer(tag));
+            }
+
+            Generator<Instruction> operator()(int tag, StoreLDSTile const& store)
+            {
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
+                                                   tag);
+                co_yield Instruction::Comment("GEN: StoreLDSTile");
+
+                co_yield m_loadStoreTileGenerator.genStoreLDSTile(
+                    tag, store, m_graph->buildTransformer(tag));
+            }
+
+            Generator<Instruction> operator()(int tag, LoadTileDirect2LDS const& load)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadTileDirect2LDS({})", tag);
+                co_yield Instruction::Comment("GEN: LoadTileDirect2LDS");
+
+                co_yield m_loadStoreTileGenerator.genLoadTileDirect2LDS(
+                    tag, load, m_graph->buildTransformer(tag));
+            }
+
+            Generator<Instruction> operator()(int tag, LoadTiledTDMToLDS const& load)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadTiledTDMToLDS({})", tag);
+                co_yield Instruction::Comment("GEN: LoadTiledTDMToLDS");
+
+                co_yield m_loadStoreTileGenerator.genLoadTiledTDMToLDS(
+                    tag, load, m_graph->buildTransformer(tag));
+            }
+
+            Generator<Instruction> operator()(int tag, StoreVGPR const& store)
+            {
+                co_yield Instruction::Comment("GEN: StoreVGPR");
+
+                auto [vgprTag, vgpr] = m_graph->getDimension<VGPR>(tag);
+                auto [userTag, user] = m_graph->getDimension<User>(tag);
+
+                auto src = m_context->registerTagManager()->getRegister(vgprTag);
+
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int64, 1);
+
+                auto indexes = m_graph->buildTransformer(tag).forward({userTag});
+
+                co_yield Instruction::Comment("GEN: StoreVGPR; user index");
+                co_yield generateOffset(
+                    offset, indexes[0], src->variableType().dataType, user.offset);
+
+                Register::ValuePtr vPtr;
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+                }
+
+                auto numBytes = CeilDivide(DataTypeInfo::Get(src->variableType()).elementBits, 8u);
+                co_yield m_context->mem()->store(
+                    MemoryInstructions::MemoryKind::Global, vPtr, src, offset, numBytes);
+            }
+
+            Generator<Instruction> operator()(int tag, StoreSGPR const& store)
+            {
+                co_yield Instruction::Comment("GEN: StoreSGPR");
+
+                auto [vgprTag, vgpr] = m_graph->getDimension<VGPR>(tag);
+                auto [userTag, user] = m_graph->getDimension<User>(tag);
+
+                auto src = m_context->registerTagManager()->getRegister(vgprTag);
+
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, DataType::Int64, 1);
+
+                auto indexes = m_graph->buildTransformer(tag).forward({userTag});
+
+                co_yield Instruction::Comment("GEN: StoreSGPR; user index");
+                co_yield generateOffset(
+                    offset, indexes[0], src->variableType().dataType, user.offset);
+
+                Register::ValuePtr vPtr;
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Scalar);
+                }
+
+                auto numBytes = CeilDivide(DataTypeInfo::Get(src->variableType()).elementBits, 8u);
+                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Scalar,
+                                                 vPtr,
+                                                 src,
+                                                 offset,
+                                                 numBytes,
+                                                 "",
+                                                 false,
+                                                 nullptr,
+                                                 store.bufOpts);
+            }
+
+            Generator<Instruction> operator()(int, WaitZero const&)
+            {
+                co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture(),
+                                                           "Explicit WaitZero operation"));
+            }
+
+            Generator<Instruction> operator()(int tag, Exchange const& exchange)
+            {
+                auto coords = m_graph->buildTransformer(tag);
+                co_yield m_exchangeGenerator.genExchange(tag, exchange, coords);
+            }
+
+            Generator<Instruction> operator()(int tag, SeedPRNG const& seedPRNG)
+            {
+                co_yield Instruction::Comment("GEN: SeedPRNG");
+
+                auto seedTag     = m_graph->mapper.get(tag, NaryArgument::DEST);
+                auto userSeedTag = m_graph->mapper.get(tag, NaryArgument::RHS);
+
+                // Allocate a register as SeedVGPR
+                auto seedReg = m_context->registerTagManager()->getRegister(
+                    seedTag, Register::Type::Vector, DataType::UInt32);
+                auto userSeedVGPR = m_context->registerTagManager()->getRegister(userSeedTag);
+
+                auto seedExpr = userSeedVGPR->expression();
+
+                if(seedPRNG.addTID)
+                {
+                    // Generate an expression of TID and add it to the seed
+                    auto tidTag  = m_graph->mapper.get(tag, NaryArgument::LHS);
+                    auto indexes = m_graph->buildTransformer(tag).forward({tidTag});
+                    seedExpr     = seedExpr + indexes[0];
+                }
+
+                // Set the initial seed value
+                co_yield Expression::generate(seedReg, seedExpr, m_context);
+            }
+
+        private:
+            KernelGraphPtr m_graph;
+
+            ContextPtr        m_context;
+            AssemblyKernelPtr m_kernel;
+
+            std::set<int> m_completedControlNodes;
+
+            FastArithmetic         m_fastArith;
+            LoadStoreTileGenerator m_loadStoreTileGenerator;
+            ExchangeGenerator      m_exchangeGenerator;
+            ConditionalGenerator   m_conditionalGenerator;
+
+            std::optional<ControlFlowArgumentTracer> m_argumentTracer;
+        };
+
+        Generator<Instruction> generateImpl(KernelGraph                              graph,
+                                            AssemblyKernelPtr                        kernel,
+                                            std::optional<ControlFlowArgumentTracer> argTracer)
+        {
+            TIMER(t, "LowerFromKernelGraph::generate");
+            auto graphPtr = std::make_shared<KernelGraph>(std::move(graph));
+
+            if(Settings::getInstance()->get(Settings::LogGraphs))
+                rocRoller::Log::getLogger()->debug("KernelGraph::generate(); DOT\n{}",
+                                                   graphPtr->toDOT(true));
+
+            auto visitor = CodeGeneratorVisitor(graphPtr, kernel, std::move(argTracer));
+
+            co_yield visitor.generate();
+        }
+
+        Generator<Instruction> generate(KernelGraph graph, AssemblyKernelPtr kernel)
+        {
+            std::optional<ControlFlowArgumentTracer> argTracer;
+
+            if(Settings::Get(Settings::AuditControlTracers))
+            {
+                argTracer.emplace(graph, kernel);
+            }
+
+            co_yield generateImpl(graph, kernel, std::move(argTracer));
+        }
+
+        Generator<Instruction> generate(KernelGraph                 graph,
+                                        AssemblyKernelPtr           kernel,
+                                        ControlFlowArgumentTracer&& argTracer)
+        {
+            co_yield generateImpl(graph, kernel, std::move(argTracer));
+        }
+    }
+}

@@ -1,0 +1,20 @@
+#!/bin/bash -ex
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Installs CodeQL binaries in /opt/codeql
+VERSION=v2.20.4
+DESTINATION=/opt/codeql
+if [[ -n "$1" ]]; then
+  DESTINATION=$1
+fi
+
+mkdir -p $DESTINATION
+cd $DESTINATION
+
+curl -O -L https://github.com/github/codeql-cli-binaries/releases/download/$VERSION/codeql-linux64.zip
+unzip -q codeql-linux64.zip
+rm codeql-linux64.zip
+
+curl -o codeql-cli.zip -L https://github.com/github/codeql/archive/refs/tags/codeql-cli/$VERSION.zip

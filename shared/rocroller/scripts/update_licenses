@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""
+Add SPDX license headers to source files that don't have them.
+
+This script adds the short SPDX license format to files tracked by git
+that don't already contain a license header.
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+repo_dir = Path(__file__).resolve().parent.parent
+sys.path.append(str(repo_dir / "scripts" / "lib"))
+
+from rrperf import git  # noqa: E402
+
+# New license text for different file types
+LICENSE_CPP = """\
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+"""
+
+LICENSE_HASH = """\
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""
+
+# Files that should never have licenses added
+EXCLUDE_NAMES = [
+    "CODEOWNERS",
+    "CppCheckSuppressions.txt",
+    "requirements.txt",
+    ".clang-format",
+    ".gitignore",
+    ".gitattributes",
+    "LICENSE.md",
+]
+
+# Paths containing these substrings should be excluded
+EXCLUDE_PATHS = [
+    "cmake/CMakeRC.cmake",  # External: vector-of-bool
+    "GPUArchitectureGenerator/isa_spec_manager/tinyxml2",  # External: Lee Thomason
+    "GPUArchitectureGenerator/isa_spec_manager/amdisa_",  # Different AMD project
+    "GPUArchitectureGenerator/isa_spec_manager/isa_xml_reader",  # Different AMD project
+    "_deps/",
+]
+
+# Extensions that can have licenses added
+EXTENSIONS_CPP = [".hpp", ".cpp", ".h", ".c", ".in", ".cl", ".ql", ".qll"]
+EXTENSIONS_HASH = [".py", ".sh", ".cmake", ".txt"]
+
+
+def should_exclude(path: Path) -> bool:
+    """Check if a file should be excluded from processing."""
+    if path.name in EXCLUDE_NAMES:
+        return True
+    path_str = str(path)
+    for exclude in EXCLUDE_PATHS:
+        if exclude in path_str:
+            return True
+    return False
+
+
+def get_license_format(path: Path) -> str | None:
+    """Determine license format for file, or None if not applicable."""
+    if path.suffix in EXTENSIONS_CPP:
+        return "cpp"
+    elif path.suffix in EXTENSIONS_HASH:
+        return "hash"
+    elif "dockerfile" in path.name.lower():
+        # Dockerfiles use # comments but have no extension
+        return "hash"
+    elif "doxyfile" in path.name.lower():
+        # Doxyfiles use # comments
+        return "hash"
+    elif path.suffix == "" and path.name not in EXCLUDE_NAMES:
+        # Scripts without extension - check for shebang
+        try:
+            with open(path, "r") as f:
+                first_line = f.readline()
+                if first_line.startswith("#!"):
+                    return "hash"
+        except (IOError, UnicodeDecodeError):
+            pass
+    return None
+
+
+def has_license(text: str) -> bool:
+    """Check if file already has a license."""
+    return "SPDX-License-Identifier" in text or "Copyright" in text
+
+
+def prepend_license(text: str, license_format: str) -> str:
+    """Prepend license to file content, preserving shebang and encoding lines."""
+    lines = text.split("\n")
+    insert_index = 0
+
+    # Preserve shebang
+    if lines and lines[0].startswith("#!"):
+        insert_index = 1
+
+    # Preserve encoding declaration
+    if len(lines) > insert_index and "coding:" in lines[insert_index]:
+        insert_index += 1
+
+    license_text = LICENSE_CPP if license_format == "cpp" else LICENSE_HASH
+    license_lines = license_text.rstrip("\n").split("\n")
+
+    # Insert license and blank line
+    lines[insert_index:insert_index] = license_lines + [""]
+
+    return "\n".join(lines)
+
+
+def process_file(path: Path, dry_run: bool = False) -> bool:
+    """Process a single file, returning True if it was modified."""
+    if should_exclude(path):
+        return False
+
+    license_format = get_license_format(path)
+    if license_format is None:
+        return False
+
+    try:
+        text = path.read_text()
+    except (IOError, UnicodeDecodeError) as e:
+        print(f"Error reading {path}: {e}")
+        return False
+
+    if has_license(text):
+        return False
+
+    new_text = prepend_license(text, license_format)
+
+    if dry_run:
+        print(f"Would add license: {path}")
+    else:
+        print(f"Adding license: {path}")
+        path.write_text(new_text)
+
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Add SPDX license headers to source files"
+    )
+    parser.add_argument(
+        "dir",
+        type=Path,
+        default=repo_dir,
+        nargs="?",
+        help="Directory to process (default: repo root)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be changed without making changes",
+    )
+
+    args = parser.parse_args()
+
+    updated = 0
+    errors = []
+
+    for x in git.ls_tree(args.dir):
+        path = args.dir / Path(x)
+        if path.is_file():
+            try:
+                if process_file(path, args.dry_run):
+                    updated += 1
+            except Exception as e:
+                print(f"Error processing {path}: {e}")
+                errors.append(path)
+
+    print(
+        f"\n{'Would add license to' if args.dry_run else 'Added license to'} {updated} files"
+    )
+    if errors:
+        print(f"\nErrors in {len(errors)} files:")
+        for e in errors:
+            print(f"  {e}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,108 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R6 rich-gfx90a designed config (arch-breadth, MFMA/cap arms).
+#
+# Purpose: widen KernelWriterAssembly.py coverage on gfx90a (CDNA2/aldebaran)
+# by exercising arch-specific MFMA cap arms not yet reached by seed.yaml:
+#
+#   * MFMA_BF16_1K=True  — the BF16 1K (b1k) MFMA variant arm at KWA line
+#     8554 / MFMA emission line ~9420-9438 (MFMAInstruction mfma1k=True path).
+#     This is activated whenever DataType=BF16 and MFMA_BF16_1K is enabled,
+#     which happens for the gfx90a BBS logic (per attribution-gfx90a.json,
+#     BBS.yaml line 123: "MFMA_BF16_1K: true").
+#
+#   * DirectToVgprA=[False, True] — the DTV single-sided arm at KWA lines
+#     752-755 (isDTVAorB for StaggerUIterDTV allocation) and the DTV vgpr
+#     buffer paths at 974-976, 1109-1111, 1315-1316. gfx90a's BBS arch supports
+#     DirectToVgprA for the 16x16x16 tile shape.
+#
+#   * GlobalSplitU=[1, 4] — GSU on vs off paths; GSU=4 routes through
+#     _GlobalAccumulation=MultipleBuffer at KWA / GSU.py.
+#
+#   * UseScaleAlphaVec=1 (on ProblemType via ScaleAlphaVec field) — kept live
+#     by the BBS logic shape (BBS.yaml UseScaleAlphaVec: 1).
+#
+#   * Two MatrixInstruction tile shapes: 16x16x16x1 and 32x32x8x1 — both used
+#     in seed.yaml and valid for gfx90a BBS; ensures store-geometry variation.
+#
+# ForkParameters cartesian product (before limit):
+#   2 (MatrixInstruction) x 2 (DirectToVgprA) x 2 (GlobalSplitU) = 8 kernels
+# => exactly 8, matching the harness limit.
+#
+# Design notes:
+#   - ProblemType mirrors BBS.yaml and seed.yaml: DataType=b (BF16),
+#     DestDataType=b, ComputeDataType=s (Single), HPA=True, TransposeA=1,
+#     TransposeB=0, UseBias=1, Activation=True, ActivationType=hipblaslt_all.
+#   - MFMA_BF16_1K is NOT a ForkParameter here; it is derived automatically by
+#     the solution struct from the DataType=b + arch=gfx90a combination when the
+#     MatrixInstruction K-dim implies 1K mode. This matches the shipped BBS.yaml
+#     where MFMA_BF16_1K=True is set in the solution (not the fork). The config
+#     drives the 16x16x16x1 and 32x32x8x1 MI shapes which are both in the BBS
+#     MFMA_BF16_1K=True family on gfx90a.
+#   - DirectToVgprA=True is supported on gfx90a for the 16x16x16 MI shape
+#     (same as gfx942; the DTV vgpr scheme is arch-agnostic at config level).
+#     For 32x32x8, DirectToVgprA=True may be rejected; the harness emits only
+#     valid permutations so the total may be < 8.
+#   - ActivationType=hipblaslt_all (matches BBS.yaml) to keep activation arm live.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (BF16/BF16 -> Single) NT — dominant gfx90a attribution entry
+  # Rich fork: MatrixInstruction x DirectToVgprA x GlobalSplitU
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1]
+          - [32, 32,  8, 1,  1,   1, 1,  4, 1]
+        - DirectToVgprA: [False, True]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1, 4]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']
+        - ActivationArgs:
+          - [Enum: relu]

@@ -1,0 +1,4 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include "${KERNEL_SRC_HPP_FILENAME}"

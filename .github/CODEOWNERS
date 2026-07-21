@@ -1,0 +1,192 @@
+# Generic Ownership (broadest rules first)
+**/next-cmake/                                      @ROCm/rocm-math-lib-build-infra
+./CMakeLists.txt                                    @ROCm/rocm-math-lib-build-infra
+./CMakePresets.json                                 @ROCm/rocm-math-lib-build-infra
+/cmake/
+
+# CI ownership
+/.azuredevops/                                      @ROCm/external-ci
+/.github/                                           @ROCm/rocm-libraries-reviewers
+
+# Project-specific ownership
+/dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
+/dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
+/dnn-providers/hip-kernel-provider/                 @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
+/dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
+/dnn-providers/integration-tests/                   @ROCm/dnn-providers-core
+/projects/composablekernel/                         @ROCm/ck-reviewers
+/projects/hipblas/                                  @ROCm/hipblas-reviewers
+/projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
+/projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
+/projects/hipcub/                                   @ROCm/prims-rands-reviewers
+/projects/hipdnn/                                   @ROCm/hipdnn-core
+/projects/hipfft/                                   @ROCm/fft-reviewers
+/projects/hiprand/                                  @ROCm/prims-rands-reviewers
+/projects/hipsolver/                                @ROCm/solvers-reviewers
+/projects/hipsparse/                                @ROCm/sparses-reviewers
+/projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
+/projects/hiptensor/                                @ROCm/hiptensor-reviewers
+/projects/miopen/                                   @ROCm/miopen-reviewers
+/projects/rocblas/                                  @ROCm/rocblas-reviewers
+/projects/rocfft/                                   @ROCm/fft-reviewers
+/projects/rocprim/                                  @ROCm/prims-rands-reviewers
+/projects/rocrand/                                  @ROCm/prims-rands-reviewers
+/projects/rocsolver/                                @ROCm/solvers-reviewers
+/projects/rocsparse/                                @ROCm/sparses-reviewers
+/projects/rocthrust/                                @ROCm/prims-rands-reviewers
+/projects/rocwmma/                                  @ROCm/rocwmma-reviewers
+/projects/rpp/                                      @ROCm/rpp-reviewers
+/shared/origami/                                    @ROCm/origami-reviewers
+/shared/mxdatagenerator/                            @ROCm/rocroller-developers
+/shared/rocroller/                                  @ROCm/rocroller-developers
+/shared/tensile/                                    @ROCm/tensile-reviewers
+/shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
+
+# Next CMake-specific ownership
+/projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra
+/projects/hipblas-common/**/CMakeLists.txt          @ROCm/rocm-math-lib-build-infra
+
+/projects/hipblaslt/**/*.cmake                      @ROCm/rocm-math-lib-build-infra
+/projects/hipblaslt/**/CMakeLists.txt               @ROCm/rocm-math-lib-build-infra
+
+/projects/hipsparselt/**/*.cmake                    @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
+/projects/hipsparselt/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
+
+/projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+/projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+
+/shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
+/shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
+
+/shared/origami/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
+/shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
+
+/shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
+/shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
+
+/shared/tensile/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
+/shared/tensile/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
+
+# Documentation-specific ownership by project
+/projects/hipblas/**/*.md                           @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/**/*.rst                          @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/**/.readthedocs.yaml              @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/docs/                             @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/library/include/                  @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+
+/projects/hipblas-common/**/*.md                    @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/**/*.rst                   @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/**/.readthedocs.yaml       @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/docs/                      @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/library/include/           @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+
+/projects/hiptensor/**/*.md                         @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+/projects/hiptensor/**/*.rst                        @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+/projects/hiptensor/library/include/*               @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+/projects/hiptensor/docs/                           @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+
+/projects/rocwmma/**/*.md                           @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/**/*.rst                          @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/library/include/*                 @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/docs/                             @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+
+/projects/hipblaslt/**/*.md                         @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/**/*.rst                        @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/**/.readthedocs.yaml            @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/docs/                           @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/library/include/                @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+
+/projects/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipcub/**/.readthedocs.yaml               @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipcub/docs/                              @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/projects/hipfft/**/*.md                            @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/**/*.rst                           @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/**/.readthedocs.yaml               @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/docs/                              @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/library/include/                   @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+
+/projects/hiprand/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+
+/projects/hipsolver/**/*.md                         @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/**/*.rst                        @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/**/.readthedocs.yaml            @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/docs/                           @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/library/include/                @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+
+/projects/hipsparse/**/*.md                         @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/**/*.rst                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/**/.readthedocs.yaml            @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/docs/                           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/library/include/                @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+
+/projects/hipsparselt/**/*.md                       @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/**/*.rst                      @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/**/.readthedocs.yaml          @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/docs/                         @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/library/include/              @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+
+/projects/miopen/**/*.md                            @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/**/*.rst                           @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+
+/projects/rocblas/**/*.md                           @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/**/*.rst                          @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/**/.readthedocs.yaml              @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/docs/                             @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/library/include/                  @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+
+/projects/rocfft/**/*.md                            @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/**/*.rst                           @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/**/.readthedocs.yaml               @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/docs/                              @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/library/include/                   @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+
+/projects/rocprim/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocprim/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocprim/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocprim/docs/                             @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/projects/rocrand/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+
+/projects/rocsolver/**/*.md                         @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/**/*.rst                        @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/**/.readthedocs.yaml            @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/docs/                           @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/library/include/                @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+
+/projects/rocsparse/**/*.md                         @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/**/*.rst                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/**/.readthedocs.yaml            @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/docs/                           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/library/include/                @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+
+/projects/rocthrust/**/*.md                         @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocthrust/**/*.rst                        @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocthrust/**/.readthedocs.yaml            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocthrust/docs/                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/shared/tensile/**/*.md                             @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+/shared/tensile/**/*.rst                            @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+/shared/tensile/**/.readthedocs.yaml                @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+/shared/tensile/docs/                               @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+
+/projects/composablekernel/**/*.md                  @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/**/*.rst                 @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/**/.readthedocs.yaml     @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/docs/                    @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+
+/projects/rpp/**/*.md                               @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
+/projects/rpp/**/*.rst                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
+/projects/rpp/**/.readthedocs.yaml                  @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
+/projects/rpp/**/docs/                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers

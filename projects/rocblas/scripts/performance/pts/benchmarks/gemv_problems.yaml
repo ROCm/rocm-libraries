@@ -1,0 +1,70 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &gemvN_matrix_sizes
+    # skinny n large m
+    - { scan:  [ 65536..131072..4096 ], M: *c_scan_value, N: 32, lda: *c_scan_value }
+    - { scan: [ 16384..65536..2048], M: *c_scan_value, N: 8, lda: *c_scan_value }
+
+    # double buffered loads on gfx90a w/ float/double
+    - { scan: [ 512..8192..512], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value }
+
+    # optimized sizes for gfx906 and gfx908, generic covered by gfx90a
+    - { scan: [ 1538..12304..1538 ], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value } # non-multiples of 128
+    - { M:  4011, N:  4011,  lda: 4011,  stride_a: 16088200 }
+    - { M:  8000, N:  8000,  lda: 8000,  stride_a: 64000000 }
+
+  - &gemvT_matrix_sizes
+    # skinny n large m
+    - { scan:  [ 65536..131072..4096 ], M: *c_scan_value, N: 32, lda: *c_scan_value }
+    - { scan: [ 16384..65536..2048], M: *c_scan_value, N: 8, lda: *c_scan_value }
+
+    # double bufferred loads, special kernel only for gfx908
+    - { scan: [ 8192..1024..16384 ], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value }
+
+    # generic square range - uses gfx10/gfx11-specific kernels, or generic kernels on other hardware
+    - { scan: [ 1024..8192..1024], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value }
+
+  - &gemv_batched_matrix_sizes
+    # m && n <= 32 && batch_count >= 256 (gfx90a only) watch for overlap with qmcpack
+    - { M:    3 , N:    32, lda:    3, batch_count: [ 256..1024..256 ], stride_a:       96 }
+    - { M:    24, N:    24, lda:   24, batch_count: [ 256..1024..256 ], stride_a:     1024 }
+
+    # qmcpack few rows
+    - { M:    32, N:  [ 2048..8192..1024 ], lda:   32, batch_count: [ 8..32..8 ], stride_a:    49152 }
+
+
+
+Tests:
+  - name: gemvn_bench
+    category: bench
+    function: gemv
+    precision: *single_double_precisions_complex_real
+    transA: [ N ]
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *gemvN_matrix_sizes
+
+
+  - name: gemvt_bench
+    category: bench
+    function: gemv
+    precision: *single_double_precisions_complex_real
+    transA: [ T ]
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *gemvT_matrix_sizes
+
+  - name: gemv_batched_bench
+    category: bench
+    function: gemv_batched
+    precision: *single_double_precisions_complex_real
+    transA: [ N, T ]
+    alpha: 1
+    incx: 1
+    incy: 1
+    matrix_size: *gemv_batched_matrix_sizes
+...

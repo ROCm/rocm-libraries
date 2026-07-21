@@ -1,0 +1,49 @@
+#!/bin/bash -ex
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+chgrp tty /dev/tty*
+
+if id "${_USER}" &>/dev/null; then
+    echo "${_USER} already exists, skipping creation."
+else
+    echo "Creating user ${_USER}."
+    useradd -o -m ${_USER} --uid ${_UID} --gid tty --gid video -s /bin/bash
+    mkhomedir_helper ${_USER}
+
+    echo "$_USER    ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
+fi
+
+if [[ -z "${_RENDER_GID}" ]]; then
+    echo "RENDER GID not passed in, skipping config."
+else
+    echo "Configuring render group."
+    sudo groupadd --gid ${_RENDER_GID} render
+    sudo usermod -a -G render ${_USER}
+fi
+
+if [[ -z "${_GIT_EMAIL}" ]]; then
+    echo "Git email not passed in, skipping config."
+else
+    echo "Configuring Git email."
+    sudo su -l $_USER -c "git config --global user.email \"${_GIT_EMAIL}\""
+fi
+
+if [[ -z "${_GIT_USER}" ]]; then
+    echo "Git name not passed in, skipping config."
+else
+    echo "Configuring Git username."
+    sudo su -l $_USER -c "git config --global user.name \"${_GIT_USER}\""
+fi
+
+cd /data
+
+if [ "$#" -gt 0 ]; then
+    echo $#
+    echo sudo -u $_USER "$@"
+    exec su -l $_USER -c "$@"
+else
+    echo su --login $_USER
+    su --login $_USER
+fi

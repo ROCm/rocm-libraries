@@ -1,0 +1,1 @@
+.amdgpu_hsa_kernel foo

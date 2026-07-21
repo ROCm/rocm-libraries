@@ -1,0 +1,213 @@
+/* ************************************************************************
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+#pragma once
+#ifndef TESTING_AXPBY_HPP
+#define TESTING_AXPBY_HPP
+
+#include "display.hpp"
+#include "flops.hpp"
+#include "gbyte.hpp"
+#include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
+#include "hipsparse_test_unique_ptr.hpp"
+#include "unit.hpp"
+#include "utility.hpp"
+
+#include <hipsparse.h>
+
+using namespace hipsparse_test;
+
+template <typename I, typename X, typename Y, typename T>
+void testing_axpby_bad_arg(const Arguments& argus)
+{
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
+
+    int64_t size = 100;
+    int64_t nnz  = 100;
+
+    T alpha = make_DataType<T>(3.7);
+    T beta  = make_DataType<T>(1.2);
+
+    hipsparseIndexType_t idxType = getIndexType<I>();
+    hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
+    hipDataType          xType   = getDataType<X>();
+    hipDataType          yType   = getDataType<Y>();
+
+    hipsparseLocalHandle_t handle;
+
+    auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(X) * nnz), device_free};
+    auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(I) * nnz), device_free};
+    auto dy_managed     = hipsparse_unique_ptr{device_malloc(sizeof(Y) * size), device_free};
+
+    X* dx_val = (X*)dx_val_managed.get();
+    I* dx_ind = (I*)dx_ind_managed.get();
+    Y* dy     = (Y*)dy_managed.get();
+
+    // Structures
+    hipsparseSpVecDescr_t x;
+    hipsparseDnVecDescr_t y;
+
+    verify_hipsparse_status_success(
+        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType), "Success");
+    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, size, dy, yType), "Success");
+
+    // Axpby
+    verify_hipsparse_status_invalid_handle(hipsparseAxpby(nullptr, &alpha, x, &beta, y));
+    verify_hipsparse_status_invalid_pointer(hipsparseAxpby(handle, nullptr, x, &beta, y),
+                                            "Error: alpha is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseAxpby(handle, &alpha, nullptr, &beta, y),
+                                            "Error: x is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseAxpby(handle, &alpha, x, nullptr, y),
+                                            "Error: beta is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseAxpby(handle, &alpha, x, &beta, nullptr),
+                                            "Error: y is nullptr");
+
+    // Destruct
+    verify_hipsparse_status_success(hipsparseDestroySpVec(x), "Success");
+    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "Success");
+#endif
+}
+
+template <typename I, typename X, typename Y, typename T>
+void testing_axpby(Arguments argus)
+{
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
+    I size = argus.N;
+    I nnz  = argus.nnz;
+
+    T alpha = argus.get_alpha<T>();
+    T beta  = argus.get_beta<T>();
+
+    hipsparseIndexBase_t idxBase = argus.baseA;
+
+    // Index and data types
+    hipsparseIndexType_t idxType = getIndexType<I>();
+    hipDataType          xType   = getDataType<X>();
+    hipDataType          yType   = getDataType<Y>();
+
+    // hipSPARSE handle
+    hipsparseLocalHandle_t handle(argus);
+
+    // Host structures
+    std::vector<I> hx_ind(nnz);
+    std::vector<X> hx_val(nnz);
+    std::vector<Y> hy(size);
+    std::vector<Y> hy_gold(size);
+
+    // Initial Data on CPU
+    srand(12345ULL);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
+    hipsparseInit<X>(hx_val, 1, nnz);
+    hipsparseInit<Y>(hy, 1, size);
+
+    hy_gold = hy;
+
+    // Allocate memory on device
+    auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(I) * nnz), device_free};
+    auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(X) * nnz), device_free};
+    auto dy_managed     = hipsparse_unique_ptr{device_malloc(sizeof(Y) * size), device_free};
+
+    I* dx_ind = (I*)dx_ind_managed.get();
+    X* dx_val = (X*)dx_val_managed.get();
+    Y* dy     = (Y*)dy_managed.get();
+
+    // copy data from CPU to device
+    CHECK_HIP_ERROR(hipMemcpy(dx_ind, hx_ind.data(), sizeof(I) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx_val, hx_val.data(), sizeof(X) * nnz, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy, hy.data(), sizeof(Y) * size, hipMemcpyHostToDevice));
+
+    // Create structures
+    hipsparseSpVecDescr_t x;
+    hipsparseDnVecDescr_t y;
+
+    CHECK_HIPSPARSE_ERROR(
+        hipsparseCreateSpVec(&x, size, nnz, dx_ind, dx_val, idxType, idxBase, xType));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y, size, dy, yType));
+
+    if(argus.unit_check)
+    {
+        // Axpby
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseAxpby(handle, &alpha, x, &beta, y));
+
+        // Copy output from device to CPU
+        CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(Y) * size, hipMemcpyDeviceToHost));
+
+        // CPU
+        host_axpby<I, X, Y, T>(
+            size, nnz, alpha, hx_val.data(), hx_ind.data(), beta, hy_gold.data(), idxBase);
+
+        // Verify results against host
+        unit_check_general(1, size, 1, hy_gold.data(), hy.data());
+    }
+
+    if(argus.timing)
+    {
+        int number_cold_calls = 2;
+        int number_hot_calls  = argus.iters;
+
+        // Warm up
+        for(int iter = 0; iter < number_cold_calls; ++iter)
+        {
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseAxpby(handle, &alpha, x, &beta, y));
+        }
+
+        double gpu_time_used = get_time_us();
+
+        // Performance run
+        for(int iter = 0; iter < number_hot_calls; ++iter)
+        {
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseAxpby(handle, &alpha, x, &beta, y));
+        }
+
+        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+
+        double gflop_count = axpby_gflop_count(nnz);
+        double gbyte_count = axpby_gbyte_count<X, Y>(nnz, size);
+
+        double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
+        double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
+
+        display_timing_info(display_key_t::size,
+                            size,
+                            display_key_t::nnz,
+                            nnz,
+                            display_key_t::alpha,
+                            alpha,
+                            display_key_t::beta,
+                            beta,
+                            display_key_t::gflops,
+                            gpu_gflops,
+                            display_key_t::bandwidth,
+                            gpu_gbyte,
+                            display_key_t::time_ms,
+                            get_gpu_time_msec(gpu_time_used));
+    }
+
+    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
+    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
+
+#endif
+}
+
+#endif // TESTING_AXPBY_HPP

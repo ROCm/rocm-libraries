@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+mkdir -p codeql/build/.cache/
+
+# Run cpp tests
+codeql test run codeql/cpp/test/ --search-path=codeql/build/codeql-cli:codeql/cpp/ \
+    --compilation-cache=codeql/build/.cache/ --show-extractor-output
+
+return_code=$?
+
+# Cleanup
+find codeql/ -type d -name '*.testproj' -prune -exec rm -rf {} +
+
+if [[ "$*" != *"--i-will-not-copy-actual-contents-to-expected"* ]]; then
+    find codeql/ -type f -name '*.actual' -delete
+fi
+
+exit $return_code

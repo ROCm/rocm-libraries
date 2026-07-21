@@ -1,0 +1,98 @@
+GlobalParameters:
+  MinimumRequiredVersion: 4.2.0
+  ForceRedoBenchmarkProblems: True
+  ForceRedoLibraryLogic: True
+  ForceRedoLibraryClient: True
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  LibraryPrintDebug: False
+  NumElementsToValidate: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  ShortNames: False
+  MergeFiles: True
+  Platform: 0
+  Device: 0
+  KernelTime: True
+  PinClocks: False
+  SleepPercent: 50
+  DataInitTypeBeta : 0
+  SolutionSelectionAlg: 1
+  PrintWinnersOnly: 1
+
+BenchmarkProblems:
+  ########################################
+  # NN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+  ########################################
+  # Explore large number of ~10K solutions
+  ########################################
+    - # Benchmark Group
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - EdgeType: ["ShiftPtr"]
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - FractionalLoad: [1]
+        - PrefetchGlobalRead: [ False, True ]
+        - PrefetchLocalRead: [ True]
+        - ThreadTile:
+          - [ 4, 4 ]
+          - [ 8, 4 ]
+        - WorkGroup:
+          - [ 16, 16, 1 ]
+          - [ 16, 32, 1 ]
+        - GlobalSplitU: [1]
+        - WorkGroupMapping: [1,2,8,16,32,64]
+        - DepthU: [ 2,3,4,5,8,10,16,24,32,48,64 ]
+        - VectorWidth: [4]
+        - GlobalReadVectorWidth: [1,4]
+        #- LdsPadA: [0, -1 ]
+        #- LdsPadB: [0, -1 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [ 4096 , 192 , 1, 1280 ]
+          - Exact: [ 4096 , 192 , 1, 2048 ]
+          - Exact: [ 4096 , 256 , 1, 1536 ]
+          - Exact: [ 4096 , 320 , 1, 1280 ]
+          - Exact: [ 4096 , 320 , 1, 2048 ]
+          - Exact: [ 4096 , 384 , 1, 1280 ]
+          - Exact: [ 4096 , 384 , 1, 1536 ]
+          - Exact: [ 4096 , 384 , 1, 2048 ]
+          - Exact: [ 4096 , 448 , 1, 1280 ]
+          - Exact: [ 4096 , 448 , 1, 2048 ]
+
+LibraryLogic:
+    ScheduleName: "vega20"
+    DeviceNames: ["Device 66a0", "Device 66a1", "Device 66a7"]
+    ArchitectureName: "gfx906"
+
+#   ScheduleName: "vega10"
+#   DeviceNames: ["Device 6863", "Device 6862", "Device 687f", "Device 6860", "Device 6861", "Vega 10 XTX [Radeon Vega Frontier Edition]", "Vega [Radeon RX Vega]"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "mi25"
+#   DeviceNames: ["Device 6860"]
+#   ArchitectureName: "gfx900"
+
+#   ScheduleName: "r9nano"
+#   DeviceNames: ["Device 7300"]
+#   ArchitectureName: "gfx803"
+
+#   ScheduleName: "hip"
+#   DeviceNames: ["Device 0000"]
+#   ArchitectureName: "fallback"
+
+LibraryClient:

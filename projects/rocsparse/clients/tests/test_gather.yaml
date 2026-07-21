@@ -1,0 +1,151 @@
+# ########################################################################
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+- name: gather_bad_arg
+  category: pre_checkin
+  function: gather_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+
+- name: gather
+  category: quick
+  function: gather
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [500]
+  nnz: [5, 10, 500]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: gather
+  category: pre_checkin
+  function: gather
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [20000]
+  nnz: [0, 1543, 7111, 10000]
+  baseA: [rocsparse_index_base_one]
+
+- name: gather
+  category: nightly
+  function: gather
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [500000]
+  nnz: [23512, 84412, 311983]
+  baseA: [rocsparse_index_base_zero]
+
+- name: gather
+  category: quick
+  function: gather
+  indextype: *i32_i64
+  precision: *int8_precision
+  M: [600]
+  nnz: [7, 21, 600]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: gather
+  category: pre_checkin
+  function: gather
+  indextype: *i32_i64
+  precision: *int8_precision
+  M: [12000]
+  nnz: [0, 1703, 4161, 10100]
+  baseA: [rocsparse_index_base_one]
+
+- name: gather
+  category: nightly
+  function: gather
+  indextype: *i32_i64
+  precision: *int8_precision
+  M: [500000]
+  nnz: [33814, 74711, 311084]
+  baseA: [rocsparse_index_base_zero]
+
+- name: gather
+  category: quick
+  function: gather
+  indextype: *i32_i64
+  precision: *half_precision
+  M: [800]
+  nnz: [5, 77, 723]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: gather
+  category: pre_checkin
+  function: gather
+  indextype: *i32_i64
+  precision: *half_precision
+  M: [10000]
+  nnz: [0, 2123, 7689, 9100]
+  baseA: [rocsparse_index_base_one]
+
+- name: gather
+  category: nightly
+  function: gather
+  indextype: *i32_i64
+  precision: *half_precision
+  M: [300000]
+  nnz: [30476, 54697, 200375]
+  baseA: [rocsparse_index_base_zero]
+
+- name: gather
+  category: quick
+  function: gather
+  indextype: *i32_i64
+  precision: *brain_half_precision
+  M: [1000]
+  nnz: [11, 103, 777]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: gather
+  category: pre_checkin
+  function: gather
+  indextype: *i32_i64
+  precision: *brain_half_precision
+  M: [13000]
+  nnz: [0, 4235, 8768, 12361]
+  baseA: [rocsparse_index_base_one]
+
+- name: gather
+  category: nightly
+  function: gather
+  indextype: *i32_i64
+  precision: *brain_half_precision
+  M: [300000]
+  nnz: [54678, 132456, 267120]
+  baseA: [rocsparse_index_base_zero]
+
+- name: gather_graph_test
+  category: pre_checkin
+  function: gather
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [1200]
+  nnz: [5, 10, 500]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  graph_test: true

@@ -1,0 +1,15 @@
+#[error id]:[filename]:[line]
+
+
+*:*/*_cmrc*/*
+*:*/_deps/*
+*:*/isa_spec_manager/*
+*:*/llvm/*
+*:/usr/*
+
+
+# m_coroutine
+uninitMemberVar:*/Generator_impl.hpp
+
+# useful unused variables in tests
+unreadVariable:*/HypergraphTest.cpp

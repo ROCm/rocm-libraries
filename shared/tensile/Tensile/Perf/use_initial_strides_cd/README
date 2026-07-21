@@ -1,0 +1,60 @@
+Parm guide for supporting arbitrary strides with C != D:
+
+- For testing in Tensile, set global parm CEqualD=0 to force D tensor to be allocated unique memory location
+  This appears to have little impact on performance.
+
+- In the ProblemType Section:
+  - UseInitialStridesAB: true
+  - UseInitialStridesCD: true
+
+- In the solution generation
+   - LdcEqualsLdd=0 : Costs a couple percent in limited testing.
+   - UseInitialStridesAB requires GlobalReadVectorWidth=1, this impacts perf a bit
+   - UseInitialStridesCD will set vector-store to 0 internally, this impacts perf 5%-10%.
+
+
+Specialized Solution Generation:
+- AssertStrideA0Equal: 1, AssertStrideBEqual: 1
+- AssertStrideC0Equal: 0, AssertStrideDEqual: 1
+
+
+problem-progress problem-sizes      solution                                             time-us  gflops best-any
+
+Baseline:
+0/3              (512,512,1,512)    Cijk_Aikl_Blkj_SB_MT64x64x16_SE_K1_TT4_4_WG16_16_1   53.21    5045   8780
+1/3              (1024,1024,1,1024) Cijk_Aikl_Blkj_SB_MT128x128x16_SE_K1_TT8_8_WG16_16_1 268.69   7993   10116
+2/3              (4096,4096,1,4096) Cijk_Aikl_Blkj_SB_MT128x128x16_SE_K1_TT8_8_WG16_16_1 13585.91 10116  10116
+
+LdcEqualdLdd=0:
+0/3              (512,512,1,512)    Cijk_Aikl_Blkj_SB_MT64x64x16_SE_K1_TT4_4_WG16_16_1   54.41    4934   8835
+1/3              (1024,1024,1,1024) Cijk_Aikl_Blkj_SB_MT128x128x16_SE_K1_TT8_8_WG16_16_1 268.90   7986   10196
+2/3              (4096,4096,1,4096) Cijk_Aikl_Blkj_SB_MT128x128x16_SE_K1_TT8_8_WG16_16_1 13479.05 10196  10196
+
+LdcEqualdLdd, UseInitialStridesAB=1:
+* shows 15%-20% performance drop, looks like excessive LDS writes from the GRVW=1 pattern
+0/3              (512,512,1,512)    Cijk_Aikl_Blkj_SBI_MT64x64x16_SN_K1_TT4_4_WG16_16_1   66.11    4061   6663
+1/3              (1024,1024,1,1024) Cijk_Aikl_Blkj_SBI_MT128x128x16_SN_K1_TT8_8_WG16_16_1 313.03   6860   9318
+2/3              (4096,4096,1,4096) Cijk_Aikl_Blkj_SBI_MT128x128x16_SN_K1_TT8_8_WG16_16_1 14749.67 9318   9318
+
+LdcEqualdLdd=0,VectorStore=0:
+* shows ~5%-10% drop, from use of single element loads on beta loads and D stores.  Address calcs similar
+0/3              (512,512,1,512)    Cijk_Aikl_Blkj_SB_MT32x32x16_SN_K1_TT4_4_WG8_8_1     61.23    4384   5480
+1/3              (1024,1024,1,1024) Cijk_Aikl_Blkj_SB_MT128x128x16_SN_K1_TT8_8_WG16_16_1 295.89   7258   9850
+2/3              (4096,4096,1,4096) Cijk_Aikl_Blkj_SB_MT128x128x16_SN_K1_TT8_8_WG16_16_1 13953.52 9850   9850
+
+UseInitialStridesCD=1:
+0/3              (512,512,1,512)    Cijk_Aikl_Blkj_SBIc_MT32x32x16_SE_K1_TT4_4_WG8_8_1     60.61    4429   5501
+1/3              (1024,1024,1,1024) Cijk_Aikl_Blkj_SBIc_MT128x128x16_SE_K1_TT8_8_WG16_16_1 289.63   7415   8190
+2/3              (4096,4096,1,4096) Cijk_Aikl_Blkj_SBIc_MT64x64x16_SE_K1_TT4_4_WG16_16_1   16105.27 8534   8534
+
+UseInitialStridesCD=1,UseInitialStridesAB=1:
+0/3              (512,512,1,512)    Cijk_Aikl_Blkj_SBIIc_MT64x64x16_SN_K1_TT4_4_WG16_16_1   72.70    3693   6450
+1/3              (1024,1024,1,1024) Cijk_Aikl_Blkj_SBIIc_MT128x128x16_SN_K1_TT8_8_WG16_16_1 342.23   6275   7115
+2/3              (4096,4096,1,4096) Cijk_Aikl_Blkj_SBIIc_MT128x128x16_SN_K1_TT8_8_WG16_16_1 19317.50 7115   7115
+
+
+
+Specializing - see perf_uis_cd_specialized.yaml:
+0/3              (512,512,1,512)    Cijk_Aikl_Blkj_SBIIc_MT64x64x16_SN_K1_TT4_4_WG16_16_1   54.82    4897   8778
+1/3              (1024,1024,1,1024) Cijk_Aikl_Blkj_SBIIc_MT128x128x16_SN_K1_TT8_8_WG16_16_1 267.31   8034   10275
+2/3              (4096,4096,1,4096) Cijk_Aikl_Blkj_SBIIc_MT128x128x16_SN_K1_TT8_8_WG16_16_1 13375.98 10275  10275

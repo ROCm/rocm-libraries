@@ -1,0 +1,31 @@
+Sample libraries can be rebuilt using TensileCreateLibrary and rocBLAS build.
+
+To rebuild rocBLAS_Full, run rocBLAS build script.
+Sample library currently includes gfx803, gfx900, gfx906, and gfx908.
+To build yaml version, include the --no-msgpack flag.
+
+./install.sh -dc -t ~/tensile -a "gfx803;gfx900;gfx906;gfx908" --merge-architectures --no-lazy-library-loading
+./install.sh -dc -t ~/tensile -a "gfx803;gfx900;gfx906;gfx908" --merge-architectures --no-lazy-library-loading --no-msgpack
+
+SampleTensileKernels are small samples written manually.
+To update, make any required updates to SampleTensileKernels.yaml and call the script to convert to msgpack
+
+cd HostLibraryTests
+./LibYamlToMsgpack.py configs/SolutionLibraries/SampleTensileKernels.yaml configs/SolutionLibraries/SampleTensileKernels.dat
+
+Other libs can be rebuilt by calling TensileCreateLibrary.
+
+KernelsLite:
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=yaml ../HostLibraryTests/configs/lite_configs/ . HIP
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=msgpack ../HostLibraryTests/configs/lite_configs/ . HIP
+KernelsLiteMixed:
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=yaml ../HostLibraryTests/configs/lite_configs_mixed/ . HIP
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=msgpack ../HostLibraryTests/configs/lite_configs_mixed/ . HIP
+KernelsLiteNavi:
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=yaml ../Tensile/Source/lib/configs/lite_configs/ . HIP
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=msgpack ../Tensile/Source/lib/configs/lite_configs/ . HIP
+KernelsTileLite:
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=yaml ../HostLibraryTests/configs/tile_aware_selection/ . HIP
+../Tensile/bin/TensileCreateLibrary --merge-files --code-object-version=default --library-format=msgpack ../HostLibraryTests/configs/tile_aware_selection/ . HIP
+
+All libraries are checked in as .gz to reduce checkout size

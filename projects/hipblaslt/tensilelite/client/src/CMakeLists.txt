@@ -1,0 +1,35 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+target_sources(tensilelite-client-common
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PerformanceReporter.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TimingEvents.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ResultFileReporter.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Reference.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ProgressListener.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Rotating.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CSVStackFile.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIterator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
+)
+
+# Profiler sources only target tensilelite-client (cpu-gemm-driver does not
+# expose ROCprofiler counters).
+if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
+    target_sources(tensilelite-client
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/Profiler.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/RocProfiler.cpp"
+    )
+endif()

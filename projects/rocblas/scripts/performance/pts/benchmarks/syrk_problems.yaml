@@ -1,0 +1,19 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &skinny_range
+    - { scan: [ 1024..10240..1024 ], N: *c_scan_value, K: 64, lda: *c_scan_value, ldc: *c_scan_value}
+    - { scan: [ 1024..10240..1024 ], N: *c_scan_value, K: 128, lda: *c_scan_value, ldc: *c_scan_value}
+
+Tests:
+        - name: syrk_skinny
+          function: syrk
+          precision: *single_double_precisions_complex_real
+          matrix_size: *skinny_range
+          uplo: [ L, U ]
+          transA: [ N ]
+          alpha: 1
+          beta: 1
+          iters: 10
+...

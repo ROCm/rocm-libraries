@@ -1,0 +1,184 @@
+operation:
+  name: "ConvolutionFwd"
+  class_name: "ConvolutionFwdOperationDescriptor"
+  fbs_table: "ConvolutionFwdAttributes"
+  fbs_generated_header: "convolution_fwd_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD"
+
+  error_label: "conv"
+  packer_operation_label: "convolution forward"
+  packer_finalize_label: "convolution"
+  test_params_method_name: "setConvParams"
+  data_fields_section_label: "Convolution Parameters"
+  build_node_attrs_var: "convAttrs"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD_EXT"
+
+  frontend:
+    packer_function: "createConvFpropOperation"
+    unpacker_function: "unpackConvFpropOperation"
+    node_class: "ConvolutionFpropNode"
+    attributes_class: "ConvFpropAttributes"
+    attributes_include: "ConvolutionFpropAttributes"
+    attributes_filename: "ConvolutionFprop"
+
+    inputs:
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "w"
+        enum_name: "W"
+        required: true
+        getter_name: "get_w"
+        setter_name: "set_w"
+    outputs:
+      - name: "y"
+        enum_name: "Y"
+        required: true
+        getter_name: "get_y"
+        setter_name: "set_y"
+    graph_method_name: "conv_fprop"
+    graph_method_params:
+      - name: "x"
+        tensor_name: "x"
+      - name: "w"
+        tensor_name: "w"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "y"
+    node_type_enum: "NodeType::CONVOLUTION_FPROP"
+    node_attributes_union_type: "ConvolutionFwdAttributes"
+    compatibility_typedef: "Conv_fprop_attributes"
+
+  infer_properties:
+    strategy: "stub"
+    dimension_formula: "output = (input + pre_padding + post_padding - dilated_kernel) / stride + 1"
+
+  validation:
+    required_input_tensors:
+      - "x"
+      - "w"
+    required_input_dims:
+      - "x"
+      - "w"
+    custom_checks:
+      - "Validate stride > 0 and dilation > 0 for each spatial dimension"
+      - "Validate input channels match weight channels (or divisible for grouped conv)"
+
+  tensor_fields:
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X"
+      required: true
+
+    - name: "w"
+      fbs_field: "w_tensor_uid"
+      attr_suffix: "W"
+      required: true
+
+    - name: "y"
+      fbs_field: "y_tensor_uid"
+      attr_suffix: "Y"
+      required: true
+
+  data_fields:
+    - name: "pre_padding"
+      fbs_field: "pre_padding"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_pre_padding()"
+      test_label: "Convolution"
+      test_value: [2, 3]
+      test_constant_name: "K_FPROP_CONV_PADDING"
+
+    - name: "post_padding"
+      fbs_field: "post_padding"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_post_padding()"
+      test_label: "Convolution"
+      test_value: [4, 5]
+      build_node_check: false
+      test_constant_name: "K_FPROP_CONV_PADDING"
+
+    - name: "stride"
+      fbs_field: "stride"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_stride()"
+      test_label: "Convolution"
+      test_value: [2, 2]
+      test_constant_name: "K_FPROP_CONV_STRIDE"
+
+    - name: "dilation"
+      fbs_field: "dilation"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_DILATIONS"
+      type: "vector_int64"
+      required: true
+      frontend_getter: "get_dilation()"
+      test_label: "Convolution"
+      test_value: [3, 3]
+      test_constant_name: "K_FPROP_CONV_DILATION"
+
+    - name: "conv_mode"
+      fbs_field: "conv_mode"
+      attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
+      type: "mode"
+      cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
+      frontend_type: "ConvolutionMode"
+      default_value: "ConvolutionMode::CROSS_CORRELATION"
+      required: false
+      frontend_getter: "get_convolution_mode()"
+      backend_setter: "setConvMode"
+      backend_getter: "getConvMode"
+      backend_converter: "toBackendConvMode"
+      frontend_inverse_converter: "fromHipdnnConvMode"
+      backend_type_name: "HIPDNN_TYPE_CONVOLUTION_MODE"
+      test_enum_value: "CROSS_CORRELATION"
+      test_alt_enum_value: "CONVOLUTION"
+      test_backend_value: "HIPDNN_CROSS_CORRELATION"
+      test_c_type: "hipdnnConvolutionMode_t"
+      test_default_value: "HIPDNN_CONVOLUTION"
+      # Verification: enum_def for ConvMode (matches existing hand-written code)
+      # Note: ConvMode has no UNSET in the backend C-API, but the frontend has NOT_SET = 0
+      enum_def:
+        backend_header: "HipdnnConvolutionMode.h"
+        backend_prefix: "HIPDNN_"
+        values:
+          - { name: "UNSET", value: 0, sentinel: true }
+          - { name: "CONVOLUTION", value: 0, frontend_value: 2, description: "Mathematical convolution (filter is flipped)" }
+          - { name: "CROSS_CORRELATION", value: 1, frontend_value: 1, description: "Cross-correlation mode (standard deep learning convolution)" }
+
+  tensor_array_fields: []
+
+  data_fields_helper:
+    pack_function: "packConvolutionParams"
+    unpack_function: "unpackConvolutionParams"
+    include: "ConvolutionPackerHelpers"
+    label: "convolution"
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_CONVOLUTION_COMP_TYPE"
+
+  test_data:
+    constants_include: "ConvFpropConstants"
+    tensor_const_prefix: "K_FPROP_"
+    tensor_uids: { x: 1000, w: 1001, y: 1002 }
+    tensor_configs:
+      x: { dims: [1, 3, 32, 32], strides: [3072, 1024, 32, 1] }
+      w: { dims: [64, 3, 3, 3], strides: [27, 9, 3, 1] }
+      y: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+    field_values:
+      pre_padding: [1, 1]
+      post_padding: [1, 1]
+      stride: [1, 1]
+      dilation: [1, 1]

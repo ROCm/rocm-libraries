@@ -1,0 +1,20 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &square_range
+    - { scan: [ 1024..8192..1024 ], N: *c_scan_value, K: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, ldc: *c_scan_value}
+
+
+Tests:
+        - name: gemmt_square
+          function: gemmt
+          precision: *single_double_precisions_complex_real
+          matrix_size: *square_range
+          uplo: [ L, U ]
+          transA: [ N, T ]
+          transB: [ N, T ]
+          alpha: 1
+          beta: 1
+          iters: 10
+...

@@ -1,0 +1,14 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+include: rocblas_perf_common.yaml
+
+Tests:
+  - name: scal_bench
+    category: bench
+    function: scal
+    precision: *single_double_precisions
+    alpha: 1
+    N: *generic_l1_perf_sizes
+    incx: 1 # using special unit-inc kernel for fp32, f16, generic for fp64
+    incy: 1
+...

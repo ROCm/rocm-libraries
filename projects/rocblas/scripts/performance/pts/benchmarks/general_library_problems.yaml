@@ -1,0 +1,83 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+include: rocblas_perf_common.yaml
+
+Definitions:
+  Definitions:
+  - &gemv_sizes_report
+    - { scan: [ 512..24576..512 ], N: *c_scan_value, M: *c_scan_value, lda: *c_scan_value }
+
+  - &trmv_sizes_report
+    - { scan: [ 1024..32768..1024 ], N: *c_scan_value, M: *c_scan_value, lda: *c_scan_value }
+
+  - &trsm_sizes_report
+    - { scan: [ 2048..40960..2048 ], N: 384, M: *c_scan_value, lda: 384, ldb: *c_scan_value }
+    - { scan: [ 2048..40960..2048 ], N: 512, M: *c_scan_value, lda: 512, ldb: *c_scan_value }
+
+  - &gemm_sizes_report
+    - { scan: [ 512..8192..512 ], N: *c_scan_value, M: *c_scan_value, K: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, ldc: *c_scan_value }
+    - { scan: [ 1024..24576..1024 ], N: *c_scan_value, M: *c_scan_value, K: 384, lda: *c_scan_value, ldb: *c_scan_value, ldc: *c_scan_value }
+
+Tests:
+  - name: axpy_bench_report
+    category: bench
+    function: axpy
+    precision: *single_double_precisions_complex_real
+    alpha: 1
+    N: *generic_l1_perf_sizes
+    incx: 1
+    incy: 1
+
+  - name: dot_bench_report
+    category: bench
+    function: dot
+    precision: *single_double_precisions_complex_real
+    N: *generic_l1_perf_sizes
+    incx: 1
+    incy: 1
+
+  - name: gemv_square_bench_report
+    category: bench
+    function: gemv
+    precision: *single_double_precisions_complex_real
+    matrix_size: *gemv_sizes_report
+    incx: 1
+    incy: 1
+    alpha: 1
+    beta: 1
+    transA: T
+
+  - name: trmv_bench_report
+    category: bench
+    function: trmv
+    precision: *single_double_precisions_complex_real
+    matrix_size: *trmv_sizes_report
+    incx: 1
+    incy: 1
+    alpha: 1
+    beta: 1
+    transA: T
+    uplo: L
+    diag: U
+
+  - name: trsm_bench_report
+    category: bench
+    function: trsm
+    precision: *single_double_precisions
+    matrix_size: *trsm_sizes_report
+    alpha: 1
+    transA: T
+    side: R
+    uplo: L
+    diag: U
+
+  - name: gemm_bench_report
+    category: bench
+    function: gemm
+    precision: *single_double_precisions_complex_real
+    matrix_size: *gemm_sizes_report
+    alpha: 1
+    beta: 1
+    transA: N
+    transB: T
+...

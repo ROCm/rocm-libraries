@@ -1,0 +1,12 @@
+dataTypes:
+- 'single_precision'
+transposes:
+- ['N', 'T']
+alphas:
+- 1.0
+betas:
+- 1.0
+dimensionRanges:
+- [20, 80]
+- [200, 900]
+- [2000, 7000]

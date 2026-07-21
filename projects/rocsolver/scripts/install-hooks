@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+
+display_help() {
+  cat <<EOF
+Installs the git hooks used for development in this repository
+
+Usage:
+  $0 [--get-clang-format] [--help] [--] files...
+
+Options:
+  --help                      Print this help message.
+
+  --get-clang-format          Download clang-format for use with the hooks.
+                              This is an alternative to installing the llvm-amdgpu package.
+                              This option may require additional system packages
+                              (e.g., wget, binutils, rpm2cpio, or libtinfo5).
+EOF
+}
+
+# Set defaults
+get_clang_format=false
+
+# Check getopt version
+getopt -T
+if [[ $? -ne 4 ]]; then
+  >&2 echo 'getopt version check failed'
+  exit 1
+fi
+
+# Parse options
+GETOPT_PARSE=$(getopt --name "$0" --longoptions help,get-clang-format --options '' -- "$@")
+if [[ $? -ne 0 ]]; then
+  exit 1
+fi
+eval set -- "$GETOPT_PARSE"
+while true; do
+  case "$1" in
+    --help)
+      display_help
+      exit ;;
+    --get-clang-format)
+      get_clang_format=true
+      shift ;;
+    --) shift ; break ;;
+  esac
+done
+
+set -eu
+
+hooks_dir=$(git rev-parse --git-path hooks)
+scripts_dir=$(dirname "${BASH_SOURCE[0]}")
+
+install --backup --verbose "$scripts_dir/post-commit" "$hooks_dir"
+install --backup --verbose "$scripts_dir/reformat-files" "$hooks_dir"
+
+if [[ "$get_clang_format" == true ]]; then
+  "$scripts_dir/get-clang-format" "$hooks_dir"
+fi

@@ -1,0 +1,24 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &hemm_size_range
+  # - &m_equals_n_range
+    - { scan: [512..4096..512], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value, ldb: *c_scan_value, ldc: *c_scan_value }
+
+  # - &constant_m_range
+    - { scan: [512..4096..512], M: 1024, N: *c_scan_value, lda: 4096, ldb: 1024, ldc: 1024 }
+
+  # - &constant_n_range
+    - { scan: [512..4096..512], M: *c_scan_value, N: 1024, lda: 4096, ldb: *c_scan_value, ldc: *c_scan_value }
+
+Tests:
+  - name: hemm
+    function: hemm
+    precision: *single_double_precisions_complex
+    side: [ L, R ]
+    uplo: [ L, U ]
+    alpha: 1
+    beta: 1
+    matrix_size: *hemm_size_range
+...

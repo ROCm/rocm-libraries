@@ -1,0 +1,19 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+import cpp
+
+/**
+ * Checks if v is within the checked directories
+ * Reasonings for specific exclusions:
+ * Context.hpp: `LabelAllocatorPtr` and `RegTagManPtr` get falsely caught for unknown reason
+ */
+predicate isInCheckedDirs(Element v) {
+  not (
+    v.getFile()
+        .getAbsolutePath()
+        .toString()
+        .regexpMatch(".*(build)/.*") or
+    v.getFile().getAbsolutePath().toString().regexpMatch(".*(Context\\.hpp)$")
+  )
+}

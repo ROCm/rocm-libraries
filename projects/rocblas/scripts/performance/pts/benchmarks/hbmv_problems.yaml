@@ -1,0 +1,19 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &multiples_of_32_sizes
+    - { scan: [2048..10240..2048], N: *c_scan_value, K: 200, lda: *c_scan_value }
+
+Tests:
+  - name: hbmv_upper_multiples_of_32_sizes
+    category: bench
+    function: hbmv
+    precision: *single_double_precisions_complex
+    uplo: U
+    alpha: 1
+    beta: 1
+    incx: 1
+    incy: 1
+    matrix_size: *multiples_of_32_sizes
+...

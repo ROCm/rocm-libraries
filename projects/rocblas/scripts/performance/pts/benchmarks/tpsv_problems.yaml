@@ -1,0 +1,18 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &multiples_of_32_sizes
+    - { N: [2048..12288..2048] }
+
+Tests:
+  - name: tpsv_upper_multiples_of_32_sizes
+    category: bench
+    function: tpsv
+    precision: *single_double_precisions_complex_real
+    uplo: U
+    transA: [ N, T ]
+    diag: U
+    incx: 1
+    matrix_size: *multiples_of_32_sizes
+...

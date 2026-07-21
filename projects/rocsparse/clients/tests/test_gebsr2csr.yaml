@@ -1,0 +1,346 @@
+# ########################################################################
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Tests:
+# Quick
+- name: gebsr2csr
+  category: quick
+  function: gebsr2csr
+  precision: *single_double_precisions_complex_real
+  M: [16]
+  N: [16]
+  row_block_dimA: [8]
+  col_block_dimA: [4]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_zero]
+
+- name: gebsr2csr
+  category: quick
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: [1758]
+  N: [1875]
+  row_block_dimA: [1, 6, 11, 16]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr
+  category: quick
+  function: gebsr2csr
+  precision: *double_only_precisions
+  M: [1857]
+  N: [1567]
+  row_block_dimA: [2, 7, 12, 17]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr
+  category: quick
+  function: gebsr2csr
+  precision: *single_only_precisions_complex
+  M: [1375]
+  N: [1287]
+  row_block_dimA: [3, 8, 13, 18]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr
+  category: quick
+  function: gebsr2csr
+  precision: *double_only_precisions_complex
+  M: [1276]
+  N: [1190]
+  row_block_dimA: [4, 9, 14, 19]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr_file
+  category: quick
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [5, 10, 15, 20]
+  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos5]
+
+# Pre-checkin
+- name: gebsr2csr_bad_arg
+  category: pre_checkin
+  function: gebsr2csr_bad_arg
+  precision: *single_double_precisions_complex_real
+  
+- name: gebsr2csr
+  category: pre_checkin
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: [2245]
+  N: [2200]
+  row_block_dimA: [1, 6, 11, 16]
+  col_block_dimA: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr
+  category: pre_checkin
+  function: gebsr2csr
+  precision: *double_only_precisions
+  M: [2687]
+  N: [2023]
+  row_block_dimA: [2, 7, 12, 17]
+  col_block_dimA: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr
+  category: pre_checkin
+  function: gebsr2csr
+  precision: *single_only_precisions_complex
+  M: [2835]
+  N: [2583]
+  row_block_dimA: [3, 8, 13, 18]
+  col_block_dimA: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr
+  category: pre_checkin
+  function: gebsr2csr
+  precision: *double_only_precisions_complex
+  M: [2385]
+  N: [2572]
+  row_block_dimA: [4, 9, 14, 19]
+  col_block_dimA: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: gebsr2csr_file
+  category: pre_checkin
+  function: gebsr2csr
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  row_block_dimA: [1, 3, 8, 16, 32, 64, 128]
+  col_block_dimA: [2, 4, 5, 11, 22, 33, 70]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534]
+
+# Nightly
+- name: gebsr2csr
+  category: nightly
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: [4758]
+  N: [8576]
+  row_block_dimA: [45, 55, 61]
+  col_block_dimA: [33, 45, 72]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *single_only_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [7]
+  col_block_dimA: [7, 14]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [8]
+  col_block_dimA: [21, 34]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *single_only_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [9]
+  col_block_dimA: [22, 35]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  row_block_dimA: [10]
+  col_block_dimA: [23, 36]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [2, 3]
+  col_block_dimA: [4, 8]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [3, 4]
+  col_block_dimA: [5, 9]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [bmwcra_1]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [4, 5]
+  col_block_dimA: [6, 10]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [5, 6]
+  col_block_dimA: [7, 11]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [sme3Dc]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [6, 7]
+  col_block_dimA: [8, 12]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [webbase-1M]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [7, 8]
+  col_block_dimA: [9, 13]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chebyshev4]
+
+- name: gebsr2csr_file
+  category: nightly
+  function: gebsr2csr
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  row_block_dimA: [8, 9]
+  col_block_dimA: [10, 14]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10]

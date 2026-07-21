@@ -1,0 +1,41 @@
+---
+include: ../../../../clients/include/rocblas_common.yaml
+
+Definitions:
+  - &multiples_of_32_sizes
+    - { scan: [2048..8192..2048], N: *c_scan_value, lda: *c_scan_value }
+
+  - &generic_sizes
+    - { N:  7343, lda:  7343 }
+    - { N:  5143, lda:  5143 }
+    - { N:  3057, lda:  3057 }
+    - { N:  1023, lda:  1023 }
+    - { N:   573, lda:   573 }
+    - { N:   233, lda:   233 }
+    - { N:   100, lda:   100 }
+
+Tests:
+  - name: trmv_multiples_of_32_sizes
+    category: bench
+    function: trmv
+    precision: *single_double_precisions_complex_real
+    transA: [ N, T ]
+    uplo: [ U, L ]
+    diag: [ N ]
+    incx: 1
+    matrix_size: *multiples_of_32_sizes
+    iters: 500
+    cold_iters: 500
+
+  - name: trmv_generic_sizes
+    category: bench
+    function: trmv
+    precision: *single_double_precisions_complex_real
+    transA: [ N, T ]
+    uplo: [ U, L ]
+    diag: [ N ]
+    incx: 1
+    matrix_size: *generic_sizes
+    iters: 500
+    cold_iters: 500
+...

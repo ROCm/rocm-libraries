@@ -1,0 +1,41 @@
+name: Setup Monorepo
+
+on:
+  workflow_dispatch:
+
+env:
+  MONOREPO_URL: github.com/ROCm/rocm-libraries.git
+  MONOREPO_BRANCH: develop
+
+jobs:
+  setup-monorepo:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout the Monorepo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Set up Git user and Git LFS
+        run: |
+          git config user.name "assistant-librarian[bot]"
+          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+
+      - name: Add Repositories to the Monorepo
+        run: |
+          # Skip entries whose url is the monorepo itself (in-tree-only subtrees;
+          # git subtree add cannot pull the monorepo into its own prefix).
+          while IFS=$'\t' read -r repo url branch category; do
+            git subtree add --prefix "${category}/${repo}" "https://github.com/${url}.git" "$branch"
+          done < <(jq -r '.repositories[] | select(.url != "ROCm/rocm-libraries") | [.name,.url,.branch,.category] | @tsv' .github/repos-config.json)
+
+      - name: Push changes to Monorepo
+        run: git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}
