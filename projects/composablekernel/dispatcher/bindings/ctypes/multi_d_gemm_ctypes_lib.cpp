@@ -47,9 +47,10 @@
 // NumDTensor, DsDataType, DsLayout, DLayout, ElementWiseFn, GemmMultiDArgs, and
 // transitively brings in ck_tile::GemmMultiDHostArgs and ck_tile::stream_config.
 
-// GPU architecture - can be overridden via -DGFX_ARCH="gfx90a" at compile time
+// GPU architecture - must be provided via -DGFX_ARCH="<arch>" at compile time
 #ifndef GFX_ARCH
-#define GFX_ARCH "gfx942"
+#error \
+    "GFX_ARCH must be defined at compile time (pass -DGFX_ARCH=<arch>); do not default to a specific GPU architecture."
 #endif
 
 #ifndef GEMM_KEY_NUM_D_TENSORS
