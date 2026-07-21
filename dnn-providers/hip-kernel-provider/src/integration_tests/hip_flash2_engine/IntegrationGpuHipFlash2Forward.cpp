@@ -11,8 +11,8 @@
 
 #include "IntegrationGraphVerificationHarness.hpp"
 
-#include <hipdnn_frontend/Graph.hpp>
 #include <gtest/gtest.h>
+#include <hipdnn_frontend/Graph.hpp>
 
 #include <cmath>
 #include <vector>
@@ -63,9 +63,9 @@ static std::vector<Flash2TestConfig> getTestConfigs()
 
 static std::shared_ptr<Graph> buildSdpaGraph(const Flash2TestConfig& cfg)
 {
-    const std::vector<int64_t> qDims  = {cfg.batch, cfg.seqQ,  cfg.numQHeads,  cfg.headDim};
+    const std::vector<int64_t> qDims = {cfg.batch, cfg.seqQ, cfg.numQHeads, cfg.headDim};
     const std::vector<int64_t> kvDims = {cfg.batch, cfg.seqKV, cfg.numKVHeads, cfg.headDim};
-    const std::vector<int64_t> oDims  = {cfg.batch, cfg.seqQ,  cfg.numQHeads,  cfg.headDim};
+    const std::vector<int64_t> oDims = {cfg.batch, cfg.seqQ, cfg.numQHeads, cfg.headDim};
 
     auto graph = std::make_shared<Graph>();
     graph->set_io_data_type(DataType::HALF)
@@ -73,37 +73,29 @@ static std::shared_ptr<Graph> buildSdpaGraph(const Flash2TestConfig& cfg)
         .set_intermediate_data_type(DataType::FLOAT);
 
     auto q = std::make_shared<TensorAttributes>();
-    q->set_dim(qDims).set_stride({qDims[1] * qDims[2] * qDims[3],
-                                  qDims[2] * qDims[3],
-                                  qDims[3],
-                                  1})
-      .set_data_type(DataType::HALF)
-      .set_uid(1);
+    q->set_dim(qDims)
+        .set_stride({qDims[1] * qDims[2] * qDims[3], qDims[2] * qDims[3], qDims[3], 1})
+        .set_data_type(DataType::HALF)
+        .set_uid(1);
 
     auto k = std::make_shared<TensorAttributes>();
-    k->set_dim(kvDims).set_stride({kvDims[1] * kvDims[2] * kvDims[3],
-                                   kvDims[2] * kvDims[3],
-                                   kvDims[3],
-                                   1})
-      .set_data_type(DataType::HALF)
-      .set_uid(2);
+    k->set_dim(kvDims)
+        .set_stride({kvDims[1] * kvDims[2] * kvDims[3], kvDims[2] * kvDims[3], kvDims[3], 1})
+        .set_data_type(DataType::HALF)
+        .set_uid(2);
 
     auto v = std::make_shared<TensorAttributes>();
-    v->set_dim(kvDims).set_stride({kvDims[1] * kvDims[2] * kvDims[3],
-                                   kvDims[2] * kvDims[3],
-                                   kvDims[3],
-                                   1})
-      .set_data_type(DataType::HALF)
-      .set_uid(3);
+    v->set_dim(kvDims)
+        .set_stride({kvDims[1] * kvDims[2] * kvDims[3], kvDims[2] * kvDims[3], kvDims[3], 1})
+        .set_data_type(DataType::HALF)
+        .set_uid(3);
 
     auto o = std::make_shared<TensorAttributes>();
-    o->set_dim(oDims).set_stride({oDims[1] * oDims[2] * oDims[3],
-                                  oDims[2] * oDims[3],
-                                  oDims[3],
-                                  1})
-      .set_data_type(DataType::HALF)
-      .set_uid(4)
-      .set_output(true);
+    o->set_dim(oDims)
+        .set_stride({oDims[1] * oDims[2] * oDims[3], oDims[2] * oDims[3], oDims[3], 1})
+        .set_data_type(DataType::HALF)
+        .set_uid(4)
+        .set_output(true);
 
     const float smScale = 1.0f / std::sqrt(static_cast<float>(cfg.headDim));
 
@@ -135,12 +127,11 @@ TEST_P(HipFlash2ForwardTest, VerifyCorrectness)
         << "HipFlash2Engine correctness check failed for: " << cfg.description;
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    HipFlash2,
-    HipFlash2ForwardTest,
-    ::testing::ValuesIn(getTestConfigs()),
-    [](const ::testing::TestParamInfo<Flash2TestConfig>& info) {
-        return info.param.description;
-    });
+INSTANTIATE_TEST_SUITE_P(HipFlash2,
+                         HipFlash2ForwardTest,
+                         ::testing::ValuesIn(getTestConfigs()),
+                         [](const ::testing::TestParamInfo<Flash2TestConfig>& info) {
+                             return info.param.description;
+                         });
 
 } // namespace hip_flash2_engine

@@ -14,22 +14,30 @@
 #include <string>
 #include <utility>
 
-namespace hip_flash2_engine {
+namespace hip_flash2_engine
+{
 
 // =============================================================================
 // HipModuleGuard — RAII wrapper for hipModule_t
 // =============================================================================
-class HipModuleGuard {
-   public:
+class HipModuleGuard
+{
+public:
     HipModuleGuard() = default;
 
     explicit HipModuleGuard(hipModule_t mod, hipFunction_t func = nullptr)
-        : _module(mod), _function(func) {}
+        : _module(mod)
+        , _function(func)
+    {
+    }
 
-    ~HipModuleGuard() {
-        if (_module != nullptr) {
+    ~HipModuleGuard()
+    {
+        if(_module != nullptr)
+        {
             const hipError_t err = hipModuleUnload(_module);
-            if (err != hipSuccess) {
+            if(err != hipSuccess)
+            {
                 HIPDNN_PLUGIN_LOG_ERROR(
                     "HipFlash2: failed to unload kernel module: " << hipGetErrorString(err));
             }
@@ -40,15 +48,21 @@ class HipModuleGuard {
     HipModuleGuard& operator=(const HipModuleGuard&) = delete;
 
     HipModuleGuard(HipModuleGuard&& o) noexcept
-        : _module(std::exchange(o._module, nullptr)),
-          _function(std::exchange(o._function, nullptr)) {}
+        : _module(std::exchange(o._module, nullptr))
+        , _function(std::exchange(o._function, nullptr))
+    {
+    }
 
-    HipModuleGuard& operator=(HipModuleGuard&& o) noexcept {
-        if (this != &o) {
-            if (_module != nullptr) {
+    HipModuleGuard& operator=(HipModuleGuard&& o) noexcept
+    {
+        if(this != &o)
+        {
+            if(_module != nullptr)
+            {
                 // Log unload errors on move-assignment (mirrors SdpaKernelUtils pattern)
                 const hipError_t err = hipModuleUnload(_module);
-                if (err != hipSuccess) {
+                if(err != hipSuccess)
+                {
                     HIPDNN_PLUGIN_LOG_ERROR(
                         "HipFlash2: failed to unload kernel module on move-assign: "
                         << hipGetErrorString(err));
@@ -60,17 +74,20 @@ class HipModuleGuard {
         return *this;
     }
 
-    hipModule_t module() const {
+    hipModule_t module() const
+    {
         return _module;
     }
-    hipFunction_t function() const {
+    hipFunction_t function() const
+    {
         return _function;
     }
-    void setFunction(hipFunction_t f) {
+    void setFunction(hipFunction_t f)
+    {
         _function = f;
     }
 
-   private:
+private:
     hipModule_t _module = nullptr;
     hipFunction_t _function = nullptr;
 };
@@ -79,10 +96,12 @@ class HipModuleGuard {
 // loadKernelModule — load .co and get named function
 // =============================================================================
 inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
-                                                      const char* funcName) {
+                                                      const char* funcName)
+{
     hipModule_t rawModule = nullptr;
     hipError_t err = hipModuleLoad(&rawModule, coPath.c_str());
-    if (err != hipSuccess) {
+    if(err != hipSuccess)
+    {
         HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: failed to load .co from '"
                                 << coPath << "': " << hipGetErrorString(err));
         return std::nullopt;
@@ -92,10 +111,11 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
 
     hipFunction_t func = nullptr;
     err = hipModuleGetFunction(&func, guard.module(), funcName);
-    if (err != hipSuccess) {
+    if(err != hipSuccess)
+    {
         HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: hipModuleGetFunction('"
                                 << funcName << "'): " << hipGetErrorString(err));
-        return std::nullopt;  // guard destructs → hipModuleUnload
+        return std::nullopt; // guard destructs → hipModuleUnload
     }
     guard.setFunction(func);
     return guard;
@@ -105,7 +125,8 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
 // Flash2KernelArgs — argument struct passed to the kernel via
 // HIP_LAUNCH_PARAM_BUFFER_POINTER/SIZE (matches the kernel's parameter order)
 // =============================================================================
-struct Flash2KernelArgs {
+struct Flash2KernelArgs
+{
     // Input tensors (device pointers, FP16)
     const void* ptr_q = nullptr;
     const void* ptr_k = nullptr;
@@ -119,9 +140,9 @@ struct Flash2KernelArgs {
     int num_heads_k = 32;
     int seq_len_q = 2048;
     int seq_len_kv = 2048;
-    int head_dim = 128;  // compile-time template in kernel, but kept for reference
+    int head_dim = 128; // compile-time template in kernel, but kept for reference
     float scale = 0.0f;
-    int causal = 0;  // bool as int
+    int causal = 0; // bool as int
 
     // Strides (in elements, not bytes) — BHSD layout [B, H, S, D]
     int q_stride_batch = 0;
@@ -141,25 +162,39 @@ struct Flash2KernelArgs {
 // =============================================================================
 // launchFlash2Kernel — wrapper around hipModuleLaunchKernel
 // =============================================================================
-inline bool launchFlash2Kernel(hipFunction_t func, Flash2KernelArgs& args, unsigned int gridX,
-                               unsigned int gridY, unsigned int gridZ, unsigned int blockDim,
-                               hipStream_t stream) {
+inline bool launchFlash2Kernel(hipFunction_t func,
+                               Flash2KernelArgs& args,
+                               unsigned int gridX,
+                               unsigned int gridY,
+                               unsigned int gridZ,
+                               unsigned int blockDim,
+                               hipStream_t stream)
+{
     // All Flash2 V7 tiles use 1-D thread blocks (256 or 512 threads per CTA)
     constexpr unsigned int K_BLOCK_DIM_Y = 1;
     constexpr unsigned int K_BLOCK_DIM_Z = 1;
 
     size_t argSize = sizeof(Flash2KernelArgs);
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                      &argSize, HIP_LAUNCH_PARAM_END};
+    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                      &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                      &argSize,
+                      HIP_LAUNCH_PARAM_END};
 
-    const hipError_t err =
-        hipModuleLaunchKernel(func, gridX, gridY, gridZ, blockDim, K_BLOCK_DIM_Y, K_BLOCK_DIM_Z,
-                              0,  // LDS allocated by kernel
-                              stream,
-                              nullptr,  // params via config
-                              config);
-    if (err != hipSuccess) {
+    const hipError_t err = hipModuleLaunchKernel(func,
+                                                 gridX,
+                                                 gridY,
+                                                 gridZ,
+                                                 blockDim,
+                                                 K_BLOCK_DIM_Y,
+                                                 K_BLOCK_DIM_Z,
+                                                 0, // LDS allocated by kernel
+                                                 stream,
+                                                 nullptr, // params via config
+                                                 config);
+    if(err != hipSuccess)
+    {
         HIPDNN_PLUGIN_LOG_ERROR(
             "HipFlash2: hipModuleLaunchKernel failed: " << hipGetErrorString(err));
         return false;
@@ -174,15 +209,17 @@ inline bool launchFlash2Kernel(hipFunction_t func, Flash2KernelArgs& args, unsig
 // =============================================================================
 // Kernel symbol names (extern "C" wrappers in HipFlash2FwdPlan.hip)
 // =============================================================================
-inline const char* flash2KernelName(int headDim) {
-    switch (headDim) {
-        case 64:
-            return "flash2_v7_hipdnn_d64";
-        case 128:
-            return "flash2_v7_hipdnn_d128";
-        default:
-            HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: unsupported head_dim=" << headDim);
-            return nullptr;
+inline const char* flash2KernelName(int headDim)
+{
+    switch(headDim)
+    {
+    case 64:
+        return "flash2_v7_hipdnn_d64";
+    case 128:
+        return "flash2_v7_hipdnn_d128";
+    default:
+        HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: unsupported head_dim=" << headDim);
+        return nullptr;
     }
 }
 
@@ -207,11 +244,10 @@ inline std::string flash2CoPath(const std::string& archId)
 {
     // Prefer runtime env override so tests and non-standard installs work.
     const char* envDir = std::getenv("HIP_FLASH2_KERNEL_DIR");
-    std::string dir = (envDir != nullptr && envDir[0] != '\0') ? envDir
-                                                               : HIP_FLASH2_KERNEL_DIR;
-    if (!dir.empty() && dir.back() != '/')
+    std::string dir = (envDir != nullptr && envDir[0] != '\0') ? envDir : HIP_FLASH2_KERNEL_DIR;
+    if(!dir.empty() && dir.back() != '/')
         dir += '/';
     return dir + "hip_flash2_fwd_" + archId + ".co";
 }
 
-}  // namespace hip_flash2_engine
+} // namespace hip_flash2_engine

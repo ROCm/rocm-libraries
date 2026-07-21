@@ -58,7 +58,14 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsTrueForFP16SdpaGraphOnGfx942)
     const std::vector<int64_t> dims{1, 32, 2048, 128}; // {batch, heads, seq, D}
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -75,7 +82,14 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForBF16Graph)
     const std::vector<int64_t> dims{1, 32, 2048, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -96,7 +110,14 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
     const std::vector<int64_t> dims{1, 32, 2048, 256};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -121,8 +142,7 @@ TEST_F(TestHipFlash2Engine, EngineNameIsNonEmpty)
 TEST_F(TestHipFlash2Engine, EngineIdIsUniqueFromAsmSdpa)
 {
     // Verify our engine ID doesn't collide with ASM_SDPA_ENGINE_ID
-    EXPECT_NE(HipFlash2Engine::staticId(),
-              hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID);
+    EXPECT_NE(HipFlash2Engine::staticId(), hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID);
 }
 
 // ── Workspace tests ───────────────────────────────────────────────────────────
@@ -138,7 +158,14 @@ TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
     const std::vector<int64_t> dims{1, 32, 2048, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
