@@ -161,7 +161,7 @@ class LocalReadMFMA(LocalRead):
         return offset_val, srcAddr
 
     @staticmethod
-    def getMxsTileSpanInfo(kernel, tc, tile01):
+    def getMxsTileSpanInfo(kernel, tc, tile01, asmCaps):
         """
         MX scale TileSpan scale-select: when MIWaveTile//VectorWidth is a positive even
         multiple, LRA lays out the tile span so a single ds_load holds two scale blocks
@@ -183,6 +183,17 @@ class LocalReadMFMA(LocalRead):
         (MatrixInstM for A, MatrixInstN for B).
         """
         if "MXS" not in tc:
+            return None
+        # Single source of truth for the whole TileSpan feature. TileSpan is currently only
+        # supported on gfx1250: it needs the InMemorySwizzle half-wave scale layout AND the
+        # gfx1250 WMMA_V3 matrix_*_scale select. Gate explicitly on the arch (ISA (12,5,0))
+        # plus that consumer condition (see KernelWriterAssembly.mxsUsesScaleSel), so the load
+        # layout (LocalRead ds_load-halving + LraTileAssignment) never diverges from what the
+        # WMMA expects. Any other arch (e.g. gfx1151, where MatrixInst 16 == WavefrontSize/2
+        # would otherwise pass the geometry checks) never engages TileSpan.
+        if kernel.get("ISA") != (12, 5, 0) \
+                or not asmCaps.get("HasWMMA_V3", False) \
+                or kernel.get("MXScaleFormat") != "InMemorySwizzle":
             return None
         vectorWidth = kernel["VectorWidth%s" % tc]
         miWaveTile = kernel["MIWaveTile"][tile01]
@@ -614,7 +625,7 @@ class LocalReadMFMA(LocalRead):
         tilePerRead      = stridePerRead // mxUnit
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
-        tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01)
+        tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps)
         mxsTileSpan = tileSpanInfo is not None
         numVectorsPerTile = tileSpanInfo["numGroups"] if mxsTileSpan else kernel["MIWaveTile"][tile01] // vectorWidth
         numReadsPerVector = int(vectorWidth // tilePerRead)

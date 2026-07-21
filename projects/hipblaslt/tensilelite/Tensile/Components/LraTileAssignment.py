@@ -29,7 +29,7 @@ from rocisa.functions import vectorStaticRemainder, \
     vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply, \
     vectorStaticMultiplyAdd
 
-from ..Component import LraTileAssignment, LraTileProperties
+from ..Component import LraTileAssignment, LraTileProperties, LocalRead
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
 from dataclasses import dataclass
@@ -744,15 +744,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # get constant parameter
         tc               = tP["tensorChar"]
         tile01           = tP["tile01Idx"]
-        # TileSpan scale-select engages when MIWaveTile//VectorWidth is a positive even
-        # multiple (ratio == 2 is the base case; ratio % 2 == 0 lets one ds_load per group
-        # hold two scale blocks and halve the number of MX scale ds_loads).
-        _mxsRatio = (kernel["MIWaveTile%s"%tc[3]] // kernel["VectorWidth%s"%tc[3]]) if ("MXS" in tc) else 0
-        # tileSpan is the ds_load-halving gate and MUST match LocalRead.getMxsTileSpanInfo
-        # exactly, so the load layout produced here agrees with the packed VGPR layout /
-        # matrix_*_scale:N select the WMMA emits. Requirements: MXS tensor, ratio >= 2 and even,
-        # and the tile-axis matrix-instr size is the wave midpoint (so lanes i vs i+halfSpan ==
-        # lower/upper half-wave). tileSpan is independent of the wave count.
+        # tileSpan is the ds_load-halving gate: it MUST match LocalRead.getMxsTileSpanInfo
+        # exactly so the load layout produced here agrees with the packed VGPR layout /
+        # matrix_*_scale:N select the WMMA emits. Rather than re-deriving the gate (which
+        # risks drift, and previously mixed tc[3]-aliased MIWaveTile/VectorWidth with
+        # tile01-indexed MatrixInst), call getMxsTileSpanInfo as the single source of truth.
+        # It internally requires: MXS tensor, HasWMMA_V3 + InMemorySwizzle, ratio >= 2 and
+        # even, and the tile-axis matrix-instr size at the wave midpoint. Wave-count neutral.
         #
         # tileSpanWaveSplit adds MIWaveGroup>1 and picks between the two load layouts (both put
         # block 2g in the lower half-wave and partner block 2g+1 in the upper half-wave):
@@ -760,9 +758,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         #     single wave's lanes 0..MI-1 / MI..2MI-1 directly cover the two blocks; no hi offset.
         #   - MIWaveGroup>1 (tileSpanWaveSplit): wave-split. nIdx = wtid % MI, and the num1DWaves>1
         #     hiOffset path below explicitly places the partner block into the upper half-wave.
-        _mxsMatrixInstT = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"])
-        tileSpan = ("MXS" in tc) and (_mxsRatio >= 2) and (_mxsRatio % 2 == 0) \
-                            and (_mxsMatrixInstT == kernel["WavefrontSize"] // 2)
+        tileSpan = LocalRead.find(writer).getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps) is not None
         tileSpanWaveSplit = tileSpan and (kernel["MIWaveGroup"][tile01] > 1)
 
         waveWidth        = writer.states.kernel["WavefrontSize"]

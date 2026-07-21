@@ -79,12 +79,19 @@ def _make_kernel(
         "MatrixInstN": matrix_inst_n,
         "MIWaveGroup": list(mi_wave_group),
         "WavefrontSize": wavefront_size,
+        "MXScaleFormat": "InMemorySwizzle",
+        "ISA": (12, 5, 0),
     }, tc, tile01
 
 
-def _info(kernel_args):
+# Default caps: the whole TileSpan feature only exists on gfx1250 WMMA_V3, so the
+# eligible-path tests run with HasWMMA_V3 on.
+_CAPS_V3 = {"HasWMMA_V3": True}
+
+
+def _info(kernel_args, asmCaps=_CAPS_V3):
     kernel, tc, tile01 = kernel_args
-    return LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01)
+    return LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01, asmCaps)
 
 
 class TestGetMxsTileSpanInfoGate:
@@ -99,8 +106,30 @@ class TestGetMxsTileSpanInfoGate:
         """Non-MX-scale tensors (tc without 'MXS') never tile-span."""
         # A regular data tensor: getMxsTileSpanInfo must bail before touching
         # any MXS-only kernel keys.
-        assert LocalReadMFMA.getMxsTileSpanInfo({}, "A", 0) is None
-        assert LocalReadMFMA.getMxsTileSpanInfo({}, "B", 1) is None
+        assert LocalReadMFMA.getMxsTileSpanInfo({}, "A", 0, _CAPS_V3) is None
+        assert LocalReadMFMA.getMxsTileSpanInfo({}, "B", 1, _CAPS_V3) is None
+
+    def test_no_wmma_v3_returns_none(self):
+        """The whole feature is gfx1250 WMMA_V3 only: no WMMA_V3 -> None even when the
+        geometry is otherwise eligible (e.g. gfx1151, where MatrixInst 16 == WavefrontSize/2
+        would pass the geometry checks). Keeps the load side aligned with the consumer gate."""
+        assert _info(_make_kernel(), asmCaps={"HasWMMA_V3": False}) is None
+        assert _info(_make_kernel(), asmCaps={}) is None
+
+    def test_wrong_scale_format_returns_none(self):
+        """MXScaleFormat != InMemorySwizzle -> None (matches mxsUsesScaleSel)."""
+        kernel, tc, tile01 = _make_kernel()
+        kernel["MXScaleFormat"] = "Separate"
+        assert LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01, _CAPS_V3) is None
+
+    def test_non_gfx1250_returns_none(self):
+        """TileSpan is only supported on gfx1250 (ISA (12,5,0)); other ISAs -> None
+        even with an otherwise-eligible geometry and HasWMMA_V3 asserted."""
+        kernel, tc, tile01 = _make_kernel()
+        kernel["ISA"] = (11, 5, 1)  # gfx1151
+        assert LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01, _CAPS_V3) is None
+        kernel["ISA"] = (9, 5, 0)  # gfx950
+        assert LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01, _CAPS_V3) is None
 
     def test_ratio_below_two_returns_none(self):
         """ratio (MIWaveTile//VectorWidth) < 2 -> no 2-block group to split."""
@@ -194,7 +223,7 @@ class TestGateMatchesLraTileSpan:
             matrix_inst_m=matrix_inst, matrix_inst_n=matrix_inst,
             mi_wave_group=wave_group,
         )
-        info = LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01)
+        info = LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01, _CAPS_V3)
         # The activation gate is wave-count independent and matches tileSpan.
         assert (info is not None) == _lra_tile_span(kernel, tc, tile01), (
             f"gate mismatch for tc={tc} tile01={tile01} vw={vector_width} "
@@ -217,6 +246,7 @@ def _make_scalesel_kernel(vector_width=1, mi_wave_tile=(4, 4), mxscale_format="I
         "MatrixInstN": 16,
         "MIWaveGroup": [2, 2],
         "WavefrontSize": WAVESIZE_32,
+        "ISA": (12, 5, 0),
     }
 
 

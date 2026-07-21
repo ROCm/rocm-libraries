@@ -8476,7 +8476,7 @@ class KernelWriterAssembly(KernelWriter):
     if "MXS" not in tc or not self.mxsUsesScaleSel(kernel):
       return idxAB, 0
     component = Component.LocalRead.find(self)
-    info = component.getMxsTileSpanInfo(kernel, tc, tP["tile01Idx"])
+    info = component.getMxsTileSpanInfo(kernel, tc, tP["tile01Idx"], self.states.asmCaps)
     if info is None:
       return idxAB, 0
     vectorWidth = info["vectorWidth"]
