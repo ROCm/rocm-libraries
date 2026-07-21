@@ -747,11 +747,9 @@ incremental and non-disruptive, with a hand-written engine and its descriptor-ba
 coexisting until the generic one reaches parity on the graphs that engine covers, at which point the
 hand-written code is retired.
 
-1. **AOT packaging (KDP), lifting the prototype.** Ship the rocKE prototype as descriptor data plus
-   code objects: the producer, packer, and per-architecture manifest for arbitrary descriptor sets,
-   with build-time validation and duplicate detection. The opt-in runtime drop-in path
-   ([Section 10](#10-packaging-and-delivery)), loading custom bundles with source-trust and
-   compatibility gating, uses the same loader and becomes exercisable once the pieces below run.
+1. **Migrate the generic pieces from the rocKE SDPA POC.** Lift the build and bundling pipeline out of
+   the SDPA-specific prototype into shared, operation-agnostic form, producing the SDPA kernel as
+   descriptor data plus code objects. This is the reference path every later phase is validated against.
 2. **Matching (UMD + graph matcher).** The declarative pattern and constraint model, native-predicate
    escape hatch, compile-once matcher, and deterministic arbitration, replacing the SDPA graph decode
    with a match descriptor.
@@ -760,8 +758,13 @@ hand-written code is retired.
    descriptor-backed engines.
 4. **Dispatch (UDD + expression language).** Lift the prototype's launch core into a shared,
    operation-agnostic module and add the symbolic grid, block, workspace, and argument language. With
-   matching and the registry already in place, SDPA now runs end to end from descriptor data.
-5. **Kernel selection (UHD).** The generic selector driven by heuristic-descriptor content, consulted
+   matching and the registry already in place, the SDPA POC now runs end to end on the generic path.
+5. **Full data-driven build pipeline and integration (KDP).** Generalize packaging to arbitrary
+   descriptor sets: producer, packer, per-architecture manifest, build-time validation, and duplicate
+   detection, plus the opt-in runtime drop-in path ([Section 10](#10-packaging-and-delivery)) with
+   source-trust and compatibility gating. The build and load path is now fully data-driven, no longer
+   tied to the migrated POC.
+6. **Kernel selection (UHD).** The generic selector driven by heuristic-descriptor content, consulted
    by the engine to rank the kernels that fit a graph and optimize which one runs when several apply.
 
 Multi-kernel launch and composition ([Section 13](#13-multiple-kernels-and-composition)) are
