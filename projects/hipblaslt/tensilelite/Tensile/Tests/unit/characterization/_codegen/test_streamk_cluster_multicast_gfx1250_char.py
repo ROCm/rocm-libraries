@@ -89,15 +89,21 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly():
         assert "s_barrier_wait -3" in src, (
             f"Kernel {base!r} missing cluster-scope barrier wait (-3)"
         )
-        # The cluster-scope split barrier must be balanced: every arrive
-        # (s_barrier_signal -3) is matched by a completion (s_barrier_wait -3).
-        # The prologue wave-0 arrive pairs the pass's first-load wait; an
-        # imbalance (unpaired wait) deadlocks all cluster waves on HW.
+        # Cluster-scope split-barrier balance. Every arrive
+        # (s_barrier_signal -3) must be consumed by a completion
+        # (s_barrier_wait -3) on every control-flow path. The prologue wave-0
+        # arrive is consumed by exactly one of two mutually exclusive cluster
+        # waits: the last-iteration guard's zero-iteration skip-edge wait, or
+        # the first-load wait on the >=1-iteration fall-through. Both waits are
+        # emitted statically but only one executes on any given path, so the
+        # static wait count is exactly one greater than the signal count; every
+        # other arrive is a self-contained arrive/wait pair. Any other imbalance
+        # would leave a cluster wait unpaired and stall the cluster waves.
         n_signal = src.count("s_barrier_signal -3")
         n_wait = src.count("s_barrier_wait -3")
-        assert n_signal == n_wait, (
-            f"Kernel {base!r} has imbalanced cluster barrier: "
-            f"{n_signal} signal(-3) vs {n_wait} wait(-3)"
+        assert n_wait == n_signal + 1, (
+            f"Kernel {base!r} has unexpected cluster barrier balance: "
+            f"{n_signal} signal(-3) vs {n_wait} wait(-3) (expected wait == signal + 1)"
         )
 
 

@@ -2603,6 +2603,42 @@ class StreamKTwoTileDPFirst(StreamK):
         writer.sgprPool.checkIn(elect)
         return module
 
+    def streamKMulticastZeroIterClusterWait(self, writer, kernel):
+        """Consume the prologue cluster arrive on the zero-iteration skip path.
+
+        The prologue arrive (``streamKMulticastPrologueSignal``) fires once per
+        cluster peer, uniformly, before the first cooperative-multicast load.
+        Its only matching cluster-scope ``s_barrier_wait -3`` is the pass's
+        first-load wait, which sits *after* the last-iteration guard
+        (``checkLastIter`` -> long-branch to ``PrefetchGlobalLastIterEnd``). On
+        the zero-full-iteration path (a participating workgroup that runs only
+        the tail/fixup, reachable when K is not a whole multiple of DepthU) that
+        long branch skips the first-load wait, leaving the arrive unmatched and
+        the cluster-scope barrier unbalanced on that edge.
+
+        Emit the matching cluster wait on that skip edge so every cluster peer
+        executes exactly one arrive and exactly one wait on every control-flow
+        path out of the prologue. ``checkLastIter`` has set scc (scc1 ==
+        numIterL == 0). Branch over the wait on scc0 (>=1 full iteration -> the
+        first-load wait pairs the arrive); on scc1 emit the all-waves cluster
+        wait (mirroring the all-waves first-load wait so the arrive is consumed
+        exactly once). The wait leaves scc intact, so the standard scc1 long
+        branch that follows still takes the skip edge. Inert unless
+        StreamKMulticast.
+        """
+        module = Module("StreamK multicast zero-iteration cluster wait")
+        if not kernel.get("StreamKMulticast", 0):
+            return module
+        assert writer.states.asmCaps.get("HasClusterBarrier", False), \
+            "StreamKMulticast requires the HasClusterBarrier asm capability"
+        module.addComment0("StreamKMulticast: zero-iteration skip path consumes the prologue cluster arrive (pairs prologue arrive)")
+        skipWait = Label(label=writer.labels.getNameInc("SKMC_SkipZeroIterClusterWait"), comment="")
+        module.add(SCBranchSCC0(labelName=skipWait.getLabelName(),
+                                comment=">=1 full iteration: the first-load cluster wait pairs the arrive"))
+        module.add(SBarrier(True, True, True, comment="cluster_barrier wait"))
+        module.add(skipWait)
+        return module
+
     def preLoop(self, writer, kernel):
         module = Module("StreamK TwoTileDPFirst openLoop")
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)

@@ -9694,6 +9694,15 @@ class KernelWriterAssembly(KernelWriter):
             if self.isPrefetchAcrossPersistentEnabled(kernel):
               module.add(SCMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                          comment="discard primed PAP group when current slice skips NLL"))
+            # StreamKMulticast: the long branch below skips the pass's first-load
+            # cluster wait on the zero-iteration path; emit the matching
+            # cluster-scope wait on that skip edge so the prologue cluster arrive
+            # is consumed on every control-flow path (whole-cluster barrier
+            # symmetry). scc (from checkLastIter) is preserved for the branch
+            # below. No-op unless StreamKMulticast.
+            if kernel.get("StreamKMulticast", 0):
+              skComponent = Component.StreamK.find(self)
+              module.add(skComponent.streamKMulticastZeroIterClusterWait(self, kernel))
             # use positive offset only long jump
             with self.allocTmpSgpr(3, tag="openSumAtLeastUnroll_tmpSgprInfo") as tmpSgprInfo:
               module.add(self.longBranchScc1(lastIterEnd, posNeg=1, tmpSgprInfo=tmpSgprInfo))
