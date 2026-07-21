@@ -31,7 +31,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   SCBranchSCC0, SCBranchSCC1, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SMinU32, SEndpgm, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
-  SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
+  SSwapPCB64, SWaitCnt, SWaitAlu, SWaitXCnt, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
@@ -2908,6 +2908,8 @@ class GlobalWriteBatchWriter:
       if self.edge:
         module.add(self.getEdgeMovInstType()(EXEC(), sgpr(mask, self.laneSGPRC), "sgprs -> exec (before atomic)"))
 
+      if self.parentWriter.states.archCaps["RequiresXCntForVolatileVMEM"] and self.gwvw // self.atomicW > 0 and self.parentWriter.do["GlobalWrite"] and self.kernel["BufferStore"]:
+        module.add(SWaitXCnt(xcnt=0, comment="XNACK: drain before atomic (SWDEV-585157)"))
       for avi in range(0, self.gwvw // self.atomicW):
         sumIdxV = self.ss.elementSumIdx[elementIdx] + avi
         newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
@@ -2977,6 +2979,8 @@ class GlobalWriteBatchWriter:
         # attempt write
         atomicDestVgpr = dataV if self.kernel["BufferStore"] else dataV+2
         if self.parentWriter.do["GlobalWrite"]:
+          if self.parentWriter.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            module.add(SWaitXCnt(xcnt=0, comment="XNACK: drain before atomic retry (SWDEV-585157)"))
           if self.kernel["BufferStore"]:
             # use cmpswap_x2 for DGEMM in CAS loop
             if self.kernel["ProblemType"]["DestDataType"].isDouble():
@@ -3096,6 +3100,8 @@ class GlobalWriteBatchWriter:
                         vgpr(dataV+0,vgprCnt), vgpr(dataV+1*vgprIdx,vgprCnt), vgpr("ValuC+%u"%newSumIdxV,vgprCnt), \
                         "newC = rC + originalC"))
         if self.parentWriter.do["GlobalWrite"]:
+          if self.parentWriter.states.archCaps["RequiresXCntForVolatileVMEM"]:
+            module.add(SWaitXCnt(xcnt=0, comment="XNACK: drain before atomic retry (SWDEV-585157)"))
           if self.kernel["BufferStore"]:
             # Using no-ret version here?
             # cmpswap_x2 for DGEMM
