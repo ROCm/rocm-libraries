@@ -113,14 +113,6 @@ rocsparse_status rocsparse_spildlt0_buffer_size(rocsparse_handle            hand
  *  data types for \p A : \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
  *
  *  \note The descriptor \p spildlt0_descr needs to be configured with \ref rocsparse_spildlt0_set_input.
- *  Setting the diagonal output pointer via \ref rocsparse_spildlt0_input_diag is optional: when
- *  provided, \f$D\f$ is additionally copied into it; otherwise \f$D\f$ can still be read back from
- *  the diagonal of \f$L\f$ after the stage \ref rocsparse_spildlt0_stage_compute.
- *  When provided, it must be a pointer to \b device memory holding \f$m \times \text{batch\_count}\f$
- *  real-valued entries: the diagonal \f$D\f$ of each batch is written contiguously (\f$m\f$ entries
- *  per batch, batch \p b at offset \f$b \times m\f$). \f$D\f$ is always real, even for complex
- *  matrices, so the array is \p float* for the \p s and \p c types and \p double* for the \p d and
- *  \p z types.
  *
  *  \note
  *  The sparse matrix format currently supported is \ref rocsparse_format_csr.
