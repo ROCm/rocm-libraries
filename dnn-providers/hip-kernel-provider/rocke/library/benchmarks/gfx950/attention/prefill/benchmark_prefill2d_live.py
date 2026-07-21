@@ -912,6 +912,13 @@ def main() -> int:
             if (fly_ms is not None and best_ms is not None and best_ms > 0)
             else None
         )
+        flops = attention_flops(shape, data["query_lens"], data["kv_lens_list"])
+        rec["flops"] = flops
+        rec["best_tflops"] = (
+            flops / (best_ms * 1e-3) / 1e12
+            if (best_ms is not None and best_ms > 0)
+            else None
+        )
         results.append(rec)
         tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
@@ -922,6 +929,7 @@ def main() -> int:
             if "ms" in rec["variants"][v]
         )
         best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
+        tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""
         fly_str = ""
         if args.flydsl:
             fly_spd_str = ""
@@ -934,7 +942,7 @@ def main() -> int:
             )
             fly_str = f" | fly={fly_status}{fly_spd_str}{fly_best_spd_str}"
         print(
-            f"{tag} sw={sw} fp8={int(is_fp8)} {tri_str} {aot_str} | {vs} | best={rec['best_variant']}={best_str}{fly_str}"
+            f"{tag} sw={sw} fp8={int(is_fp8)} {tri_str} {aot_str} | {vs} | best={rec['best_variant']}={best_str}{tf_str}{fly_str}"
         )
 
     args.output_json.write_text(json.dumps(results, indent=2, default=str))
@@ -967,7 +975,9 @@ def main() -> int:
             r["best_speedup_vs_flydsl"] for r in rs if r.get("best_speedup_vs_flydsl")
         ]
         best_us = [r["best_ms"] * 1000 for r in rs if r.get("best_ms")]
+        tflops = [r["best_tflops"] for r in rs if r.get("best_tflops")]
         lat_part = f"best_lat_gm={_gm(best_us):.1f}us (n={len(best_us)})"
+        tf_part = f"  tflops_gm={_gm(tflops):.1f}" if tflops else ""
         tri_part = (
             f"  vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
             if tri_spds
@@ -979,7 +989,7 @@ def main() -> int:
         fly_part = (
             f"  vs_fly={_gm(fly_spds):.3f}x (n={len(fly_spds)})" if fly_spds else ""
         )
-        print(f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {lat_part}{tri_part}{aot_part}{fly_part}")
+        print(f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}")
     print("\n=== per-variant geomean (correct shapes only) ===")
     for v in args.variants:
         sp = [
