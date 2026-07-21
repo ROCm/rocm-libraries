@@ -20,7 +20,8 @@ endmacro()
 #   union    : ACTIVE -- the reduced subtractive union filter actually runs (TheRock default)
 macro(dapper_init)
     # Dapper's build-time tooling (Python + nm / C preprocessor) is not Windows-ready yet
-    # (see DAPPER.md "Known limitations"). Force the mode off on Windows; the rest of this
+    # (see script/dependency-parser/DAPPER.md "Known limitations"). Force the mode off on
+    # Windows; the rest of this
     # macro then takes the 'off' path -- no python, no dapper wiring -- so the build falls
     # back to the normal full-category / non-dapper test flow.
     if(WIN32 OR CMAKE_HOST_WIN32)
