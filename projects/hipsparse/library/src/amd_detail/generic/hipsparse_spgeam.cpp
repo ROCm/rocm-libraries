@@ -111,21 +111,23 @@ namespace hipsparse
                                                              &rocType,
                                                              sizeof(rocType),
                                                              nullptr));
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(rocHandle,
-                                                             descr->descr,
-                                                             rocsparse_spgeam_input_compute_datatype,
-                                                             &rocType,
-                                                             sizeof(rocType),
-                                                             nullptr));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse_spgeam_set_input(rocHandle,
+                                       descr->descr,
+                                       rocsparse_spgeam_input_compute_datatype,
+                                       &rocType,
+                                       sizeof(rocType),
+                                       nullptr));
 
         if(alpha != nullptr)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(rocHandle,
-                                                                 descr->descr,
-                                                                 rocsparse_spgeam_input_scalar_alpha,
-                                                                 alpha,
-                                                                 sizeof(void*),
-                                                                 nullptr));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse_spgeam_set_input(rocHandle,
+                                           descr->descr,
+                                           rocsparse_spgeam_input_scalar_alpha,
+                                           alpha,
+                                           sizeof(void*),
+                                           nullptr));
         }
 
         if(beta != nullptr)
@@ -198,15 +200,14 @@ hipsparseStatus_t hipsparseSpGEAM_bufferSize(hipsparseHandle_t          handle,
     // The rocSPARSE compute stage does not require any additional workspace, therefore the buffer
     // returned to the user is the buffer required by the analysis (nnz) stage.
     size_t analysisBufferSize = 0;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_spgeam_buffer_size((rocsparse_handle)handle,
-                                     spgeamDescr->descr,
-                                     to_rocsparse_const_spmat_descr(matA),
-                                     to_rocsparse_const_spmat_descr(matB),
-                                     to_rocsparse_const_spmat_descr(matC),
-                                     rocsparse_spgeam_stage_analysis,
-                                     &analysisBufferSize,
-                                     nullptr));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgeam_buffer_size((rocsparse_handle)handle,
+                                                           spgeamDescr->descr,
+                                                           to_rocsparse_const_spmat_descr(matA),
+                                                           to_rocsparse_const_spmat_descr(matB),
+                                                           to_rocsparse_const_spmat_descr(matC),
+                                                           rocsparse_spgeam_stage_analysis,
+                                                           &analysisBufferSize,
+                                                           nullptr));
 
     spgeamDescr->bufferSize = analysisBufferSize;
 
@@ -283,15 +284,14 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
     // The compute stage copies the C row offsets computed during the analysis stage into matC and
     // fills the C column indices and values arrays. It does not require any external workspace.
     size_t computeBufferSize = 0;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_spgeam_buffer_size((rocsparse_handle)handle,
-                                     spgeamDescr->descr,
-                                     to_rocsparse_const_spmat_descr(matA),
-                                     to_rocsparse_const_spmat_descr(matB),
-                                     to_rocsparse_const_spmat_descr(matC),
-                                     rocsparse_spgeam_stage_compute,
-                                     &computeBufferSize,
-                                     nullptr));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgeam_buffer_size((rocsparse_handle)handle,
+                                                           spgeamDescr->descr,
+                                                           to_rocsparse_const_spmat_descr(matA),
+                                                           to_rocsparse_const_spmat_descr(matB),
+                                                           to_rocsparse_const_spmat_descr(matC),
+                                                           rocsparse_spgeam_stage_compute,
+                                                           &computeBufferSize,
+                                                           nullptr));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgeam((rocsparse_handle)handle,
                                                spgeamDescr->descr,

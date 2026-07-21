@@ -143,52 +143,49 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
         hipsparseSpGEAM_bufferSize(
             handle, transA, transB, nullptr, A, &beta, B, C, dataType, alg, descr, &bufferSize),
         "Error: alpha is nullptr");
-    verify_hipsparse_status_invalid_pointer(
-        hipsparseSpGEAM_bufferSize(handle,
-                                   transA,
-                                   transB,
-                                   &alpha,
-                                   nullptr,
-                                   &beta,
-                                   B,
-                                   C,
-                                   dataType,
-                                   alg,
-                                   descr,
-                                   &bufferSize),
-        "Error: A is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseSpGEAM_bufferSize(handle,
+                                                                       transA,
+                                                                       transB,
+                                                                       &alpha,
+                                                                       nullptr,
+                                                                       &beta,
+                                                                       B,
+                                                                       C,
+                                                                       dataType,
+                                                                       alg,
+                                                                       descr,
+                                                                       &bufferSize),
+                                            "Error: A is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpGEAM_bufferSize(
             handle, transA, transB, &alpha, A, nullptr, B, C, dataType, alg, descr, &bufferSize),
         "Error: beta is nullptr");
-    verify_hipsparse_status_invalid_pointer(
-        hipsparseSpGEAM_bufferSize(handle,
-                                   transA,
-                                   transB,
-                                   &alpha,
-                                   A,
-                                   &beta,
-                                   nullptr,
-                                   C,
-                                   dataType,
-                                   alg,
-                                   descr,
-                                   &bufferSize),
-        "Error: B is nullptr");
-    verify_hipsparse_status_invalid_pointer(
-        hipsparseSpGEAM_bufferSize(handle,
-                                   transA,
-                                   transB,
-                                   &alpha,
-                                   A,
-                                   &beta,
-                                   B,
-                                   nullptr,
-                                   dataType,
-                                   alg,
-                                   descr,
-                                   &bufferSize),
-        "Error: C is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseSpGEAM_bufferSize(handle,
+                                                                       transA,
+                                                                       transB,
+                                                                       &alpha,
+                                                                       A,
+                                                                       &beta,
+                                                                       nullptr,
+                                                                       C,
+                                                                       dataType,
+                                                                       alg,
+                                                                       descr,
+                                                                       &bufferSize),
+                                            "Error: B is nullptr");
+    verify_hipsparse_status_invalid_pointer(hipsparseSpGEAM_bufferSize(handle,
+                                                                       transA,
+                                                                       transB,
+                                                                       &alpha,
+                                                                       A,
+                                                                       &beta,
+                                                                       B,
+                                                                       nullptr,
+                                                                       dataType,
+                                                                       alg,
+                                                                       descr,
+                                                                       &bufferSize),
+                                            "Error: C is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpGEAM_bufferSize(
             handle, transA, transB, &alpha, A, &beta, B, C, dataType, alg, descr, nullptr),
@@ -215,10 +212,11 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
         "Error: C is nullptr");
 
     // SpGEAM compute
-    verify_hipsparse_status_invalid_handle(
-        hipsparseSpGEAM(nullptr, transA, transB, &alpha, A, &beta, B, C, dataType, alg, descr, dbuf));
+    verify_hipsparse_status_invalid_handle(hipsparseSpGEAM(
+        nullptr, transA, transB, &alpha, A, &beta, B, C, dataType, alg, descr, dbuf));
     verify_hipsparse_status_invalid_pointer(
-        hipsparseSpGEAM(handle, transA, transB, nullptr, A, &beta, B, C, dataType, alg, descr, dbuf),
+        hipsparseSpGEAM(
+            handle, transA, transB, nullptr, A, &beta, B, C, dataType, alg, descr, dbuf),
         "Error: alpha is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpGEAM(
@@ -235,34 +233,32 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
 
     // Unsupported cases must return a well-defined error rather than an incorrect result.
     // Only non-transpose operations are supported.
-    verify_hipsparse_status_not_supported(
-        hipsparseSpGEAM_bufferSize(handle,
-                                   HIPSPARSE_OPERATION_TRANSPOSE,
-                                   transB,
-                                   &alpha,
-                                   A,
-                                   &beta,
-                                   B,
-                                   C,
-                                   dataType,
-                                   alg,
-                                   descr,
-                                   &bufferSize),
-        "Error: opA transpose is not supported");
-    verify_hipsparse_status_not_supported(
-        hipsparseSpGEAM_bufferSize(handle,
-                                   transA,
-                                   HIPSPARSE_OPERATION_TRANSPOSE,
-                                   &alpha,
-                                   A,
-                                   &beta,
-                                   B,
-                                   C,
-                                   dataType,
-                                   alg,
-                                   descr,
-                                   &bufferSize),
-        "Error: opB transpose is not supported");
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM_bufferSize(handle,
+                                                                     HIPSPARSE_OPERATION_TRANSPOSE,
+                                                                     transB,
+                                                                     &alpha,
+                                                                     A,
+                                                                     &beta,
+                                                                     B,
+                                                                     C,
+                                                                     dataType,
+                                                                     alg,
+                                                                     descr,
+                                                                     &bufferSize),
+                                          "Error: opA transpose is not supported");
+    verify_hipsparse_status_not_supported(hipsparseSpGEAM_bufferSize(handle,
+                                                                     transA,
+                                                                     HIPSPARSE_OPERATION_TRANSPOSE,
+                                                                     &alpha,
+                                                                     A,
+                                                                     &beta,
+                                                                     B,
+                                                                     C,
+                                                                     dataType,
+                                                                     alg,
+                                                                     descr,
+                                                                     &bufferSize),
+                                          "Error: opB transpose is not supported");
 
     // Only the CSR format is supported.
     hipsparseSpMatDescr_t A_coo;
@@ -480,14 +476,22 @@ void testing_spgeam_csr(Arguments argus)
         std::vector<T>   hcsr_val_C_1(nnz_C_1);
         std::vector<T>   hcsr_val_C_2(nnz_C_2);
 
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcsr_row_ptr_C_1.data(), dcsr_row_ptr_C_1, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcsr_row_ptr_C_2.data(), dcsr_row_ptr_C_2, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcsr_col_ind_C_1.data(), dcsr_col_ind_C_1, sizeof(int) * nnz_C_1, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(
-            hcsr_col_ind_C_2.data(), dcsr_col_ind_C_2, sizeof(int) * nnz_C_2, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hcsr_row_ptr_C_1.data(),
+                                  dcsr_row_ptr_C_1,
+                                  sizeof(int) * (m + 1),
+                                  hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hcsr_row_ptr_C_2.data(),
+                                  dcsr_row_ptr_C_2,
+                                  sizeof(int) * (m + 1),
+                                  hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hcsr_col_ind_C_1.data(),
+                                  dcsr_col_ind_C_1,
+                                  sizeof(int) * nnz_C_1,
+                                  hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hcsr_col_ind_C_2.data(),
+                                  dcsr_col_ind_C_2,
+                                  sizeof(int) * nnz_C_2,
+                                  hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(
             hcsr_val_C_1.data(), dcsr_val_C_1, sizeof(T) * nnz_C_1, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(

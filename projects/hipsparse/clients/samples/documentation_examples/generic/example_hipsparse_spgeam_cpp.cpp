@@ -88,14 +88,14 @@ int main()
 
     HIP_CHECK(hipMemcpy(
         dcsr_row_ptr_A, hcsr_row_ptr_A.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(dcsr_col_ind_A, hcsr_col_ind_A.data(), sizeof(int) * nnz_A, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(
+        dcsr_col_ind_A, hcsr_col_ind_A.data(), sizeof(int) * nnz_A, hipMemcpyHostToDevice));
     HIP_CHECK(
         hipMemcpy(dcsr_val_A, hcsr_val_A.data(), sizeof(float) * nnz_A, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(
         dcsr_row_ptr_B, hcsr_row_ptr_B.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(dcsr_col_ind_B, hcsr_col_ind_B.data(), sizeof(int) * nnz_B, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(
+        dcsr_col_ind_B, hcsr_col_ind_B.data(), sizeof(int) * nnz_B, hipMemcpyHostToDevice));
     HIP_CHECK(
         hipMemcpy(dcsr_val_B, hcsr_val_B.data(), sizeof(float) * nnz_B, hipMemcpyHostToDevice));
 
@@ -212,8 +212,8 @@ int main()
 
     HIP_CHECK(hipMemcpy(
         hcsr_row_ptr_C.data(), dcsr_row_ptr_C, sizeof(int) * (m + 1), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(hcsr_col_ind_C.data(), dcsr_col_ind_C, sizeof(int) * nnz_C, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(
+        hcsr_col_ind_C.data(), dcsr_col_ind_C, sizeof(int) * nnz_C, hipMemcpyDeviceToHost));
     HIP_CHECK(
         hipMemcpy(hcsr_val_C.data(), dcsr_val_C, sizeof(float) * nnz_C, hipMemcpyDeviceToHost));
 
