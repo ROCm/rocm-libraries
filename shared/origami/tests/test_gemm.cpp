@@ -182,9 +182,9 @@ TEST_CASE("GEMM: compute_total_latency", "[gemm]") {
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency_small =
-          origami::gemm::compute_total_latency(problem_small, hardware, config, hardware.N_CU);
+          origami::gemm::compute_total_latency(problem_small, hardware, config);
       auto latency_large =
-          origami::gemm::compute_total_latency(problem_large, hardware, config, hardware.N_CU);
+          origami::gemm::compute_total_latency(problem_large, hardware, config);
 
       REQUIRE(latency_small < latency_large);
     }
@@ -342,7 +342,7 @@ TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
       // Returns: (reduction_t, num_wgs, num_active_cus, num_timesteps, split_factor)
       auto [reduction, num_wgs, num_active_cus, num_timesteps, split_factor] =
           origami::gemm::compute_launch_parameters(
-              problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU);
+              problem, hardware, config, origami::grid_selection_t::k_split_aware);
       REQUIRE(num_wgs > 0);
       REQUIRE(num_active_cus > 0);
       REQUIRE(num_timesteps >= 1);
@@ -350,12 +350,15 @@ TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
 
       // Test with different grid selection algorithms
       auto result_analytical = origami::gemm::compute_launch_parameters(
-          problem, hardware, config, origami::grid_selection_t::analytical, hardware.N_CU);
+          problem, hardware, config, origami::grid_selection_t::analytical);
       REQUIRE(std::get<1>(result_analytical) > 0);
 
-      // Test with max_cus parameter
-      auto result_max_cus = origami::gemm::compute_launch_parameters(
-          problem, hardware, config, origami::grid_selection_t::k_split_aware, 150);
+      // The CU budget now comes from problem.num_cus: capping it below the
+      // physical CU count must bound the number of active CUs accordingly.
+      auto capped_problem    = problem;
+      capped_problem.num_cus = 150;
+      auto result_max_cus    = origami::gemm::compute_launch_parameters(
+          capped_problem, hardware, config, origami::grid_selection_t::k_split_aware);
       REQUIRE(std::get<2>(result_max_cus) <= 150);
     }
   }
