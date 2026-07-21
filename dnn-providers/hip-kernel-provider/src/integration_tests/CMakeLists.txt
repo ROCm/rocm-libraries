@@ -61,6 +61,11 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
+if(ENABLE_HIP_MLOPS_ENGINE)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        hip_mlops_engine/IntegrationGpuPassByValue.cpp
+    )
+endif()
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
