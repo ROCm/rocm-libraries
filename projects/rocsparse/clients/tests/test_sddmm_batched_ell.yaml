@@ -194,23 +194,23 @@ Tests:
   order: [rocsparse_order_column]
   orderB: [rocsparse_order_column]
 
-# - name: sddmm_batched_ell_file
-#   category: pre_checkin
-#   function: sddmm_batched_ell
-#   indextype: *i32 
-#   precision: *single_only_precisions
-#   M: 1
-#   N: 1
-#   K: [2]
-#   batch_count_A: [1]
-#   batch_count_B: [1]
-#   batch_count_C: [65537]
-#   alpha_beta: *alpha_beta_range_checkin
-#   transA: [rocsparse_operation_none]
-#   transB: [rocsparse_operation_none]
-#   baseA: [rocsparse_index_base_zero]
-#   matrix: [rocsparse_matrix_file_rocalution]
-#   sddmm_alg: [rocsparse_sddmm_alg_default]
-#   order: [rocsparse_order_column]
-#   orderB: [rocsparse_order_column]
-#   filename: [nos4]
+- name: sddmm_batched_ell_file
+  category: nightly
+  function: sddmm_batched_ell
+  indextype: *i32 
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  K: [2]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  batch_count_C: [65537]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+  filename: [nos4]

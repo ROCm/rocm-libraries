@@ -182,8 +182,6 @@ void testing_sddmm_batched_ell(const Arguments& arg)
 
     const I batch_count = batch_count_C;
 
-    std::cout << "batch_count: " << batch_count << std::endl;
-
     // Build the host-side ELL pattern (shared across batches). The matrix
     // factory determines the ELL width based on the requested generator.
     rocsparse_matrix_factory<C, I, I> matrix_factory(arg);
