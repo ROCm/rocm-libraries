@@ -35,7 +35,7 @@ struct callback_test_data
     double scalar;
 };
 
-static const char* callback_test_data_jit = R"(
+inline constexpr const char* callback_test_data_jit = R"(
 struct callback_test_data
 {
     // scalar to modify the input/output with

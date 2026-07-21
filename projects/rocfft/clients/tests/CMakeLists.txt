@@ -353,7 +353,7 @@ if( NOT ROCFFT_BUILD_SCOPE )
   set( ROCFFT_SQLITE_LIB SQLite::SQLite3)
 endif()
 
-find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
+find_package( hiprtc REQUIRED CONFIG PATHS ${ROCM_PATH} )
 target_link_libraries( rocfft-test
   PRIVATE
   hip::device

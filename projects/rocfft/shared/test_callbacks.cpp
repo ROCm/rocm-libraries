@@ -971,6 +971,7 @@ std::shared_ptr<fft_params::jit_cb_state_t> get_rank_jit_state(const fft_params&
             {
                 cb_data_host.scalar = params.store_cb_scalar;
             }
+            break;
         }
 
         auto hip_status = state->data[deviceID].alloc(sizeof(callback_test_data));
