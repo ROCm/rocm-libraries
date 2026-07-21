@@ -3,7 +3,6 @@
 
 #include "Container.hpp"
 
-#include "compilation/KernelCompiler.hpp"
 #include "device/CurrentDevicePropertyProvider.hpp"
 
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
@@ -41,28 +40,26 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
     // HIP_MLOPS_ENGINE
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
         {HIP_MLOPS_ENGINE_ID,
-         [](const compilation::IKernelCompiler& kernelCompiler,
-            const device::IDevicePropertyProvider& devicePropertyProvider)
+         [](const device::IDevicePropertyProvider& devicePropertyProvider)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
-             engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(
+                 std::make_unique<batchnorm::BatchnormPlanBuilder>(devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormBwdPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<layernorm::LayernormPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
+                 devicePropertyProvider));
+             engine->addPlanBuilder(
+                 std::make_unique<rmsnorm::RMSnormPlanBuilder>(devicePropertyProvider));
+             engine->addPlanBuilder(
+                 std::make_unique<rmsnorm::RMSnormBwdPlanBuilder>(devicePropertyProvider));
+             engine->addPlanBuilder(
+                 std::make_unique<layernorm::LayernormPlanBuilder>(devicePropertyProvider));
              return engine;
          }},
 #endif
 #ifdef HIPDNN_ENGINE_ASM_SDPA
         // ASM_SDPA_ENGINE
         {ASM_SDPA_ENGINE_ID,
-         [](const compilation::IKernelCompiler& /*kernelCompiler*/,
-            const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+         [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
@@ -75,11 +72,11 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         // Complements ASM_SDPA_ENGINE: handles FP16 on gfx942/gfx950.
         // Performance: 78.98 TFLOPS MI325X, 71.27 TFLOPS MI300X (seq=4096 causal D=128).
         {HIP_FLASH2_ENGINE_ID,
-         [](const compilation::IKernelCompiler& kernelCompiler,
-            const device::IDevicePropertyProvider& devicePropertyProvider)
+         [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              auto engine = std::make_unique<hip_flash2_engine::HipFlash2Engine>();
-             engine->addPlanBuilder(std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
+             engine->addPlanBuilder(
+                 std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
              return engine;
          }},
 #endif // HIPDNN_ENGINE_HIP_FLASH2
@@ -112,7 +109,6 @@ uint32_t Container::copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint3
 
 Container::Container()
     : _devicePropertyProvider(std::make_unique<device::CurrentDevicePropertyProvider>())
-    , _kernelCompiler(std::make_unique<compilation::KernelCompiler>())
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating Container");
 
@@ -122,7 +118,7 @@ Container::Container()
     for(const auto& engineDefinition : getEngineDefinitions())
     {
         _engineManager->addEngine(
-            engineDefinition.createEngine(*_kernelCompiler, *_devicePropertyProvider));
+            engineDefinition.createEngine(*_devicePropertyProvider));
     }
 }
 
