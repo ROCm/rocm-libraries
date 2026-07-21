@@ -108,8 +108,6 @@ rocsparse_status rocsparse_spildlt0_buffer_size(rocsparse_handle            hand
  *  The factorization is performed in-place: the values array of \p P stores the strictly
  *  lower-triangular entries of \f$L\f$, and the diagonal of \f$D\f$ is stored in-place on the
  *  otherwise-unused diagonal slot of \f$L\f$ (whose unit diagonal is implicit).
- *  Optionally, the diagonal of \f$D\f$ is additionally copied to the device pointer set via
- *  \ref rocsparse_spildlt0_input_diag in \ref rocsparse_spildlt0_set_input, if one is provided.
  *
  *  \p rocsparse_spildlt0 supports the following
  *  data types for \p A : \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
