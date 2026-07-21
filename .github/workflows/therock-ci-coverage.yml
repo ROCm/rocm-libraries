@@ -194,4 +194,3 @@ jobs:
       platform: "linux"
       test_type: ${{ inputs.test_type }}
       coverage_enabled: true
-

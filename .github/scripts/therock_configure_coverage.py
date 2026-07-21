@@ -29,6 +29,7 @@ COVERAGE_PROJECT_METADATA = {
     ),
 }
 
+
 def get_build_metadata(project_key: str, base_dir: str = "TheRock/build-coverage"):
     """Get CMake target and build directory for a coverage-enabled project.
 
