@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <miopen/kthvalue.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/handle.hpp>
 #include <miopen/tensor_ops.hpp>
 
@@ -71,16 +70,16 @@ static void LogCmdKthvalue(const miopenTensorDescriptor_t inputDesc, bool is_fwd
     }
 }
 
-extern "C" miopenStatus_t miopenKthvalueForward_impl(miopenHandle_t handle,
-                                                     miopenTensorDescriptor_t inputDesc,
-                                                     const void* input,
-                                                     miopenTensorDescriptor_t outputDesc,
-                                                     void* output,
-                                                     miopenTensorDescriptor_t indicesDesc,
-                                                     size_t* indices,
-                                                     size_t k,
-                                                     int32_t dim,
-                                                     bool keepDim)
+extern "C" miopenStatus_t miopenKthvalueForward(miopenHandle_t handle,
+                                                miopenTensorDescriptor_t inputDesc,
+                                                const void* input,
+                                                miopenTensorDescriptor_t outputDesc,
+                                                void* output,
+                                                miopenTensorDescriptor_t indicesDesc,
+                                                size_t* indices,
+                                                size_t k,
+                                                int32_t dim,
+                                                bool keepDim)
 {
     MIOPEN_LOG_FUNCTION(
         handle, inputDesc, input, outputDesc, output, indicesDesc, indices, k, dim, keepDim);

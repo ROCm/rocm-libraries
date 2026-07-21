@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <miopen/handle.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/prelu.hpp>
 
@@ -73,10 +72,10 @@ static void LogCmdPReLU(const miopenTensorDescriptor_t inputDesc,
 }
 
 extern "C" miopenStatus_t
-miopenGetPReLUBackwardWorkspaceSize_impl(miopenHandle_t handle,
-                                         const miopenTensorDescriptor_t inputDesc,
-                                         const miopenTensorDescriptor_t weightDesc,
-                                         size_t* sizeInBytes)
+miopenGetPReLUBackwardWorkspaceSize(miopenHandle_t handle,
+                                    const miopenTensorDescriptor_t inputDesc,
+                                    const miopenTensorDescriptor_t weightDesc,
+                                    size_t* sizeInBytes)
 {
 
     MIOPEN_LOG_FUNCTION(handle, inputDesc, weightDesc, sizeInBytes);
@@ -87,19 +86,19 @@ miopenGetPReLUBackwardWorkspaceSize_impl(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenPReLUBackward_impl(miopenHandle_t handle,
-                                                   void* workspace,
-                                                   const size_t workspaceSizeInBytes,
-                                                   const miopenTensorDescriptor_t inputDesc,
-                                                   const void* input,
-                                                   const miopenTensorDescriptor_t weightDesc,
-                                                   const void* weight,
-                                                   const miopenTensorDescriptor_t doutputDesc,
-                                                   const void* doutput,
-                                                   const miopenTensorDescriptor_t dinputDesc,
-                                                   void* dinput,
-                                                   const miopenTensorDescriptor_t dweightDesc,
-                                                   void* dweight)
+extern "C" miopenStatus_t miopenPReLUBackward(miopenHandle_t handle,
+                                              void* workspace,
+                                              const size_t workspaceSizeInBytes,
+                                              const miopenTensorDescriptor_t inputDesc,
+                                              const void* input,
+                                              const miopenTensorDescriptor_t weightDesc,
+                                              const void* weight,
+                                              const miopenTensorDescriptor_t doutputDesc,
+                                              const void* doutput,
+                                              const miopenTensorDescriptor_t dinputDesc,
+                                              void* dinput,
+                                              const miopenTensorDescriptor_t dweightDesc,
+                                              void* dweight)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         workspace,

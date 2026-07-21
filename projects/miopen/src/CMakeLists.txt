@@ -848,20 +848,22 @@ if(MIOPEN_USE_MLIR)
         )
 endif()
 
-# Public/private library split. The implementation is always built as the
-# private library MIOpen_private (libMIOpen_private.so); the public-facing
-# MIOpen target (libMIOpen.so) is a thin wrapper that forwards each public C
-# entry point to its renamed _impl counterpart in MIOpen_private. The split is
-# unconditional.
-set(_MIOPEN_IMPL_TARGET MIOpen_private)
-set(_MIOPEN_INSTALL_TARGETS MIOpen MIOpen_private)
+# Public/private library split (RFC 0001), gated by MIOPEN_ENABLE_HIPDNN_WRAPPER.
+# When ON, the implementation is built as the private library MIOpen_private
+# (libMIOpen_private.so) and the public-facing MIOpen target (libMIOpen.so) is a
+# thin wrapper that forwards each public C entry point to its renamed _impl
+# counterpart in MIOpen_private. When OFF (the default), _MIOPEN_IMPL_TARGET is
+# MIOpen and a single libMIOpen.so is produced exactly as before the split, so
+# the flag-off build is byte-equivalent to the pre-wrapper baseline.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    set(_MIOPEN_IMPL_TARGET MIOpen_private)
+    set(_MIOPEN_INSTALL_TARGETS MIOpen MIOpen_private)
+else()
+    set(_MIOPEN_IMPL_TARGET MIOpen)
+    set(_MIOPEN_INSTALL_TARGETS MIOpen)
+endif()
 
-message(STATUS
-    "MIOpen: building public wrapper (libMIOpen.so) + private implementation "
-    "(libMIOpen_private.so); the wrapper forwards each public entry point to "
-    "the private implementation")
-
-# build library (private implementation)
+# build library (implementation; the private library when the wrapper is enabled)
 if(MIOPEN_ENABLE_SQLITE)
     add_library( ${_MIOPEN_IMPL_TARGET}
         ${MIOpen_Source}
@@ -873,39 +875,51 @@ else()
         )
 endif()
 
-# Public wrapper library. src/private/wrapper.cpp defines extern "C" pass-through
-# stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>, each forwarding
-# to its renamed _impl symbol in MIOpen_private. PUBLIC linkage propagates the
-# implementation's include directories and link interface to consumers of the
-# wrapper, so existing consumers (driver, tests, CK plugins) that link MIOpen
-# keep resolving MIOpen's internal C++ symbols against libMIOpen_private.so.
-add_library(MIOpen ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp)
-target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
-target_include_directories(MIOpen PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_BINARY_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src/include)
-rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
-if(NOT WIN32 AND NOT APPLE)
-    set_target_properties(MIOpen PROPERTIES
-        CXX_VISIBILITY_PRESET hidden
-        VISIBILITY_INLINES_HIDDEN 1)
-    target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # Rename the private library's public C entry points to their _impl form by
+    # force-including the redefinition header into every private source. The
+    # header is pure preprocessor #defines and is guarded by
+    # MIOPEN_BUILDING_PRIVATE, so it is safe across C++, HIP and assembled
+    # kernel sources and the MIOpen source tree stays untouched.
+    target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOPEN_BUILDING_PRIVATE)
+    target_compile_options(${_MIOPEN_IMPL_TARGET} PRIVATE
+        "SHELL:-include ${PROJECT_SOURCE_DIR}/src/private/miopen_private_rename.h")
+
+    # Public wrapper library. src/private/wrapper.cpp defines extern "C"
+    # pass-through stubs for every MIOPEN_EXPORT entry point in <miopen/miopen.h>,
+    # each forwarding to its renamed _impl symbol in MIOpen_private. PUBLIC
+    # linkage propagates the implementation's include directories and link
+    # interface to consumers of the wrapper, so existing consumers (driver,
+    # tests, CK plugins) that link MIOpen keep resolving MIOpen's internal C++
+    # symbols against libMIOpen_private.so.
+    add_library(MIOpen ${PROJECT_SOURCE_DIR}/src/private/wrapper.cpp)
+    target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
+    target_include_directories(MIOpen PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_BINARY_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src/include)
+    rocm_set_soversion(MIOpen ${MIOpen_SOVERSION})
+    if(NOT WIN32 AND NOT APPLE)
+        set_target_properties(MIOpen PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN 1)
+        target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
+    endif()
+
+    # The generated public export header (miopen_generate_export_header below)
+    # keys MIOPEN_EXPORT off <target>_EXPORTS. It targets MIOpen (the wrapper),
+    # so the check is MIOpen_EXPORTS -- auto-defined for wrapper sources but not
+    # for the private sources. Define it explicitly on MIOpen_private so that
+    # MIOPEN_EXPORT means "default visibility" on the renamed _impl symbols.
+    target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOpen_EXPORTS)
+
+    # The private library needs the binary include dir (export.h, config.h,
+    # version.h); miopen_generate_export_header below only adds it to MIOpen.
+    target_include_directories(${_MIOPEN_IMPL_TARGET} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
 endif()
 
-# The generated public export header (miopen_generate_export_header below) keys
-# MIOPEN_EXPORT off <target>_EXPORTS. It targets MIOpen (the wrapper), so the
-# check is MIOpen_EXPORTS -- auto-defined for wrapper sources but not for the
-# private sources. Define it explicitly on MIOpen_private so that MIOPEN_EXPORT
-# means "default visibility" on the renamed _impl symbols.
-target_compile_definitions(${_MIOPEN_IMPL_TARGET} PRIVATE MIOpen_EXPORTS)
-
-# The private library needs the binary include dir (export.h, config.h,
-# version.h); miopen_generate_export_header below only adds it to MIOpen.
-target_include_directories(${_MIOPEN_IMPL_TARGET} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
-
-# ---- MIOpen_private configuration (was: MIOpen) ----
+# ---- implementation-target configuration ----
 
 # Add dependency on inlined rocrand header if it was created
 if(TARGET inline_rocrand_header)

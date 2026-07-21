@@ -24,12 +24,12 @@
  *
  *******************************************************************************/
 
-#include <miopen/miopen_impl.h>
+#include <miopen/miopen.h>
 
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 
-miopenStatus_t miopenSetTuningPolicy_impl(miopenHandle_t handle, miopenTuningPolicy_t newValue)
+miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t newValue)
 {
     MIOPEN_LOG_FUNCTION(handle, newValue);
     return miopen::try_([&] {
@@ -43,7 +43,7 @@ miopenStatus_t miopenSetTuningPolicy_impl(miopenHandle_t handle, miopenTuningPol
     });
 }
 
-miopenStatus_t miopenGetTuningPolicy_impl(miopenHandle_t handle, miopenTuningPolicy_t* value)
+miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t* value)
 {
     MIOPEN_LOG_FUNCTION(handle, value);
     return miopen::try_([&] {

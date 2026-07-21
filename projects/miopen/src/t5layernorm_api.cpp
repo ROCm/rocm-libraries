@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <miopen/t5layernorm.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -52,7 +51,7 @@ LogCmdT5LayerNorm(const miopenTensorDescriptor_t Desc, const miopenNormMode_t mo
         }
 
         int32_t size = {0};
-        miopenGetTensorDescriptorSize_impl(Desc, &size);
+        miopenGetTensorDescriptorSize(Desc, &size);
         ss << " -n " << miopen::deref(Desc).GetLengths()[0] << " -c "
            << miopen::deref(Desc).GetLengths()[1];
         if(size == 5)
@@ -77,17 +76,17 @@ LogCmdT5LayerNorm(const miopenTensorDescriptor_t Desc, const miopenNormMode_t mo
     }
 }
 
-extern "C" miopenStatus_t miopenT5LayerNormForward_impl(miopenHandle_t handle,
-                                                        miopenNormMode_t mode,
-                                                        const miopenTensorDescriptor_t xDesc,
-                                                        const void* x,
-                                                        const miopenTensorDescriptor_t weightDesc,
-                                                        const void* weight,
-                                                        const float epsilon,
-                                                        const miopenTensorDescriptor_t yDesc,
-                                                        void* y,
-                                                        const miopenTensorDescriptor_t rstdDesc,
-                                                        void* rstd)
+extern "C" miopenStatus_t miopenT5LayerNormForward(miopenHandle_t handle,
+                                                   miopenNormMode_t mode,
+                                                   const miopenTensorDescriptor_t xDesc,
+                                                   const void* x,
+                                                   const miopenTensorDescriptor_t weightDesc,
+                                                   const void* weight,
+                                                   const float epsilon,
+                                                   const miopenTensorDescriptor_t yDesc,
+                                                   void* y,
+                                                   const miopenTensorDescriptor_t rstdDesc,
+                                                   void* rstd)
 {
     MIOPEN_LOG_FUNCTION(
         handle, mode, xDesc, x, weightDesc, weight, epsilon, yDesc, y, rstdDesc, rstd);
@@ -109,15 +108,15 @@ extern "C" miopenStatus_t miopenT5LayerNormForward_impl(miopenHandle_t handle,
 }
 
 extern "C" miopenStatus_t
-miopenGetT5LayerNormBackwardWorkspaceSize_impl(miopenHandle_t handle,
-                                               miopenNormMode_t mode,
-                                               const miopenTensorDescriptor_t dyDesc,
-                                               const miopenTensorDescriptor_t xDesc,
-                                               const miopenTensorDescriptor_t weightDesc,
-                                               const miopenTensorDescriptor_t rstdDesc,
-                                               const miopenTensorDescriptor_t dxDesc,
-                                               const miopenTensorDescriptor_t dwDesc,
-                                               size_t* sizeInBytes)
+miopenGetT5LayerNormBackwardWorkspaceSize(miopenHandle_t handle,
+                                          miopenNormMode_t mode,
+                                          const miopenTensorDescriptor_t dyDesc,
+                                          const miopenTensorDescriptor_t xDesc,
+                                          const miopenTensorDescriptor_t weightDesc,
+                                          const miopenTensorDescriptor_t rstdDesc,
+                                          const miopenTensorDescriptor_t dxDesc,
+                                          const miopenTensorDescriptor_t dwDesc,
+                                          size_t* sizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(handle, mode, dyDesc, xDesc, weightDesc, rstdDesc, dxDesc, dwDesc);
 
@@ -134,22 +133,22 @@ miopenGetT5LayerNormBackwardWorkspaceSize_impl(miopenHandle_t handle,
     });
 };
 
-extern "C" miopenStatus_t miopenT5LayerNormBackward_impl(miopenHandle_t handle,
-                                                         miopenNormMode_t mode,
-                                                         void* workspace,
-                                                         size_t workspaceSizeInBytes,
-                                                         const miopenTensorDescriptor_t dyDesc,
-                                                         const void* dy,
-                                                         const miopenTensorDescriptor_t xDesc,
-                                                         const void* x,
-                                                         const miopenTensorDescriptor_t weightDesc,
-                                                         const void* weight,
-                                                         const miopenTensorDescriptor_t rstdDesc,
-                                                         const void* rstd,
-                                                         const miopenTensorDescriptor_t dxDesc,
-                                                         void* dx,
-                                                         const miopenTensorDescriptor_t dwDesc,
-                                                         void* dw)
+extern "C" miopenStatus_t miopenT5LayerNormBackward(miopenHandle_t handle,
+                                                    miopenNormMode_t mode,
+                                                    void* workspace,
+                                                    size_t workspaceSizeInBytes,
+                                                    const miopenTensorDescriptor_t dyDesc,
+                                                    const void* dy,
+                                                    const miopenTensorDescriptor_t xDesc,
+                                                    const void* x,
+                                                    const miopenTensorDescriptor_t weightDesc,
+                                                    const void* weight,
+                                                    const miopenTensorDescriptor_t rstdDesc,
+                                                    const void* rstd,
+                                                    const miopenTensorDescriptor_t dxDesc,
+                                                    void* dx,
+                                                    const miopenTensorDescriptor_t dwDesc,
+                                                    void* dw)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         mode,

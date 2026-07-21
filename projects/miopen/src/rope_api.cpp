@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <miopen/rope.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -66,15 +65,15 @@ static void LogCmdRoPE(const miopenTensorDescriptor_t xDesc, bool is_fwd)
     }
 }
 
-extern "C" miopenStatus_t miopenRoPEForward_impl(miopenHandle_t handle,
-                                                 const miopenTensorDescriptor_t xDesc,
-                                                 const void* x,
-                                                 const miopenTensorDescriptor_t cosDesc,
-                                                 const void* cos,
-                                                 const miopenTensorDescriptor_t sinDesc,
-                                                 const void* sin,
-                                                 const miopenTensorDescriptor_t yDesc,
-                                                 void* y)
+extern "C" miopenStatus_t miopenRoPEForward(miopenHandle_t handle,
+                                            const miopenTensorDescriptor_t xDesc,
+                                            const void* x,
+                                            const miopenTensorDescriptor_t cosDesc,
+                                            const void* cos,
+                                            const miopenTensorDescriptor_t sinDesc,
+                                            const void* sin,
+                                            const miopenTensorDescriptor_t yDesc,
+                                            void* y)
 {
 
     MIOPEN_LOG_FUNCTION(handle, xDesc, x, cosDesc, cos, sinDesc, sin, yDesc, y);
@@ -94,15 +93,15 @@ extern "C" miopenStatus_t miopenRoPEForward_impl(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenRoPEBackward_impl(miopenHandle_t handle,
-                                                  const miopenTensorDescriptor_t dyDesc,
-                                                  const void* dy,
-                                                  const miopenTensorDescriptor_t cosDesc,
-                                                  const void* cos,
-                                                  const miopenTensorDescriptor_t sinDesc,
-                                                  const void* sin,
-                                                  const miopenTensorDescriptor_t dxDesc,
-                                                  void* dx)
+extern "C" miopenStatus_t miopenRoPEBackward(miopenHandle_t handle,
+                                             const miopenTensorDescriptor_t dyDesc,
+                                             const void* dy,
+                                             const miopenTensorDescriptor_t cosDesc,
+                                             const void* cos,
+                                             const miopenTensorDescriptor_t sinDesc,
+                                             const void* sin,
+                                             const miopenTensorDescriptor_t dxDesc,
+                                             void* dx)
 {
 
     MIOPEN_LOG_FUNCTION(handle, dyDesc, dy, cosDesc, cos, sinDesc, sin, dxDesc, dx);

@@ -5,14 +5,16 @@
 // translation unit is compiled into the public wrapper library libMIOpen.so.
 // Each public C entry point declared in <miopen/miopen.h> has a matching
 // extern "C" stub here that forwards to the corresponding _impl symbol in the
-// private implementation library (libMIOpen_private.so). The public-API
-// definitions were renamed directly in source to their _impl form, so these
-// stubs are the only definitions of the public miopenFoo names.
+// private implementation library (libMIOpen_private.so). The private library's
+// definitions are renamed to their _impl form at build time by force-including
+// src/private/miopen_private_rename.h into every private source, so these stubs
+// are the only definitions of the public miopenFoo names. This file is compiled
+// WITHOUT that rename header, so it sees the public names from <miopen/miopen.h>.
 //
 // HAND-MAINTAINED. Add a stub here whenever a new MIOPEN_EXPORT function is
-// added to miopen.h, and rename the corresponding definition to its _impl form
-// in the private source. The set of stubs must stay a superset of the public
-// entry points implemented in libMIOpen_private.so.
+// added to miopen.h, and a matching `#define miopenNewFn miopenNewFn_impl` line
+// to src/private/miopen_private_rename.h. The set of stubs must stay a superset
+// of the public entry points implemented in libMIOpen_private.so.
 
 #include <miopen/miopen.h>
 

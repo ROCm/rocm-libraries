@@ -25,14 +25,13 @@
  *******************************************************************************/
 
 #include <miopen/ctc.hpp>
-#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/stringutils.hpp>
 #include <vector>
 
-extern "C" miopenStatus_t miopenCreateCTCLossDescriptor_impl(miopenCTCLossDescriptor_t* ctcLossDesc)
+extern "C" miopenStatus_t miopenCreateCTCLossDescriptor(miopenCTCLossDescriptor_t* ctcLossDesc)
 {
     MIOPEN_LOG_FUNCTION(ctcLossDesc);
     return miopen::try_([&] {
@@ -41,16 +40,16 @@ extern "C" miopenStatus_t miopenCreateCTCLossDescriptor_impl(miopenCTCLossDescri
     });
 }
 
-extern "C" miopenStatus_t miopenDestroyCTCLossDescriptor_impl(miopenCTCLossDescriptor_t ctcLossDesc)
+extern "C" miopenStatus_t miopenDestroyCTCLossDescriptor(miopenCTCLossDescriptor_t ctcLossDesc)
 {
     MIOPEN_LOG_FUNCTION(ctcLossDesc);
     return miopen::try_([&] { miopen_destroy_object(ctcLossDesc); });
 }
 
-extern "C" miopenStatus_t miopenGetCTCLossDescriptor_impl(miopenCTCLossDescriptor_t ctcLossDesc,
-                                                          miopenDataType_t* dataType,
-                                                          int* blank_label_id       = nullptr,
-                                                          bool* apply_softmax_layer = nullptr)
+extern "C" miopenStatus_t miopenGetCTCLossDescriptor(miopenCTCLossDescriptor_t ctcLossDesc,
+                                                     miopenDataType_t* dataType,
+                                                     int* blank_label_id       = nullptr,
+                                                     bool* apply_softmax_layer = nullptr)
 {
     MIOPEN_LOG_FUNCTION(ctcLossDesc);
     return miopen::try_([&] {
@@ -62,10 +61,10 @@ extern "C" miopenStatus_t miopenGetCTCLossDescriptor_impl(miopenCTCLossDescripto
     });
 }
 
-extern "C" miopenStatus_t miopenSetCTCLossDescriptor_impl(miopenCTCLossDescriptor_t ctcLossDesc,
-                                                          miopenDataType_t dataType,
-                                                          const int blank_label_id = 0,
-                                                          bool apply_softmax_layer = true)
+extern "C" miopenStatus_t miopenSetCTCLossDescriptor(miopenCTCLossDescriptor_t ctcLossDesc,
+                                                     miopenDataType_t dataType,
+                                                     const int blank_label_id = 0,
+                                                     bool apply_softmax_layer = true)
 {
     MIOPEN_LOG_FUNCTION(ctcLossDesc, dataType, blank_label_id, apply_softmax_layer);
     return miopen::try_([&] {
@@ -76,15 +75,15 @@ extern "C" miopenStatus_t miopenSetCTCLossDescriptor_impl(miopenCTCLossDescripto
 }
 
 extern "C" miopenStatus_t
-miopenGetCTCLossWorkspaceSize_impl(miopenHandle_t handle,
-                                   const miopenTensorDescriptor_t probsDesc,
-                                   const miopenTensorDescriptor_t gradientsDesc,
-                                   const int* labels,
-                                   const int* labelLengths,
-                                   const int* inputLengths,
-                                   miopenCTCLossAlgo_t algo,
-                                   const miopenCTCLossDescriptor_t ctcLossDesc,
-                                   size_t* workSpaceSize)
+miopenGetCTCLossWorkspaceSize(miopenHandle_t handle,
+                              const miopenTensorDescriptor_t probsDesc,
+                              const miopenTensorDescriptor_t gradientsDesc,
+                              const int* labels,
+                              const int* labelLengths,
+                              const int* inputLengths,
+                              miopenCTCLossAlgo_t algo,
+                              const miopenCTCLossDescriptor_t ctcLossDesc,
+                              size_t* workSpaceSize)
 {
     MIOPEN_LOG_FUNCTION(
         probsDesc, gradientsDesc, labels, labelLengths, inputLengths, algo, ctcLossDesc);
@@ -101,19 +100,19 @@ miopenGetCTCLossWorkspaceSize_impl(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenCTCLoss_impl(miopenHandle_t handle,
-                                             const miopenTensorDescriptor_t probsDesc,
-                                             const void* probs,
-                                             const int* labels,
-                                             const int* labelLengths,
-                                             const int* inputLengths,
-                                             void* losses,
-                                             const miopenTensorDescriptor_t gradientsDesc,
-                                             void* gradients,
-                                             miopenCTCLossAlgo_t algo,
-                                             const miopenCTCLossDescriptor_t ctcLossDesc,
-                                             void* workSpace,
-                                             size_t workSpaceSize)
+extern "C" miopenStatus_t miopenCTCLoss(miopenHandle_t handle,
+                                        const miopenTensorDescriptor_t probsDesc,
+                                        const void* probs,
+                                        const int* labels,
+                                        const int* labelLengths,
+                                        const int* inputLengths,
+                                        void* losses,
+                                        const miopenTensorDescriptor_t gradientsDesc,
+                                        void* gradients,
+                                        miopenCTCLossAlgo_t algo,
+                                        const miopenCTCLossDescriptor_t ctcLossDesc,
+                                        void* workSpace,
+                                        size_t workSpaceSize)
 {
     MIOPEN_LOG_FUNCTION(probsDesc,
                         probs,
