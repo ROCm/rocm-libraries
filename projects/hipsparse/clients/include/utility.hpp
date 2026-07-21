@@ -161,10 +161,10 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
+#if (!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 {
     switch(status)
@@ -7918,6 +7918,71 @@ void host_sddmm_csr(J                    C_m,
             }
             csr_val[j] = testing_mult(csr_val[j], beta) + testing_mult(alpha, sum);
         }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host batched sddmm_csr (sampled dense-dense matrix multiplication - CSR format).*/
+template <typename I, typename J, typename T>
+void host_sddmm_csr_batched(J                    C_m,
+                            J                    C_n,
+                            J                    k,
+                            I                    nnz,
+                            T                    alpha,
+                            const T*             A,
+                            int64_t              lda,
+                            hipsparseOrder_t     orderA,
+                            hipsparseOperation_t transA,
+                            J                    batch_count_A,
+                            int64_t              batch_stride_A,
+                            const T*             B,
+                            int64_t              ldb,
+                            hipsparseOrder_t     orderB,
+                            hipsparseOperation_t transB,
+                            J                    batch_count_B,
+                            int64_t              batch_stride_B,
+                            T                    beta,
+                            T*                   csr_val,
+                            const I*             csr_row_ptr,
+                            const J*             csr_col_ind,
+                            J                    batch_count_C,
+                            int64_t              offsets_batch_stride_C,
+                            int64_t              columns_values_batch_stride_C,
+                            hipsparseIndexBase_t idx_base)
+{
+    const bool Ci_A_B_Ci   = (batch_count_A == 1 && batch_count_B == 1);
+    const bool Ci_A_Bi_Ci  = (batch_count_A == 1 && batch_count_B == batch_count_C);
+    const bool Ci_Ai_B_Ci  = (batch_count_B == 1 && batch_count_A == batch_count_C);
+    const bool Ci_Ai_Bi_Ci = (batch_count_A == batch_count_C && batch_count_A == batch_count_B);
+
+    if(!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci)
+    {
+        return;
+    }
+
+    for(J i = 0; i < batch_count_C; i++)
+    {
+        const int64_t offset_A = (batch_count_A == 1) ? 0 : (batch_stride_A * i);
+        const int64_t offset_B = (batch_count_B == 1) ? 0 : (batch_stride_B * i);
+
+        host_sddmm_csr(C_m,
+                       C_n,
+                       k,
+                       nnz,
+                       alpha,
+                       A + offset_A,
+                       lda,
+                       orderA,
+                       transA,
+                       B + offset_B,
+                       ldb,
+                       orderB,
+                       transB,
+                       beta,
+                       csr_val + columns_values_batch_stride_C * i,
+                       csr_row_ptr + offsets_batch_stride_C * i,
+                       csr_col_ind + columns_values_batch_stride_C * i,
+                       idx_base);
     }
 }
 
