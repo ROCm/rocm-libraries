@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the 2D-tiled LDS-budget resolver.
+"""Unit tests for the 2D-tiled LDS budget resolver.
 
 Pure codegen (no GPU, no subprocess). The resolver deterministically shrinks an
 over-budget register-PV 2D spec until it fits the arch LDS cap, and is a strict

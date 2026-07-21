@@ -68,7 +68,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   }
 
   // Default values
-  size_t numCUs             = hardware.N_CU;
+  // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
+  size_t numCUs             = resolve_num_cus(problem.num_cus, hardware.N_CU);
   size_t numXCD             = hardware.NUM_XCD;
   size_t numCUsPerXCD       = numCUs / numXCD;
   size_t defaultWGMXCCCHUNK = 0;
@@ -373,7 +374,8 @@ staggerU_t select_staggerU(const problem_t& problem,
   }
 
   // Default values
-  size_t numCUs       = hardware.N_CU;
+  // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
+  size_t numCUs       = resolve_num_cus(problem.num_cus, hardware.N_CU);
   size_t numXCD       = hardware.NUM_XCD;
   size_t numCUsPerXCD = numCUs / numXCD;
 
@@ -576,14 +578,14 @@ double compute_ranked_latency(const problem_t& problem,
       log_config_rejection(config, "LDS capacity exceeded");
       return kRejectedLatency;
     }
-    return attention::compute_total_latency(problem, hardware, config, hardware.N_CU);
+    return attention::compute_total_latency(problem, hardware, config);
   }
 
   if (!gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }
-  return gemm::compute_total_latency(problem, hardware, config, hardware.N_CU);
+  return gemm::compute_total_latency(problem, hardware, config);
 }
 
 }  // namespace
