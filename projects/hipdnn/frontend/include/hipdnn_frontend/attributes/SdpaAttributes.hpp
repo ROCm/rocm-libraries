@@ -669,12 +669,11 @@ public:
         return *this;
     }
 
-    // -- cuDNN source-compatibility setters (DISCUSS) --
+    // -- cuDNN parity setters --
     // Each accepts the cuDNN frontend spelling/overload/semantics that is more
     // than a straight rename of a native setter (overload merge, semantic remap,
     // one-to-many split, or a capability hipDNN lacks). The pure renames were
-    // folded into the native setters above; these remain pending review of
-    // whether hipDNN should own the cuDNN behavior natively or diverge.
+    // folded into the native setters above.
     // cuDNN [[deprecated]] set_is_inference(b) means "no stats": the inverse of
     // generate_stats. PyTorch still emits it on CUDNN_FRONTEND_VERSION <= 11200.
     // NOLINTNEXTLINE(readability-identifier-naming)

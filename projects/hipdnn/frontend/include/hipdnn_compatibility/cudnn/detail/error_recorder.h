@@ -25,9 +25,18 @@ class ErrorRecorder
 {
     Derived& recordError(error_t err)
     {
-        if(err.is_bad() && !_recordedError.has_value())
+        if(err.is_bad())
         {
-            _recordedError = std::move(err);
+            if(!_recordedError.has_value())
+            {
+                CUDNN_FE_LOG_LABEL("ERROR: recording deferred error: " << err.get_message());
+                _recordedError = std::move(err);
+            }
+            else
+            {
+                CUDNN_FE_LOG_LABEL("ERROR: skipping later deferred error (first error wins): "
+                                   << err.get_message());
+            }
         }
         return static_cast<Derived&>(*this);
     }

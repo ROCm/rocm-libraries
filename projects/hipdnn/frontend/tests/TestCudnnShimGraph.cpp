@@ -72,19 +72,18 @@ TEST(TestCudnnShimGraph, BenignConfigSettersDoNotFailValidation)
     EXPECT_TRUE(graph.validate().is_good());
 }
 
-// TODO: Bring this back when by-value tensors lands
-// TEST(TestCudnnShimGraph, ScalarTensorFactoriesCompileAndValidateRuntimeParams)
-// {
-//     fe::graph::Graph graph;
-//     graph.tensor(1.0F, fe::graph::ScalarType::RUNTIME_PARAM);
-//     graph.tensor(fe::graph::half{1.0F}, fe::graph::ScalarType::RUNTIME_PARAM);
-//     graph.tensor(fe::graph::nv_bfloat16{1.0F}, fe::graph::ScalarType::RUNTIME_PARAM);
-//     graph.tensor(int32_t{1}, fe::graph::ScalarType::RUNTIME_PARAM);
-//     graph.tensor(int64_t{1}, fe::graph::ScalarType::RUNTIME_PARAM);
-//     graph.tensor(1.0, fe::graph::ScalarType::RUNTIME_PARAM);
+TEST(TestCudnnShimGraph, ScalarTensorFactoriesCompileAndValidateRuntimeParams)
+{
+    fe::graph::Graph graph;
+    graph.tensor(1.0F, fe::graph::ScalarType::RUNTIME_PARAM);
+    graph.tensor(fe::graph::half{1.0F}, fe::graph::ScalarType::RUNTIME_PARAM);
+    graph.tensor(fe::graph::nv_bfloat16{1.0F}, fe::graph::ScalarType::RUNTIME_PARAM);
+    graph.tensor(int32_t{1}, fe::graph::ScalarType::RUNTIME_PARAM);
+    graph.tensor(int64_t{1}, fe::graph::ScalarType::RUNTIME_PARAM);
+    graph.tensor(1.0, fe::graph::ScalarType::RUNTIME_PARAM);
 
-//     EXPECT_TRUE(graph.validate().is_good());
-// }
+    EXPECT_TRUE(graph.validate().is_good());
+}
 
 TEST(TestCudnnShimGraph, TensorLikeAndQueryByUid)
 {

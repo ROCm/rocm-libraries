@@ -477,11 +477,10 @@ public:
         return *this;
     }
 
-    // -- cuDNN source-compatibility setters (DISCUSS) --
+    // -- cuDNN parity setters --
     // Each accepts the cuDNN frontend spelling/overload/semantics that is more
     // than a straight rename of a native setter (overload merge, one-to-many
-    // split, or a capability hipDNN lacks). Pending review of whether hipDNN
-    // should own the cuDNN behavior natively or diverge.
+    // split, or a capability hipDNN lacks).
 
     // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
     // NOLINTNEXTLINE(readability-identifier-naming)

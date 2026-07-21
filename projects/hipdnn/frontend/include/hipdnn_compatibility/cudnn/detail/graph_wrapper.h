@@ -136,7 +136,10 @@ public:
     error_t build_plans(BuildPlanPolicy_t policy = BuildPlanPolicy_t::HEURISTICS_CHOICE,
                         bool doMultithreadedBuilds = false)
     {
-        static_cast<void>(doMultithreadedBuilds);
+        if(doMultithreadedBuilds)
+        {
+            CUDNN_FE_LOG_LABEL("Ignoring multithreaded-build hint; this shim builds serially");
+        }
         if(auto err = getRecordedError(); err.is_bad())
         {
             return err;
@@ -281,11 +284,17 @@ public:
         return _graph.get_intermediate_data_type();
     }
 
+#ifdef HIPDNN_ENABLE_SDPA
+    // Native set_override_shape_enabled is SDPA-gated (see Graph.hpp); mirror
+    // that gating here so the shim never calls a method the frontend omits.
+    // Not part of cuDNN's graph::Graph surface, so nothing cuDNN-spelled relies
+    // on it in a compat-only (SDPA-off) build.
     Graph& set_override_shape_enabled(bool isEnabled)
     {
         _graph.set_override_shape_enabled(isEnabled);
         return *this;
     }
+#endif // HIPDNN_ENABLE_SDPA
 
     // Setter triage: hints that are safe to drop (dynamic-shape, kernel-cache)
     // log and continue; requests the shim cannot honor without changing results
@@ -339,36 +348,35 @@ public:
         return tensorPtr;
     }
 
-    // TODO: Bring this back when by-value tensors lands
-    // std::shared_ptr<Tensor_attributes> tensor(const float& scalar, ScalarType scalarType)
-    // {
-    //     return scalarTensor(scalar, scalarType);
-    // }
+    std::shared_ptr<Tensor_attributes> tensor(const float& scalar, ScalarType scalarType)
+    {
+        return scalarTensor(scalar, scalarType);
+    }
 
-    // std::shared_ptr<Tensor_attributes> tensor(const half& scalar, ScalarType scalarType)
-    // {
-    //     return scalarTensor(scalar, scalarType);
-    // }
+    std::shared_ptr<Tensor_attributes> tensor(const half& scalar, ScalarType scalarType)
+    {
+        return scalarTensor(scalar, scalarType);
+    }
 
-    // std::shared_ptr<Tensor_attributes> tensor(const nv_bfloat16& scalar, ScalarType scalarType)
-    // {
-    //     return scalarTensor(scalar, scalarType);
-    // }
+    std::shared_ptr<Tensor_attributes> tensor(const nv_bfloat16& scalar, ScalarType scalarType)
+    {
+        return scalarTensor(scalar, scalarType);
+    }
 
-    // std::shared_ptr<Tensor_attributes> tensor(const int32_t& scalar, ScalarType scalarType)
-    // {
-    //     return scalarTensor(scalar, scalarType);
-    // }
+    std::shared_ptr<Tensor_attributes> tensor(const int32_t& scalar, ScalarType scalarType)
+    {
+        return scalarTensor(scalar, scalarType);
+    }
 
-    // std::shared_ptr<Tensor_attributes> tensor(const int64_t& scalar, ScalarType scalarType)
-    // {
-    //     return scalarTensor(scalar, scalarType);
-    // }
+    std::shared_ptr<Tensor_attributes> tensor(const int64_t& scalar, ScalarType scalarType)
+    {
+        return scalarTensor(scalar, scalarType);
+    }
 
-    // std::shared_ptr<Tensor_attributes> tensor(const double& scalar, ScalarType scalarType)
-    // {
-    //     return scalarTensor(scalar, scalarType);
-    // }
+    std::shared_ptr<Tensor_attributes> tensor(const double& scalar, ScalarType scalarType)
+    {
+        return scalarTensor(scalar, scalarType);
+    }
 
     std::shared_ptr<Tensor_attributes>
         tensor_like(const std::shared_ptr<Tensor_attributes>& tensorAttributes,
@@ -587,8 +595,12 @@ public:
         {
             clearWrapperGraphState();
             _mode = Mode::Native;
-            // A handle-bearing deserialize yields a compiled, executable graph.
-            _stage = handle != nullptr ? Stage::PlansBuilt : Stage::Described;
+            // Trust the native graph on whether a compiled plan was actually
+            // embedded: a handle-bearing deserialize only installs one when the
+            // blob carried an execution plan. Without it the graph is described
+            // and finalized but planless, so do not claim PlansBuilt.
+            _stage
+                = _graph.get_execution_plan_count() > 0 ? Stage::PlansBuilt : Stage::OpGraphBuilt;
         }
         return err;
     }
@@ -640,20 +652,13 @@ private:
         return static_cast<int>(_stage) >= static_cast<int>(stage);
     }
 
-    // TODO: Bring this back when by-value tensors lands
-    // template <typename T>
-    // std::shared_ptr<Tensor_attributes> scalarTensor(const T& scalar, ScalarType scalarType)
-    // {
-    //     if(scalarType == ScalarType::COMPILE_TIME_CONST)
-    //     {
-    //         recordError(error_code_t::INVALID_VALUE,
-    //                     "Compile-time scalar tensors are unsupported by this shim");
-    //     }
-
-    //     auto tensorPtr = std::make_shared<Tensor_attributes>(scalar);
-    //     _ownedTensors.emplace_back(tensorPtr);
-    //     return tensorPtr;
-    // }
+    template <typename T>
+    std::shared_ptr<Tensor_attributes> scalarTensor(const T& scalar, ScalarType scalarType)
+    {
+        auto tensorPtr = std::make_shared<Tensor_attributes>(scalar, scalarType);
+        _ownedTensors.emplace_back(tensorPtr);
+        return tensorPtr;
+    }
 
     error_t validateOwnedTensors()
     {

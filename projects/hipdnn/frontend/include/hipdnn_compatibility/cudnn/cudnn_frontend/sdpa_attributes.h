@@ -2,7 +2,8 @@
 // SPDX-License-Identifier:  MIT
 //
 // Portions derived from NVIDIA cuDNN frontend
-// (include/cudnn_frontend/graph_properties.h), used under the MIT license.
+// (include/cudnn_frontend/graph_properties.h — SDPA_attributes /
+// SDPA_backward_attributes), used under the MIT license.
 
 /**
  * @file sdpa_attributes.h
