@@ -6,10 +6,10 @@ macro(dapper_init)
     # Respect whatever MIOPEN_TEST_DISCRETE the user/CI set (default off) instead of forcing it.
 
     # Additive attribution bridges run during 'parse' (see dependency-parser/main.py).
-    # Empty = none (base behavior). e.g. -DMIOPEN_DAPPER_BRIDGES=stem or =symbol.
-    # 'symbol' supersedes 'stem'. The bridge module must exist on the current branch.
+    # Empty = none (base behavior). e.g. -DMIOPEN_DAPPER_BRIDGES=symbol.
+    # The bridge module must exist on the current branch.
     set(MIOPEN_DAPPER_BRIDGES "" CACHE STRING
-        "Comma-separated dapper attribution bridges to run during 'parse' (stem, symbol)")
+        "Comma-separated dapper attribution bridges to run during 'parse' (symbol)")
 
     # Local-iteration cache: when ON (default) reuse existing dapper input files and skip
     # regeneration + the test-binary build. The Python generators (shas/fixtures/parse) skip

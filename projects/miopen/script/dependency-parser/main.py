@@ -28,17 +28,15 @@ import time
 # attribution pass that runs after the ninja-deps mapping and only unions extra
 # edges into the parser's in-memory file->executables map (never modifying the
 # base include graph). Modules live on the gap-fix branches
-# (stem -> src/common_stem, symbol -> src/symbol_graph, future runtime -> ...)
-# and are imported lazily so the base branch works with no bridge selected.
+# (symbol -> src/symbol_graph, future runtime -> ...) and are imported lazily so
+# the base branch works with no bridge selected.
 BRIDGE_REGISTRY = {
-    "stem": ("src.common_stem", "apply"),
     "symbol": ("src.symbol_graph", "apply"),
 }
 
 # Supersession: selecting the key drops the listed bridges (a superseding bridge
-# makes the superseded one redundant). The symbol bridge is correctness-dominant
-# over the stem bridge, so selecting 'symbol' disables 'stem'.
-BRIDGE_SUPERSEDES = {"symbol": ["stem"]}
+# makes the superseded one redundant). Empty until multiple bridges coexist.
+BRIDGE_SUPERSEDES = {}
 
 
 def resolve_bridges(bridges_arg):
@@ -191,8 +189,7 @@ def main():
         "--bridges",
         default="",
         help="Comma-separated additive attribution bridges to run after the "
-        "ninja-deps mapping (e.g. 'stem', 'symbol'). Empty = none. If 'symbol' "
-        "is listed it supersedes 'stem'.",
+        "ninja-deps mapping (e.g. 'symbol'). Empty = none.",
     )
     parser_parse.add_argument(
         "--use-cached",

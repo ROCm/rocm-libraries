@@ -120,13 +120,12 @@ passes that close that gap; select one with `MIOPEN_DAPPER_BRIDGES` (comma list)
 
 | Bridge | Module | How | Notes |
 |--------|--------|-----|-------|
-| `stem` | `src/common_stem.py` | Attribute `foo.cpp` to whatever includes its sibling `foo.hpp`. | Cheap heuristic; can over-attribute, and misses symbols declared in non-sibling headers. |
-| `symbol` | `src/symbol_graph.py` | `nm` provider→consumer symbol graph: attribute a source to the tests that reference the out-of-line symbols it defines. | Precise (mirrors the linker); also handles library `.cpp`. Supersedes `stem`. |
+| `symbol` | `src/symbol_graph.py` | `nm` provider→consumer symbol graph: attribute a source to the tests that reference the out-of-line symbols it defines. | Precise (mirrors the linker); also handles library `.cpp`. |
 
 Bridges only *add* edges to the mapping; the include graph is never modified.
-`symbol` is correctness-dominant, so `--bridges=stem,symbol` resolves to `symbol`
-alone. Empty (default) runs no bridge. A future runtime-kernel bridge plugs into the
-same registry.
+Empty (default) runs no bridge. A future runtime-kernel bridge plugs into the
+same registry. When multiple bridges can coexist, a superseding bridge drops the
+ones it makes redundant (see `BRIDGE_SUPERSEDES` in `main.py`).
 
 ## Configuration
 
@@ -134,7 +133,7 @@ same registry.
 |-----------------|---------|---------|
 | `MIOPEN_DAPPER_MODE` | `union` (TheRock) / `validate` (native) | `off` \| `validate` \| `union` |
 | `MIOPEN_DAPPER_BASE_REF` | `origin/develop` | Ref to compute the impact diff against |
-| `MIOPEN_DAPPER_BRIDGES` | (empty) | Additive attribution bridges: `stem`, `symbol` |
+| `MIOPEN_DAPPER_BRIDGES` | (empty) | Additive attribution bridges: `symbol` |
 
 Per category, `test_categories.yaml` provides `gtest_runner: scripts/run_miopen_gtest.py`
 and per-category `enable_dapper: "True"`. A category is routed through the wrapper only
@@ -150,7 +149,7 @@ Tooling (`script/dependency-parser/`):
 - `src/extract_gtest_fixtures.py` — compile_commands → per-source fixtures.
 - `src/selective_test_filter.py` — git diff → affected fixtures → `dapper_filter` +
   `fallback_mode`.
-- `src/common_stem.py` (`stem` bridge), `src/symbol_graph.py` (`symbol` bridge).
+- `src/symbol_graph.py` (`symbol` bridge).
 - `src/miopen_gtest_runner.py`, `src/dapper_diff.py` — native validate-mode analysis.
 
 Shared (`<rocm-libraries>/shared/ctest/`):
@@ -174,4 +173,3 @@ Build/runtime artifacts (`bin/<PROJECT>/` on the runner):
   and falls back to `entire_category`. A future data-derived (coverage/trace) map is the
   intended fix.
 - **Native `union`** is not yet a drop-in for `check`; it runs via `diff_check` today.
-- The `stem` bridge is a heuristic (see table); prefer `symbol` where `nm` is available.
