@@ -183,7 +183,7 @@ jobs:
   therock-coverage-test:
     name: Test Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
     needs: [therock-coverage-build]
-    if: ${{ inputs.test_runs_on != '' }}
+    if: ${{ inputs.test_runs_on != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     secrets: inherit
     with:
