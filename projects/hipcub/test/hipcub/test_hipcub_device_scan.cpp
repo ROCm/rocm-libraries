@@ -1417,8 +1417,7 @@ TEST(HipcubDeviceScanTests, InclusiveScanFFM)
 {
     constexpr size_t size = 3'000'000;
 
-    std::random_device                     rd;
-    std::mt19937                           gen(rd());
+    std::mt19937                           gen(12345);
     std::uniform_int_distribution<int32_t> dis(0, 10);
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -1470,14 +1469,13 @@ TEST(HipcubDeviceScanTests, InclusiveScanFFM)
     HIP_CHECK(hipPeekAtLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
-    //coppying results back to host
+    //copying results back to host
     int32_t* output = new int32_t[size];
     HIP_CHECK(hipMemcpy(output, d_output, size * sizeof(int32_t), hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipDeviceSynchronize());
 
     // Check if output values are as expected
-
     for(size_t i = 0; i < size; i++)
         ASSERT_EQ(output[i], expected[i]);
 
