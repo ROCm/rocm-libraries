@@ -27,21 +27,24 @@ enable_testing()
 include(GoogleTest)
 include(CTest)
 
-# Location of golden/input data (defaults to the legacy suite for now).
-set(RPP_TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../test_suite"
-    CACHE PATH "Directory containing test input/golden data")
-
 add_executable(rpp_tests
     core/handle_test.cpp
     core/descriptor_test.cpp
-    image/brightness_test.cpp
+    image/color/brightness_test.cpp
+    image/color/exposure_test.cpp
+    image/color/blend_test.cpp
+    image/arithmetic/magnitude_test.cpp
+    image/effects/solarize_test.cpp
+    image/bitwise/bitwise_and_test.cpp
+    image/bitwise/bitwise_or_test.cpp
+    image/bitwise/bitwise_xor_test.cpp
+    image/bitwise/bitwise_not_test.cpp
 )
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(rpp_INCLUDE_DIR)
     target_include_directories(rpp_tests PRIVATE ${rpp_INCLUDE_DIR}/rpp)
 endif()
 target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest_main)
-target_compile_definitions(rpp_tests PRIVATE RPP_TEST_DATA_DIR="${RPP_TEST_DATA_DIR}")
 
 if(rpp_BACKEND_TYPE STREQUAL "HIP" OR BACKEND STREQUAL "HIP")
     target_compile_definitions(rpp_tests PRIVATE RPP_TEST_HAVE_HIP=1)

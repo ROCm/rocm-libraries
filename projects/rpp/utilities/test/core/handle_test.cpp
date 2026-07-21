@@ -26,7 +26,7 @@ TEST_P(HandleTest, BatchSizeRoundTrip) {
     EXPECT_EQ(rppDestroy(handle, GetParam()), rppStatusSuccess);
 }
 
-INSTANTIATE_TEST_SUITE_P(Backends, HandleTest, ::testing::ValuesIn(available_backends()),
+INSTANTIATE_TEST_SUITE_P(, HandleTest, ::testing::ValuesIn(available_backends()),
                          [](const ::testing::TestParamInfo<RppBackend>& info) {
                              return backend_name(info.param);
                          });

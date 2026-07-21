@@ -1,0 +1,44 @@
+#ifndef RPP_TEST_EXPOSURE_REF_H
+#define RPP_TEST_EXPOSURE_REF_H
+
+#include <rpp/rpp.h>
+
+#include <cmath>
+
+#include "framework/config_param.hpp"
+#include "framework/tensor_setup.hpp"
+
+namespace rpptest {
+
+// Independent host golden model for rppt_exposure, derived from the op's definition
+// (out = pixel * 2^exposureFactor), NOT from the RPP kernel.
+//
+// Integer types work in [0,255] intensity space and round to nearest; I8 pixels are the same
+// intensities shifted by -128:
+//   U8      : clamp[0,255]  ( round(v * mult) )
+//   I8      : clamp[-128,127]( round((v + 128) * mult) - 128 )
+//   F16/F32 : clamp[0,1]    ( v * mult )
+inline double exposure_scalar(double v, DType dt, double mult) {
+    switch (dt) {
+        case DType::U8: return clampd(std::nearbyint(v * mult), 0.0, 255.0);
+        case DType::I8: return clampd(std::nearbyint((v + 128.0) * mult), 0.0, 255.0) - 128.0;
+        case DType::F16:
+        case DType::F32: return clampd(v * mult, 0.0, 1.0);
+    }
+    return v;
+}
+
+template <typename T>
+void exposure_reference(const T* src, T* dst, const RpptDesc& d, DType dt, const RpptROI* roi,
+                        RpptRoiType roiType, double exposureFactor) {
+    const double mult = std::pow(2.0, exposureFactor);
+    for_each_roi_io(d, roi, roiType,
+                    [&](Rpp32u, Rpp32u, Rpp32u, Rpp32u, std::size_t srcIdx, std::size_t dstIdx) {
+                        dst[dstIdx] =
+                            from_double<T>(exposure_scalar(to_double(src[srcIdx]), dt, mult));
+                    });
+}
+
+}  // namespace rpptest
+
+#endif  // RPP_TEST_EXPOSURE_REF_H
