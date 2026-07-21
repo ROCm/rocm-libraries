@@ -177,7 +177,7 @@ def make_tex(figs,
 
     if histogram_bound != None:
         print("histogram bound: ", histogram_bound)
-        
+
     tex = header
 
     tex += "\n\\section{Introduction}\n"
@@ -373,7 +373,7 @@ def make_tex(figs,
             asycmd.extend(['-o', os.path.join(docdir, "histogramsig")])
 
             print(asycmd)
-            
+
             asyproc = subprocess.Popen(asycmd,
                                        cwd=top,
                                        stdout=fout,
