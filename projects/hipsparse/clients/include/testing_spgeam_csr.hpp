@@ -528,17 +528,37 @@ void testing_spgeam_csr(Arguments argus)
             hcsr_val_C_2.data(), dcsr_val_C_2, sizeof(T) * nnz_C_2, hipMemcpyDeviceToHost));
 #endif
 
-        // Compute host reference solution
+        // Compute host reference solution.
+        //
+        // Match the cuSPARSE SpGEAM behavior for zero scalars: when alpha is zero the output
+        // sparsity pattern is that of B, when beta is zero it is that of A, and when both are
+        // zero the output is empty. This is emulated by dropping the corresponding operand
+        // (feeding an empty matrix) to the host csrgeam reference.
+        const bool alpha_is_zero = (argus.alpha == 0.0 && argus.alphai == 0.0);
+        const bool beta_is_zero  = (argus.beta == 0.0 && argus.betai == 0.0);
+
+        std::vector<int> empty_row_ptr_A(m + 1, idxBaseA);
+        std::vector<int> empty_row_ptr_B(m + 1, idxBaseB);
+        std::vector<int> empty_col_ind;
+        std::vector<T>   empty_val;
+
+        const int* gold_row_ptr_A = alpha_is_zero ? empty_row_ptr_A.data() : hcsr_row_ptr_A.data();
+        const int* gold_col_ind_A = alpha_is_zero ? empty_col_ind.data() : hcsr_col_ind_A.data();
+        const T*   gold_val_A     = alpha_is_zero ? empty_val.data() : hcsr_val_A.data();
+        const int* gold_row_ptr_B = beta_is_zero ? empty_row_ptr_B.data() : hcsr_row_ptr_B.data();
+        const int* gold_col_ind_B = beta_is_zero ? empty_col_ind.data() : hcsr_col_ind_B.data();
+        const T*   gold_val_B     = beta_is_zero ? empty_val.data() : hcsr_val_B.data();
+
         std::vector<int> hcsr_row_ptr_C_gold(m + 1);
 
         int nnz_C_gold = host_csrgeam_nnz(m,
                                           n,
                                           h_alpha,
-                                          hcsr_row_ptr_A.data(),
-                                          hcsr_col_ind_A.data(),
+                                          gold_row_ptr_A,
+                                          gold_col_ind_A,
                                           h_beta,
-                                          hcsr_row_ptr_B.data(),
-                                          hcsr_col_ind_B.data(),
+                                          gold_row_ptr_B,
+                                          gold_col_ind_B,
                                           hcsr_row_ptr_C_gold.data(),
                                           idxBaseA,
                                           idxBaseB,
@@ -550,13 +570,13 @@ void testing_spgeam_csr(Arguments argus)
         host_csrgeam(m,
                      n,
                      h_alpha,
-                     hcsr_row_ptr_A.data(),
-                     hcsr_col_ind_A.data(),
-                     hcsr_val_A.data(),
+                     gold_row_ptr_A,
+                     gold_col_ind_A,
+                     gold_val_A,
                      h_beta,
-                     hcsr_row_ptr_B.data(),
-                     hcsr_col_ind_B.data(),
-                     hcsr_val_B.data(),
+                     gold_row_ptr_B,
+                     gold_col_ind_B,
+                     gold_val_B,
                      hcsr_row_ptr_C_gold.data(),
                      hcsr_col_ind_C_gold.data(),
                      hcsr_val_C_gold.data(),

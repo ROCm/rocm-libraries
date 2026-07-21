@@ -25,9 +25,10 @@
 include: hipsparse_common.yaml
 
 
-# The cuSPARSE SpGEAM backend requires host pointer mode scalars, both alpha and beta
-# nonzero, and does not support the bad-argument probing, so those cases are only run on
-# the rocSPARSE backend (see the rocm test yaml).
+# The cuSPARSE SpGEAM backend requires host pointer mode scalars (enforced by the test) and
+# does not support the bad-argument probing, so those cases are only run on the rocSPARSE
+# backend (see the rocm test yaml). The alpha/beta zero edge cases below match cuSPARSE on
+# this backend but are marked as known bugs on rocSPARSE (see the rocm test yaml).
 Tests:
 - name: spgeam_csr
   category: quick
@@ -38,6 +39,23 @@ Tests:
   alpha: [2.0]
   alphai: [0.0]
   beta: [-1.5]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+
+# Edge cases: alpha and/or beta equal to zero. cuSPARSE drops the operand scaled by a zero
+# scalar from C's sparsity pattern (alpha == 0 -> pattern of B, beta == 0 -> pattern of A,
+# both zero -> empty C).
+- name: spgeam_csr
+  category: quick
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: [325, 1057]
+  N: [174, 623]
+  alpha: [0.0, 2.0]
+  alphai: [0.0]
+  beta: [0.0, -1.5]
   betai: [0.0]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]

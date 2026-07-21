@@ -24,6 +24,18 @@
 ---
 include: hipsparse_common.yaml
 
+# Known bugs - tests matching these criteria are moved to the known_bug category so they are
+# not run. rocSPARSE currently does not match the cuSPARSE SpGEAM behavior when a scalar is
+# zero: cuSPARSE drops the operand scaled by a zero scalar from C's sparsity pattern
+# (alpha == 0 -> pattern of B, beta == 0 -> pattern of A, both zero -> empty C), while
+# rocSPARSE produces the union of A and B with the scaled-by-zero values set to zero. The
+# host reference matches cuSPARSE, so these cases fail on the rocSPARSE backend until
+# rocSPARSE is fixed.
+Known bugs:
+  - function: spgeam_csr
+    alpha: 0.0
+  - function: spgeam_csr
+    beta: 0.0
 
 Tests:
 - name: spgeam_csr_bad_arg
@@ -45,9 +57,9 @@ Tests:
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO]
 
-# Edge cases: alpha and/or beta equal to zero. The sparsity pattern of C is the union of
-# A and B and is independent of the values of alpha and beta on both the rocSPARSE and
-# cuSPARSE backends.
+# Edge cases: alpha and/or beta equal to zero. cuSPARSE drops the operand scaled by a zero
+# scalar from C's sparsity pattern (alpha == 0 -> pattern of B, beta == 0 -> pattern of A,
+# both zero -> empty C). On rocSPARSE these are currently marked as known bugs (see above).
 - name: spgeam_csr
   category: quick
   function: spgeam_csr
