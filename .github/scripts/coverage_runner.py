@@ -246,18 +246,18 @@ def main():
         if rc != 0:
             logging.warning("Tests exited with %d; continuing with coverage.", rc)
 
-    # Some test runners (e.g. GPU families whose machines have no matching GPU)
-    # run only host-side quick tests that never exercise the instrumented
-    # library, so they upload no profraw. With nothing to merge there is no
-    # coverage to report; treat that as a no-op success rather than failing the
-    # job, so the absence of data on one GPU family does not break CI.
+    # Coverage is a gating job: if the tests produced no profraw, fail loudly
+    # instead of passing as a silent no-op. An empty result means the library
+    # under test was not exercised or is not instrumented (e.g. the shipped
+    # artifact lacks instrumentation), which must surface rather than be hidden.
     if not list(profraw_dir.rglob("*.profraw")):
-        logging.warning(
-            "No .profraw files found under %s; skipping coverage report "
-            "(no instrumented test data was produced for this build).",
+        logging.error(
+            "No .profraw files found under %s; the tests produced no coverage "
+            "data (the library under test is likely not instrumented). "
+            "Failing the coverage job.",
             profraw_dir,
         )
-        return
+        raise SystemExit(1)
 
     profdata = merge_profraw_files(
         llvm_profdata, profraw_dir, args.coverage_dir / f"{project}.profdata"
