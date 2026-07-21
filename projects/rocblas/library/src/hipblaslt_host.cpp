@@ -24,8 +24,6 @@
 
 #include "rocblas.h"
 
-extern "C" void rocblas_shutdown();
-
 /*****************************************************************************
  * This is the only file in rocBLAS which should #include Hipblaslt headers    *
  * or reference Hipblaslt identifiers. hipblaslt_host.hpp defines the interface. *
