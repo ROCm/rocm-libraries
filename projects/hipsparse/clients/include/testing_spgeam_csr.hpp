@@ -280,21 +280,16 @@ void testing_spgeam_csr(Arguments argus)
     CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
         filename, m, n, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idxBaseA));
 
-    // B shares the sparsity pattern of A (both are m x n) so C = alpha * A + beta * B
-    int              nnz_B = nnz_A;
-    std::vector<int> hcsr_row_ptr_B(m + 1);
-    std::vector<int> hcsr_col_ind_B(nnz_B);
-    std::vector<T>   hcsr_val_B(nnz_B);
+    // B is generated as an independent m x n matrix so that it has a different sparsity
+    // pattern than A. This exercises the SpGEAM pattern-merge path (columns present in only
+    // one of the operands) and the guarantee that the output C column indices are sorted.
+    std::vector<int> hcsr_row_ptr_B;
+    std::vector<int> hcsr_col_ind_B;
+    std::vector<T>   hcsr_val_B;
 
-    for(int i = 0; i < m + 1; ++i)
-    {
-        hcsr_row_ptr_B[i] = hcsr_row_ptr_A[i] - idxBaseA + idxBaseB;
-    }
-    for(int i = 0; i < nnz_A; ++i)
-    {
-        hcsr_col_ind_B[i] = hcsr_col_ind_A[i] - idxBaseA + idxBaseB;
-    }
-    hipsparseInit<T>(hcsr_val_B, hcsr_val_B.size(), 1);
+    int nnz_B = 0;
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        "*", m, n, nnz_B, hcsr_row_ptr_B, hcsr_col_ind_B, hcsr_val_B, idxBaseB));
 
     // Allocate device memory
     auto dcsr_row_ptr_A_managed
