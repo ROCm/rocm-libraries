@@ -3,7 +3,7 @@
 """Workflow harness for the gfx1151 transposed-QK WMMA FMHA (swapqk) kernel.
 
 Single import surface for the build / verify / tune / benchmark loop, decoupled
-from the unified ``tune`` CLI driver.
+from the unified ``benchmark`` CLI driver.
 
 Production kernel (winning knobs baked in):
 
@@ -20,7 +20,7 @@ Verify + time one config on-device:
 
 Cross-machine board workflow (compile on any host, run on the gfx1151 board):
 the dense kernel compiles host-side (comgr targets gfx1151 regardless of the
-build host's GPU) but must EXECUTE on gfx1151, so the unified ``tune`` driver
+build host's GPU) but must EXECUTE on gfx1151, so the unified ``benchmark`` driver
 splits the two phases via ``--emit <dir>`` (compile hsaco, no GPU needed) and
 ``--prebuilt <dir>`` (load + verify + time on the board). ``--warmup`` /
 ``--iters`` scale the timing loop (dense attention is O(L^2): use small iters +
@@ -54,7 +54,7 @@ from kernels.gfx1151.wmma_fmha_multiwave import (  # noqa: F401
 )
 
 # Unified verify+time driver (per-kernel wrappers) and the shape descriptor.
-from .tune import (  # noqa: F401
+from .benchmark import (  # noqa: F401
     KERNELS,
     Shape,
     verify_and_time,

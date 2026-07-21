@@ -12,7 +12,7 @@ and (c) the persistent kernel's extra work-queue counter arg. Those live in the
 
 CLI (pick the kernel, sweep any config field)::
 
-    python -m builders.gfx1151.attention.tune --kernel swapqk \\
+    python -m builders.gfx1151.attention.benchmark --kernel swapqk \\
         --seqlen-q 2048 --seqlen-k 2048 --head-size 128 --heads 24 --batch 1 \\
         --grid n_waves=2 --grid block_n=32,64 --set qk_ilp=2 \\
         --set buffer_gather=1 --set dual_gather=1 --set lazy_rescale=1 \\
@@ -49,18 +49,42 @@ from .bench_v_staging import _find_objdump, _ref_attention
 
 # Kernel builders (production + candidates come via the kernels/ tree through the
 # back-compat shims; the remaining experimental kernels stay under builders/).
-from .fmha_singlewave import SingleWaveCfg, build_wmma_fmha_singlewave, singlewave_grid
-from .fmha_swapqk import SwapQKCfg, build_wmma_fmha_swapqk, swapqk_grid
-from .fmha_persistent import (
+from kernels.gfx1151.wmma_fmha_singlewave import (
+    SingleWaveCfg,
+    build_wmma_fmha_singlewave,
+    singlewave_grid,
+)
+from kernels.gfx1151.wmma_fmha_swapqk import (
+    SwapQKCfg,
+    build_wmma_fmha_swapqk,
+    swapqk_grid,
+)
+from kernels.gfx1151.wmma_fmha_swapqk_persistent import (
     PersistentCfg,
     build_wmma_fmha_persistent,
     num_work_items,
     persistent_grid,
 )
-from .fmha_multiwave import MultiWaveCfg, build_wmma_fmha_multiwave, multiwave_grid
-from .fmha_blockn import BlockNCfg, build_wmma_fmha_blockn, blockn_grid
-from .fmha_pipelined import PipelinedCfg, build_wmma_fmha_pipelined, pipelined_grid
-from .fmha_regblocked import RegBlockedCfg, build_wmma_fmha_regblocked, regblocked_grid
+from kernels.gfx1151.wmma_fmha_multiwave import (
+    MultiWaveCfg,
+    build_wmma_fmha_multiwave,
+    multiwave_grid,
+)
+from kernels.gfx1151.wmma_fmha_blockn import (
+    BlockNCfg,
+    build_wmma_fmha_blockn,
+    blockn_grid,
+)
+from kernels.gfx1151.wmma_fmha_pipelined import (
+    PipelinedCfg,
+    build_wmma_fmha_pipelined,
+    pipelined_grid,
+)
+from kernels.gfx1151.wmma_fmha_regblocked import (
+    RegBlockedCfg,
+    build_wmma_fmha_regblocked,
+    regblocked_grid,
+)
 
 
 @dataclass(frozen=True)

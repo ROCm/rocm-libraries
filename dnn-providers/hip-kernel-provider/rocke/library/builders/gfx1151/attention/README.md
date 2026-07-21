@@ -15,8 +15,9 @@
 >   (persistent work-queue grid) and `kernels/gfx1151/wmma_fmha_multiwave.py`.
 > - **Why it wins & how it's derived:** see the transposed-QK section in
 >   [`ALGORITHM.md`](ALGORITHM.md).
-> - **Tuning harness:** the unified [`tune.py`](tune.py) driver (`--kernel swapqk`,
->   `--set`/`--grid`, `--emit`/`--prebuilt`) and [`harness.py`](harness.py); the
+> - **Tuning harness:** the unified [`benchmark.py`](benchmark.py) driver
+>   (`--kernel swapqk`, `--set`/`--grid`, `--emit`/`--prebuilt`) and the importable
+>   [`gfx1151_dense_attention_builder.py`](gfx1151_dense_attention_builder.py); the
 >   dead-end levers (`d16_hi` inline-asm gather, `iglp_opt`, pipeline, LDS-Q, …)
 >   are kept as documented, off-by-default flags with their measured verdicts.
 > - **Scaling:** throughput peaks at L≈1024 and is cache/bandwidth-bound past
@@ -758,8 +759,7 @@ rescale when the tile max doesn't re-anchor), and **fast exp2** (raw
 |---|---|---|
 | 512  | w2 bn64 ilp2 | 22.9 |
 | 1024 | w2 bn64 ilp2 | **24.7** |
-| 2048 | w2 bn32 ilp2 | 22.8 |
-| 4096 | w2 bn64 ilp2 | 17.4 |
+| 2048 | w2 bn32 ilp2 | 23.1 |
 
 `w2 bn64 ilp2` is the robust default across shapes (ties `bn32` at L2048).
 Efficiency peaks at L≈1024 then declines — the KV working set spills the APU's
@@ -778,24 +778,26 @@ pingpong-optimal). `pipeline`, `q_hoist`, `q_lds`, `o_f16`, `static_shape`,
 
 ### Tuning & board workflow
 
-The unified [`tune.py`](tune.py) driver replaces the per-kernel `*_tune.py`
-scripts. Pick a kernel and sweep any config field; the dense kernel compiles
-host-side (comgr targets gfx1151 regardless of the build GPU) but must *execute*
-on gfx1151, so build and run are split:
+The unified [`benchmark.py`](benchmark.py) driver replaces the per-kernel
+`*_tune.py` scripts (all kernels now live in `kernels/gfx1151/`). Pick a kernel
+and sweep any config field; the dense kernel compiles host-side (comgr targets
+gfx1151 regardless of the build GPU) but must *execute* on gfx1151, so build and
+run are split:
 
 ```bash
 # 1. compile hsaco(s) on any host (no GPU needed):
-python -m builders.gfx1151.attention.tune --kernel swapqk --emit /tmp/art \
+python -m builders.gfx1151.attention.benchmark --kernel swapqk --emit /tmp/art \
     --seqlen-q 2048 --seqlen-k 2048 --head-size 128 --heads 24 --batch 1 \
     --grid n_waves=2 --grid block_n=32,64 --set qk_ilp=2 \
     --set buffer_gather=1 --set dual_gather=1 --set lazy_rescale=1 --set fast_exp2=1
 
 # 2. rsync /tmp/art -> gfx1151 board, then run the prebuilt objects there:
-python -m builders.gfx1151.attention.tune --kernel swapqk --prebuilt /tmp/art \
+python -m builders.gfx1151.attention.benchmark --kernel swapqk --prebuilt /tmp/art \
     ...same shape/grid flags... --warmup 10 --iters 50
 ```
 
 `--warmup`/`--iters` scale the timing loop (dense attention is O(L²): use small
 iters + `--no-verify` for long sequences, where the numpy reference is
-infeasible). [`harness.py`](harness.py) is the importable equivalent
-(`WmmaFmhaSwapQKSpec`, `build_wmma_fmha_swapqk_fwd`, `verify_and_time_swapqk`, …).
+infeasible). [`gfx1151_dense_attention_builder.py`](gfx1151_dense_attention_builder.py)
+is the importable equivalent (`WmmaFmhaSwapQKSpec`, `build_wmma_fmha_swapqk_fwd`,
+`verify_and_time_swapqk`, …).

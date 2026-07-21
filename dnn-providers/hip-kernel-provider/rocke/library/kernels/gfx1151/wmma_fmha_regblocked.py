@@ -46,6 +46,7 @@ Each tile op lowers to the exact same single instruction the raw path emitted
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
 from rocke.helpers import (
@@ -77,6 +78,12 @@ class RegBlockedCfg:
     m_repeat: int = 1  # 16-row M-atoms owned per wave
     block_n: int = 32  # keys consumed per K-loop step (n_repeat = /16)
     double_buffer: bool = False  # prefetch next K/V tile into a 2nd LDS buffer
+    # waves_per_eu (Lever 1): explicit AMDGPU occupancy target (CK's
+    # __launch_bounds__(128, 2)). ``None`` = backend heuristic. This kernel's
+    # density (m_repeat*n_repeat*n_dk WMMAs/tile) is exactly what over-spills the
+    # default 192-VGPR pin; a lower occupancy target lets the distributed
+    # accumulator use the top of the wave32 VGPR file (toward 256) spill-free.
+    waves_per_eu: Optional[int] = None
     name: str = "wmma_fmha_regblocked"
 
     @property
@@ -108,6 +115,7 @@ class RegBlockedCfg:
             f"m{self.m_repeat}",
             f"n{self.block_n}",
             "db" if self.double_buffer else "sb",
+            f"vpe{self.waves_per_eu}" if self.waves_per_eu is not None else "vpedef",
         )
 
 
@@ -163,6 +171,10 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
 
     b = IRBuilder(cfg.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = cfg.block_size
+    # Lever 1: relax occupancy so the register-blocked accumulator fits the VGPR
+    # file spill-free (CK's launch_bounds(128, 2)).
+    if cfg.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = cfg.waves_per_eu
     p = _declare_params(b)
 
     c0 = b.const_i32(0)

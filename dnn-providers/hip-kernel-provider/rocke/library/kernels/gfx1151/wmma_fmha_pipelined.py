@@ -79,6 +79,13 @@ class PipelinedCfg:
     fuse_k: Optional[bool] = None  # None = auto (head_size >= 128)
     sched: bool = False  # emit sched_group_barrier interleave hints
     p_xpose: str = "lds"  # "lds" | "shuffle" (ds_bpermute gfx11 CToA)
+    # waves_per_eu: register-pressure / occupancy control (the "register-trim"
+    # enabler). The pipeline carries the next-tile score through the iter-args;
+    # at D128 that pushes the default allocation to spill. Setting a tighter
+    # occupancy target makes the backend fit within the VGPR file (spill=0) and
+    # lets >=2 waves/SIMD co-reside so the softmax VALU of one wave hides in the
+    # WMMA shadow of another (pairs with s_setprio). None = backend heuristic.
+    waves_per_eu: Optional[int] = None
     name: str = "wmma_fmha_pipelined"
 
     @property
@@ -104,6 +111,7 @@ class PipelinedCfg:
             self.mask_mode,
             "sch" if self.sched else "nsch",
             self.p_xpose,
+            f"vpe{self.waves_per_eu}" if self.waves_per_eu is not None else "vpedef",
         )
 
 
@@ -152,6 +160,10 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
 
     b = IRBuilder(cfg.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = wave
+    # Register-trim / occupancy: force a tighter allocation so the pipelined
+    # next-tile-score carry fits without spilling and >=2 waves/SIMD co-reside.
+    if cfg.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = cfg.waves_per_eu
     p = _declare_params(b)
 
     c0 = b.const_i32(0)
