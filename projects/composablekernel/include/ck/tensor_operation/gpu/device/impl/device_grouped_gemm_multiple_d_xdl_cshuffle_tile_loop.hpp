@@ -571,7 +571,10 @@ struct DeviceGroupedGemmMultipleDXdlCShuffleTileLoop
         // The oversubscription factor for the number of blocks that can simultaneously reside on
         // GPU.
         static constexpr int BLOCK_SUBSCRIPTION_FACTOR = 1;
-        static constexpr int BLOCK_WAVES               = BlockSize / get_warp_size();
+        // XDL kernels target gfx9/CDNA only, where the warp size is 64. get_warp_size()
+        // is non-constexpr in host context on this branch, so use the literal here to keep
+        // BLOCK_WAVES a constant expression (mainline computes this at runtime instead).
+        static constexpr int BLOCK_WAVES               = BlockSize / 64;
         static constexpr int CU_SIMDS                  = 4;
         // Assume we want to have at most 2 waves per SIMD
         static constexpr int CU_BLOCKS = math::integer_divide_floor(2 * CU_SIMDS, BLOCK_WAVES);

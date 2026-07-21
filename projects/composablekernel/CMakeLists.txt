@@ -617,7 +617,9 @@ if(NOT GPU_ARCHS AND USER_GPU_TARGETS)
         LIBRARY_NAME composablekernel
         PACKAGE_NAME examples
    )
-   add_subdirectory(example)
+   if(NOT DEFINED BUILD_CK_EXAMPLES OR BUILD_CK_EXAMPLES)
+       add_subdirectory(example)
+   endif()
    add_subdirectory(tile_engine)
    if(BUILD_TESTING)
        add_subdirectory(test)
