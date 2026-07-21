@@ -38,9 +38,11 @@ kernel's behavior as code creates four problems that compound as the library gro
 - **Staleness.** These kernels come from upstream authors who revise them continuously, but every
   variant is hand-ported C++, so staying current means re-porting by hand. hipDNN falls behind: a stale
   copy misses a niche uplift (sometimes more than 2x) or keeps selecting a solution that is now 2x
-  slower, and the built value goes undelivered until someone funds the re-port.
-- **Maintainability.** The near-identical copies drift apart over time, and a fix or a bug has to be
-  chased across every one, with no single source of truth.
+  slower, and the built value goes undelivered until the re-port is prioritized.
+- **Maintainability.** Every hand-written variant is code the team then carries: it must be tested,
+  kept building, updated as interfaces change, and fixed when it breaks. The near-identical copies drift
+  apart over time, so that burden, test coverage included, is paid again for each one, with no single
+  source of truth.
 - **Feature velocity.** A cross-cutting change, such as hipGraph support or plan serialization, has to
   be threaded by hand through every one of those near-duplicate engines, so platform features arrive
   slowly and unevenly.
