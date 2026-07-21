@@ -31,7 +31,7 @@ an engine, a registration-table entry, bespoke launch code, and a selection heur
 kernel's behavior as code creates four problems that compound as the library grows.
 
 - **Scale.** Kernels multiply combinatorially: a variant per architecture, data type, and problem
-  shape, and again per fused form. rocKE already carries three to four SDPA-forward variants per
+  shape, and again per fused form. rocKE (ROCm's kernel engine) already carries three to four SDPA-forward variants per
   architecture, and convolution alone spans several algorithm families (implicit GEMM, explicit GEMM,
   direct, and Winograd). Ten variants per architecture is a near-term floor, with hundreds looming as
   coverage grows toward every algorithm and architecture. Each variant is another hand-written engine.
@@ -80,9 +80,9 @@ when and how to run it is ingested the same way.
 **Vision.** The goal is to let kernel authors own delivery end to end. hipDNN provides the tools and
 platform to describe, package, and release a kernel; the author takes it the rest of the way without
 waiting on provider changes. This cuts the friction from writing a fast kernel to shipping it and gives
-a defined path for extending the system. The end state is one generalized description covering both AOT
-and JIT kernels; AOT is the focus here, and JIT is a future follow-on
-([Section 8.3](#83-future-jit-and-normalized-providers)).
+a defined path for extending the system. The end state is one generalized description covering both
+ahead-of-time (AOT) and just-in-time (JIT) kernels; AOT is the focus here, and JIT is a future
+follow-on ([Section 8.3](#83-future-jit-and-normalized-providers)).
 
 **Scope.** This document frames the system and its direction; each descriptor format (UMD, UDD, UED,
 UHD) and subsystem (the matcher, the expression language, packaging, and the drop-in loader) is
@@ -104,7 +104,7 @@ full provider. This complements build-time codegen rather than replacing it.
 | Kernel sources | `kpack`, `hsaco` first; `hip`, `hiprtc` follow | new authoring adapters, DSLs ([§8.1](#81-kernel-source-adapters)) |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables ([§8.2](#82-heuristic-adapters)) |
 | Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§10](#10-packaging-and-delivery)) |
-| Execution composition: multi-launch program | None | composition ([§13.1](#131-several-kernels-for-one-operation)) |
+| Multi-kernel launch program (e.g. SDPA-BWD) | None | composition ([§13.1](#131-several-kernels-for-one-operation)) |
 | Selection composition: UCD pipeline | None | composition ([§13.2](#132-a-pipeline-of-separately-chosen-kernels)) |
 | JIT compilation; normalized providers | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
 
@@ -187,11 +187,11 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```jsonc
 {
   "schema": "hipdnn.ued/v1",
-  "id":     3310472051,            // stable, unique; referenced by UKDs
-  "name":   "Example attention engine",         // human-readable label
-  "behavior_notes":  ["runtime_compilation"],    // hipDNN behavior notes for this engine
-  "numerical_notes": ["tensor_core", "reduced_precision_reduction"], // hipDNN numerical notes
-  "knobs": [                                      // author-exposed, user-controllable
+  "id":     3310472051,                        // stable, unique; referenced by UKDs
+  "name":   "Example attention engine",        // human-readable label
+  "behavior_notes":  ["runtime_compilation"],  // hipDNN behavior notes for this engine
+  "numerical_notes": ["tensor_core", "reduced_precision_reduction"],  // hipDNN numerical notes
+  "knobs": [                                   // author-exposed, user-controllable
     {"name": "split_k",     "type": "int", "default": 1, "constraint": {"min": 1, "max": 8}},
     {"name": "use_atomics", "type": "int", "default": 0, "constraint": {"one_of": [0, 1]}}
   ]
@@ -205,13 +205,13 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
   "schema": "hipdnn.uhd/v1",
   "id":     3310472052,       // stable, unique; referenced by UKDs
   "name":   "Example attention LightGBM selector",
-  "kind":   "model",                   // "model" | "static_order" | "custom_library"
+  "kind":   "model",          // "model" | "static_order" | "custom_library"
   "model": {
-    "framework": "lightgbm",           // tagged so other frameworks are additive
+    "framework": "lightgbm",  // tagged so other frameworks are additive
     "artifact":  "example_attn/model.bin",
     "features":  "example_attn/features.json"
   },
-  "objective": "max"                   // higher predicted score wins
+  "objective": "max"          // higher predicted score wins
 }
 ```
 
@@ -220,10 +220,10 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
-  "id":     8811203344,   // stable; referenced by UKDs
+  "id":     8811203344,    // stable; referenced by UKDs
   "name":   "SDPA prefill d128 bf16 match",
-  "nodes":       [ ... ],               // structural pattern (Section 5)
-  "constraints": [ ... ]                // dtype / shape / attr / predicate (Section 5)
+  "nodes":       [ ... ],  // structural pattern (Section 5)
+  "constraints": [ ... ]   // dtype / shape / attr / predicate (Section 5)
 }
 ```
 
@@ -250,13 +250,13 @@ examples keep them separate for clarity and reuse.
   "schema": "hipdnn.ukd/v1",
   "id":        4471900201,
   "name":      "Example attention prefill d128 bf16 (gfx942)",
-  "engine":    3310472051,       // UED id this kernel joins
+  "engine":    3310472051,         // UED id this kernel joins
   "heuristic": 3310472052,         // UHD id that ranks it
-  "priority":  100,                          // tie-break when the UHD is not decisive
-  "match":     8811203344,    // UMD id: when it applies (Section 5)
+  "priority":  100,                // tie-break when the UHD is not decisive
+  "match":     8811203344,         // UMD id: when it applies (Section 5)
 
-  "launches": [                              // one Launch here; N for a multi-launch kernel (Section 13)
-    {"kernel_source": { ... },              // Section 7: where the code lives
+  "launches": [                    // one Launch here; N for a multi-launch kernel (Section 13)
+    {"kernel_source": { ... },     // Section 7: where the code lives
      "dispatch":      8811203390}  // which UDD invokes it (Section 6)
   ]
 }
@@ -268,8 +268,8 @@ files. Only UKDs are batched; UMD/UDD/UED/UHD stay individual and referenced by 
 ```jsonc
 {
   "schema": "hipdnn.kdp/v1",
-  "version": "1",                            // pack format version, gated at load
-  "kernelDescriptors": [                     // N UKDs
+  "version": "1",         // pack format version, gated at load
+  "kernelDescriptors": [  // N UKDs
     { "id": 4471900201, ... },
     { "id": 4471900202,  ... }
     // ...
@@ -312,19 +312,23 @@ The UMD below matches SDPA forward and binds the tensors and dims its Launch wil
   ],
   "constraints": [
     {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "layout": "bhsd",
-     "shape": ["batch", "num_heads", "seqlen_q", "head_size"]},   // binds batch, num_heads, seqlen_q, head_size
+     "shape": ["batch", "num_heads", "seqlen_q", "head_size"]},  // binds batch, num_heads, seqlen_q, head_size
     {"on": "$k", "dtype": {"one_of": ["BFLOAT16"]}, "shape": ["batch", "num_heads", "seqlen_k", "head_size"]},
     {"on": "$v", "dtype": {"one_of": ["BFLOAT16"]}},
     {"kind": "native_predicate", "name": "hipdnn.same_head_dim", "args": ["$q", "$k", "$v"]},
-    {"on": "root", "attr": {"head_size": {"equals": 128}, "mask_mode": {"one_of": ["none"]}}}
+    {"on": "root",   "attr": {"head_size": {"equals": 128}, "mask_mode": {"one_of": ["none"]}}},
+    {"on": "device", "arch": {"one_of": ["gfx942"]}}  // gate on GPU architecture
   ]
 }
 ```
 
-Matching a graph does double duty: it decides the kernel applies and it binds named variables (`$q`,
-`$k`, dims like `seqlen_q`) to concrete tensors and values. The dispatch and workspace
-formulas in the UDD ([Section 6](#6-dispatch-and-workspace)) then reference those bound names, so one
-match feeds every Launch downstream.
+Matching does double duty: it decides the kernel applies and it binds named variables to concrete
+tensors and values. A symbol has a clear lifecycle. It is **declared** in the UMD, as a dim named in a
+tensor's `shape` or an op attribute; **bound** to a concrete value when the graph matches; then
+**used** in the UDD's dispatch and workspace formulas ([Section 6](#6-dispatch-and-workspace)). For
+example, `seqlen_q` is declared above as `$q`'s third dim, bound when the SDPA graph matches, and used
+in the grid formula `ceil_div(seqlen_q, 16)` in Section 6. Every symbol a formula uses must be declared
+this way, so a formula can only reference values the match actually produces.
 
 ![A live graph is matched against a declarative pattern, binding named variables](../images/ukd_criteria_match.svg)
 
@@ -340,6 +344,12 @@ The constraint vocabulary covers what the hand-written checks do today:
 | **Use-count / exclusivity** | "Used exactly once", or "no consumer outside the pattern", the safety check that a substitution is legal |
 | **Cross-tensor relation** | A relation over two or more bound variables (e.g. same head dim across Q/K/V) |
 | **Optional / variadic operands** | Optional slots (bias, mask, dropout) that a shorter match may skip |
+| **Device / architecture** | Restrict to specific GPU archs, for example `arch: {one_of: ["gfx942"]}` |
+
+Most constraints target a bound tensor (`$q`) or a matched op node (`root`); `device` is a special
+target for properties of the GPU rather than the graph. The device constraint gates *applicability* at
+match time, while the per-architecture `kpack` manifest ([Section 10](#10-packaging-and-delivery))
+gates *loadability* at install and load; both must agree for a kernel to run.
 
 **Escape hatch.** When a check cannot be expressed declaratively, a UMD constraint may name a
 **native predicate** resolved from a provider-internal registry:
@@ -389,7 +399,7 @@ no consumer outside the pattern), so one UKD serves the whole chain as a single 
     {"on": "$y", "dtype": {"one_of": ["FLOAT16"]}, "layout": "nhwc",
      "shape": ["batch", "out_h", "out_w", "out_channels"]},
     {"on": "$bias", "shape": ["out_channels"]},
-    {"on": "$conv_out", "use_count": 1},   // private to the subgraph, so the fusion is legal
+    {"on": "$conv_out", "use_count": 1},  // private to the subgraph, so the fusion is legal
     {"on": "$bias_out", "use_count": 1}
   ]
 }
@@ -417,13 +427,15 @@ references a symbol its UMD does not bind is rejected then, rather than left to 
 on a live graph. Plan-time fail-closed remains a backstop, not the first line of defense.
 
 ```jsonc
-{                                       // a UDD
+{  // a UDD; every `sym` below is a dim the UMD binds (Section 5)
   "schema": "hipdnn.udd/v1",
   "grid":  {"x": {"op": "ceil_div", "args": [{"sym": "seqlen_q"}, 16]},
             "y": {"sym": "num_heads"}, "z": {"sym": "batch"}},
   "block": {"x": 256, "y": 1, "z": 1},
   "shared_mem_bytes": 32768,
-  "workspace_bytes":  0                 // a formula when the kernel needs scratch
+  "workspace_bytes": {"op": "mul",  // scratch = batch * num_heads * seqlen_q * 4 bytes
+                      "args": [{"op": "mul", "args": [{"sym": "batch"}, {"sym": "num_heads"}]},
+                               {"op": "mul", "args": [{"sym": "seqlen_q"}, 4]}]}
 }
 ```
 
@@ -438,7 +450,7 @@ generically.
 so the generic launcher can assemble the call directly from the matched graph:
 
 ```jsonc
-{                                       // the same UDD, continued
+{  // the same UDD, continued
   ...,
   "args_signature": [
     {"name": "Q",          "kind": "pointer", "source": {"from": "tensor", "ref": "$q"}},
@@ -668,10 +680,10 @@ UDD, and a UKD that binds them inside a KDP. It reuses the SDPA forward UMD from
       "engine":    9100067001,
       "heuristic": 9100067002,
       "priority":  100,
-      "match":     1180449020,        // the UMD above
-      "launches": [                              // one Launch: source + UDD
+      "match":     1180449020,         // the UMD above
+      "launches": [                    // one Launch: source + UDD
         {"kernel_source": {"kind": "kpack", "entry": "rocke/sdpa_fwd/d128_bf16_gfx942"},
-         "dispatch":      1180449055}   // the UDD above
+         "dispatch":      1180449055}  // the UDD above
       ]
     }
     // more UKDs (d64, other dtypes/arches) reuse the same UMD/UDD or their own
@@ -808,19 +820,23 @@ consumers. The whole program is ranked as a unit by a single heuristic (it compe
 whole programs for the same graph, not against its own Launches) and is selected atomically; a caller
 never picks a subset of its Launches.
 
+The UMD referenced below (id `7715002230`, not shown) matches `sdpa_bwd` and binds the inputs
+`$q, $k, $v, $o, $do`, the gradient outputs `$dq, $dk, $dv`, and the dims `batch, num_heads, seqlen_q,
+seqlen_k` that the Launch formulas and the `$D` intermediate use.
+
 ```jsonc
 {
   "schema": "hipdnn.ukd/v1",
   "id":   7715002999,
   "name": "SDPA backward (d128, bf16, gfx942)",
   "engine":    9100067001,
-  "heuristic": 9100067002,              // one pick: the program is co-designed
-  "match":     7715002230,      // one UMD: matches sdpa_bwd once, binds vars
+  "heuristic": 9100067002,  // one pick: the program is co-designed
+  "match":     7715002230,  // one UMD: matches sdpa_bwd once, binds vars
 
-  "intermediates": [                      // named scratch (see 10.3)
+  "intermediates": [        // named scratch (see 13.3)
     {"name": "$D", "dtype": "FLOAT", "shape": ["batch", "num_heads", "seqlen_q"]}
   ],
-  "launches": [                           // three Launches, each a (kernel source + UDD) pair
+  "launches": [             // three Launches, each a (kernel source + UDD) pair
     {"name": "preprocess",
      "kernel_source": {"kind": "kpack", "entry": "rocke/sdpa_bwd/preprocess_d128_bf16_gfx942"},
      "dispatch": {
@@ -892,11 +908,11 @@ its stages' programs, with each stage's intermediates remapped into the composit
 
 ```jsonc
 {
-  "schema": "hipdnn.ucd/v1",              // UCD = Universal Composite Descriptor
+  "schema": "hipdnn.ucd/v1",  // UCD = Universal Composite Descriptor
   "id":   2093844170,
   "name": "Layout-adapted work pipeline",
-  "engine": 2093800000,            // its own engine; engine selection picks it vs. the fused engine
-  "match":  2093844001,          // one UMD: matches the work fragment once; binds $x (in), $y (out)
+  "engine": 2093800000,       // its own engine; engine selection picks it vs. the fused engine
+  "match":  2093844001,       // one UMD: matches the work fragment once; binds $x (in), $y (out)
 
   "intermediates": [
     {"name": "$x_t", "dtype": {"same_as": "$x"}, "shape": {"layout_of": "$x", "as": "nchw"}},
