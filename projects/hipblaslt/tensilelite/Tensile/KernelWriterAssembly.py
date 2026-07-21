@@ -14474,7 +14474,7 @@ class KernelWriterAssembly(KernelWriter):
                   "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
                   "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
                   "SrdA", "SrdB", "SrdMXSA", "SrdMXSB",
-                  "SrdC", "SrdWS"):
+                  "SrdC"):
       if _name in self.sgprs and _name not in self.states.freeSgprVarPool:
         self.addSgprVarToPool(_name)
         lentSgprs.append(_name)
