@@ -827,7 +827,10 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::SOrSaveExecB32, "s_or_saveexec_b32"},
     {logical::SOrSaveExecB64, "s_or_saveexec_b64"},
     // Scalar Control
-    {logical::SBarrier, "s_barrier"},
+    // gfx1250 has no plain s_barrier; ToStinkyAsmPass legalizes SBarrier into an
+    // s_barrier_signal -1 / s_barrier_wait -1 pair (mirrors rocisa's legalizeBarrier),
+    // so the first emitted mnemonic is s_barrier_signal, not s_barrier.
+    {logical::SBarrier, "s_barrier_signal"},
     {logical::SGetRegB32, "s_getreg_b32"},
     {logical::SSetRegB32, "s_setreg_b32"},
     {logical::SSetRegIMM32B32, "s_setreg_IMM32_b32"},
@@ -1053,10 +1056,15 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
     std::set<logical::Opcode> SKIP_LOWERING = {
         logical::Label,
         logical::IntrinsicCall,
-        // MFMA, MXMFMA: Now supported via custom mnemonic generation in ToStinkyAsmPass
+        // MFMA: Now supported via custom mnemonic generation in ToStinkyAsmPass
         // TensorLoadToLds: Now works via generic createAsmFromIR (gfx1250 only)
         // SMFMA and other gfx9-only instructions not supported on gfx1250
         logical::SMFMA,
+        // MXMFMA: the factory builds a placeholder 16x16x4/f32 shape whose generated
+        // mnemonic (v_wmma_scale_f32_16x16x4_f32) has no gfx1250 ISA .def entry (only
+        // the k=128 f8f6f4/f4 scaled-WMMA variants exist), so lowering hits an
+        // UNREACHABLE and aborts. Skip until the factory uses a real supported shape.
+        logical::MXMFMA,
         logical::VMadMixF32,
         logical::BufferLoadD16I8,
         logical::VDot2CF32F16,
