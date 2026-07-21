@@ -272,6 +272,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_dll_dirs.py"
             CONTENT "DEP_DLLS = [p for p in r'''$<TARGET_RUNTIME_DLLS:_rocisa>'''.split(';') if p]\n"
         )
+    endif()
 
     # ---------------------------------------------------------------------
     # Sibling staging for the stinkytofu Python package.
