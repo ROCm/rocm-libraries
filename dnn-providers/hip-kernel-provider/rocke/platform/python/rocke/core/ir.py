@@ -2980,6 +2980,26 @@ class IRBuilder:
             result_name_hint="bl1",
         ).result
 
+    def buffer_load_f16_d16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
+        """D16 scalar f16 buffer load via ``raw_ptr_buffer_load.f16`` returning
+        `half` DIRECTLY (not `i16` + bitcast).
+
+        Unlike :meth:`buffer_load_f16` (which zero-extends an i16 into a full
+        VGPR and thus needs an explicit ``v_mov_b16`` to pack), the `half`
+        return lets the AMDGPU backend select ``buffer_load_short_d16`` /
+        ``buffer_load_short_d16_hi`` -- packing two strided halves into one
+        register's lo/hi lane for free (the buffer analogue of
+        ``global_load_d16_b16/_hi_b16``) when the results feed an
+        ``insertelement <2 x half>``. Same per-element OOB clamp. Address =
+        rsrc.base + voffset + soffset computed in the memory unit (no VALU).
+        """
+        return self._op(
+            "tile.buffer_load_f16_d16",
+            [rsrc, voffset, soffset],
+            [F16],
+            result_name_hint="bld16",
+        ).result
+
     def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
         """Scalar bf16 buffer load via `raw_ptr_buffer_load_u16` + bitcast.
 

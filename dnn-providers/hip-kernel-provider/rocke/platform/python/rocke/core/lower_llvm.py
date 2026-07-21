@@ -581,6 +581,17 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
         "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
     ),
+    # D16 2-byte buffer load returning `half` DIRECTLY (not i16+bitcast). This is
+    # the enabler for `buffer_load_short_d16` / `buffer_load_short_d16_hi`
+    # selection: when two of these feed an `insertelement <2 x half>`, the AMDGPU
+    # backend packs them into one register's lo/hi half (the buffer analogue of
+    # global_load_d16_b16/_hi_b16) -- recovering the free f16 packing the i16 path
+    # loses (which otherwise needs an explicit v_mov_b16 per element + serializes
+    # the load clause). Same OOB-per-element clamp as the i16 form.
+    "raw.ptr.buffer.load.f16": (
+        "declare half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+        "ptr addrspace(8) nocapture readonly, i32, i32, i32 immarg)"
+    ),
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
@@ -3309,6 +3320,21 @@ class _Lowerer:
             f"i32 0)"
         )
         self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to half")
+
+    def _op_tile_buffer_load_f16_d16(self, op: Op) -> None:
+        """D16 half buffer load via ``raw.ptr.buffer.load.f16`` (returns `half`
+        directly). Lets the backend pack two strided halves into one register's
+        lo/hi lane (buffer_load_short_d16 / _d16_hi) when the results feed an
+        insertelement <2 x half>, instead of the i16-path's explicit v_mov_b16."""
+        rsrc, voffset, soffset = op.operands
+        self._need("raw.ptr.buffer.load.f16")
+        self._current().emit(
+            f"  {op.result.name} = call half @llvm.amdgcn.raw.ptr.buffer.load.f16("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
 
     def _op_tile_buffer_load_vN(self, op: Op) -> None:
         """Dtype-generic vectorised buffer load.
