@@ -28,7 +28,7 @@
   <!-- UED -->
   <rect x="30" y="252" width="250" height="66" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
   <text x="45" y="274" font-weight="600">UED: Universal Engine Descriptor</text>
-  <text x="45" y="294" font-size="12" fill="#333">engine identity, tags[], knobs[]</text>
+  <text x="45" y="294" font-size="12" fill="#333">engine identity, knobs[], notes[]</text>
   <text x="45" y="310" font-size="12" fill="#333">a named group of kernels</text>
 
   <!-- ======================= COLUMN 2: the UKD binding (one of N in a KDP) ======================= -->
@@ -63,7 +63,7 @@
   <text x="628" y="128" font-weight="600" font-size="11" fill="#333">Launch 1  =  kernel source  +  UDD</text>
   <rect x="628" y="134" width="130" height="40" rx="6" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="693" y="153" text-anchor="middle" font-size="12">kernel source</text>
-  <text x="693" y="168" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip_source / hiprtc</text>
+  <text x="693" y="168" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip / hiprtc</text>
   <text x="780" y="159" text-anchor="middle" font-size="16" fill="#555">+</text>
   <rect x="804" y="134" width="132" height="40" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="870" y="153" text-anchor="middle" font-size="12">UDD</text>
@@ -74,7 +74,7 @@
   <text x="628" y="210" font-weight="600" font-size="11" fill="#333">Launch 2  =  kernel source  +  UDD</text>
   <rect x="628" y="216" width="130" height="40" rx="6" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="693" y="235" text-anchor="middle" font-size="12">kernel source</text>
-  <text x="693" y="250" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip_source / hiprtc</text>
+  <text x="693" y="250" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip / hiprtc</text>
   <text x="780" y="241" text-anchor="middle" font-size="16" fill="#555">+</text>
   <rect x="804" y="216" width="132" height="40" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="870" y="235" text-anchor="middle" font-size="12">UDD</text>

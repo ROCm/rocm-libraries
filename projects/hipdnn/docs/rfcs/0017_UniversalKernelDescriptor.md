@@ -12,7 +12,7 @@
 6. [Dispatch and Workspace](#6-dispatch-and-workspace)
 7. [Kernel Source](#7-kernel-source)
 8. [Adapters and Extensibility](#8-adapters-and-extensibility)
-9. [End-to-End Flow](#9-end-to-end-flow)
+9. [Observability and Diagnostics](#9-observability-and-diagnostics)
 10. [Packaging and Delivery](#10-packaging-and-delivery)
 11. [Worked Example: SDPA as a UKD](#11-worked-example-sdpa-as-a-ukd)
 12. [Phased Delivery](#12-phased-delivery)
@@ -30,23 +30,19 @@ Every kernel hipDNN's kernel provider runs is hand-written C++: a plan builder t
 an engine, a registration-table entry, bespoke launch code, and a selection heuristic. Carrying each
 kernel's behavior as code creates four problems that compound as the library grows.
 
-- **Scale.** Kernels multiply combinatorially, a variant per architecture, data type, and problem
+- **Scale.** Kernels multiply combinatorially: a variant per architecture, data type, and problem
   shape, and again per fused form. rocKE already carries three to four SDPA-forward variants per
-  architecture, and convolution alone will span igemm, egemm, naive, Winograd, and optimized-naive
-  families before per-pipeline variants expand it further. Ten variants per architecture is a near-term
-  floor, with hundreds looming as coverage grows toward every algorithm and architecture. Each variant
-  is another hand-written engine.
-- **Staleness.** These kernels come from upstream authors who revise them continuously. Because every
-  variant is hand-ported C++, staying current means re-porting by hand, and each improvement becomes a
-  cost-benefit call on whether the rollout is worth the effort. The consequence is concrete: a stale
-  copy can miss a large uplift for a niche case (sometimes more than 2x), or keep selecting a solution
-  that is now 2x slower until someone finds time to update it. That cost is high enough that keeping
-  kernels fresh competes directly with other work, and value that has already been built goes
-  undelivered.
-- **Sprawl.** The result is a large body of nearly (but not quite) identical sources, each of which
-  must be read, tested, and maintained on its own.
-- **Slow features.** A cross-cutting change, such as hipGraph support or plan serialization, has to be
-  threaded by hand through every one of those near-duplicate engines, so platform features arrive
+  architecture, and convolution alone spans several algorithm families (implicit GEMM, explicit GEMM,
+  direct, and Winograd). Ten variants per architecture is a near-term floor, with hundreds looming as
+  coverage grows toward every algorithm and architecture. Each variant is another hand-written engine.
+- **Staleness.** These kernels come from upstream authors who revise them continuously, but every
+  variant is hand-ported C++, so staying current means re-porting by hand. hipDNN falls behind: a stale
+  copy misses a niche uplift (sometimes more than 2x) or keeps selecting a solution that is now 2x
+  slower, and the built value goes undelivered until someone funds the re-port.
+- **Maintainability.** The near-identical copies drift apart over time, and a fix or a bug has to be
+  chased across every one, with no single source of truth.
+- **Feature velocity.** A cross-cutting change, such as hipGraph support or plan serialization, has to
+  be threaded by hand through every one of those near-duplicate engines, so platform features arrive
   slowly and unevenly.
 
 This RFC moves kernel behavior out of code and into data: declarative descriptor files that one
@@ -59,8 +55,8 @@ works from a small family of reusable descriptors, bound together for one kernel
   which also bind the named variables a launch references.
 - **UDD (Universal Dispatch Descriptor).** How to invoke a kernel, the dispatch ABI: argument binding
   and ordering, grid, block, shared memory, and workspace.
-- **UED (Universal Engine Descriptor).** One engine: a stable identity plus the knobs and tags it
-  exposes. An engine is a named group of kernels.
+- **UED (Universal Engine Descriptor).** One engine: a stable identity plus the knobs it exposes and
+  its behavior and numerical notes. An engine is a named group of kernels.
 - **UHD (Universal Heuristic Descriptor).** One kernel-selection model: given many kernels that fit a
   graph, it picks the best one for the problem.
 - **UKD (Universal Kernel Descriptor).** One launchable kernel, a thin binding with no logic of its
@@ -75,30 +71,27 @@ small UKD each, not hundreds of near-duplicate files.
 
 A prototype for a single operation (SDPA) runs a kernel end-to-end from a generic launch core plus a
 thin operation-specific adapter (rocKE, [PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)).
-The step this RFC takes is to turn that adapter into data, so that any kernel expressible as a code
-object plus a description of when and how to run it can be ingested the same way.
+This RFC generalizes that adapter into a complete data description of a kernel and makes that
+generalized form the delivery vehicle: any kernel expressible as a code object plus a description of
+when and how to run it is ingested the same way.
 
 ![Hand-written C++ per kernel today versus dropping in descriptor data](../images/ukd_before_after.svg)
 
 **Vision.** The goal is to let kernel authors own delivery end to end. hipDNN provides the tools and
-the platform to describe, package, and release a kernel, and an author who writes a fast kernel takes
-it the rest of the way without waiting on provider changes, so the friction between writing a fast
-kernel and getting it into a user's hands drops toward zero. Concretely, that means one generalized
-system for describing both AOT and JIT kernels, with the data-plus-adapter provider
-([Section 8](#8-adapters-and-extensibility)) as one vehicle toward it: a new authoring tool, a new
-selection model, or eventually a whole provider becomes data plus an adapter rather than new C++, and a
-platform feature lands once for every descriptor-backed kernel.
+platform to describe, package, and release a kernel; the author takes it the rest of the way without
+waiting on provider changes. This cuts the friction from writing a fast kernel to shipping it and gives
+a defined path for extending the system. The end state is one generalized description covering both AOT
+and JIT kernels; AOT is the focus here, and JIT is a future follow-on
+([Section 8.3](#83-future-jit-and-normalized-providers)).
 
-**Scope.** This document is high-level by design: it frames the system and its direction, and each
-complex piece (the matcher, the expression language, the packaging pipeline, the drop-in loader, and
-the composition layer) is expanded in its own follow-up RFC. The first deliverable is the single-kernel
-path, one UKD with its UMD, UDD, UED, and UHD; multi-kernel programs and composition
-([Section 13](#13-multiple-kernels-and-composition)) are the target design but are not committed here.
-The model covers kernels that reduce to a loadable code object described declaratively, with a named
-escape hatch for a step that genuinely needs C++ (Sections [5](#5-matching-and-the-umd) and
-[6](#6-dispatch-and-workspace)); anything needing a new C-API surface or a runtime dependency stays a
-full provider. It complements build-time codegen rather than replacing it, since the most tuned kernels
-come from many sources: hand-written, an assembly generator, the rocKE generator, or a DSL.
+**Scope.** This document frames the system and its direction; each descriptor format (UMD, UDD, UED,
+UHD) and subsystem (the matcher, the expression language, packaging, and the drop-in loader) is
+designed in its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)). The first deliverable is the
+single-kernel path. Multi-kernel launch and composition
+([Section 13](#13-multiple-kernels-and-composition)) are fast-follows, not part of this initial design.
+A named escape hatch covers a step that genuinely needs C++ (Sections [5](#5-matching-and-the-umd) and
+[6](#6-dispatch-and-workspace)); anything needing a new C-API surface or runtime dependency stays a
+full provider. This complements build-time codegen rather than replacing it.
 
 ### 1.1 What Ships Now Versus Later
 
@@ -108,9 +101,9 @@ come from many sources: hand-written, an assembly generator, the rocKE generator
 | Fusion: one UMD matches a bounded multi-op subgraph, run as one kernel | Yes ([§5](#5-matching-and-the-umd)) | None |
 | Match constraints: opcode, dtype, shape, layout, attribute, use-count, cross-tensor, bounded optional and commutative slots | Yes ([§5](#5-matching-and-the-umd)) | None |
 | General matching: N-ary commutative, unbounded chains | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
-| Kernel sources | `kpack`, `hsaco` first; `hip_source`, `hiprtc` follow | new authoring adapters, DSLs ([§8.1](#81-kernel-source-adapters)) |
+| Kernel sources | `kpack`, `hsaco` first; `hip`, `hiprtc` follow | new authoring adapters, DSLs ([§8.1](#81-kernel-source-adapters)) |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables ([§8.2](#82-heuristic-adapters)) |
-| Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-source trust rules ([§10](#10-packaging-and-delivery)) |
+| Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§10](#10-packaging-and-delivery)) |
 | Execution composition: multi-launch program | None | composition ([§13.1](#131-several-kernels-for-one-operation)) |
 | Selection composition: UCD pipeline | None | composition ([§13.2](#132-a-pipeline-of-separately-chosen-kernels)) |
 | JIT compilation; normalized providers | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
@@ -127,7 +120,7 @@ becomes data instead of hand-written code.
 | **UKD** (kernel) | Bind the pieces below into one launchable kernel | A hand-coded `IPlanBuilder::isApplicable` check plus bespoke launch code |
 | **UMD** (match) | Accept a graph and bind its named variables | The graph half of `isApplicable` |
 | **UDD** (dispatch) | Invoke a kernel: args & ordering, grid/block, shared mem, workspace | The bespoke launch and argument-wiring code |
-| **UED** (engine) | A stable engine identity with its knobs and tags | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
+| **UED** (engine) | A stable engine identity with its knobs and behavior/numerical notes | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
 | **UHD** (heuristic) | Rank the kernels within one engine and pick one | A ranking model living inside an engine's dispatcher |
 
 A UKD carries no logic of its own. It binds one UMD, one UED, one UHD, and one or more Launches, where
@@ -183,21 +176,22 @@ Descriptors are authored in a human-readable, diffable text format and compiled 
 form for fast loading. Each format has a defined schema (a JSON Schema or FlatBuffer definition) and a
 version; a descriptor is refused, never silently reinterpreted, if its version is newer than the
 runtime understands, and the concrete schema for each format lands in that format's follow-up RFC.
-Every descriptor also carries a stable `id` used for cross-references and a `name` that is mandatory for
+Every descriptor also carries a stable, opaque `id` used for cross-references and a `name` that is mandatory for
 logging and diagnostics; both appear in the examples. The examples are illustrative, and the
 `schema`/version plumbing is shown once here and elided elsewhere.
 
 ![Descriptor formats: a KDP of UKDs, each referencing reusable UMD, UDD, UED, and UHD by ID](../images/ukd_descriptor_formats.svg)
 
-**UED, an engine with its knobs and tags:**
+**UED, an engine with its knobs and notes:**
 
 ```jsonc
 {
   "schema": "hipdnn.ued/v1",
-  "id":     "EXAMPLE_ATTN_ENGINE",            // stable, unique; referenced by UKDs
-  "name":   "Example attention engine",       // human-readable label
-  "tags":   ["experimental", "prefill-only"], // user-filterable; extends today's engine behavior notes
-  "knobs": [                                    // author-exposed, user-controllable
+  "id":     3310472051,            // stable, unique; referenced by UKDs
+  "name":   "Example attention engine",         // human-readable label
+  "behavior_notes":  ["runtime_compilation"],    // hipDNN behavior notes for this engine
+  "numerical_notes": ["tensor_core", "reduced_precision_reduction"], // hipDNN numerical notes
+  "knobs": [                                      // author-exposed, user-controllable
     {"name": "split_k",     "type": "int", "default": 1, "constraint": {"min": 1, "max": 8}},
     {"name": "use_atomics", "type": "int", "default": 0, "constraint": {"one_of": [0, 1]}}
   ]
@@ -209,7 +203,7 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```jsonc
 {
   "schema": "hipdnn.uhd/v1",
-  "id":     "EXAMPLE_ATTN_LGBM",       // stable, unique; referenced by UKDs
+  "id":     3310472052,       // stable, unique; referenced by UKDs
   "name":   "Example attention LightGBM selector",
   "kind":   "model",                   // "model" | "static_order" | "custom_library"
   "model": {
@@ -226,7 +220,7 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
-  "id":     "sdpa_prefill_d128_bf16",   // stable; referenced by UKDs
+  "id":     8811203344,   // stable; referenced by UKDs
   "name":   "SDPA prefill d128 bf16 match",
   "nodes":       [ ... ],               // structural pattern (Section 5)
   "constraints": [ ... ]                // dtype / shape / attr / predicate (Section 5)
@@ -238,7 +232,7 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```jsonc
 {
   "schema": "hipdnn.udd/v1",
-  "id":     "sdpa_prefill_d128_dispatch",
+  "id":     8811203390,
   "name":   "SDPA prefill d128 dispatch",
   "grid":   { ... }, "block": { ... },  // Section 6
   "shared_mem_bytes": 32768,
@@ -248,21 +242,22 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```
 
 **UKD, one kernel:** a thin binding that references the descriptors above by ID and pairs each
-kernel source with a UDD to form a Launch.
+kernel source with a UDD to form a Launch. Any referenced descriptor may instead be defined inline; the
+examples keep them separate for clarity and reuse.
 
 ```jsonc
 {
   "schema": "hipdnn.ukd/v1",
-  "id":        "example_attn_prefill_d128_bf16_gfx942",
+  "id":        4471900201,
   "name":      "Example attention prefill d128 bf16 (gfx942)",
-  "engine":    "EXAMPLE_ATTN_ENGINE",       // UED id this kernel joins
-  "heuristic": "EXAMPLE_ATTN_LGBM",         // UHD id that ranks it
+  "engine":    3310472051,       // UED id this kernel joins
+  "heuristic": 3310472052,         // UHD id that ranks it
   "priority":  100,                          // tie-break when the UHD is not decisive
-  "match":     "sdpa_prefill_d128_bf16",    // UMD id: when it applies (Section 5)
+  "match":     8811203344,    // UMD id: when it applies (Section 5)
 
   "launches": [                              // one Launch here; N for a multi-launch kernel (Section 13)
     {"kernel_source": { ... },              // Section 7: where the code lives
-     "dispatch":      "sdpa_prefill_d128_dispatch"}  // which UDD invokes it (Section 6)
+     "dispatch":      8811203390}  // which UDD invokes it (Section 6)
   ]
 }
 ```
@@ -275,8 +270,8 @@ files. Only UKDs are batched; UMD/UDD/UED/UHD stay individual and referenced by 
   "schema": "hipdnn.kdp/v1",
   "version": "1",                            // pack format version, gated at load
   "kernelDescriptors": [                     // N UKDs
-    { "id": "example_attn_prefill_d128_bf16_gfx942", ... },
-    { "id": "example_attn_prefill_d64_bf16_gfx942",  ... }
+    { "id": 4471900201, ... },
+    { "id": 4471900202,  ... }
     // ...
   ]
 }
@@ -298,80 +293,33 @@ A UMD has two parts:
    node-and-edge graph, not a nested expression.
 2. A **constraint list** attached to those nodes and edges. Constraints implicitly AND together.
 
-**Fusion is a day-one capability.** Because the pattern is a multi-node subgraph, a single UMD can
-match a fused op sequence, bind all of its tensors at once, and hand it to one UKD that runs it as a
-single kernel launch. Fusion is matching many ops and serving them with one kernel, and it needs
-nothing beyond this section. It is distinct from two deferred items: the general pattern features
-below (N-ary commutative matching, unbounded chains) are a matcher-expressiveness limit rather than a
-limit on fusion, and running one graph as several kernels
-([Section 13](#13-multiple-kernels-and-composition)) is composition, which goes the opposite direction
-and is also future work.
+**Fusion is a day-one capability.** Because a UMD's pattern is a multi-node subgraph, one UMD can match
+a fused op sequence, bind all its tensors at once, and hand it to a single UKD; the fused case is shown
+at the end of this section. Fusion is distinct from composition, running one graph as several kernels
+([Section 13](#13-multiple-kernels-and-composition)), which goes the opposite direction and is future
+work.
 
-The example below matches a Conv, Bias, and ReLU chain as one fusable subgraph. The `use_count`
-constraints are what make the fusion legal: the intermediate tensors have no consumer outside the
-pattern, so replacing the three ops with one kernel changes nothing else in the graph. The values are
-illustrative.
+The UMD below matches SDPA forward and binds the tensors and dims its Launch will reference:
 
 ```jsonc
-// UMD: match Conv -> BiasAdd -> ReLU as one fusable subgraph
 {
   "schema": "hipdnn.umd/v1",
-  "id":   "conv_bias_relu_nhwc_f16",
-  "name": "Conv-Bias-ReLU (NHWC, f16) match",
+  "id":   1180449020,
+  "name": "SDPA forward (d128, bf16) match",
   "nodes": [
-    {"kind": "op", "id": "conv", "op": "convolution_fwd",
-     "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
-    {"kind": "op", "id": "bias", "op": "pointwise_add",
-     "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
-    {"kind": "op", "id": "act",  "op": "pointwise_relu",
-     "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
+    {"kind": "op", "id": "root", "op": "sdpa_fwd",
+     "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
   ],
   "constraints": [
-    {"on": "$x",   "dtype": {"one_of": ["FLOAT16"]}, "layout": "nhwc"},
-    {"on": "$w",   "dtype": {"one_of": ["FLOAT16"]}},
-    {"on": "$y",   "dtype": {"one_of": ["FLOAT16"]}, "layout": "nhwc"},
-    {"on": "$bias", "shape": ["out_channels"]},
-    {"on": "$conv_out", "use_count": 1},   // private to the subgraph, so the fusion is legal
-    {"on": "$bias_out", "use_count": 1}
-  ]
-}
-
-// UDD: how the fused kernel is invoked (illustrative grid and args)
-{
-  "schema": "hipdnn.udd/v1",
-  "id":   "conv_bias_relu_nhwc_f16_dispatch",
-  "name": "Conv-Bias-ReLU (NHWC, f16) dispatch",
-  "grid":  {"x": {"op": "ceil_div", "args": [{"sym": "out_pixels"}, 256]},
-            "y": {"sym": "out_channels"}, "z": {"sym": "batch"}},
-  "block": {"x": 256, "y": 1, "z": 1},
-  "shared_mem_bytes": 16384,
-  "workspace_bytes":  0,
-  "args_signature": [
-    {"name": "X",    "kind": "pointer", "source": {"from": "tensor", "ref": "$x"}},
-    {"name": "W",    "kind": "pointer", "source": {"from": "tensor", "ref": "$w"}},
-    {"name": "bias", "kind": "pointer", "source": {"from": "tensor", "ref": "$bias"}},
-    {"name": "Y",    "kind": "pointer", "source": {"from": "tensor", "ref": "$y"}}
-    // convolution params and strides follow the same pattern
-  ]
-}
-
-// UKD: one binding, one Launch, so the whole chain is a single kernel
-{
-  "schema": "hipdnn.ukd/v1",
-  "id":   "conv_bias_relu_nhwc_f16_gfx942",
-  "name": "Conv-Bias-ReLU (NHWC, f16, gfx942)",
-  "engine":    "FUSED_CONV_ENGINE",
-  "heuristic": "FUSED_CONV_LGBM",
-  "match":     "conv_bias_relu_nhwc_f16",
-  "launches": [
-    {"kernel_source": {"kind": "kpack", "entry": "conv/cbr_nhwc_f16_gfx942"},
-     "dispatch":      "conv_bias_relu_nhwc_f16_dispatch"}
+    {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "layout": "bhsd",
+     "shape": ["batch", "num_heads", "seqlen_q", "head_size"]},   // binds batch, num_heads, seqlen_q, head_size
+    {"on": "$k", "dtype": {"one_of": ["BFLOAT16"]}, "shape": ["batch", "num_heads", "seqlen_k", "head_size"]},
+    {"on": "$v", "dtype": {"one_of": ["BFLOAT16"]}},
+    {"kind": "native_predicate", "name": "hipdnn.same_head_dim", "args": ["$q", "$k", "$v"]},
+    {"on": "root", "attr": {"head_size": {"equals": 128}, "mask_mode": {"one_of": ["none"]}}}
   ]
 }
 ```
-
-Three ops match, one kernel runs, and matching, dispatch, and selection are identical to a single-op
-kernel.
 
 Matching a graph does double duty: it decides the kernel applies and it binds named variables (`$q`,
 `$k`, dims like `seqlen_q`) to concrete tensors and values. The dispatch and workspace
@@ -411,24 +359,43 @@ form a graded ladder from fully declarative descriptors, to a named escape hatch
 that needs real C++, to a full provider.
 
 **Arbitration is deterministic.** When several UKDs accept the same graph, the UHD ranks them and the
-top-scored kernel wins. If the UHD is not decisive, an absolute fallback order breaks the tie: explicit
-`priority`, then the descriptor's stable `id` (never declaration or load order). A
-genuine full tie, equal score and equal priority, is resolved by picking one deterministically and
-logging the conflict to the warning log. Nothing stops an author from registering two kernels that
-overlap, and no check can rule that out in general, so the design makes the outcome reproducible and
-observable rather than pretending it cannot happen.
+top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then the descriptor's stable
+`id`. When the decision falls to `id`, the provider logs the conflict to the warning log.
 
-**Out of scope for v1.** General N-ary commutative matching and unbounded variable-length operation
-chains are deferred; bounded commutative pairs and bounded optional slots cover the common fusion
-cases. A prebuilt kernel is a fixed code object: it
-definitively encodes the exact graph shape it serves, so ahead-of-time ingestion only ever needs
-bounded matching. There is no way to precompile one binary for an open-ended pattern such as a
-convolution followed by an arbitrary-length pointwise chain; each distinct shape is its own compiled
-kernel. Matching an unbounded or fully general pattern only becomes useful once a kernel can be
-generated for whatever was matched, which is what JIT adds, so general matching lands with the JIT
-follow-up ([Section 8.3](#83-future-jit-and-normalized-providers)). Systems that appear to fuse
-arbitrary epilogues onto a prebuilt kernel either JIT the epilogue or select from a bounded set of
-precompiled instances; neither needs general matching here.
+**Out of scope for v1.** General N-ary commutative matching and unbounded variable-length chains are
+deferred; bounded commutative pairs and bounded optional slots cover the common fusion cases. A
+prebuilt kernel encodes one fixed graph shape, so it only ever needs bounded matching; general matching
+lands with the JIT follow-up ([Section 8.3](#83-future-jit-and-normalized-providers)).
+
+**A fused match.** The same UMD form matches several ops as one fusable unit. This UMD matches a Conv,
+Bias, and ReLU chain; the `use_count` constraints make the fusion legal (the intermediate tensors have
+no consumer outside the pattern), so one UKD serves the whole chain as a single kernel:
+
+```jsonc
+{
+  "schema": "hipdnn.umd/v1",
+  "id":   6620551007,
+  "name": "Conv-Bias-ReLU (NHWC, f16) match",
+  "nodes": [
+    {"kind": "op", "id": "conv", "op": "convolution_fwd",
+     "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
+    {"kind": "op", "id": "bias", "op": "pointwise_add",
+     "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
+    {"kind": "op", "id": "act",  "op": "pointwise_relu",
+     "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
+  ],
+  "constraints": [
+    {"on": "$x", "dtype": {"one_of": ["FLOAT16"]}, "layout": "nhwc"},
+    {"on": "$y", "dtype": {"one_of": ["FLOAT16"]}, "layout": "nhwc",
+     "shape": ["batch", "out_h", "out_w", "out_channels"]},
+    {"on": "$bias", "shape": ["out_channels"]},
+    {"on": "$conv_out", "use_count": 1},   // private to the subgraph, so the fusion is legal
+    {"on": "$bias_out", "use_count": 1}
+  ]
+}
+```
+
+Its bound `$y` dims feed the fused kernel's launch formulas exactly as the single-op case does.
 
 ---
 
@@ -485,11 +452,11 @@ so the generic launcher can assemble the call directly from the matched graph:
 }
 ```
 
-Each argument's `source` (a tensor pointer, a dim or stride read off a bound tensor, an attribute, a
-computed expression, or the plan-allocated workspace) is exactly the information the hand-written
-adapter supplies today. Making it data removes the per-kernel adapter entirely. In `dim` and `stride`
-sources, `axis` indexes the tensor's logical dimension order (as listed in its `shape`), independent
-of its physical `layout`.
+Each argument's `source` is one of a small set: a tensor pointer, a dim or stride read off a bound
+tensor, an attribute, a computed expression, or the plan-allocated workspace. Together these describe
+the full kernel call as data, so the launcher assembles it without any per-kernel code. In `dim` and
+`stride` sources, `axis` indexes the tensor's logical dimension order (as listed in its `shape`),
+independent of its physical `layout`.
 
 The generic launcher then does the same steps for every kernel: resolve the argument sources against
 the bound variables, evaluate the grid/block/shared/workspace formulas, pack the arguments, load the
@@ -508,10 +475,12 @@ flags, a UDD may name a registered custom plan instead of the declarative fields
 
 As with the native predicate ([Section 5](#5-matching-and-the-umd)), the descriptor carries only a
 symbol name and typed config, never inline code, and the handler is resolved from the
-provider-internal registry. A custom plan still matches its graph declaratively and reports its
-workspace size through the handler, so it composes with everything else; only the launch itself
-becomes C++. On the drop-in path a custom plan must be a built-in registered handler, subject to the
-source-trust rules of [Section 10](#10-packaging-and-delivery).
+provider-internal registry. Because a custom plan replaces the UDD's declarative fields, its handler
+owns everything those fields would have provided, including reporting the kernel's workspace size (the
+query the `workspace_bytes` formula would otherwise answer). Matching still happens declaratively
+through the UMD, so only the launch itself becomes C++. On the drop-in path a custom plan must be a
+built-in registered handler, subject to the source-trust rules of
+[Section 10](#10-packaging-and-delivery).
 
 ---
 
@@ -522,11 +491,11 @@ inside a UKD. The initial variants:
 
 ```jsonc
 "kernel_source": {
-  "kind": "kpack" | "hsaco" | "hip_source" | "hiprtc"
-  // kpack:      a packed multi-arch bundle entry (build-time)
-  // hsaco:      a prebuilt code object file (runtime drop-in)
-  // hip_source: HIP source compiled ahead of time (build-time)
-  // hiprtc:     HIP source JIT-compiled on first use (runtime drop-in)
+  "kind": "kpack" | "hsaco" | "hip" | "hiprtc"
+  // kpack:  a packed multi-arch bundle entry (build-time)
+  // hsaco:  a prebuilt code object file (runtime drop-in)
+  // hip:    a HIP kernel compiled ahead of time (build-time)
+  // hiprtc: a HIP kernel JIT-compiled on first use (runtime drop-in)
 }
 ```
 
@@ -570,8 +539,8 @@ UHDs extend the same way. A UHD names a `kind`, and an adapter interprets that c
 The first adapter is a **LightGBM model** ([Section 4](#4-descriptor-formats)); alongside it, a
 **custom heuristic library** adapter satisfies a small C-API, so a provider can supply a bespoke
 selector without a model file. Further adapters extend what a UHD can reference (other model formats,
-or plain file types such as a static CSV lookup or a fixed static order) without changing the spec.
-As with sources, a heuristic whose runtime dependency is too heavy to ship can be a build-only adapter.
+or plain file types such as a static CSV lookup or a fixed static order) without changing the spec. A
+heuristic runs at selection time, so its adapter is always build-and-runtime, never build-only.
 
 ### 8.3 Future: JIT and Normalized Providers
 
@@ -605,19 +574,24 @@ composition instead of a hand-fused kernel.
 
 ---
 
-## 9. End-to-End Flow
+## 9. Observability and Diagnostics
 
-The flow below is the standard hipDNN path, with descriptor-backed behavior at each step and no change
-to the core, frontend, or plugin interfaces.
+A data-driven provider needs more diagnostic surface than hand-written code, not less. When a kernel
+is a dropped-in file, an operator must be able to see why one was not selected or not loaded, why one
+winner beat another, and where time went. Because selection and launch are data-driven, they are also
+inspectable, so this design treats tooling as a first-class deliverable rather than an afterthought.
+The provider surfaces:
 
-![End-to-end selection and execution flow](../images/ukd_execution_flow.svg)
+- **A resolved-plan view**: the chosen UKD, its bound variables, and the concrete grid, block, and
+  workspace values.
+- **A why-not and arbitration trace**: which UKDs matched, how the UHD scored them, and where a tie
+  fell to `priority` or stable `id`.
+- **Load and compile diagnostics**: which descriptors were discovered, which were quarantined and why,
+  and the timing of descriptor discovery and any JIT compilation.
 
-### 9.1 Observability and Diagnostics
-
-Because a kernel is now a dropped-in file, operators need to see why one was not selected or not
-loaded, and why one winner beat another. Selection and launch are data-driven and inspectable, so the
-design surfaces the resolved plan and its bindings, a why-not and arbitration trace, and timing of
-descriptor discovery and JIT compilation.
+These make a descriptor-backed kernel as debuggable as hand-written C++, and are what let an operator
+trust a system whose behavior lives in data. The tooling surface is built out alongside the phases of
+[Section 12](#12-phased-delivery).
 
 ---
 
@@ -629,12 +603,12 @@ The two ingestion paths differ only in where a kernel's code comes from:
   architecture, pack the code objects into per-arch bundles with a self-describing manifest, and
   install them beside the provider. The manifest records provenance (architecture, toolchain,
   build id) so incompatible bundles are rejected before load.
-- **Runtime drop-in.** The path is off by default and enabled by an explicit environment flag; when
-  enabled, the descriptor source directories are given by an environment variable (for example
-  `HIPDNN_KDP_PATH`). Each directory is scanned at startup, each descriptor is compiled to a matcher
-  once and registered exactly as an installed one, a single package may declare many descriptors and
-  register them all, and a bad descriptor is quarantined on load without failing the rest of the
-  folder. JIT kernels compile on first use and cache their result.
+- **Runtime drop-in.** The path is opt-in and off by default. When enabled, the provider scans a
+  dedicated drop-in location for custom bundles at startup, compiles each descriptor to a matcher once,
+  and registers it exactly as an installed one; a single package may declare many descriptors, and a
+  bad descriptor is quarantined on load without failing the rest. JIT kernels compile on first use and
+  cache their result. (The concrete enablement and location mechanism is left to the delivery
+  follow-up RFC.)
 
 Compatibility is gated the same way in both paths: a descriptor whose schema version, required
 architecture, or toolchain does not match the runtime is refused with a clear error rather than
@@ -653,34 +627,15 @@ including restricting drop-in to prebuilt code objects, are deferred to the deli
 ## 11. Worked Example: SDPA as a UKD
 
 The SDPA path prototyped in the rocKE work ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)),
-a graph allowlist plus a grid-symbol table plus hand-written argument wiring, collapses into the
-descriptors below: a UMD (the graph allowlist), a UDD (the grid-symbol table and argument wiring), and
-a UKD that binds them, all shipped inside a KDP. This shows the model is sufficient for a real kernel.
+a graph allowlist plus a grid-symbol table plus hand-written argument wiring, collapses into a UMD, a
+UDD, and a UKD that binds them inside a KDP. It reuses the SDPA forward UMD from
+[Section 5](#5-matching-and-the-umd) (id `1180449020`); the UDD and the packed UKD complete it:
 
 ```jsonc
-// --- UMD: when this kernel applies (referenced by ID) ---
-{
-  "schema": "hipdnn.umd/v1",
-  "id":   "sdpa_fwd_d128_bf16",
-  "name": "SDPA forward (d128, bf16) match",
-  "nodes": [
-    {"kind": "op", "id": "root", "op": "sdpa_fwd",
-     "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
-  ],
-  "constraints": [
-    {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "layout": "bhsd",
-     "shape": ["batch", "num_heads", "seqlen_q", "head_size"]},
-    {"on": "$k", "dtype": {"one_of": ["BFLOAT16"]}, "shape": ["batch", "num_heads", "seqlen_k", "head_size"]},
-    {"on": "$v", "dtype": {"one_of": ["BFLOAT16"]}},
-    {"kind": "native_predicate", "name": "hipdnn.same_head_dim", "args": ["$q", "$k", "$v"]},
-    {"on": "root", "attr": {"head_size": {"equals": 128}, "mask_mode": {"one_of": ["none"]}}}
-  ]
-}
-
 // --- UDD: how to invoke it (referenced by ID; reusable across kernels) ---
 {
   "schema": "hipdnn.udd/v1",
-  "id":   "sdpa_fwd_d128_dispatch",
+  "id":   1180449055,
   "name": "SDPA forward (d128) dispatch",
   "grid":  {"x": {"op": "ceil_div", "args": [{"sym": "seqlen_q"}, 16]},
             "y": {"sym": "num_heads"}, "z": {"sym": "batch"}},
@@ -708,15 +663,15 @@ a UKD that binds them, all shipped inside a KDP. This shows the model is suffici
   "kernelDescriptors": [
     {
       "schema": "hipdnn.ukd/v1",
-      "id":   "sdpa_fwd_d128_bf16_gfx942",
+      "id":   1180449900,
       "name": "SDPA forward (d128, bf16, gfx942)",
-      "engine":    "ROCKE_ENGINE",
-      "heuristic": "ROCKE_LGBM",
+      "engine":    9100067001,
+      "heuristic": 9100067002,
       "priority":  100,
-      "match":     "sdpa_fwd_d128_bf16",        // the UMD above
+      "match":     1180449020,        // the UMD above
       "launches": [                              // one Launch: source + UDD
         {"kernel_source": {"kind": "kpack", "entry": "rocke/sdpa_fwd/d128_bf16_gfx942"},
-         "dispatch":      "sdpa_fwd_d128_dispatch"}   // the UDD above
+         "dispatch":      1180449055}   // the UDD above
       ]
     }
     // more UKDs (d64, other dtypes/arches) reuse the same UMD/UDD or their own
@@ -735,36 +690,42 @@ Every SDPA-specific line of hand-written C++ maps to a field:
 | module load and launch | the generic launcher | `kernel_source: kpack` paired with the UDD |
 
 The generic launcher runs it with no SDPA-specific code, and a sibling kernel such as `d64` is one more
-small UKD in the same KDP, reusing or replacing the UMD and UDD as needed.
+small UKD in the same KDP, reusing or replacing the UMD and UDD as needed. This descriptor set is what
+the phased delivery ([Section 12](#12-phased-delivery)) produces: the pieces land and are used to
+implement SDPA for rocKE as the first real target, and the existing hand-written engines are replaced
+by their descriptor-backed equivalents over time.
 
 ---
 
 ## 12. Phased Delivery
 
-Each phase is independently shippable and delivers a concrete capability, and each is validated against
-the SDPA path from the rocKE work with the checks of [Section 12.1](#121-testing-and-performance) before
-any hand-written code is removed. Adoption is incremental: a hand-written engine and its
-descriptor-backed replacement coexist, the generic one is enabled once it reaches parity on the graphs
-that engine covers, and the hand-written code is retired last. The design details of each phase land in
-its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)).
+The plan begins by publishing the follow-up RFC series ([Section 12.2](#122-follow-up-rfcs)), one per
+descriptor format bundled with the subsystem it drives, so the design is agreed before code lands.
+Implementation then follows that series in dependency order. Each phase is independently shippable and
+validated against the SDPA path from the rocKE work with the checks of
+[Section 12.1](#121-testing-and-performance) before any hand-written code is removed. Adoption is
+incremental: a hand-written engine and its descriptor-backed replacement coexist, the generic one is
+enabled once it reaches parity on the graphs that engine covers, and the hand-written code is retired
+last.
 
-1. **Generalize the dispatch core.** *SDPA launches from data.* Lift the prototype's launch core into a
-   shared, operation-agnostic module; add the expression language, workspace formula, and declarative
-   argument binding (the UDD). Re-express SDPA dispatch as data.
-2. **Descriptor formats and registry.** *A kernel becomes a file.* Define the UKD/UMD/UDD/UED/UHD and KDP
-   formats; populate the generic engine and plan builders from data, replacing static registration for
-   descriptor-backed engines.
-3. **UMD matcher.** *Applicability becomes data.* Declarative pattern and constraint model, native-predicate
-   escape hatch, compile-once matcher, and deterministic arbitration. Replace the SDPA graph decode with a UMD.
-4. **AOT packaging.** *A whole family ships as one KDP.* Producer, packer, and manifest for arbitrary
-   descriptor sets, with validation and duplicate detection in the build.
-5. **Runtime drop-in.** *Add a kernel without a build.* Folder discovery, prebuilt and JIT source kinds,
-   compatibility gating, and the enablement flag and trust controls of [Section 10](#10-packaging-and-delivery).
-6. **UHD kernel selection.** *The best kernel is picked per problem.* The generic selector driven by UHD
-   model content, consulted by the engine to rank matching kernels.
+1. **Dispatch (UDD + expression language).** Lift the prototype's launch core into a shared,
+   operation-agnostic module and add the symbolic grid, block, workspace, and argument language, so
+   SDPA launches from data.
+2. **Formats and registry (UKD, UED, UHD, KDP).** Define the descriptor formats and populate the
+   generic engine and plan builders from data, replacing static registration for descriptor-backed
+   engines.
+3. **Matching (UMD + graph matcher).** Declarative pattern and constraint model, native-predicate
+   escape hatch, compile-once matcher, and deterministic arbitration, replacing the SDPA graph decode
+   with a UMD.
+4. **AOT packaging (KDP).** Producer, packer, and per-architecture manifest for arbitrary descriptor
+   sets, with build-time validation and duplicate detection.
+5. **Runtime drop-in.** Opt-in loading of custom bundles from a dedicated location, prebuilt sources,
+   and compatibility gating ([Section 10](#10-packaging-and-delivery)).
+6. **Kernel selection (UHD).** The generic selector driven by UHD content, consulted by the engine to
+   rank matching kernels.
 
-Composition and pipelines ([Section 13](#13-multiple-kernels-and-composition)) are future work and are
-not committed in this plan.
+Multi-kernel launch and composition ([Section 13](#13-multiple-kernels-and-composition)) are
+fast-follows, not committed in this plan.
 
 ### 12.1 Testing and Performance
 
@@ -794,19 +755,19 @@ Three areas are new to UKD:
 
 ### 12.2 Follow-up RFCs
 
-The pieces this document frames but does not design each land in a focused follow-up RFC. Together they
-form the planned series below.
+The pieces this document frames but does not design each land in a focused follow-up RFC. Each bundles
+a descriptor format with the subsystem it drives, and together they form the planned series below.
 
-| Follow-up RFC | Specifies |
+| Follow-up RFC | Covers |
 |---|---|
-| Descriptor formats | The concrete UMD, UDD, UED, UHD, UKD, and KDP schemas, one concise RFC per format |
-| Graph matcher | The pattern and constraint model, compile-once matcher, arbitration, and native-predicate registry ([§5](#5-matching-and-the-umd)) |
-| Expression language | The symbolic grid, block, shared-memory, workspace, and argument language and its safe interpreter ([§6](#6-dispatch-and-workspace)) |
-| AOT packaging | The producer, packer, per-architecture manifest, and build-time validation ([§10](#10-packaging-and-delivery)) |
-| Runtime drop-in and trust | Folder discovery, compatibility gating, and the source-trust rules ([§10](#10-packaging-and-delivery)) |
-| Adapters | Registering kernel-source and heuristic adapters, and the build-only versus runtime split ([§8](#8-adapters-and-extensibility)) |
-| Composition | Multi-launch programs, intermediate buffers, and UCD pipelines ([§13](#13-multiple-kernels-and-composition)) |
-| JIT and normalized providers | JIT sources, general pattern matching, and folding existing providers onto the descriptor system ([§8.3](#83-future-jit-and-normalized-providers)) |
+| UMD + graph matcher | The match format plus the pattern and constraint model, compile-once matcher, native-predicate registry, and arbitration ([§5](#5-matching-and-the-umd)) |
+| UDD + expression language | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument language and its safe interpreter ([§6](#6-dispatch-and-workspace)) |
+| UED + UHD + selection | The engine and heuristic formats plus the registry and the generic kernel selector |
+| KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§10](#10-packaging-and-delivery)) |
+| Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules ([§10](#10-packaging-and-delivery)) |
+| Adapters | Registering kernel-source and heuristic adapters ([§8](#8-adapters-and-extensibility)) |
+| Composition | Multi-kernel launch, intermediate buffers, and UCD pipelines ([§13](#13-multiple-kernels-and-composition)) |
+| JIT and normalized providers | JIT sources, general pattern matching, and normalizing existing providers onto the descriptor system ([§8.3](#83-future-jit-and-normalized-providers)) |
 
 ---
 
@@ -827,7 +788,7 @@ capabilities go further, and they differ in kind:
   independently-authored kernels, each picked by its own heuristic, for example
   `Transpose -> Work -> Transpose`, where a reusable transpose adapts a layout the work kernel
   requires. The pieces are not co-designed; each is chosen on its own merits. Composition is the one
-  new descriptor kind here, the UCD.
+  new descriptor kind here, the **UCD (Universal Composite Descriptor)**.
 
 Both are the target design, presented so the single-kernel format does not foreclose them; both are
 future work, not committed in this RFC or its first deliverable, and each will be specified in its own
@@ -850,11 +811,11 @@ never picks a subset of its Launches.
 ```jsonc
 {
   "schema": "hipdnn.ukd/v1",
-  "id":   "sdpa_bwd_d128_bf16_gfx942",
+  "id":   7715002999,
   "name": "SDPA backward (d128, bf16, gfx942)",
-  "engine":    "ROCKE_ENGINE",
-  "heuristic": "ROCKE_LGBM",              // one pick: the program is co-designed
-  "match":     "sdpa_bwd_d128_bf16",      // one UMD: matches sdpa_bwd once, binds vars
+  "engine":    9100067001,
+  "heuristic": 9100067002,              // one pick: the program is co-designed
+  "match":     7715002230,      // one UMD: matches sdpa_bwd once, binds vars
 
   "intermediates": [                      // named scratch (see 10.3)
     {"name": "$D", "dtype": "FLOAT", "shape": ["batch", "num_heads", "seqlen_q"]}
@@ -932,10 +893,10 @@ its stages' programs, with each stage's intermediates remapped into the composit
 ```jsonc
 {
   "schema": "hipdnn.ucd/v1",              // UCD = Universal Composite Descriptor
-  "id":   "layout_adapted_work",
+  "id":   2093844170,
   "name": "Layout-adapted work pipeline",
-  "engine": "PIPELINE_ENGINE",            // its own engine; engine selection picks it vs. the fused engine
-  "match":  "work_fragment_umd",          // one UMD: matches the work fragment once; binds $x (in), $y (out)
+  "engine": 2093800000,            // its own engine; engine selection picks it vs. the fused engine
+  "match":  2093844001,          // one UMD: matches the work fragment once; binds $x (in), $y (out)
 
   "intermediates": [
     {"name": "$x_t", "dtype": {"same_as": "$x"}, "shape": {"layout_of": "$x", "as": "nchw"}},
@@ -943,12 +904,12 @@ its stages' programs, with each stage's intermediates remapped into the composit
   ],
   "stages": [
     {"name": "transpose_in",  "in": "$x",   "out": "$x_t",
-     "select": {"criteria": {"op": "transpose"},        "heuristic": "TRANSPOSE_LGBM"}},
+     "select": {"criteria": {"op": "transpose"},        "heuristic": 2093800100}},
     {"name": "work",          "in": "$x_t", "out": "$y_t",
-     "select": {"criteria": { ... work fragment ... },  "heuristic": "WORK_LGBM"}},
+     "select": {"criteria": { ... work fragment ... },  "heuristic": 2093800101}},
     {"name": "transpose_out", "in": "$y_t", "out": "$y",
-     "select": {"candidates": ["transpose_nchw_nhwc_gfx942", "transpose_generic"],
-                "heuristic": "TRANSPOSE_LGBM"}}
+     "select": {"candidates": [2093844501, 2093844502],
+                "heuristic": 2093800100}}
   ]
 }
 ```
@@ -986,11 +947,10 @@ a Launch binds a shared region with `{"from": "intermediate", "ref": "$D", "acce
 while its own private scratch remains the `{"kind": "workspace"}` argument of a single kernel
 ([Section 6](#6-dispatch-and-workspace)).
 
-Each region has a single writer and is live from that write to its last read. Because the stream
-serializes the Launches, regions whose lifetimes do not overlap can later share storage: illustratively,
-a program that stages 100 MB through three Launches could fit in 200 MB rather than 300 MB. The initial
-model forgoes that and simply sums the regions; the liveness and storage-sharing model is deferred to
-the composition follow-up ([Section 12.2](#122-follow-up-rfcs)).
+Each region has a single writer and is live from that write to its last read, so regions whose
+lifetimes do not overlap can later share storage. The initial model forgoes that and simply sums the
+regions; the liveness and storage-sharing model is deferred to the composition follow-up
+([Section 12.2](#122-follow-up-rfcs)).
 
 ### 13.4 Execution and Selection
 
@@ -1062,16 +1022,14 @@ follow-up RFCs rather than solved now.
 
 ## 15. Open Questions
 
-1. **Identity for drop-in-only engines:** require a pre-registered engine name (safer,
-   collision-checked) or allow an identity minted from the descriptor (lower friction, higher risk)?
-2. **Source trust for drop-in:** what is the minimum trust requirement for drop-in JIT source, from
+1. **Source trust for drop-in:** what is the minimum trust requirement for drop-in JIT source, from
    restricting drop-in to prebuilt code objects, to bounding compiler inputs, to a separate opt-in?
-3. **Composition:** if composition ([Section 13](#13-multiple-kernels-and-composition)) is pursued,
-   should multi-step programs land before composite pipelines?
-4. **Expression coverage:** validate the expression language against several real kernels (for
+2. **Composition:** if composition ([Section 13](#13-multiple-kernels-and-composition)) is pursued,
+   should multi-kernel launch land before composite pipelines?
+3. **Expression coverage:** validate the expression language against several real kernels (for
    example a split-K GEMM with workspace, a normalization, and a ragged attention that forces the
    data-dependent-launch discussion) before freezing it.
-5. **Feature-vector contract:** standardize a graph/device feature extractor so selection models are
+4. **Feature-vector contract:** standardize a graph/device feature extractor so selection models are
    portable across UHDs, or keep it per-model?
 
 ---
@@ -1105,7 +1063,7 @@ choices; none is a dependency.
 - **UDD (Universal Dispatch Descriptor):** the dispatch ABI, meaning argument binding and ordering,
   grid, block, shared memory, and workspace ([Section 6](#6-dispatch-and-workspace)). Reused by ID.
   (Distinct from a tensor UID, which is an unrelated unique identifier.)
-- **UED (Universal Engine Descriptor):** one engine, a stable identity plus knobs and tags.
+- **UED (Universal Engine Descriptor):** one engine, a stable identity plus knobs and behavior/numerical notes.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
   a graph and picks one.
 - **Launch:** a kernel source paired with a UDD; the unique, non-reused unit a UKD lists in
@@ -1138,11 +1096,13 @@ choices; none is a dependency.
   UHD selects a kernel within the chosen engine.
 - **knobs:** author-exposed, user-controllable tuning parameters a UED declares (name, type, default,
   constraint).
-- **tags:** user-filterable labels a UED carries, for example `experimental` or `prefill-only`.
+- **Behavior / numerical notes:** hipDNN's existing per-engine annotations that a UED carries; behavior
+  notes describe execution properties (for example runtime compilation), numerical notes describe
+  precision behavior (for example tensor-core use).
 - **Code object:** a loadable, prebuilt GPU kernel binary.
 - **kpack:** a packed multi-architecture archive of code objects.
 - **hsaco:** a single prebuilt GPU code-object file (Heterogeneous System Architecture Code Object).
-- **hip_source:** HIP source compiled ahead of time into a code object.
+- **hip:** a HIP kernel compiled ahead of time into a code object.
 - **hiprtc:** HIP source compiled just-in-time on first use (HIP Runtime Compilation).
 - **Adapter:** a plug-in that turns one supported authoring form into something the generic engine can
   use: a loadable kernel module for a kernel source, or a scorer for a UHD. Build-only adapters need

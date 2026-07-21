@@ -40,7 +40,7 @@
   <text x="636" y="82" font-family="Consolas, monospace" font-size="13" fill="#4a72c4" font-weight="600">UED  engine descriptor</text>
   <text x="636" y="104" font-family="Consolas, monospace" font-size="11">id</text>
   <text x="636" y="122" font-family="Consolas, monospace" font-size="11">name</text>
-  <text x="800" y="104" font-family="Consolas, monospace" font-size="11">tags[]</text>
+  <text x="800" y="104" font-family="Consolas, monospace" font-size="11">notes[]</text>
   <text x="800" y="122" font-family="Consolas, monospace" font-size="11">knobs[]</text>
 
   <!-- UHD -->
