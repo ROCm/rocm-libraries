@@ -369,6 +369,15 @@ function(add_gtest TEST_NAME TEST_CPP)
         RUN_SERIAL TRUE
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
       )
+      if(MIOPEN_ENABLE_DAPPER_NATIVE)
+        # HipGraphExist runs as its own RUN_SERIAL test (outside the parallel shards), but its
+        # results must still be analyzed by dapper. Append its XML to SHARDS_FILE so dapper_diff
+        # ingests it alongside the shard XMLs. Existence is guaranteed by dapper_add_sharded_test(),
+        # called below: it orders miopen_gtest_sharded_dapper dead-last, after every current-dir
+        # test (this serial test included), and dapper_diff aborts if any listed XML is missing.
+        file(APPEND ${SHARDS_FILE}
+          "${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml\n")
+      endif()
     endif()
 
     if(MIOPEN_ENABLE_DAPPER_NATIVE)
