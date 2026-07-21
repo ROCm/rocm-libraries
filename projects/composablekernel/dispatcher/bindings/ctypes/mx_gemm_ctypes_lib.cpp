@@ -167,9 +167,12 @@ int dispatcher_run_mx_gemm(const void* A,
     if(k_batch != 1)
     {
         // v1 scope: split-K (k_batch > 1) is not yet supported through this bridge.
+        // This is a v1 feature limitation, not a bad-argument/HIP error, so report
+        // -2 (unsupported) per the documented convention above -- the Python
+        // wrapper then surfaces it as "unsupported" rather than a generic error.
         std::cerr << "dispatcher_run_mx_gemm: only k_batch==1 is supported in v1, got " << k_batch
                   << "\n";
-        return -1;
+        return -2;
     }
 
     // MX block-scale pre-shuffle is gfx950-only (preShuffleScaleBuffer_gfx950).

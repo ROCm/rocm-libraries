@@ -432,29 +432,48 @@ class MxGemmDispatcherLib:
 # =============================================================================
 
 
+# Tolerance for on-grid membership in _map_grid_to_bytes. The quantization grid
+# entries are all exactly representable in float32 (0, +/-0.5, +/-1.0, ...), so
+# grid-exact inputs match to the bit; this epsilon only absorbs the last few ULPs
+# of float-repr noise (e.g. a value stored via float64 -> float32). Any input
+# farther than this from the nearest grid point is a genuine off-grid value and
+# is rejected. Values like 0.5004 (0.0004 off the 0.5 grid point) exceed this and
+# now raise, matching the documented "rejects off-grid values" contract.
+_GRID_MATCH_EPS = np.float32(1e-4)
+
+
 def _map_grid_to_bytes(vals: np.ndarray, value_to_byte: dict, grid_name: str) -> np.ndarray:
     """Vectorized exact-grid float -> byte code lookup (uint8, flattened).
 
     The inputs are drawn from a small fixed grid (see make_inputs), so instead of
     a per-element Python loop -- which dominates runtime for realistic M*K -- we
-    round to the grid resolution and index a sorted LUT with a single
-    searchsorted. Off-grid values are a caller contract violation, so raise
-    (mirrors the old dict-KeyError) rather than silently snapping to a neighbour.
+    snap each input to the nearest grid point via a single searchsorted and index
+    a sorted LUT. An input is accepted only if it lies within _GRID_MATCH_EPS
+    (1e-4) of that nearest grid point; anything farther off (e.g. 0.5004) is a
+    caller contract violation and raises (mirrors the old dict-KeyError) rather
+    than silently snapping to a neighbour.
     """
     keys = np.array(sorted(value_to_byte), dtype=np.float32)
     byts = np.array([value_to_byte[float(k)] for k in keys], dtype=np.uint8)
 
-    r = np.round(np.asarray(vals, dtype=np.float32), 3)
-    r = r + np.float32(0.0)  # collapse -0.0 -> +0.0 so it matches the 0.0 key
-    flat = r.reshape(-1)
+    v = np.asarray(vals, dtype=np.float32) + np.float32(0.0)  # collapse -0.0 -> +0.0
+    flat = v.reshape(-1)
 
-    idx = np.clip(np.searchsorted(keys, flat), 0, keys.size - 1)
-    if not np.all(keys[idx] == flat):
-        bad = flat[keys[idx] != flat]
+    # Nearest grid key for each value: searchsorted gives the insertion point;
+    # the closer of the two straddling keys is the nearest grid point.
+    pos = np.clip(np.searchsorted(keys, flat), 1, keys.size - 1)
+    left = keys[pos - 1]
+    right = keys[pos]
+    nearest = np.where(np.abs(flat - left) <= np.abs(flat - right), left, right)
+
+    if not np.all(np.abs(flat - nearest) <= _GRID_MATCH_EPS):
+        off = np.abs(flat - nearest) > _GRID_MATCH_EPS
+        bad = flat[off]
         raise KeyError(
-            f"{grid_name}: value(s) not on the exact quantization grid: "
-            f"{np.unique(bad)[:8].tolist()}"
+            f"{grid_name}: value(s) not on the exact quantization grid "
+            f"(tolerance {float(_GRID_MATCH_EPS):g}): {np.unique(bad)[:8].tolist()}"
         )
+    idx = np.searchsorted(keys, nearest)
     return byts[idx]
 
 
@@ -715,6 +734,22 @@ def setup_multiple_mx_gemm_dispatchers(
     if not configs:
         return []
     arch = gfx_arch or _get_arch()
+    # When an explicit gfx_arch is passed, pin every config to it BEFORE computing
+    # cfg.name / running codegen. Otherwise cfg.to_codegen_config() falls back to
+    # `self.gpu_target or _get_arch()`, so codegen (and the cached name) would use
+    # the host-detected arch (or fail if rocminfo is missing) while the .so is
+    # compiled for `arch` -- an arch mismatch between the header and the binary.
+    # Resetting _name_cache forces the name to be recomputed for the chosen arch.
+    if gfx_arch is not None:
+        _supported = ("gfx90a", "gfx942", "gfx950")
+        if gfx_arch not in _supported:
+            raise ValueError(
+                f"Unsupported GPU architecture {gfx_arch!r}; supported: {list(_supported)}"
+            )
+        for c in configs:
+            if c.gpu_target != gfx_arch:
+                c.gpu_target = gfx_arch
+                c._name_cache = None
     base = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="mx_gemm_bridge_"))
     headers = base / "generated_kernels"
     libs = base / "libs"
