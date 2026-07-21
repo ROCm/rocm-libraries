@@ -43,6 +43,7 @@
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <string_view>
 #include <vector>
 
 // Kernel header force-included via -include. Brings in ck_tile core + the
@@ -58,6 +59,14 @@
 #error \
     "GFX_ARCH must be defined at compile time (pass -DGFX_ARCH=<arch>); do not default to a specific GPU architecture."
 #endif
+
+// The MX (microscaling) block-scale pre-shuffle below uses ck_tile's gfx950-only
+// preShuffleScaleBuffer_gfx950 host helper, so this bridge is inherently gfx950
+// only. Make that scope explicit: fail the build clearly on any other arch
+// instead of silently mis-calling the gfx950 helper.
+static_assert(std::string_view(GFX_ARCH) == "gfx950",
+              "mx_gemm dispatcher bridge is gfx950-only (uses preShuffleScaleBuffer_gfx950); "
+              "build with -DGFX_ARCH=gfx950.");
 
 static bool g_initialized = false;
 
