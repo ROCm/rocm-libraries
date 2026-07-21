@@ -691,8 +691,6 @@ void testing_spildlt0(const Arguments& arg)
                                                        sizeof(compute_datatype),
                                                        p_error));
 
-    // Note: the optional diagonal output vector (rocsparse_spildlt0_input_diag) is deliberately
-    // NOT set here. D must be recoverable directly from the diagonal of the L factor.
 
     //
     // Perform analysis.
