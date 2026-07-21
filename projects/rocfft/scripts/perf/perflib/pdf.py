@@ -150,6 +150,7 @@ def make_tex(figs,
              label,
              significance,
              ncompare,
+             histogram_bound,
              secondtype=None):
     """Generate PDF containing performance figures."""
 
@@ -174,6 +175,9 @@ def make_tex(figs,
     globalgeomean = perflib.utils.find_geomean(outdirs, False)
     print("geomean:", globalgeomean)
 
+    if histogram_bound != None:
+        print("histogram bound: ", histogram_bound)
+        
     tex = header
 
     tex += "\n\\section{Introduction}\n"
@@ -363,9 +367,13 @@ def make_tex(figs,
             ferr = tempfile.TemporaryFile(mode="w+")
 
             asycmd = ["asy", "-f", "pdf", "histogram.asy"]
+            if histogram_bound != None:
+                asycmd.extend(['-u', 'bounds=' + str(histogram_bound)])
             asycmd.extend(['-u', 'filename="' + histdatname + '"'])
             asycmd.extend(['-o', os.path.join(docdir, "histogramsig")])
 
+            print(asycmd)
+            
             asyproc = subprocess.Popen(asycmd,
                                        cwd=top,
                                        stdout=fout,
@@ -414,6 +422,8 @@ def make_tex(figs,
             ferr = tempfile.TemporaryFile(mode="w+")
 
             asycmd = ["asy", "-f", "pdf", "histogram.asy"]
+            if histogram_bound != None:
+                asycmd.extend(['-u', 'bounds=' + str(histogram_bound)])
             asycmd.extend(['-u', 'filename="' + allhistdatname + '"'])
             asycmd.extend(['-o', os.path.join(docdir, "histogramall")])
 

@@ -540,7 +540,7 @@ def command_generate(arguments):
 
     if arguments.command == 'pdf':
         perflib.pdf.make_tex(figures, docdir, outdirs, label, new_sig,
-                             ncompare)
+                             ncompare, arguments.histogram_bound)
     if arguments.command == 'html':
         title = f"Performance report: {perflib.utils.cjoin(outdirs)}"
         perflib.html.make_html(figures, title, docdir, outdirs,
@@ -968,6 +968,7 @@ def main():
                        type=str,
                        help='label (appendable)',
                        action='append')
+    pdf_parser.add_argument('--histogram_bound', type=float, help='bounds for histogram')
 
     run_parser.add_argument('-g', '--device', type=int, help='device number')
     run_parser.add_argument(
