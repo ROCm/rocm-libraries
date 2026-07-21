@@ -563,6 +563,8 @@ void sort_pairs()
             {
                 HIP_CHECK(hipFree(d_values_input));
                 HIP_CHECK(hipFree(d_values_output));
+                HIP_CHECK(hipFree(d_keys_input));
+                HIP_CHECK(hipFree(d_keys_output));
                 continue;
             }
             for(size_t i = 0; i < size; i++)
@@ -1522,6 +1524,8 @@ void sort_pairs_ffm()
     {
         HIP_CHECK(hipFree(d_values_input));
         HIP_CHECK(hipFree(d_values_output));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_keys_output));
         GTEST_SKIP() << "insufficient memory";
     }
     for(size_t i = 0; i < size; i++)
