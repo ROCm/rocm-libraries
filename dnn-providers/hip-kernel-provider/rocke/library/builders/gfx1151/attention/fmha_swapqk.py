@@ -160,9 +160,13 @@ class SwapQKCfg:
     # CURRENT tile's softmax/P-transpose/PV while issuing the NEXT tile's QK
     # WMMAs -- so the matrix unit stays fed during the softmax VALU (WMMA
     # utilization) instead of idling. Costs n_kv_sub carried score tiles.
-    # MEASURED DEAD-END: regresses 22->10 TF. Carrying current+next scores on top
-    # of the 64-VGPR O accumulator blows the 256-VGPR budget (vgpr=255 + spills),
-    # collapsing occupancy. The kernel is register-bound, so it cannot pipeline.
+    # MEASURED (register-GATED, not a flat dead-end):
+    #   * D<=64 (O accumulator <= 32 VGPR): FITS spill-free and WINS +4-5%
+    #     (D64 L2048: 19.3->20.0 TF, vgpr 115->185, spill 0). Recommended ON here.
+    #   * D=128 (O = 64 VGPR): carrying current+next scores blows the 256-VGPR cap
+    #     (vgpr=255 + spills) -> 22->10 TF. The D=128 kernel is register-bound and
+    #     cannot pipeline; unblocking it via a D-split costs 2x softmax + 1.5x
+    #     matmul (a confirmed net loss). So D=128 dense tops out at ~22.5 TF.
     pipeline: bool = False
     # q_hoist: Q is loop-invariant (this wave's 16 query rows). Load all n_dk Q
     # fragments ONCE before the K-loop and pre-scale them by scale_log2, so the
