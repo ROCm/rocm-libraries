@@ -116,6 +116,11 @@ _FP8_OCP_VALUE_TO_BYTE = {
     -3.0: 0xC4, -4.0: 0xC8, -6.0: 0xCC,
 }
 _FP8_OCP_BYTE_TO_VALUE = {b: v for v, b in _FP8_OCP_VALUE_TO_BYTE.items()}
+# 256-entry byte -> value LUT for vectorized dequantize_fp8. Untested bytes stay
+# NaN (they cannot come from quantize_fp8, so a NaN result flags a foreign byte).
+_FP8_OCP_BYTE_LUT = np.full(256, np.nan, dtype=np.float32)
+for _b, _v in _FP8_OCP_BYTE_TO_VALUE.items():
+    _FP8_OCP_BYTE_LUT[_b] = np.float32(_v)
 
 
 def fp8_ocp_is_default_for_arch(arch: str) -> bool:
@@ -491,11 +496,15 @@ def quantize_fp8(vals: np.ndarray) -> np.ndarray:
 
 
 def dequantize_fp8(bytes_arr: np.ndarray) -> np.ndarray:
-    flat = np.asarray(bytes_arr, dtype=np.uint8).reshape(-1)
-    out = np.empty(flat.shape, dtype=np.float32)
-    for i, b in enumerate(flat):
-        out[i] = _FP8_OCP_BYTE_TO_VALUE[int(b)]
-    return out.reshape(bytes_arr.shape)
+    """Raw OCP e4m3 bytes (uint8) -> float grid values, preserving shape.
+
+    Vectorized LUT-gather (consistent with dequantize_fp4_packed) instead of a
+    per-element Python loop, so this stays fast if ever applied to large buffers.
+    Bytes outside the tested grid map to NaN (they cannot appear from quantize_fp8,
+    which only emits grid codes, so a NaN here flags a corrupt/foreign buffer).
+    """
+    b = np.asarray(bytes_arr, dtype=np.uint8)
+    return _FP8_OCP_BYTE_LUT[b]
 
 
 def quantize_fp4_packed(vals: np.ndarray) -> np.ndarray:
