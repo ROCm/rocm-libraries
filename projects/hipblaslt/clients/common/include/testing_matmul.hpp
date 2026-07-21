@@ -43,8 +43,10 @@
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
+#include "gpu_compare.hpp"
 #include "near.hpp"
 #include "norm.hpp"
+#include "reference_device.hpp"
 #include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -1463,6 +1465,129 @@ void check(hipStream_t                   stream,
         hipblaslt_avg_ulp = ulp_sum_total / ulp_count_total;
 }
 
+// GPU correctness path (--check_ref gpu|both): compares the GPU output `dD`
+// against the device reference `dD_gold` on the device and asserts under gtest.
+// dD_gold is computed once by the caller (run_reference_gemm_device). When
+// `report` is true it also fills the reported error/atol/rtol columns; in 'both'
+// mode the CPU check() owns those, so the GPU leg asserts only (report=false).
+// Restricted to gpu_ref_supported() configs.
+inline void gpu_reference_report(hipStream_t                   stream,
+                                 const Arguments&              arg,
+                                 const uint32_t&               gemm_count,
+                                 const std::vector<int64_t>&   M,
+                                 const std::vector<int64_t>&   N,
+                                 const std::vector<int64_t>&   ldd,
+                                 const std::vector<int64_t>&   stride_d,
+                                 const std::vector<int>&       num_batches,
+                                 std::vector<HipDeviceBuffer>& dD_gold,
+                                 std::vector<HipDeviceBuffer>& dD,
+                                 const std::vector<double>&    tol,
+                                 double&                       hipblaslt_error,
+                                 double&                       hipblaslt_atol,
+                                 double&                       hipblaslt_rtol,
+                                 double&                       hipblaslt_max_ulp,
+                                 double&                       hipblaslt_avg_ulp,
+                                 hipDataType                   To,
+                                 bool                          report)
+{
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+    const int ulp_mant_bits = ulp_mantissa_bits(To);
+
+    // Accumulate ULP across gemms and average once after the loop, matching the CPU
+    // check()'s ulp_sum_total/ulp_count_total handling.
+    double             ulp_sum_total   = 0.0;
+    unsigned long long ulp_count_total = 0;
+
+    for(uint32_t gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+    {
+        const GpuRefResult res = compare_gemm_device(dD[gemmIdx].buf(),
+                                                     dD_gold[gemmIdx].buf(),
+                                                     To,
+                                                     M[gemmIdx],
+                                                     N[gemmIdx],
+                                                     ldd[gemmIdx],
+                                                     stride_d[gemmIdx],
+                                                     num_batches[gemmIdx],
+                                                     ulp_mant_bits,
+                                                     stream);
+
+        // A HIP error during the device comparison must fail loudly, not read as a
+        // zero-error pass.
+#ifdef GOOGLE_TEST
+        ASSERT_TRUE(res.valid) << "gpu_ref: device comparison failed (HIP error)";
+#else
+        if(!res.valid)
+            throw std::runtime_error("gpu_ref: device comparison failed (HIP error)");
+#endif
+
+        if(arg.norm_check)
+        {
+            double norm_error = (res.num_nan_mismatch > 0)
+                                    ? std::numeric_limits<double>::infinity()
+                                    : res.norm_error();
+            if(report)
+                hipblaslt_error += norm_error;
+            if(arg.norm_check_assert)
+                CHECK_SUCCESS(
+                    norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+        }
+
+        if(arg.ulp_check && report)
+        {
+            hipblaslt_max_ulp = std::max(hipblaslt_max_ulp, res.max_ulp);
+            ulp_sum_total += res.sum_ulp;
+            ulp_count_total += res.ulp_count;
+        }
+
+        if(arg.allclose_check && report)
+        {
+            // Reproduce allclose_check_general()'s ascending atol-outer/rtol-inner
+            // search over the shared candidate grid; res.allclose_g[k] is the
+            // smallest atol admissible for rtol = GPU_REF_TOL_GRID[k].
+            double foundAtol = 1.0, foundRtol = 1.0;
+            if(res.num_nan_mismatch == 0)
+            {
+                for(int ai = 0; ai < GPU_REF_TOL_GRID_N && foundAtol == 1.0; ++ai)
+                {
+                    const double atol = GPU_REF_TOL_GRID[ai];
+                    for(int ri = 0; ri < GPU_REF_TOL_GRID_N; ++ri)
+                    {
+                        if(res.allclose_g[ri] <= atol)
+                        {
+                            foundAtol = atol;
+                            foundRtol = GPU_REF_TOL_GRID[ri];
+                            break;
+                        }
+                    }
+                }
+            }
+            hipblaslt_atol = foundAtol;
+            hipblaslt_rtol = foundRtol;
+        }
+
+#ifdef GOOGLE_TEST
+        if(arg.unit_check)
+        {
+            ASSERT_EQ(res.num_nan_mismatch, 0ull);
+            if(tol[gemmIdx] != 0)
+            {
+                // near_check: every element within the absolute tolerance
+                // (aggregate max is exactly equivalent to per-element ASSERT_NEAR).
+                hipblaslt_near_compare_double(0.0, res.max_abs_error, tol[gemmIdx]);
+            }
+            else
+            {
+                // unit_check: per-element 4-ULP compare, matching ASSERT_FLOAT_EQ.
+                ASSERT_EQ(res.num_unit_fail, 0ull);
+            }
+        }
+#endif
+    }
+
+    if(arg.ulp_check && report && ulp_count_total > 0)
+        hipblaslt_avg_ulp = ulp_sum_total / double(ulp_count_total);
+}
+
 // A function to determine the default bias_type
 hipDataType derive_unset_bias_type(const Arguments& arg)
 {
@@ -1952,6 +2077,30 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<HipDeviceBuffer>  dA, dB, dC, dD, dE, dBias;
     std::vector<HipDeviceBuffer>* dDp;
+    // Correctness reference selection (--check_ref). The GPU reference is computed
+    // once from dA/dB/dC into dD_gold and reused for every solution's check; in
+    // 'both' mode the CPU and GPU references cross-check the same output.
+    std::vector<HipDeviceBuffer> dD_gold;
+    const bool want_check  = arg.unit_check || arg.norm_check || arg.allclose_check;
+    const bool use_gpu_ref = want_check
+                             && (arg.check_ref == HIPBLASLT_CHECK_REF_GPU
+                                 || arg.check_ref == HIPBLASLT_CHECK_REF_BOTH);
+    // CPU reference runs for cpu/both and as the fallback for any unknown mode, so
+    // a check is never silently skipped.
+    const bool use_cpu_ref = want_check && arg.check_ref != HIPBLASLT_CHECK_REF_GPU;
+    if(use_gpu_ref)
+    {
+        std::string reason;
+        auto        fail_gpu_ref = [&](const std::string& why) {
+#ifdef GOOGLE_TEST
+            FAIL() << "--check_ref: " << why;
+#else
+            throw std::invalid_argument("--check_ref: " + why);
+#endif
+        };
+        if(!gpu_ref_supported(arg, reason))
+            fail_gpu_ref("unsupported configuration for GPU reference: " + reason);
+    }
     std::vector<HipDeviceBuffer>  dScaleAlphaVec, dScaleA, dScaleB, dScaleC, dScaleD, dScaleE,
         dAmaxD;
 
@@ -4867,8 +5016,55 @@ void testing_matmul_with_bias(const Arguments& arg,
         exit(EXIT_FAILURE);
     }
 
-    // get CPU result
-    if(arg.unit_check || arg.norm_check || arg.allclose_check)
+    // GPU reference (--check_ref gpu|both): compute D_gold on the device once from
+    // the device inputs; reused by every solution's check below.
+    if(use_gpu_ref)
+    {
+        if(arg.timing)
+            cpu_time_used = get_time_us_no_sync();
+
+        for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+        {
+            dD_gold.emplace_back(To, size_D[gemmIdx] * block_count, HMM);
+            CHECK_DEVICE_ALLOCATION(dD_gold.back().memcheck());
+
+            const double alpha_r = get_computeInterface(h_alpha[gemmIdx], Tc);
+            const double beta_r  = get_computeInterface(h_beta[gemmIdx], Tc);
+
+            run_reference_gemm_device(transA == HIPBLAS_OP_N,
+                                      transB == HIPBLAS_OP_N,
+                                      M[gemmIdx],
+                                      N[gemmIdx],
+                                      K[gemmIdx],
+                                      alpha_r,
+                                      beta_r,
+                                      dA[gemmIdx].buf(),
+                                      arg.a_type,
+                                      lda[gemmIdx],
+                                      stride_a[gemmIdx],
+                                      dB[gemmIdx].buf(),
+                                      arg.b_type,
+                                      ldb[gemmIdx],
+                                      stride_b[gemmIdx],
+                                      dC[gemmIdx].buf(),
+                                      arg.c_type,
+                                      ldc[gemmIdx],
+                                      stride_c[gemmIdx],
+                                      dD_gold[gemmIdx].buf(),
+                                      arg.d_type,
+                                      ldd[gemmIdx],
+                                      stride_d[gemmIdx],
+                                      num_batches[gemmIdx],
+                                      stream);
+        }
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+        if(arg.timing)
+            cpu_time_used = get_time_us_no_sync() - cpu_time_used;
+    }
+
+    // CPU reference (--check_ref cpu|both): compute hD_gold via cblas_gemm.
+    if(use_cpu_ref)
     {
         if(arg.timing)
         {
@@ -5425,50 +5621,74 @@ void testing_matmul_with_bias(const Arguments& arg,
                     tol[gemmIdx] = 1e-2;
             }
 
-            if(arg.unit_check || arg.norm_check || arg.allclose_check)
+            if(want_check)
             {
-                if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
+                if(use_cpu_ref)
                 {
-                    copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
+                    {
+                        copy_gemm_to_host(stream, arg.batch_count, hD_1, (*dDp));
+                    }
+                    else
+                    {
+                        copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    }
+                    check(stream,
+                          arg,
+                          gemm_count,
+                          M,
+                          N,
+                          ldd,
+                          lde,
+                          stride_d,
+                          stride_e,
+                          num_batches,
+                          size_bias,
+                          hD_gold,
+                          hD_1,
+                          (*dDp),
+                          hAmaxD_gold,
+                          hAmaxD,
+                          dAmaxD,
+                          hE_gold,
+                          hE,
+                          dE,
+                          hBias_gold,
+                          hBias,
+                          dBias,
+                          tol,
+                          hipblaslt_error,
+                          hipblaslt_atol,
+                          hipblaslt_rtol,
+                          hipblaslt_max_ulp,
+                          hipblaslt_avg_ulp,
+                          To,
+                          Tbias,
+                          Taux,
+                          Talpha,
+                          batchMode);
                 }
-                else
+                if(use_gpu_ref)
                 {
-                    copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
+                    gpu_reference_report(stream,
+                                         arg,
+                                         gemm_count,
+                                         M,
+                                         N,
+                                         ldd,
+                                         stride_d,
+                                         num_batches,
+                                         dD_gold,
+                                         (*dDp),
+                                         tol,
+                                         hipblaslt_error,
+                                         hipblaslt_atol,
+                                         hipblaslt_rtol,
+                                         hipblaslt_max_ulp,
+                                         hipblaslt_avg_ulp,
+                                         To,
+                                         /*report=*/!use_cpu_ref);
                 }
-                check(stream,
-                      arg,
-                      gemm_count,
-                      M,
-                      N,
-                      ldd,
-                      lde,
-                      stride_d,
-                      stride_e,
-                      num_batches,
-                      size_bias,
-                      hD_gold,
-                      hD_1,
-                      (*dDp),
-                      hAmaxD_gold,
-                      hAmaxD,
-                      dAmaxD,
-                      hE_gold,
-                      hE,
-                      dE,
-                      hBias_gold,
-                      hBias,
-                      dBias,
-                      tol,
-                      hipblaslt_error,
-                      hipblaslt_atol,
-                      hipblaslt_rtol,
-                      hipblaslt_max_ulp,
-                      hipblaslt_avg_ulp,
-                      To,
-                      Tbias,
-                      Taux,
-                      Talpha,
-                      batchMode);
             }
         }
     }
@@ -6039,62 +6259,86 @@ void testing_matmul_with_bias(const Arguments& arg,
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
                     tol[gemmIdx] = 1e-2;
             }
-            if(arg.unit_check || arg.norm_check || arg.allclose_check)
+            if(want_check)
             {
-                if(arg.dump_matrix)
+                if(use_cpu_ref)
                 {
-                    for(int batchId = 0; batchId < num_batches[0]; batchId++)
+                    if(arg.dump_matrix)
                     {
-                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                    To,
-                                                    M[0],
-                                                    N[0],
-                                                    ldd[0],
-                                                    hD_1[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
-                                                    "batch_" + std::to_string(batchId) + "_D_output.txt");
-                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                    To,
-                                                    M[0],
-                                                    N[0],
-                                                    ldd[0],
-                                                    hD_gold[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
-                                                    "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
+                        for(int batchId = 0; batchId < num_batches[0]; batchId++)
+                        {
+                            hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                        To,
+                                                        M[0],
+                                                        N[0],
+                                                        ldd[0],
+                                                        hD_1[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                        "batch_" + std::to_string(batchId) + "_D_output.txt");
+                            hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                        To,
+                                                        M[0],
+                                                        N[0],
+                                                        ldd[0],
+                                                        hD_gold[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                        "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
+                        }
                     }
+                    check(stream,
+                          arg,
+                          gemm_count,
+                          M,
+                          N,
+                          ldd,
+                          lde,
+                          stride_d,
+                          stride_e,
+                          num_batches,
+                          size_bias,
+                          hD_gold,
+                          hD_1,
+                          (*dDp),
+                          hAmaxD_gold,
+                          hAmaxD,
+                          dAmaxD,
+                          hE_gold,
+                          hE,
+                          dE,
+                          hBias_gold,
+                          hBias,
+                          dBias,
+                          tol,
+                          hipblaslt_error,
+                          hipblaslt_atol,
+                          hipblaslt_rtol,
+                          hipblaslt_max_ulp,
+                          hipblaslt_avg_ulp,
+                          To,
+                          Tbias,
+                          Taux,
+                          Talpha,
+                          batchMode);
                 }
-                check(stream,
-                      arg,
-                      gemm_count,
-                      M,
-                      N,
-                      ldd,
-                      lde,
-                      stride_d,
-                      stride_e,
-                      num_batches,
-                      size_bias,
-                      hD_gold,
-                      hD_1,
-                      (*dDp),
-                      hAmaxD_gold,
-                      hAmaxD,
-                      dAmaxD,
-                      hE_gold,
-                      hE,
-                      dE,
-                      hBias_gold,
-                      hBias,
-                      dBias,
-                      tol,
-                      hipblaslt_error,
-                      hipblaslt_atol,
-                      hipblaslt_rtol,
-                      hipblaslt_max_ulp,
-                      hipblaslt_avg_ulp,
-                      To,
-                      Tbias,
-                      Taux,
-                      Talpha,
-                      batchMode);
+                if(use_gpu_ref)
+                {
+                    gpu_reference_report(stream,
+                                         arg,
+                                         gemm_count,
+                                         M,
+                                         N,
+                                         ldd,
+                                         stride_d,
+                                         num_batches,
+                                         dD_gold,
+                                         (*dDp),
+                                         tol,
+                                         hipblaslt_error,
+                                         hipblaslt_atol,
+                                         hipblaslt_rtol,
+                                         hipblaslt_max_ulp,
+                                         hipblaslt_avg_ulp,
+                                         To,
+                                         /*report=*/!use_cpu_ref);
+                }
             }
 
 #define argument_param                                                                            \

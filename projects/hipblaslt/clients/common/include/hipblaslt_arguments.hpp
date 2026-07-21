@@ -39,6 +39,15 @@
 
 #define HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM 65536
 
+// Correctness reference for the `check_ref` argument: CPU only, GPU only, or both
+// (cross-check against two independent references).
+enum hipblaslt_check_ref : int8_t
+{
+    HIPBLASLT_CHECK_REF_CPU  = 0,
+    HIPBLASLT_CHECK_REF_GPU  = 1,
+    HIPBLASLT_CHECK_REF_BOTH = 2,
+};
+
 // Predeclare enumerator
 enum hipblaslt_argument : int;
 
@@ -165,6 +174,7 @@ struct Arguments
     int8_t unit_check;
     int8_t ulp_check;
     int8_t timing;
+    int8_t check_ref; // correctness reference: 0=cpu, 1=gpu, 2=both (see hipblaslt_check_ref)
 
     char transA;
     char transB;
@@ -289,6 +299,7 @@ struct Arguments
     OPER(unit_check) SEP             \
     OPER(ulp_check) SEP              \
     OPER(timing) SEP                 \
+    OPER(check_ref) SEP              \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
     OPER(activation_type) SEP        \
