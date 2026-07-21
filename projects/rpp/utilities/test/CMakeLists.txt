@@ -33,6 +33,8 @@ add_executable(rpp_tests
     image/color/brightness_test.cpp
     image/color/exposure_test.cpp
     image/color/blend_test.cpp
+    image/color/contrast_test.cpp
+    image/color/color_temperature_test.cpp
     image/arithmetic/magnitude_test.cpp
     image/effects/solarize_test.cpp
     image/bitwise/bitwise_and_test.cpp

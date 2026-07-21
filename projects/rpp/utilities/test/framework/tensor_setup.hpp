@@ -70,7 +70,15 @@ struct TensorShape {
     Rpp32u n, c, h, w;
 };
 
-// Builds a 4D descriptor with tightly packed strides for the given layout.
+// RPP's tensor calling convention pads the row width to (w/8)*8+8 elements, so kernels
+// that process a full SIMD vector on the row tail read/write into that slack instead of
+// overrunning the buffer (and, for a batch, the next image). The official legacy harness
+// applies this padding to every op; some kernels tolerate a tight width but others (e.g.
+// color_temperature) corrupt memory without it. d.w stays the logical width (so ROIs and
+// the reference walk the real image); only the strides carry the padded row stride.
+inline Rpp32u padded_width(Rpp32u w) { return (w / 8) * 8 + 8; }
+
+// Builds a 4D descriptor for the given layout, with the padded row stride RPP expects.
 inline RpptDesc make_descriptor(const TensorShape& s, DType dt, Layout layout) {
     RpptDesc d{};
     d.numDims = 4;
@@ -81,15 +89,16 @@ inline RpptDesc make_descriptor(const TensorShape& s, DType dt, Layout layout) {
     d.c = s.c;
     d.h = s.h;
     d.w = s.w;
+    const Rpp32u pw = padded_width(s.w);
     if (d.layout == NHWC) {
-        d.strides.nStride = s.c * s.h * s.w;
-        d.strides.hStride = s.c * s.w;
+        d.strides.nStride = s.c * s.h * pw;
+        d.strides.hStride = s.c * pw;
         d.strides.wStride = s.c;
         d.strides.cStride = 1;
     } else {  // NCHW
-        d.strides.nStride = s.c * s.h * s.w;
-        d.strides.cStride = s.h * s.w;
-        d.strides.hStride = s.w;
+        d.strides.nStride = s.c * s.h * pw;
+        d.strides.cStride = s.h * pw;
+        d.strides.hStride = pw;
         d.strides.wStride = 1;
     }
     return d;
