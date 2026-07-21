@@ -347,13 +347,14 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void stampDataReady(const StinkyInstruction& inst);
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
-    bool nonWmmaHasHazard(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     int nodeElapseKey(DAGNode* node) const;
-    DAGNode* pickFreeBest(const ReadySetByDAGid& queue) const;
+    DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
+                          bool allowHiddenStall = false) const;
     std::pair<DAGNode*, int> findMostReadyWMMA();
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
-    bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
+    bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
+                                     int* outWait = nullptr) const;
 
     bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
     DAGNode* extractForcedBarrier();
@@ -509,13 +510,6 @@ int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
     return maxLat;
 }
 
-// A non-WMMA compute node is not "free" while a src still consumes in-flight producer
-// data (RAW). WAR (overwrite of a just-read reg) is no longer a hard gate — it is
-// handled by elapse-time ordering in pickFreeBest.
-bool CDNA5ReadyQueue::nonWmmaHasHazard(DAGNode* node) const {
-    return getMaxSrcDataWait(node) > 0;
-}
-
 // True if issuing \p node now would risk a co-execution hazard: while the WMMA that
 // opened the current latency window is still in flight, \p node's dest VGPRs overlap
 // that WMMA's src VGPRs, so the write could clobber a source the WMMA is still reading.
@@ -550,19 +544,40 @@ int CDNA5ReadyQueue::nodeElapseKey(DAGNode* node) const {
     return minElapse;
 }
 
-// Best hazard-free node in \p queue: largest elapse key (operands touched longest ago),
-// tie broken by smallest DAG id. Returns nullptr if every ready node has a RAW hazard.
-DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue) const {
+// Best issuable node in \p queue: RAW-free nodes are preferred; when none is free
+// and \p allowHiddenStall is set, a node whose remaining src RAW wait still fits
+// under the active WMMA's latency shadow is also eligible (the wait is hidden by
+// the in-flight WMMA, so it is free to co-issue). Within the same free/hazard tier
+// the operand touched longest ago wins (largest elapse), tie broken by DAG id.
+// \p outWait (optional) receives the cycles the caller must advanceTime() before
+// issuing the returned node (0 for a RAW-free pick). Returns nullptr if none is
+// eligible.
+DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWait,
+                                       bool allowHiddenStall) const {
+    const int coIssueSpace = activeWmmaLatency_ - coIssueCyclePos_;
     DAGNode* best = nullptr;
     int bestElapse = INT_MIN;
+    int bestWait = 0;
     for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
-        if (nonWmmaHasHazard(n)) continue;
+        const int wait = getMaxSrcDataWait(n);
+        // Tolerate a src RAW hazard only if its wait fits the WMMA latency shadow
+        // and the dest does not clobber a live WMMA src (then the stall is free).
+        if (wait > 0 && (!allowHiddenStall || coIssueSpace <= 0 || wait > coIssueSpace ||
+                         destOverlapsActiveWmmaSrc(n)))
+            continue;
         const int elapse = nodeElapseKey(n);
-        if (elapse > bestElapse) {
-            bestElapse = elapse;
+        // Free nodes rank above hidden-stall ones; within a tier, largest elapse wins.
+        const bool nHazard = wait > 0;
+        const bool curHazard = bestWait > 0;
+        const bool better = (best == nullptr) || (!nHazard && curHazard) ||
+                            (nHazard == curHazard && elapse > bestElapse);
+        if (better) {
             best = n;
+            bestElapse = elapse;
+            bestWait = wait;
         }
     }
+    if (best && outWait) *outWait = bestWait;
     return best;
 }
 
@@ -620,20 +635,42 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     return node;
 }
 
-// Pick minimum DAG id among ready non-WMMA nodes.
+// Pick among ready non-WMMA nodes, preferring genuinely RAW-free work.
 // Queues: globalReadQueue (throttled), localReadQueue, valuQueue (co-issue gated), otherQueue.
-// SALU/other and VALU picks go through pickFreeBest: a node whose src still consumes
-// in-flight producer data (RAW) is skipped; among the rest, the node whose operands were
-// touched longest ago wins (elapse ordering — defers a reg-overwrite behind other work),
-// tie broken by DAG id. When none is free those queues contribute nothing and Phase G
-// falls back to the oldest.
+// SALU/other and VALU picks go through pickFreeBest (elapse ordering — defers a
+// reg-overwrite behind other work). SALU/other may additionally be co-issued with a
+// hidden stall when its src RAW wait fits under the active WMMA's latency shadow; that
+// wait is returned via \p outWait so the caller advances the timeline before issuing.
+// A hidden-stall candidate never outranks a genuinely free one. When nothing qualifies,
+// these queues contribute nothing and Phase G falls back to the oldest.
 // kind: 0=global, 1=local, 2=other, 3=valu.
 bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode,
-                                                  int* kindOut) const {
+                                                  int* kindOut, int* outWait) const {
     *outNode = nullptr;
     *kindOut = -1;
+    if (outWait) *outWait = 0;
     DAGNode* best = nullptr;
     int kind = -1;
+    int bestWait = 0;
+
+    // Free work beats a hidden-stall candidate; within a tier, smallest DAG id.
+    auto consider = [&](DAGNode* cand, int candKind, int candWait) {
+        if (!cand) return;
+        const bool candHazard = candWait > 0;
+        const bool curHazard = bestWait > 0;
+        bool take;
+        if (best == nullptr)
+            take = true;
+        else if (candHazard != curHazard)
+            take = !candHazard;
+        else
+            take = cand->id < best->id;
+        if (take) {
+            best = cand;
+            kind = candKind;
+            bestWait = candWait;
+        }
+    };
 
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
@@ -645,33 +682,25 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
-        best = globalReadQueue.top();
-        kind = kGlobalRead;
+        consider(globalReadQueue.top(), kGlobalRead, 0);
     }
-    if (dsWindowOk) {
-        if (!best || pickedDS->id < best->id) {
-            best = pickedDS;
-            kind = kLocalRead;
-        }
-    }
-    if (DAGNode* t = pickFreeBest(otherQueue)) {
-        if (!best || t->id < best->id) {
-            best = t;
-            kind = kOther;
-        }
+    if (dsWindowOk) consider(pickedDS, kLocalRead, 0);
+
+    // SALU/other allows hidden stalls (see pickFreeBest); VALU stays RAW-free-only.
+    int otherWait = 0;
+    if (DAGNode* t = pickFreeBest(otherQueue, &otherWait, /*allowHiddenStall=*/true)) {
+        consider(t, kOther, otherWait);
     }
     if (isValuPickable() || best == nullptr) {
         if (DAGNode* t = pickFreeBest(valuQueue)) {
-            if (!dsWindowOk && (!best || t->id < best->id) && !destOverlapsActiveWmmaSrc(t)) {
-                best = t;
-                kind = kValu;
-            }
+            if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t)) consider(t, kValu, 0);
         }
     }
 
     if (!best) return false;
     *outNode = best;
     *kindOut = kind;
+    if (outWait) *outWait = bestWait;
     return true;
 }
 
@@ -1171,10 +1200,13 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     if (coIssueCyclePos_ < activeWmmaLatency_) {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
-        if (smallestPickable != nullptr) {
+        int pickWait = 0;
+        if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
-                                 << smallestPickable->id << " kind=" << pickKind << "\n");
+                                 << smallestPickable->id << " kind=" << pickKind
+                                 << " wait=" << pickWait << "\n");
+            // Pay any hidden stall (hidden under the WMMA latency) before issuing.
+            if (pickWait > 0) advanceTime(pickWait);
             return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
 
@@ -1185,8 +1217,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
-        if (smallestPickable != nullptr) {
+        int pickWait = 0;
+        if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
+            // No latency shadow here, so pickWait is 0; advance kept for safety.
+            if (pickWait > 0) advanceTime(pickWait);
             return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
     }

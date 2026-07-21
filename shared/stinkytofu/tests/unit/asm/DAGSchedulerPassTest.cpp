@@ -641,6 +641,85 @@ TEST_F(DAGSchedulerPassTest, WmmaSrcOverlap_HazardValuDeferredPastWindow) {
 }
 
 // ---------------------------------------------------------------------------
+// Hidden-stall window fill (pickFreeBest allowHiddenStall path): a SALU that is
+// only blocked by a src RAW hazard whose remaining wait fits under the active
+// WMMA's latency shadow may be co-issued *inside* that window — the stall we pay
+// waiting for its src is hidden by the in-flight WMMA, so it costs no extra
+// cycles. It must therefore be preferred over starting the next independent WMMA.
+//
+// Setup (region, not a loop, so no loop-head deferral):
+//   - WMMA #0 (v[12:20)) fires first (Phase B) and opens an 8-cycle window.
+//   - A chain of inter-dependent SALUs a0 -> a1 -> a2 -> a3, each writing s(100+i)
+//     with latency=2 > issue=1 so issuing it stamps a 1-cycle data-ready latency
+//     on its dest (the src RAW gate for the next link). a0 is free; a1..a3 are
+//     each RAW-blocked for 1 cycle, which fits under WMMA #0's remaining latency
+//     shadow, so every link is a valid hidden-stall fill. The chain is strict, so
+//     only one link is ready at a time — their relative order is forced by the
+//     DAG; the test is purely about whether each link lands inside the window.
+//   - WMMA #1 (v[200:208)) is independent and ready.
+//
+// Expected (new behavior):  wmma#0, a0, a1, a2, a3, wmma#1
+//   Every chain link is co-issued inside wmma#0's window, ahead of wmma#1.
+// Old behavior would issue wmma#1 as soon as a0's consumer was RAW-blocked
+// (wmma#0, a0, wmma#1, a1, a2, a3), because a RAW-blocked SALU was never pickable
+// inside the window.
+// ---------------------------------------------------------------------------
+TEST_F(DAGSchedulerPassTest, HiddenStallSaluFillsWmmaWindowBeforeNextWmma) {
+    auto createScalarAdd = [&](int dst, int src0, int src1) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+        inst->addDestReg(StinkyRegister("s", dst, 1));
+        inst->addSrcReg(StinkyRegister("s", src0, 1));
+        inst->addSrcReg(StinkyRegister("s", src1, 1));
+        return inst;
+    };
+
+    // WMMA #0 fires first (Phase B), latency=8 keeps its co-issue window open.
+    createWmmaScaleF8(/*destStart=*/12, /*src0Start=*/50);
+    // Chain a0 -> a1 -> a2 -> a3: a_i writes s(100+i), a_(i+1) reads it (RAW).
+    // Each 1-cycle wait fits the shrinking window (positions 2,4,6,8), so all four
+    // are hidden-stall filled inside WMMA #0's window.
+    const int kChain = 4;
+    for (int i = 0; i < kChain; i++) {
+        const int src0 = (i == 0) ? 0 : (100 + i - 1);  // previous link's dest
+        StinkyInstruction* a = createScalarAdd(/*dst=*/100 + i, src0, /*src1=*/1);
+        a->issueCycles = 1;
+        a->latencyCycles = 2;
+    }
+    // WMMA #1: independent (disjoint regs) and ready.
+    createWmmaScaleF8(/*destStart=*/200, /*src0Start=*/220);
+
+    int beforeCount = countStinkyInstructions(*bb);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), beforeCount)
+        << "hidden-stall fill must not drop instructions";
+
+    std::vector<std::pair<std::string, int>> seq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        const HwInstDesc* hw = inst->getHwInstDesc();
+        if (!hw || !hw->mnemonic) continue;
+        std::string_view mnem(hw->mnemonic);
+        std::string kind = mnem.find("wmma") != std::string_view::npos ? "wmma"
+                           : mnem.rfind("s_", 0) == 0                  ? "s"
+                                                                       : std::string(mnem);
+        int dst = (!inst->getDestRegs().empty() && inst->getDestRegs()[0].isRegister())
+                      ? static_cast<int>(inst->getDestRegs()[0].reg.idx)
+                      : -1;
+        seq.push_back({kind, dst});
+    }
+
+    const std::vector<std::pair<std::string, int>> expected = {
+        {"wmma", 12}, {"s", 100}, {"s", 101}, {"s", 102}, {"s", 103}, {"wmma", 200},
+    };
+    EXPECT_EQ(seq, expected)
+        << "every link of the RAW-dependent SALU chain must be co-issued inside WMMA #0's latency "
+           "window (each 1-cycle wait hidden by the in-flight WMMA), ahead of the independent "
+           "WMMA #1";
+}
+
+// ---------------------------------------------------------------------------
 // Property: per-WMMA-window DS cap — after a WMMA fires,
 // at most floor((latency - issue) / 2) = 3 ds_loads can issue in its window
 // because back-to-back ds_load issue cost doubles.
