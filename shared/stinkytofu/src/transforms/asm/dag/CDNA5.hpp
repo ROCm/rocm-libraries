@@ -220,6 +220,34 @@ static std::vector<BarrierTokenGroup> groupBarrierTokens(
     return groups;
 }
 
+// Master switch for the latency-weighted scheduling model. false: order producers
+// by DAG id (byte-identical to the pre-refactor scheduler). true: rank by schedHeight
+// (id tie-break) + slot-fill tier for global reads. All behavioral divergence is gated
+// here, so false is a pure no-op refactor.
+static constexpr bool kUseScoreModel = false;
+
+// Priority comparison for two ready nodes: true if \p a should be picked before
+// \p b. Under the score model, a taller node (more latency downstream) wins; DAG
+// id (program order) breaks ties. Otherwise falls back to pure DAG id.
+//
+// Exec-mask groups are excluded from height ranking and stay ordered by DAG id:
+// a collapsed group's latencyCycles is the sum of its children, so height would
+// hoist it across unrelated VALU that sit outside the exec-narrowed region. Those
+// ops have no DAG edge to the group, so id is the only thing keeping them on the
+// correct side of the exec boundary. Height then only reorders ordinary compute
+// producers (SALU/VALU/ds) — where the critical-path hoist is wanted. Global
+// reads are handled separately by the slot-fill tier in findSmallestPickableNonWmma,
+// not by height.
+static inline bool heightEligible(const DAGNode* n) {
+    return !isExecMaskGroup(*n->inst);
+}
+static inline bool scoreOutranks(const DAGNode* a, const DAGNode* b) {
+    if (kUseScoreModel && a->schedHeight != b->schedHeight && heightEligible(a) &&
+        heightEligible(b))
+        return a->schedHeight > b->schedHeight;
+    return a->id < b->id;
+}
+
 // -------------------------------------------------------------------------
 // CDNA5ReadyQueue — WMMA scheduling policy (Gfx1250)
 // -------------------------------------------------------------------------
@@ -566,11 +594,19 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
                          destOverlapsActiveWmmaSrc(n)))
             continue;
         const int elapse = nodeElapseKey(n);
-        // Free nodes rank above hidden-stall ones; within a tier, largest elapse wins.
+        // Free nodes rank above hidden-stall ones. Within a tier, the score model
+        // prefers greater schedHeight (elapse then id break ties); otherwise the
+        // original rule stands (largest elapse, oldest id via iteration order).
         const bool nHazard = wait > 0;
         const bool curHazard = bestWait > 0;
+        bool withinTierBetter;
+        if (kUseScoreModel && best != nullptr && n->schedHeight != best->schedHeight &&
+            heightEligible(n) && heightEligible(best))
+            withinTierBetter = n->schedHeight > best->schedHeight;
+        else
+            withinTierBetter = elapse > bestElapse;
         const bool better = (best == nullptr) || (!nHazard && curHazard) ||
-                            (nHazard == curHazard && elapse > bestElapse);
+                            (nHazard == curHazard && withinTierBetter);
         if (better) {
             best = n;
             bestElapse = elapse;
@@ -653,22 +689,34 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int kind = -1;
     int bestWait = 0;
 
-    // Free work beats a hidden-stall candidate; within a tier, smallest DAG id.
-    auto consider = [&](DAGNode* cand, int candKind, int candWait) {
+    // Tiering, highest first:
+    //   (1) slot-fill — an offered global read (slot free + budget). It reached
+    //       consider() only because globalReadQueueFull() let it through, so issuing
+    //       it now keeps the fixed-depth pipe busy up to depth; the full-queue gate
+    //       then paces the rest, which is what spreads global reads apart. This must
+    //       win over compute producers, otherwise a taller VALU would starve the
+    //       global read and the loads would bunch up at the region tail.
+    //   (2) free work beats a hidden-stall candidate.
+    //   (3) within a tier, scoreOutranks (height, then DAG id).
+    bool bestSlotFill = false;
+    auto consider = [&](DAGNode* cand, int candKind, int candWait, bool candSlotFill = false) {
         if (!cand) return;
         const bool candHazard = candWait > 0;
         const bool curHazard = bestWait > 0;
         bool take;
         if (best == nullptr)
             take = true;
+        else if (kUseScoreModel && candSlotFill != bestSlotFill)
+            take = candSlotFill;
         else if (candHazard != curHazard)
             take = !candHazard;
         else
-            take = cand->id < best->id;
+            take = scoreOutranks(cand, best);
         if (take) {
             best = cand;
             kind = candKind;
             bestWait = candWait;
+            bestSlotFill = candSlotFill;
         }
     };
 
@@ -682,7 +730,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
-        consider(globalReadQueue.top(), kGlobalRead, 0);
+        consider(globalReadQueue.top(), kGlobalRead, 0, /*candSlotFill=*/true);
     }
     if (dsWindowOk) consider(pickedDS, kLocalRead, 0);
 

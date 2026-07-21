@@ -47,6 +47,11 @@ struct DAGNode {
     // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects
     // based on DsReadOrder config and WMMA consumer analysis.
     unsigned dsReadPriority = UINT_MAX;
+    // Latency-weighted longest path from this node to a region sink:
+    // height = latencyCycles + max(height(successor)). Larger = more latency
+    // hangs downstream, so the node should be hoisted earlier. Assigned by the
+    // pre-scan in scheduleRegionWithMovableSideEffects.
+    unsigned schedHeight = 0;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };

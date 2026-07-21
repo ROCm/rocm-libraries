@@ -283,6 +283,21 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
+    // Pre-scan: assign schedHeight = latencyCycles + max(height(successor)).
+    // dagGraph is a DAG, so process nodes in reverse id order — every edge goes
+    // low-id -> high-id (addEdgeById only adds forward edges), so a node's
+    // successors always have larger ids and are finalized first.
+    // Only needed by the score model; skip the work entirely when it is off.
+    if (kUseScoreModel) {
+        for (unsigned i = regionSize; i-- > 0;) {
+            unsigned maxSucc = 0;
+            for (unsigned succId : dagGraph[i])
+                maxSucc = std::max(maxSucc, dagNodes[succId].schedHeight);
+            dagNodes[i].schedHeight =
+                static_cast<unsigned>(std::max(0, dagNodes[i].inst->latencyCycles)) + maxSucc;
+        }
+    }
+
     PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
 
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);
