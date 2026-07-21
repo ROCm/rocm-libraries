@@ -4,6 +4,7 @@
 import os
 import sys
 import types
+import warnings
 
 from pathlib import Path as _Path
 
@@ -91,12 +92,12 @@ _BACKEND = os.environ.get("ROCISA_BACKEND", "").strip().lower()
 _ADAPTER_PKG = "rocisa_stinkytofu_adaptor"
 
 
-def _load_stinkytofu_adapter() -> bool:
+def _load_stinkytofu_adapter() -> "tuple[bool, str]":
     """Try to install the rocisa_stinkytofu_adaptor as the ``rocisa`` module.
 
-    Returns True iff we successfully rewired sys.modules; on any failure
-    we fall back to the nanobind bindings silently (the caller decides
-    whether that is acceptable).
+    Returns ``(True, "")`` iff we successfully rewired sys.modules; on any
+    failure returns ``(False, <reason>)`` so the caller can surface why the
+    stinkytofu backend could not be loaded (instead of falling back silently).
     """
 
     # Locate ``<repo_root>/projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor``
@@ -129,19 +130,22 @@ def _load_stinkytofu_adapter() -> bool:
                 break
         cur = parent
     if repo_root is None:
-        return False
+        return False, (
+            f"adapter package not found: no ancestor 'projects' dir containing "
+            f"{adapter_rel}"
+        )
     adapter_parent = os.path.join(repo_root, adapter_rel)
 
     if not os.path.isdir(os.path.join(adapter_parent, _ADAPTER_PKG)):
-        return False
+        return False, f"adapter package directory missing under {adapter_parent}"
 
     if adapter_parent not in sys.path:
         sys.path.insert(0, adapter_parent)
 
     try:
         import rocisa_stinkytofu_adaptor as _adapter  # noqa: F401
-    except Exception:
-        return False
+    except Exception as exc:
+        return False, f"import failed: {exc!r}"
 
     # Install the adapter as ``rocisa`` and re-export each
     # ``rocisa_stinkytofu_adaptor.*`` submodule under ``rocisa.*`` in
@@ -153,7 +157,7 @@ def _load_stinkytofu_adapter() -> bool:
             short = _obj.__name__[len(_prefix):]
             sys.modules[f"rocisa.{short}"] = _obj
 
-    return True
+    return True, ""
 
 
 def _find_stale_sources(so_path, source_roots, build_dir):
@@ -181,7 +185,35 @@ def _stinkytofu_available() -> bool:
     return importlib.util.find_spec("stinkytofu") is not None
 
 
-if _BACKEND == "stinkytofu" and _stinkytofu_available() and _load_stinkytofu_adapter():
+def _resolve_backend(requested, available_fn, load_fn, warn=warnings.warn) -> bool:
+    """Decide whether to use the stinkytofu adapter (True) or native rocisa (False).
+
+    Emits a warning *only* when the stinkytofu backend was explicitly requested
+    but we have to fall back to native — so an unnoticed silent fallback becomes
+    visible, with the reason attached. Requesting anything else (or unset) selects
+    native without touching the availability/load probes and without warning.
+    """
+    if requested != "stinkytofu":
+        return False
+    if not available_fn():
+        warn(
+            "ROCISA_BACKEND=stinkytofu requested but the stinkytofu Python module "
+            "is not built/available; falling back to native rocisa backend.",
+            stacklevel=2,
+        )
+        return False
+    ok, reason = load_fn()
+    if not ok:
+        warn(
+            f"ROCISA_BACKEND=stinkytofu requested but the adapter failed to load "
+            f"({reason}); falling back to native rocisa backend.",
+            stacklevel=2,
+        )
+        return False
+    return True
+
+
+if _resolve_backend(_BACKEND, _stinkytofu_available, _load_stinkytofu_adapter):
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:
@@ -237,8 +269,6 @@ else:
             if _root:
                 _roots.append(Path(_root))
             else:
-                import warnings
-
                 warnings.warn(
                     f"rocisa staleness check: {_name} source root is unset in "
                     f"_build_info.py; skipping it. Rebuild with: invoke rocisa",
