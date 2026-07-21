@@ -7798,12 +7798,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.a.numVgprG2L = statesANumVgprG2L
         self.states.a.numVgprG2LAllocated = statesANumVgprG2LAllocated
         self.states.a.numVgprG2LTailloopAllocated = statesANumVgprG2LAllocated if tensorParametersA["globalReadInstruction"].blockWidth != 6 else roundUp(statesANumVgprG2LAllocated * 4 / 3)
+      elif kernel["enableTDMA"]:
+        # TDM loads global->LDS via tensor_load_to_lds (main and tail loop), so
+        # no per-thread G2L staging is needed. Zero the tail-loop allocation too
+        # (it would otherwise be sized from GlobalReadVectorWidthA, inflating VGPRs).
+        self.states.a.numVgprG2L = 0
+        self.states.a.numVgprG2LAllocated = 0
+        self.states.a.numVgprG2LTailloopAllocated = 0
       else:
         self.states.a.numVgprG2L = 0
         self.states.a.numVgprG2LAllocated = 0
         self.states.a.numVgprG2LTailloopAllocated = statesANumVgprG2LAllocated if tensorParametersA["globalReadInstruction"].blockWidth != 6 else roundUp(statesANumVgprG2LAllocated * 4 / 3)
-      # using _ds_store_b8: need one more vgpr space to do lshr
-      if tensorParametersA["localWriteInstruction"].blockWidth == 0.25:
+      # using _ds_store_b8: need one more vgpr space to do lshr (not for TDM: no local write)
+      if tensorParametersA["localWriteInstruction"].blockWidth == 0.25 and not kernel["enableTDMA"]:
         self.states.a.numVgprG2L = self.states.a.numVgprG2L * 2
         self.states.a.numVgprG2LAllocated += numVgprG2LAllocatedLocal
         self.states.a.numVgprG2LTailloopAllocated += numVgprG2LAllocatedLocal
@@ -7884,12 +7891,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.b.numVgprG2L = statesBNumVgprG2L
         self.states.b.numVgprG2LAllocated = statesBNumVgprG2LAllocated
         self.states.b.numVgprG2LTailloopAllocated = statesBNumVgprG2LAllocated if tensorParametersB["globalReadInstruction"].blockWidth != 6 else roundUp(statesBNumVgprG2LAllocated * 4 / 3)
+      elif kernel["enableTDMB"]:
+        # TDM loads global->LDS via tensor_load_to_lds (main and tail loop), so
+        # no per-thread G2L staging is needed. Zero the tail-loop allocation too
+        # (it would otherwise be sized from GlobalReadVectorWidthB, inflating VGPRs).
+        self.states.b.numVgprG2L = 0
+        self.states.b.numVgprG2LAllocated = 0
+        self.states.b.numVgprG2LTailloopAllocated = 0
       else:
         self.states.b.numVgprG2L = 0
         self.states.b.numVgprG2LAllocated = 0
         self.states.b.numVgprG2LTailloopAllocated = statesBNumVgprG2LAllocated if tensorParametersB["globalReadInstruction"].blockWidth != 6 else roundUp(statesBNumVgprG2LAllocated * 4 / 3)
-      # using _ds_store_b8: need one more vgpr space to do lshr
-      if tensorParametersB["localWriteInstruction"].blockWidth == 0.25:
+      # using _ds_store_b8: need one more vgpr space to do lshr (not for TDM: no local write)
+      if tensorParametersB["localWriteInstruction"].blockWidth == 0.25 and not kernel["enableTDMB"]:
         self.states.b.numVgprG2L = self.states.b.numVgprG2L * 2
         self.states.b.numVgprG2LAllocated += numVgprG2LAllocatedLocal
         self.states.b.numVgprG2LTailloopAllocated += numVgprG2LAllocatedLocal
