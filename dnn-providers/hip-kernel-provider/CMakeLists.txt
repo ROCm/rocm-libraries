@@ -70,9 +70,9 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     message(STATUS "HIP Flash2 SDPA engine enabled")
     # Engine sources and compile definitions are wired onto the provider's object
     # library in src/CMakeLists.txt (hip_kernel_provider target does not exist yet
-    # at this point — it is created by add_subdirectory(src) below).
+    # at this point -- it is created by add_subdirectory(src) below).
     # The Flash2 kernel is shipped as precompiled .co files (gfx942 + gfx950).
-    # HipFlash2FwdPlan.hip is NOT compiled here — it is the offline source for
+    # HipFlash2FwdPlan.hip is NOT compiled here -- it is the offline source for
     # the .co files and requires rocWMMA headers.
     # At runtime the .co is loaded via hipModuleLoad in HipFlash2KernelUtils.hpp.
     install(FILES
