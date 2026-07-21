@@ -1,0 +1,81 @@
+<svg viewBox="0 0 940 560" width="940" height="560" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="940" height="560" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arrowUkdJit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="470" y="34" text-anchor="middle" font-size="17" font-weight="600" fill="#222">JIT reuses the same pieces: only the source half of a Launch changes</text>
+
+  <!-- reused chips label -->
+  <text x="470" y="70" text-anchor="middle" font-size="12" fill="#555">reused unchanged</text>
+
+  <!-- Four reused chips around the Launch -->
+  <g>
+    <rect x="300" y="80" width="80" height="30" rx="6" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
+    <text x="340" y="100" text-anchor="middle" fill="#222">UMD</text>
+
+    <rect x="400" y="80" width="80" height="30" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+    <text x="440" y="100" text-anchor="middle" fill="#222">UDD</text>
+
+    <rect x="500" y="80" width="80" height="30" rx="6" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+    <text x="540" y="100" text-anchor="middle" fill="#222">UHD</text>
+
+    <rect x="600" y="80" width="80" height="30" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+    <text x="640" y="100" text-anchor="middle" fill="#222">UED</text>
+  </g>
+
+  <!-- Launch box -->
+  <rect x="300" y="150" width="380" height="130" rx="8" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="490" y="174" text-anchor="middle" font-size="14" font-weight="600" fill="#222">Launch = kernel source + UDD</text>
+
+  <!-- kernel source half -->
+  <rect x="320" y="192" width="165" height="72" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="402" y="217" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">kernel source</text>
+  <text x="402" y="238" text-anchor="middle" font-size="10" fill="#555">the source half</text>
+  <text x="402" y="252" text-anchor="middle" font-size="10" fill="#555">(swappable)</text>
+
+  <!-- UDD half -->
+  <rect x="495" y="192" width="165" height="72" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="577" y="217" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">UDD</text>
+  <text x="577" y="238" text-anchor="middle" font-size="10" fill="#555">dispatch descriptor</text>
+  <text x="577" y="252" text-anchor="middle" font-size="10" fill="#555">(unchanged)</text>
+
+  <!-- AOT source kinds (today) -->
+  <text x="90" y="330" font-size="12" fill="#555">today</text>
+  <g>
+    <rect x="60" y="345" width="80" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+    <text x="100" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">kpack</text>
+
+    <rect x="150" y="345" width="80" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+    <text x="190" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">hsaco</text>
+
+    <rect x="240" y="345" width="80" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+    <text x="280" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">hiprtc</text>
+  </g>
+  <text x="190" y="393" text-anchor="middle" font-size="10" fill="#555">AOT source kinds</text>
+
+  <!-- AOT arrow into source slot -->
+  <path d="M 240 359 C 300 359, 340 300, 385 264" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowUkdJit)"/>
+
+  <!-- provider SDK dashed container -->
+  <rect x="440" y="360" width="470" height="175" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="762" y="382" font-size="12" font-weight="600" fill="#8e5bc4">provider SDK</text>
+
+  <!-- JIT source (future) dashed box -->
+  <rect x="460" y="398" width="430" height="120" rx="8" fill="#ffffff" stroke="#8e5bc4" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="675" y="422" text-anchor="middle" font-size="13" font-weight="600" fill="#8e5bc4">JIT source (future)</text>
+  <text x="675" y="446" text-anchor="middle" font-size="11" fill="#555">either custom functions to call, or a</text>
+  <text x="675" y="464" text-anchor="middle" font-size="11" fill="#555">JIT definition + system</text>
+  <text x="675" y="486" text-anchor="middle" font-size="11" fill="#555">e.g. rocKE: template spec + builder</text>
+
+  <!-- JIT dashed arrow into the SAME source slot -->
+  <path d="M 540 398 C 480 360, 420 300, 402 264" fill="none" stroke="#8e5bc4" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrowUkdJit)"/>
+  <text x="360" y="330" text-anchor="middle" font-size="10" fill="#8e5bc4">same source slot</text>
+
+  <!-- Caption -->
+  <text x="470" y="552" text-anchor="middle" font-size="11" fill="#555">The same descriptors serve AOT and JIT; general pattern matching (Section 5) lands with JIT.</text>
+</svg>

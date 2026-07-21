@@ -8,7 +8,7 @@
 
   <!-- Stage titles -->
   <text x="135" y="40" text-anchor="middle" font-weight="600">Live graph</text>
-  <text x="485" y="40" text-anchor="middle" font-weight="600">UMD — Match Descriptor (declarative)</text>
+  <text x="485" y="40" text-anchor="middle" font-weight="600">UMD: Match Descriptor (declarative)</text>
   <text x="800" y="40" text-anchor="middle" font-weight="600">Bound variables</text>
 
   <!-- STAGE 1: Live graph container -->

@@ -22,8 +22,8 @@
 
   <!-- box 3 -->
   <rect x="44" y="182" width="272" height="46" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>
-  <text x="180" y="202" text-anchor="middle" font-family="Consolas, monospace" font-size="11">static EngineDefinition table</text>
-  <text x="180" y="218" text-anchor="middle" font-size="11">edit Container.cpp</text>
+  <text x="180" y="202" text-anchor="middle" font-family="Consolas, monospace" font-size="11">engine-registration table</text>
+  <text x="180" y="218" text-anchor="middle" font-size="11">HIPDNN_REGISTER_ENGINE id</text>
 
   <!-- box 4 -->
   <rect x="44" y="240" width="272" height="46" rx="8" fill="#fdecec" stroke="#c65353" stroke-width="1.5"/>

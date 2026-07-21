@@ -8,26 +8,26 @@
 
   <!-- ======================= TITLE ======================= -->
   <text x="480" y="28" text-anchor="middle" font-weight="600" font-size="15">A UKD is a thin binding of reusable descriptors</text>
-  <text x="480" y="48" text-anchor="middle" fill="#555" font-size="12">match / dispatch / heuristic / engine are reusable descriptors; a Launch = kernel source + dispatch spec (unique, not reused)</text>
+  <text x="480" y="48" text-anchor="middle" fill="#555" font-size="12">match / dispatch / heuristic / engine are reusable descriptors; a Launch = kernel source + UDD (unique, not reused)</text>
 
   <!-- ======================= COLUMN 1: reusable descriptors ======================= -->
-  <text x="35" y="82" font-weight="600" font-size="12">Shared descriptors (1 per UKD, referenced by name)</text>
+  <text x="35" y="82" font-weight="600" font-size="12">Shared descriptors (referenced by ID, reused across UKDs)</text>
 
   <!-- UMD -->
   <rect x="30" y="92" width="250" height="66" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
-  <text x="45" y="114" font-weight="600">UMD — Universal Match Descriptor</text>
+  <text x="45" y="114" font-weight="600">UMD: Universal Match Descriptor</text>
   <text x="45" y="134" font-size="12" fill="#333">when it applies: graph pattern + constraints</text>
   <text x="45" y="150" font-size="12" fill="#333">binds $vars (dims, tensors) for launch</text>
 
   <!-- UHD -->
   <rect x="30" y="172" width="250" height="66" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
-  <text x="45" y="194" font-weight="600">UHD — Universal Heuristic Descriptor</text>
+  <text x="45" y="194" font-weight="600">UHD: Universal Heuristic Descriptor</text>
   <text x="45" y="214" font-size="12" fill="#333">ranks the kernels that fit a graph</text>
   <text x="45" y="230" font-size="12" fill="#333">and picks one per problem</text>
 
   <!-- UED -->
   <rect x="30" y="252" width="250" height="66" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
-  <text x="45" y="274" font-weight="600">UED — Universal Engine Descriptor</text>
+  <text x="45" y="274" font-weight="600">UED: Universal Engine Descriptor</text>
   <text x="45" y="294" font-size="12" fill="#333">engine identity, tags[], knobs[]</text>
   <text x="45" y="310" font-size="12" fill="#333">a named group of kernels</text>
 
@@ -36,11 +36,11 @@
   <rect x="356" y="90" width="18" height="14" rx="2" fill="#fdf1cf" stroke="#c99a2e" stroke-width="1"/>
   <rect x="352" y="94" width="18" height="14" rx="2" fill="#fdf4dd" stroke="#c99a2e" stroke-width="1"/>
   <rect x="348" y="98" width="18" height="14" rx="2" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.2"/>
-  <text x="374" y="103" font-size="10" fill="#8a6d1f">KDP file — kernelDescriptors[] : N UKDs (this is one)</text>
+  <text x="374" y="103" font-size="10" fill="#8a6d1f">KDP file: kernelDescriptors[] : N UKDs (this is one)</text>
   <rect x="345" y="112" width="250" height="210" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
   <text x="470" y="138" text-anchor="middle" font-weight="600">UKD</text>
   <text x="470" y="156" text-anchor="middle" fill="#555" font-size="11">Universal Kernel Descriptor</text>
-  <text x="470" y="174" text-anchor="middle" fill="#555" font-size="11">a binding — no logic of its own</text>
+  <text x="470" y="174" text-anchor="middle" fill="#555" font-size="11">a binding, no logic of its own</text>
   <line x1="360" y1="186" x2="580" y2="186" stroke="#c99a2e" stroke-width="1" stroke-dasharray="3 3"/>
   <text x="362" y="210" font-family="Consolas, monospace" font-size="12">match:      1 UMD</text>
   <text x="362" y="234" font-family="Consolas, monospace" font-size="12">engine:     1 UED</text>
@@ -54,7 +54,8 @@
   <line x1="345" y1="262" x2="282" y2="285" stroke="#444" stroke-width="1.4" marker-end="url(#arrowD)"/>
 
   <!-- ======================= COLUMN 3: N Launches ======================= -->
-  <text x="625" y="82" font-weight="600" font-size="12">Launches — N per kernel</text>
+  <text x="625" y="82" font-weight="600" font-size="12">Launches: N per kernel</text>
+
   <text x="625" y="99" fill="#555" font-size="11">1 for a simple kernel, N for multi-launch (e.g. SDPA-BWD)</text>
 
   <!-- Launch 1 -->
@@ -62,7 +63,7 @@
   <text x="628" y="128" font-weight="600" font-size="11" fill="#333">Launch 1  =  kernel source  +  UDD</text>
   <rect x="628" y="134" width="130" height="40" rx="6" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="693" y="153" text-anchor="middle" font-size="12">kernel source</text>
-  <text x="693" y="168" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip / rtc</text>
+  <text x="693" y="168" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip_source / hiprtc</text>
   <text x="780" y="159" text-anchor="middle" font-size="16" fill="#555">+</text>
   <rect x="804" y="134" width="132" height="40" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="870" y="153" text-anchor="middle" font-size="12">UDD</text>
@@ -73,7 +74,7 @@
   <text x="628" y="210" font-weight="600" font-size="11" fill="#333">Launch 2  =  kernel source  +  UDD</text>
   <rect x="628" y="216" width="130" height="40" rx="6" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="693" y="235" text-anchor="middle" font-size="12">kernel source</text>
-  <text x="693" y="250" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip / rtc</text>
+  <text x="693" y="250" text-anchor="middle" font-size="10" fill="#555">kpack / hsaco / hip_source / hiprtc</text>
   <text x="780" y="241" text-anchor="middle" font-size="16" fill="#555">+</text>
   <rect x="804" y="216" width="132" height="40" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="870" y="235" text-anchor="middle" font-size="12">UDD</text>
@@ -83,23 +84,20 @@
   <line x1="595" y1="215" x2="618" y2="150" stroke="#444" stroke-width="1.4" marker-end="url(#arrowD)"/>
   <line x1="595" y1="240" x2="618" y2="228" stroke="#444" stroke-width="1.4" marker-end="url(#arrowD)"/>
 
-  <!-- ellipsis / notes -->
-  <text x="625" y="284" font-size="12" fill="#555">(and so on — up to N Launches; one match (UMD) binds them all)</text>
-  <text x="625" y="304" font-size="11" fill="#555">UDD = args &amp; ordering, grid/block, shared mem, workspace</text>
-  <text x="625" y="319" font-size="11" fill="#555">a UDD is reusable / referenced by name; a Launch is unique</text>
+  <!-- notes -->
+  <text x="625" y="284" font-size="12" fill="#555">(up to N Launches; one UMD binds them all)</text>
+  <text x="625" y="308" font-size="11" fill="#555">UDD = args &amp; ordering, grid/block, shared mem, workspace</text>
+  <text x="625" y="323" font-size="11" fill="#555">a UDD is reusable, referenced by ID; a Launch is unique</text>
 
-  <!-- JIT future: swaps the source half of a Launch -->
-  <rect x="628" y="336" width="130" height="42" rx="6" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5" stroke-dasharray="5 3"/>
-  <text x="693" y="356" text-anchor="middle" font-size="12" fill="#555">+ JIT source</text>
-  <text x="693" y="371" text-anchor="middle" font-size="10" fill="#555">(future) — same slot</text>
-  <line x1="693" y1="256" x2="693" y2="336" stroke="#7f8a99" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrowD)"/>
-  <text x="775" y="356" font-size="11" fill="#555">a new code source kind plugs into the source half;</text>
-  <text x="775" y="371" font-size="11" fill="#555">UMD / UDD / UHD / UED are reused unchanged.</text>
+  <!-- JIT future: another source-half kind (no connector, self-explaining) -->
+  <rect x="625" y="338" width="321" height="44" rx="6" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="636" y="357" font-size="11" fill="#555">+ JIT source (future): another code-source kind for</text>
+  <text x="636" y="372" font-size="11" fill="#555">the source half. UMD / UDD / UHD / UED reused unchanged.</text>
 
   <!-- ======================= BOTTOM: UCD strip ======================= -->
   <rect x="30" y="398" width="900" height="238" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5"/>
-  <text x="48" y="424" font-weight="600">UCD — Universal Composite Descriptor: a pipeline of the same pieces, one bundle per stage</text>
-  <text x="48" y="444" fill="#555" font-size="12">each stage resolves like a UKD — its own UMD, UHD, UED and one-or-more Launches (source + UDD) — wired by intermediate tensors</text>
+  <text x="48" y="424" font-weight="600">UCD (Universal Composite Descriptor): a pipeline of the same pieces (future work, Section 10)</text>
+  <text x="48" y="444" fill="#555" font-size="12">each stage resolves to a UKD (its own UMD, UHD, UED, and one or more Launches), wired by intermediate tensors</text>
 
   <!-- Stage 1 -->
   <rect x="55" y="458" width="272" height="168" rx="8" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5"/>

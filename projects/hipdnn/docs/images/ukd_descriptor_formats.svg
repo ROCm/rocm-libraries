@@ -1,0 +1,98 @@
+<svg viewBox="0 0 1000 600" width="1000" height="600" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrowDF" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- TITLE -->
+  <text x="500" y="26" text-anchor="middle" font-weight="600">Descriptor formats: a KDP of UKDs, each referencing reusable UMD / UDD / UED / UHD by ID</text>
+
+  <!-- ===================== KDP CONTAINER (left) ===================== -->
+  <rect x="15" y="48" width="345" height="470" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="30" y="74" font-family="Consolas, monospace" font-size="13" fill="#8e5bc4" font-weight="600">KDP  KernelDescriptorPack</text>
+  <text x="30" y="94" font-family="Consolas, monospace" font-size="11" fill="#555">kernelDescriptors[] : [ UKD, UKD, ... ]</text>
+
+  <!-- UKD #1 (detailed, the reference source) -->
+  <rect x="30" y="112" width="315" height="182" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="44" y="134" font-family="Consolas, monospace" font-size="13" fill="#8a6d1f" font-weight="600">UKD  kernel descriptor</text>
+  <text x="44" y="156" font-family="Consolas, monospace" font-size="11">id</text>
+  <text x="44" y="174" font-family="Consolas, monospace" font-size="11">name</text>
+  <text x="44" y="196" font-family="Consolas, monospace" font-size="11">engine     &#8594; UED</text>
+  <text x="44" y="214" font-family="Consolas, monospace" font-size="11">heuristic  &#8594; UHD</text>
+  <text x="44" y="232" font-family="Consolas, monospace" font-size="11">match      &#8594; UMD</text>
+  <text x="44" y="254" font-family="Consolas, monospace" font-size="11">launches[] &#8594; Launch (each)</text>
+  <text x="44" y="278" font-family="Consolas, monospace" font-size="10" fill="#555">a Launch = kernel source + UDD</text>
+
+  <!-- UKD #2, #3 (collapsed) -->
+  <rect x="30" y="304" width="315" height="28" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="44" y="323" font-family="Consolas, monospace" font-size="11" fill="#8a6d1f">UKD  { id, name, engine, heuristic, match, launches[] }</text>
+  <rect x="30" y="340" width="315" height="28" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="44" y="359" font-family="Consolas, monospace" font-size="11" fill="#8a6d1f">UKD  { id, name, engine, heuristic, match, launches[] }</text>
+
+  <text x="187" y="398" text-anchor="middle" font-size="11" fill="#555">one file, many UKDs batched together</text>
+  <text x="187" y="420" text-anchor="middle" font-size="11" fill="#555">every reference below is by ID</text>
+
+  <!-- ===================== REUSABLE CARDS (right) ===================== -->
+  <!-- UED -->
+  <rect x="620" y="60" width="365" height="72" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="636" y="82" font-family="Consolas, monospace" font-size="13" fill="#4a72c4" font-weight="600">UED  engine descriptor</text>
+  <text x="636" y="104" font-family="Consolas, monospace" font-size="11">id</text>
+  <text x="636" y="122" font-family="Consolas, monospace" font-size="11">name</text>
+  <text x="800" y="104" font-family="Consolas, monospace" font-size="11">tags[]</text>
+  <text x="800" y="122" font-family="Consolas, monospace" font-size="11">knobs[]</text>
+
+  <!-- UHD -->
+  <rect x="620" y="144" width="365" height="72" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="636" y="166" font-family="Consolas, monospace" font-size="13" fill="#3f9159" font-weight="600">UHD  heuristic descriptor</text>
+  <text x="636" y="188" font-family="Consolas, monospace" font-size="11">id</text>
+  <text x="636" y="206" font-family="Consolas, monospace" font-size="11">name</text>
+  <text x="800" y="188" font-family="Consolas, monospace" font-size="11">kind</text>
+  <text x="800" y="206" font-family="Consolas, monospace" font-size="11">model {...}</text>
+
+  <!-- UMD -->
+  <rect x="620" y="228" width="365" height="72" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
+  <text x="636" y="250" font-family="Consolas, monospace" font-size="13" fill="#2a9d8f" font-weight="600">UMD  match descriptor</text>
+  <text x="636" y="272" font-family="Consolas, monospace" font-size="11">id</text>
+  <text x="636" y="290" font-family="Consolas, monospace" font-size="11">name</text>
+  <text x="800" y="272" font-family="Consolas, monospace" font-size="11">nodes[]</text>
+  <text x="800" y="290" font-family="Consolas, monospace" font-size="11">constraints[]</text>
+
+  <!-- Launch box: kernel source + UDD -->
+  <rect x="620" y="312" width="365" height="236" rx="8" fill="#fbfbfd" stroke="#b0b7c0" stroke-width="1.5"/>
+  <text x="636" y="334" font-weight="600" font-size="12" fill="#333">Launch  (= kernel source + UDD)</text>
+
+  <rect x="632" y="346" width="158" height="92" rx="6" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="711" y="372" text-anchor="middle" font-size="12">kernel source</text>
+  <text x="711" y="394" text-anchor="middle" font-size="10" fill="#555">compiled artifact</text>
+  <text x="711" y="410" text-anchor="middle" font-size="10" fill="#555">+ entry point</text>
+
+  <text x="800" y="392" text-anchor="middle" font-size="16" fill="#555">+</text>
+
+  <rect x="812" y="346" width="161" height="190" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="826" y="368" font-family="Consolas, monospace" font-size="12" fill="#8e5bc4" font-weight="600">UDD  dispatch</text>
+  <text x="826" y="390" font-family="Consolas, monospace" font-size="11">id</text>
+  <text x="826" y="408" font-family="Consolas, monospace" font-size="11">name</text>
+  <text x="826" y="426" font-family="Consolas, monospace" font-size="11">grid</text>
+  <text x="826" y="444" font-family="Consolas, monospace" font-size="11">block</text>
+  <text x="826" y="462" font-family="Consolas, monospace" font-size="11">shared_mem_bytes</text>
+  <text x="826" y="480" font-family="Consolas, monospace" font-size="11">workspace_bytes</text>
+  <text x="826" y="498" font-family="Consolas, monospace" font-size="11">args_signature[]</text>
+
+  <!-- ===================== REFERENCE ARROWS (labels above each path) ===================== -->
+  <path d="M345 196 C 460 165, 540 110, 620 96" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+  <text x="495" y="132" text-anchor="middle" font-size="11" fill="#555">engine</text>
+
+  <path d="M345 214 C 460 205, 540 182, 620 180" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+  <text x="495" y="188" text-anchor="middle" font-size="11" fill="#555">heuristic</text>
+
+  <path d="M345 232 C 460 250, 540 262, 620 264" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+  <text x="497" y="248" text-anchor="middle" font-size="11" fill="#555">match</text>
+
+  <path d="M345 254 C 460 330, 540 410, 620 420" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+  <text x="470" y="315" text-anchor="middle" font-size="11" fill="#555">launches[]</text>
+
+  <!-- CAPTION -->
+  <text x="500" y="576" text-anchor="middle" font-size="12" fill="#555">Only UKDs are batched; every other descriptor is one small file referenced by ID.</text>
+</svg>

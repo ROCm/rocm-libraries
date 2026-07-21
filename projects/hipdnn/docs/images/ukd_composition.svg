@@ -7,7 +7,7 @@
   </defs>
 
   <!-- ===================== LEFT PANEL: execution composition ===================== -->
-  <text x="237" y="26" text-anchor="middle" font-weight="600">Execution composition: several Launches, one selection</text>
+  <text x="237" y="26" text-anchor="middle" font-weight="600">Multi-kernel launch UKD: several Launches, one selection</text>
   <rect x="15" y="40" width="445" height="395" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
 
   <!-- UKD -->
@@ -34,10 +34,10 @@
   <text x="395" y="246" text-anchor="middle" font-size="10" fill="#555">scratch</text>
   <!-- write / read edges -->
   <line x1="320" y1="168" x2="352" y2="210" stroke="#444" stroke-width="1.3" marker-end="url(#arrowCX)"/>
-  <text x="330" y="188" font-size="9" fill="#555">write</text>
+  <text x="326" y="180" font-size="9" fill="#555">write</text>
   <line x1="352" y1="240" x2="320" y2="236" stroke="#444" stroke-width="1.3" marker-end="url(#arrowCX)"/>
   <line x1="360" y1="268" x2="320" y2="300" stroke="#444" stroke-width="1.3" marker-end="url(#arrowCX)"/>
-  <text x="332" y="282" font-size="9" fill="#555">read</text>
+  <text x="326" y="292" font-size="9" fill="#555">read</text>
 
   <!-- caption -->
   <text x="237" y="352" text-anchor="middle" font-size="11" fill="#555">each Launch = kernel source + UDD; one UMD binds them all</text>
@@ -45,7 +45,7 @@
   <text x="237" y="396" text-anchor="middle" font-size="12" fill="#333">run in order on one stream.</text>
 
   <!-- ===================== RIGHT PANEL: selection composition ===================== -->
-  <text x="703" y="26" text-anchor="middle" font-weight="600">Selection composition: a pipeline of independent picks</text>
+  <text x="703" y="26" text-anchor="middle" font-weight="600">Composition (UCD): a pipeline of independent picks</text>
   <rect x="480" y="40" width="445" height="395" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
 
   <!-- composite engine -->

@@ -8,11 +8,11 @@
 
   <!-- TITLE -->
   <text x="430" y="28" text-anchor="middle" font-weight="600" font-size="15">The descriptor family: many kernels, few shared pieces</text>
-  <text x="430" y="48" text-anchor="middle" fill="#555" font-size="12">A KDP batches many UKDs; each UKD is a thin binding that references reusable descriptors by name</text>
+  <text x="430" y="48" text-anchor="middle" fill="#555" font-size="12">A KDP batches many UKDs; each UKD is a thin binding that references reusable descriptors by ID</text>
 
   <!-- CENTER: KDP with UKD entries -->
   <rect x="325" y="120" width="210" height="210" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="430" y="145" text-anchor="middle" font-weight="600">KDP — KernelDescriptorPack</text>
+  <text x="430" y="145" text-anchor="middle" font-weight="600">KDP: KernelDescriptorPack</text>
   <text x="430" y="163" text-anchor="middle" font-size="11" fill="#8a6d1f">kernelDescriptors[] : many UKDs</text>
   <rect x="345" y="176" width="170" height="30" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
   <text x="430" y="196" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UKD sdpa_d128_bf16</text>
@@ -20,51 +20,51 @@
   <text x="430" y="232" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UKD sdpa_d64_bf16</text>
   <rect x="345" y="248" width="170" height="30" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
   <text x="430" y="268" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UKD ... (N)</text>
-  <text x="430" y="300" text-anchor="middle" font-size="10" fill="#555">each UKD = engine + heuristic + match + N Launches</text>
+  <text x="430" y="300" text-anchor="middle" font-size="10" fill="#555">UKD = UED + UHD + UMD + Launches</text>
   <text x="430" y="316" text-anchor="middle" font-size="10" fill="#555">Launch = kernel source + UDD</text>
 
   <!-- LEFT: one-each shared pieces -->
+  <text x="142" y="110" text-anchor="middle" font-size="10" fill="#333">engine: many UKDs &#8594; 1</text>
   <rect x="35" y="118" width="215" height="72" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
-  <text x="50" y="142" font-weight="600">UED — Engine Descriptor</text>
+  <text x="50" y="142" font-weight="600">UED: Engine Descriptor</text>
   <text x="50" y="162" font-size="12" fill="#333">one bag of kernels</text>
   <text x="50" y="180" font-size="11" fill="#555">shared by all UKDs in the engine</text>
 
+  <text x="142" y="230" text-anchor="middle" font-size="10" fill="#333">heuristic: many UKDs &#8594; 1</text>
   <rect x="35" y="238" width="215" height="72" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
-  <text x="50" y="262" font-weight="600">UHD — Heuristic Descriptor</text>
+  <text x="50" y="262" font-weight="600">UHD: Heuristic Descriptor</text>
   <text x="50" y="282" font-size="12" fill="#333">one kernel selector</text>
   <text x="50" y="300" font-size="11" fill="#555">ranks the UKDs that fit a graph</text>
 
   <!-- RIGHT: few / many pieces -->
   <rect x="610" y="92" width="215" height="66" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
-  <text x="625" y="116" font-weight="600">UMD — Match Descriptor</text>
+  <text x="625" y="116" font-weight="600">UMD: Match Descriptor</text>
   <text x="625" y="136" font-size="12" fill="#333">a few (one per graph shape)</text>
   <text x="625" y="152" font-size="11" fill="#555">graph pattern + constraints; binds $vars</text>
 
   <rect x="610" y="176" width="215" height="66" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
-  <text x="625" y="200" font-weight="600">UDD — Dispatch Descriptor</text>
+  <text x="625" y="200" font-weight="600">UDD: Dispatch Descriptor</text>
   <text x="625" y="220" font-size="12" fill="#333">a couple (reused across kernels)</text>
   <text x="625" y="236" font-size="11" fill="#555">args &amp; ordering, grid/block, shmem, ws</text>
 
   <rect x="610" y="260" width="215" height="66" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="625" y="284" font-weight="600">kernel source</text>
   <text x="625" y="304" font-size="12" fill="#333">a bunch (one+ per UKD)</text>
-  <text x="625" y="320" font-size="11" fill="#555">kpack / hsaco / hip / rtc (JIT later)</text>
+  <text x="625" y="320" font-size="11" fill="#555">kpack / hsaco / hip_source / hiprtc</text>
 
   <!-- arrows: KDP/UKDs reference shared pieces by name -->
-  <line x1="325" y1="170" x2="250" y2="150" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="258" y="130" text-anchor="end" font-size="10" fill="#333">engine: many UKDs &#8594; 1</text>
-  <line x1="325" y1="255" x2="250" y2="272" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="258" y="235" text-anchor="end" font-size="10" fill="#333">heuristic: many UKDs &#8594; 1</text>
+  <line x1="325" y1="170" x2="252" y2="150" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <line x1="325" y1="255" x2="252" y2="272" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
 
-  <line x1="535" y1="175" x2="610" y2="128" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="600" y="120" text-anchor="end" font-size="10" fill="#333">match</text>
-  <line x1="535" y1="215" x2="610" y2="209" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="600" y="200" text-anchor="end" font-size="10" fill="#333">dispatch</text>
-  <line x1="535" y1="255" x2="610" y2="290" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="600" y="278" text-anchor="end" font-size="10" fill="#333">source</text>
+  <line x1="535" y1="175" x2="608" y2="128" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="572" y="146" text-anchor="middle" font-size="10" fill="#333">match</text>
+  <line x1="535" y1="212" x2="608" y2="209" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="572" y="203" text-anchor="middle" font-size="10" fill="#333">dispatch</text>
+  <line x1="535" y1="255" x2="608" y2="290" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="572" y="261" text-anchor="middle" font-size="10" fill="#333">source</text>
 
   <!-- caption -->
-  <text x="430" y="368" text-anchor="middle" font-size="12" fill="#333">One engine, one selector, a few matches, a couple dispatch descriptors, a bunch of sources — but many kernels.</text>
-  <text x="430" y="388" text-anchor="middle" font-size="12" fill="#333">Only kernels are batched, into a KDP; every other piece is referenced by name and reused.</text>
+  <text x="430" y="368" text-anchor="middle" font-size="12" fill="#333">One engine, one selector, a few matches, a couple dispatch descriptors, a bunch of sources, but many kernels.</text>
+  <text x="430" y="388" text-anchor="middle" font-size="12" fill="#333">Only kernels are batched, into a KDP; every other piece is referenced by ID and reused.</text>
   <text x="430" y="408" text-anchor="middle" font-size="12" fill="#555">Engine-level selection picks the engine; the UHD then picks the kernel within it.</text>
 </svg>
