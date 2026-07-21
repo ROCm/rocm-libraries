@@ -9699,8 +9699,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["InnerUnroll"] >= self.states.numReadsIterCoalescedMXSB:
           numMXSB //= self.states.numReadsIterCoalescedMXSB
 
-      # TileSpan MXS scale wave-split collapses each 2-block group into a single ds_load
-      # (partner block read via matrix_{a,b}_scale from the upper half-wave), halving the
+      # TileSpan collapses each 2-block group into a single ds_load (partner block read via
+      # matrix_{a,b}_scale from the upper half-wave; wave-count independent), halving the
       # emitted MX scale local-read count. numReadsPerIterMXS* must match this or the
       # s_wait_dscnt (dscnt) waitcount is over-counted, the wait no-ops, and the WMMA
       # consumes not-yet-loaded scale/data registers (-> -nan). Mirrors the numVgprValu

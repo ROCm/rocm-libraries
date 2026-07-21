@@ -745,21 +745,26 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         tc               = tP["tensorChar"]
         tile01           = tP["tile01Idx"]
         # TileSpan scale-select engages when MIWaveTile//VectorWidth is a positive even
-        # multiple (ratio == 2 is the base case; ratio % 2 == 0 lets one wave-split ds_load
-        # per group halve the number of MX scale ds_loads).
+        # multiple (ratio == 2 is the base case; ratio % 2 == 0 lets one ds_load per group
+        # hold two scale blocks and halve the number of MX scale ds_loads).
         _mxsRatio = (kernel["MIWaveTile%s"%tc[3]] // kernel["VectorWidth%s"%tc[3]]) if ("MXS" in tc) else 0
-        # This condition MUST match LocalRead.getMxsTileSpanInfo exactly so the wave-split load
-        # layout produced here agrees with the packed VGPR layout / matrix_*_scale:N select the
-        # WMMA emits. Requirements: MXS tensor, ratio >= 2 and even, the tile-axis matrix-instr
-        # size is the wave midpoint (so lanes i vs i+halfSpan == lower/upper half-wave), and the
-        # tile axis spans >1 wave (MIWaveGroup>1) so the num1DWaves>1 hiOffset path below
-        # actually places the partner block into the upper half-wave. If any fails, fall back to
-        # the base (non-tile-span) layout, which is known-correct.
+        # tileSpan is the ds_load-halving gate and MUST match LocalRead.getMxsTileSpanInfo
+        # exactly, so the load layout produced here agrees with the packed VGPR layout /
+        # matrix_*_scale:N select the WMMA emits. Requirements: MXS tensor, ratio >= 2 and even,
+        # and the tile-axis matrix-instr size is the wave midpoint (so lanes i vs i+halfSpan ==
+        # lower/upper half-wave). tileSpan is independent of the wave count.
+        #
+        # tileSpanWaveSplit adds MIWaveGroup>1 and picks between the two load layouts (both put
+        # block 2g in the lower half-wave and partner block 2g+1 in the upper half-wave):
+        #   - MIWaveGroup==1 (tileSpan and not tileSpanWaveSplit): non-split. nIdx = wtid, so a
+        #     single wave's lanes 0..MI-1 / MI..2MI-1 directly cover the two blocks; no hi offset.
+        #   - MIWaveGroup>1 (tileSpanWaveSplit): wave-split. nIdx = wtid % MI, and the num1DWaves>1
+        #     hiOffset path below explicitly places the partner block into the upper half-wave.
         _mxsMatrixInstT = (kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"])
-        tileSpanWaveSplit = ("MXS" in tc) and (_mxsRatio >= 2) and (_mxsRatio % 2 == 0) \
-                            and (_mxsMatrixInstT == kernel["WavefrontSize"] // 2) \
-                            and (kernel["MIWaveGroup"][tile01] > 1)
-        tileSpan = tileSpanWaveSplit
+        tileSpan = ("MXS" in tc) and (_mxsRatio >= 2) and (_mxsRatio % 2 == 0) \
+                            and (_mxsMatrixInstT == kernel["WavefrontSize"] // 2)
+        tileSpanWaveSplit = tileSpan and (kernel["MIWaveGroup"][tile01] > 1)
+
         waveWidth        = writer.states.kernel["WavefrontSize"]
 
         noUnrollOffset = writer.states.asmCaps["HasWMMA_V1"] or ("MXS" in tc)
@@ -860,12 +865,6 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         strideBlock = matrixInstT * strideTile
         if ("MXS" in tc):
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
-           if tileSpan and not tileSpanWaveSplit:
-              # non-split tile-span (MIWaveGroup==1): one wave-tile group owns MIWaveTile
-              # contiguous tile rows; W0Stride = full span. The wave-split case keeps the
-              # base W0Stride (= halfSpan * nStride) and grabs the partner block via a
-              # hi offset (see TileSpan wave-split below).
-              strideWave *= kernel["MIWaveTile"][tile01]
         elif enableLDSTr:
            strideWave = matrixInstT * vectorWidth
         else:
@@ -917,16 +916,16 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                          "1. K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
 
             else:
-              if not tileSpan:
+              if not tileSpan or tileSpanWaveSplit:
+                # Base layout and TileSpan wave-split both wrap nIdx at MI. In the wave-split case
+                # the lower/upper half-wave share nIdx and the upper half-wave grabs the partner
+                # block via the hi offset added after the wave offset below.
                 module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
                                              "1. N offset: nIdx = wtid %% MI_N(%u)" % matrixInstTO))
-              elif tileSpanWaveSplit:
-                # TileSpan wave-split: nIdx = wtid % MI_dim (lower and upper half-wave share
-                # nIdx). The upper half-wave grabs the partner block via an explicit hi
-                # offset added after the wave offset below.
-                module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
-                                             "1. N offset (TileSpan wave-split): nIdx = wtid %% MI_dim(%u)" % matrixInstTO))
               else:
+                # TileSpan non-split (MIWaveGroup==1): one thread per M/N, nIdx = wtid (no wrap),
+                # so lanes 0..MI-1 vs MI..2MI-1 already carry block 2g / partner 2g+1 in the
+                # lower/upper half-wave of a single ds_load; no hi offset needed.
                 module.addComment0("N offset: nIdx = wtid")
 
             applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0 and kernel["ProblemType"]["DataType"].numBytes() != 2

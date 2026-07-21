@@ -8456,17 +8456,18 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # MXS TileSpan scale-select
   #
-  # With the TileSpan optimization, N MXS scale ds_loads collapse to N/2 wave-split
-  # loads: within each group of 2*VW scale blocks, the lower half-wave of the single
-  # ds_load holds the first VW blocks and the upper half-wave holds the partner VW
-  # blocks. The consuming WMMA reads each block directly from that one loaded register
-  # via the gfx1250 matrix_{a,b}_scale:N select. This maps a logical scale block index
+  # With the TileSpan optimization, N MXS scale ds_loads collapse to N/2 loads: within
+  # each group of 2*VW scale blocks, the lower half-wave of the single ds_load holds the
+  # first VW blocks and the upper half-wave holds the partner VW blocks (LRA produces this
+  # layout for both MIWaveGroup==1 and >1). The consuming WMMA reads each block directly
+  # from that one loaded register via the gfx1250 matrix_{a,b}_scale:N select. This maps a
+  # logical scale block index
   # to the register that actually holds it plus the scale-select (0 = lower half-wave,
   # 1 = partner half-wave).
   ##############################################################################
   def mxsUsesScaleSel(self, kernel):
     # The scale-select path is only valid where localReadMX (gfx1250 WMMA_V3 +
-    # InMemorySwizzle) produces the wave-split scale layout.
+    # InMemorySwizzle) produces the half-wave partner scale layout.
     return (self.states.asmCaps.get("HasWMMA_V3", False)
             and kernel.get("MXScaleFormat") == "InMemorySwizzle")
 

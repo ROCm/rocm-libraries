@@ -2,16 +2,19 @@
 ################################################################################
 # Unit tests for the MXS TileSpan scale-select gating logic.
 #
-# TileSpan wave-splits each MX scale tile span so a single ds_load holds two
-# scale blocks (lower half-wave = block 2g, upper half-wave = partner block
-# 2g+1). The consuming gfx1250 WMMA then reads the partner block directly via
+# TileSpan lays out each MX scale tile span so a single ds_load holds two scale
+# blocks (lower half-wave = block 2g, upper half-wave = partner block 2g+1). The
+# consuming gfx1250 WMMA then reads the partner block directly via
 # matrix_{a,b}_scale:N, collapsing N scale ds_loads to N/2.
 #
-# The activation is gated by LocalReadMFMA.getMxsTileSpanInfo. This gate MUST
-# agree exactly with LraTileAssignment.tileSpanWaveSplit -- when they disagree,
-# the WMMA reads a scale block the load never placed in the upper half-wave and
-# produces wrong results (the gating-consistency bug this branch fixes). These
-# tests pin the gate contract and the LRA/LocalRead agreement.
+# The activation (ds_load halving) is gated by LocalReadMFMA.getMxsTileSpanInfo
+# and is independent of the wave count. It MUST agree exactly with
+# LraTileAssignment.tileSpan. LraTileAssignment.tileSpanWaveSplit is a second,
+# narrower gate (tileSpan AND MIWaveGroup>1) that only selects between the two
+# load layouts: MIWaveGroup==1 non-split (nIdx = wtid) vs MIWaveGroup>1 wave-split
+# (nIdx = wtid % MI + hi offset). When getMxsTileSpanInfo and tileSpan disagree,
+# the WMMA reads a scale block the load never placed in the half-wave and produces
+# wrong results. These tests pin the gate contract and the LRA/LocalRead agreement.
 #
 # Pure Python logic -- no GPU hardware required.
 #
@@ -119,9 +122,12 @@ class TestGetMxsTileSpanInfoGate:
         # MatrixInstM=32 with wave32 -> midpoint is 16, so 32 != 16.
         assert _info(_make_kernel(matrix_inst_m=32)) is None
 
-    def test_single_wave_group_returns_none(self):
-        """MIWaveGroup[tile]<=1: the load is not wave-split, so no scale-select."""
-        assert _info(_make_kernel(mi_wave_group=(1, 2))) is None
+    def test_single_wave_group_still_tile_spans(self):
+        """MIWaveGroup[tile]==1 still halves ds_loads: it uses the non-split layout
+        (nIdx = wtid) rather than the wave-split layout, but the gate is wave-count
+        independent so getMxsTileSpanInfo still returns a layout."""
+        info = _info(_make_kernel(mi_wave_group=(1, 2)))
+        assert info == {"vectorWidth": 1, "numGroups": 2}
 
     def test_num_groups_scales_with_tile(self):
         """numGroups = (MIWaveTile//VectorWidth)//2."""
@@ -151,11 +157,12 @@ class TestGetMxsTileSpanInfoAxisNeutral:
         )) is None
 
 
-def _lra_wave_split(kernel, tc, tile01):
-    """Replicate LraTileAssignment.tileSpanWaveSplit gating verbatim.
+def _lra_tile_span(kernel, tc, tile01):
+    """Replicate LraTileAssignment.tileSpan gating verbatim (the ds_load-halving gate,
+    wave-count independent).
 
     Kept independent of getMxsTileSpanInfo so the test detects any future drift
-    between the two gates (the bug fixed on this branch).
+    between the two gates.
     """
     if "MXS" not in tc:
         return False
@@ -163,12 +170,17 @@ def _lra_wave_split(kernel, tc, tile01):
     matrix_inst_t = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
     return (ratio >= 2
             and ratio % 2 == 0
-            and matrix_inst_t == kernel["WavefrontSize"] // 2
-            and kernel["MIWaveGroup"][tile01] > 1)
+            and matrix_inst_t == kernel["WavefrontSize"] // 2)
 
 
-class TestGateMatchesLraWaveSplit:
-    """getMxsTileSpanInfo activation must equal LraTileAssignment.tileSpanWaveSplit."""
+def _lra_wave_split(kernel, tc, tile01):
+    """Replicate LraTileAssignment.tileSpanWaveSplit: tileSpan AND MIWaveGroup>1."""
+    return _lra_tile_span(kernel, tc, tile01) and kernel["MIWaveGroup"][tile01] > 1
+
+
+class TestGateMatchesLraTileSpan:
+    """getMxsTileSpanInfo activation must equal LraTileAssignment.tileSpan (the ds_load
+    halving gate), and tileSpanWaveSplit must be exactly tileSpan AND MIWaveGroup>1."""
 
     @pytest.mark.parametrize("tc,tile01", [("MXSA", 0), ("MXSB", 1)])
     @pytest.mark.parametrize("vector_width", [1, 2])
@@ -183,10 +195,15 @@ class TestGateMatchesLraWaveSplit:
             mi_wave_group=wave_group,
         )
         info = LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01)
-        assert (info is not None) == _lra_wave_split(kernel, tc, tile01), (
+        # The activation gate is wave-count independent and matches tileSpan.
+        assert (info is not None) == _lra_tile_span(kernel, tc, tile01), (
             f"gate mismatch for tc={tc} tile01={tile01} vw={vector_width} "
             f"mt={mi_wave_tile} mi={matrix_inst} wg={wave_group}: "
-            f"getMxsTileSpanInfo={info!r}, lraWaveSplit={_lra_wave_split(kernel, tc, tile01)}"
+            f"getMxsTileSpanInfo={info!r}, lraTileSpan={_lra_tile_span(kernel, tc, tile01)}"
+        )
+        # The wave-split layout is the strict subset that also needs >1 wave.
+        assert _lra_wave_split(kernel, tc, tile01) == (
+            (info is not None) and wave_group[tile01] > 1
         )
 
 
@@ -258,6 +275,15 @@ class TestScaleSelectEffect:
         stub = scalesel_writer(has_wmma_v3=True)
         kernel = _make_scalesel_kernel(vector_width=1, mi_wave_tile=(4, 4))
         mapping = [_scale_sel(stub, kernel, "MXSB", 1, idx) for idx in range(4)]
+        assert mapping == [(0, 0), (0, 1), (1, 0), (1, 1)]
+
+    def test_single_wave_group_scale_select(self, scalesel_writer):
+        """MIWaveGroup==1 (non-split layout) still collapses 2 blocks per register:
+        the ds_load halving / scale-select is wave-count independent."""
+        stub = scalesel_writer(has_wmma_v3=True)
+        kernel = _make_scalesel_kernel(vector_width=1, mi_wave_tile=(4, 4))
+        kernel["MIWaveGroup"] = [1, 1]
+        mapping = [_scale_sel(stub, kernel, "MXSA", 0, idx) for idx in range(4)]
         assert mapping == [(0, 0), (0, 1), (1, 0), (1, 1)]
 
     def test_no_wmma_v3_disables_scale_select(self, scalesel_writer):

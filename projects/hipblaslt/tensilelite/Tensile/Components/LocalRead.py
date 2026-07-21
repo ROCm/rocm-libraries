@@ -28,7 +28,7 @@ from rocisa.enum import HighBitSel, SelectBit, InstType
 from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
                             VMovB32, VMovB64, VLShiftRightB32, VCvtFP8toF16, VCvtScalePkFP8toF16, VCvtFP8toF32, VCvtScaleFP8toF16, VCvtScalePkFP8toF16, \
                             VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, VSubF32, VSwapB32, MFMAInstruction, \
-                            ECvtPkFP8toF32, ECvtF32toF16, VSubU32
+                            ECvtPkFP8toF32, ECvtF32toF16
 
 from ..Component import LocalRead
 
@@ -164,12 +164,18 @@ class LocalReadMFMA(LocalRead):
     def getMxsTileSpanInfo(kernel, tc, tile01):
         """
         MX scale TileSpan scale-select: when MIWaveTile//VectorWidth is a positive even
-        multiple, LRA wave-splits the tile span so a single ds_load holds two scale blocks
+        multiple, LRA lays out the tile span so a single ds_load holds two scale blocks
         (lower half-wave = block 2g, upper half-wave = partner block 2g+1). The consuming
         WMMA then reads each block directly from that one register via the gfx1250
         matrix_{a,b}_scale:N selector, so N scale ds_loads collapse to N/2.
         Axis-neutral (tile01 selects the tile axis, so this serves either MX scale tensor).
         Return tile-span layout info, or None.
+
+        This is the ds_load-halving gate and is independent of the wave count: LRA produces the
+        block 2g / partner 2g+1 half-wave layout for both MIWaveGroup==1 (non-split: nIdx = wtid)
+        and MIWaveGroup>1 (wave-split: nIdx = wtid % MI plus a hi offset). It MUST match
+        LraTileAssignment.tileSpan exactly (NOT tileSpanWaveSplit, which additionally requires
+        MIWaveGroup>1 only to pick between those two layouts).
 
         Constraint: the half-wave scale-select selects lane i vs lane i+halfSpan within the
         wave, so it only maps to this optimization when the two half-wave tile spans meet at
@@ -182,9 +188,8 @@ class LocalReadMFMA(LocalRead):
         miWaveTile = kernel["MIWaveTile"][tile01]
         miWaveTileVectors = miWaveTile // vectorWidth
         # The tile is handled as (miWaveTileVectors // 2) independent ratio-2 groups. Each
-        # group is one wave-split ds_load (lower half-wave = block 2g, upper half-wave grabs
-        # partner block 2g+1), so N ds_loads collapse to N/2. (ratio == 2 is the single-group
-        # special case.)
+        # group is one ds_load (lower half-wave = block 2g, upper half-wave = partner block
+        # 2g+1), so N ds_loads collapse to N/2. (ratio == 2 is the single-group special case.)
         if miWaveTileVectors < 2 or (miWaveTileVectors % 2) != 0:
             return None
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
@@ -192,14 +197,7 @@ class LocalReadMFMA(LocalRead):
         # half-wave boundary is the wave midpoint (halfSpan == WavefrontSize/2).
         if matrixInstT != kernel["WavefrontSize"] // 2:
             return None
-        # The wave-split partner-block layout is only produced by LraTileAssignment when the
-        # tile axis spans >1 wave (MIWaveGroup>1, the num1DWaves>1 hiOffset path). With a single
-        # wave the load is NOT wave-split, so the scale-select (matrix_*_scale:1) would read a
-        # block the load never placed in the upper half-wave -> wrong results. This MUST match
-        # LraTileAssignment.tileSpanWaveSplit exactly so the packed/scale-select layout and the
-        # wave-split load layout always agree.
-        if kernel["MIWaveGroup"][tile01] <= 1:
-            return None
+
         return {
             "vectorWidth": vectorWidth,
             "numGroups": miWaveTileVectors // 2,
