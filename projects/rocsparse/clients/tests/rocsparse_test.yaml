@@ -162,6 +162,7 @@ include: test_gemvi.yaml
 include: test_sddmm.yaml
 include: test_sddmm_batched_coo.yaml
 include: test_sddmm_batched_csr.yaml
+include: test_sddmm_batched_csc.yaml
 include: test_csrcolor.yaml
 include: test_copy_info.yaml
 include: test_check_matrix_csr.yaml

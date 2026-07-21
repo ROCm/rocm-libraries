@@ -211,12 +211,13 @@ namespace rocsparse
             return;
         }
 
-        // CSR uses independent per-batch strides (configured by the user via
-        // rocsparse_csr_set_strided_batch): offsets_batch_stride_C for the row
-        // offset buffer and columns_values_batch_stride for the column-index
-        // and value buffers. The caller is therefore required to lay out those
-        // buffers with the matching strides, and to broadcast A or B across
-        // batches the caller passes batch_stride_A == 0 or batch_stride_B == 0.
+        // CSR/CSC use two independent per-batch strides (configured by the user
+        // via rocsparse_csr_set_strided_batch / rocsparse_csc_set_strided_batch):
+        // offsets_batch_stride_C for the row/column offset buffer and
+        // indices_batch_stride_C / values_batch_stride_C for the index and value
+        // buffers. The caller is therefore required to lay out those buffers with
+        // the matching strides, and to broadcast A or B across batches the caller
+        // passes batch_stride_A == 0 or batch_stride_B == 0.
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
             rocsparse::sddmm_csx_device_wavefront_per_rowcol<BLOCKSIZE,

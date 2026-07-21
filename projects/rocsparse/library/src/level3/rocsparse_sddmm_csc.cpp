@@ -143,12 +143,6 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Batched computation is currently only supported for the CSR and COO formats.
-        if(batch_count > 1)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
-
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
@@ -162,6 +156,12 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
             if(buffer == nullptr)
             {
                 return rocsparse_status_invalid_pointer;
+            }
+
+            // Batched computation is not supported for the dense algorithm.
+            if(batch_count > 1)
+            {
+                return rocsparse_status_not_implemented;
             }
 
             char* ptr   = reinterpret_cast<char*>(buffer);
