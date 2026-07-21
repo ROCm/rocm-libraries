@@ -551,6 +551,12 @@ authoring tool means adding one adapter that lowers its form to a code object, n
 dispatch path ([Section 6](#6-dispatch-and-workspace)). A DSL that needs its own compiler is typically
 a build-only adapter; a self-contained generator can be build-and-runtime.
 
+The rocKE prototype ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)) is the first
+concrete case and gets its own **build-only** kernel-source adapter: rocKE sources are not directly
+loadable, so the adapter runs the rocKE build step to lower them into `hsaco` code objects ahead of
+time, which the runtime then loads like any other prebuilt code object. This is the adapter migrated in
+the first implementation work ([Section 12](#12-phased-delivery)).
+
 ### 8.2 Heuristic Adapters
 
 UHDs extend the same way. A UHD names a `kind`, and an adapter interprets that content into a scorer.
@@ -738,34 +744,16 @@ by their descriptor-backed equivalents over time.
 
 ## 12. Phased Delivery
 
-The plan begins by publishing the follow-up RFC series ([Section 12.2](#122-follow-up-rfcs)), one per
+Each piece is designed in its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)), one per
 descriptor format bundled with the subsystem it drives, so the design is agreed before code lands.
-Implementation then builds the system up in dependency order, each phase validated against the SDPA
-path from the rocKE work with the checks of [Section 12.1](#121-testing-and-performance). The system is
-brought to full support before real engines are migrated onto it in earnest; that migration is then
-incremental and non-disruptive, with a hand-written engine and its descriptor-backed replacement
-coexisting until the generic one reaches parity on the graphs that engine covers, at which point the
-hand-written code is retired.
+Implementation proceeds against that series and is validated throughout against the SDPA path from the
+rocKE work with the checks of [Section 12.1](#121-testing-and-performance). This RFC does not commit to
+a strict build order; the pieces are implemented as their designs land.
 
-1. **Migrate the generic pieces from the rocKE SDPA POC.** Lift the build and bundling pipeline out of
-   the SDPA-specific prototype into shared, operation-agnostic form, producing the SDPA kernel as
-   descriptor data plus code objects. This is the reference path every later phase is validated against.
-2. **Matching (UMD + graph matcher).** The declarative pattern and constraint model, native-predicate
-   escape hatch, compile-once matcher, and deterministic arbitration, replacing the SDPA graph decode
-   with a match descriptor.
-3. **Engine registry (UED).** The engine format plus the registry that discovers descriptors at load
-   and populates the generic engine and its plan builders from data, replacing static registration for
-   descriptor-backed engines.
-4. **Dispatch (UDD + expression language).** Lift the prototype's launch core into a shared,
-   operation-agnostic module and add the symbolic grid, block, workspace, and argument language. With
-   matching and the registry already in place, the SDPA POC now runs end to end on the generic path.
-5. **Full data-driven build pipeline and integration (KDP).** Generalize packaging to arbitrary
-   descriptor sets: producer, packer, per-architecture manifest, build-time validation, and duplicate
-   detection, plus the opt-in runtime drop-in path ([Section 10](#10-packaging-and-delivery)) with
-   source-trust and compatibility gating. The build and load path is now fully data-driven, no longer
-   tied to the migrated POC.
-6. **Kernel selection (UHD).** The generic selector driven by heuristic-descriptor content, consulted
-   by the engine to rank the kernels that fit a graph and optimize which one runs when several apply.
+No existing engine is converted until the system has enough support to demonstrate a kernel running end
+to end from descriptor data. Only then does migration begin, and it is incremental and non-disruptive:
+a hand-written engine and its descriptor-backed replacement coexist until the generic one reaches
+parity on the graphs that engine covers, at which point the hand-written code is retired.
 
 Multi-kernel launch and composition ([Section 13](#13-multiple-kernels-and-composition)) are
 fast-follows, not committed in this plan.
