@@ -944,7 +944,8 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
                                                       uint32_t                 flags)
 {
     const size_t scalar_stride = rocblas_gemm_ex_compute_type_size(compute_type);
-    API_INT      idx           = 0;
+    int64_t      idx           = 0;
+
     for(API_INT g = 0; g < group_count; ++g)
     {
         const void* alpha_g
