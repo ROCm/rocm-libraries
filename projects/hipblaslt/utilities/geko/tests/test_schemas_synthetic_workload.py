@@ -9,8 +9,9 @@ import pytest
 import yaml
 
 from geko.bench.log import parse
+from geko import schemas
 from geko.constants import GEMM_LOG_FIELDS
-from geko.schemas import GemmConfig, GemmType
+from geko.schemas import GemmConfig, GemmType, RunState
 
 
 @pytest.mark.parametrize(
@@ -79,3 +80,90 @@ def test_workload_log_rows_concat_multiple_configs():
         rows.extend(gc.workload_log_rows())
     assert len(rows) == 2
     assert rows[0]["a_type"] == "bf16_r" and rows[1]["a_type"] == "f16_r"
+
+
+def test_compute_type_for_workload_log_scalar_and_non_scalar() -> None:
+    assert schemas._compute_type_for_workload_log("f32_r") == "c_f32_r"
+    assert schemas._compute_type_for_workload_log("f16_r") == "f16_r"
+
+
+def test_gemmtype_validation_errors() -> None:
+    with pytest.raises(ValueError, match="Invalid transA"):
+        GemmType("X", "N", data_type="B", dest_data_type="B", compute_data_type="S")
+
+    with pytest.raises(ValueError, match="must be all set or all None"):
+        GemmType("N", "N", a_type="f16_r", data_type="B", dest_data_type="B", compute_data_type="S")
+
+    with pytest.raises(ValueError, match="Invalid a_type"):
+        GemmType(
+            "N",
+            "N",
+            a_type="bad",
+            b_type="f16_r",
+            c_type="f16_r",
+            compute_type="f32_r",
+            data_type="B",
+            dest_data_type="B",
+            compute_data_type="S",
+        )
+
+    with pytest.raises(ValueError, match="must be non-empty strings"):
+        GemmType("N", "N", data_type="", dest_data_type="B", compute_data_type="S")
+
+
+def test_tensile_mapper_error_paths() -> None:
+    with pytest.raises(ValueError, match="Unknown Tensile DataType letter"):
+        GemmType._tensile_triple_to_hipblaslt("Q", "B", "S")
+
+    with pytest.raises(ValueError, match="must be 1 or 2 letters"):
+        GemmType._tensile_triple_to_hipblaslt("ABC", "B", "S")
+
+    with pytest.raises(ValueError, match="Unknown Tensile DestDataType letter"):
+        GemmType._tensile_triple_to_hipblaslt("B", "Q", "S")
+
+    with pytest.raises(ValueError, match="Unknown Tensile ComputeDataType letter"):
+        GemmType._tensile_triple_to_hipblaslt("B", "B", "Q")
+
+
+def test_hipblaslt_to_tensile_tf32_invalid_combo_raises() -> None:
+    with pytest.raises(NotImplementedError, match="TF32 not implemented"):
+        GemmType._hipblaslt_to_tensile("f16_r", "f16_r", "f16_r", "xf32_r")
+
+
+def test_gemmconfig_validation_and_row_key_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    gt = GemmType.from_tensile("N", "N", "B", "B", "S")
+    with pytest.raises(ValueError, match="non-empty list"):
+        GemmConfig(gt, [])
+
+    with pytest.raises(ValueError, match="four positive integers"):
+        GemmConfig(gt, [[1, 2, 3]])
+
+    gc = GemmConfig(gt, [[8, 8, 1, 8]])
+    monkeypatch.setattr("geko.schemas.GEMM_LOG_FIELDS", tuple(list(GEMM_LOG_FIELDS) + ["extra"]))
+    with pytest.raises(ValueError, match="must match GEMM_LOG_FIELDS exactly"):
+        gc.workload_log_rows()
+
+
+def test_runstate_dump_load_and_verify_failures(tmp_path: Path) -> None:
+    input_file = tmp_path / "in.yaml"
+    input_file.write_text("x\n")
+
+    state = RunState.create(input_file)
+    out = tmp_path / "work" / "run_state.json"
+    state.dump(out)
+    loaded = RunState.load(out)
+    assert loaded.input_path == str(input_file)
+
+    with pytest.raises(ValueError, match="Workdir belongs to input"):
+        loaded.verify(tmp_path / "other.yaml")
+
+    bad = RunState(
+        input_sha256="not-a-real-hash",
+        input_path=str(input_file),
+        created_at=loaded.created_at,
+        last_modified=loaded.last_modified,
+        configured=False,
+        optimized=False,
+    )
+    with pytest.raises(ValueError, match="hash mismatch"):
+        bad.verify(input_file)

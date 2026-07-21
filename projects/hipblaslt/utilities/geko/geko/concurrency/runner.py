@@ -140,6 +140,10 @@ class Runner(Generic[ItemT]):
             Items whose workers reported success.
         """
 
+        total_jobs = len(self.jobs)
+        if total_jobs == 0:
+            return []
+
         if self.n_slots < 1:
             raise ValueError("n_slots must be >= 1")
         if len(self.devices) == 0:
@@ -150,9 +154,6 @@ class Runner(Generic[ItemT]):
         failed_log_file = workdir / "failed_jobs.log"
 
         jobs = list(self.jobs)
-        total_jobs = len(jobs)
-        if total_jobs == 0:
-            return []
 
         _stop_event = Event()
         output_queue: Queue[tuple[bool, ItemT]] = Queue()
