@@ -183,6 +183,11 @@ ships to the runner; `ctest` invokes the binary directly.
   and falls back to `entire_category`. A future data-derived (coverage/trace) map is the
   intended fix.
 - **Native `union`** is not yet a drop-in for `check`; it runs via `diff_check` today.
+- **No compliance report on TheRock (future work).** The `dapper_diff` coverage check
+  (COMPLIANT / FAIL / NOT VIABLE) runs only in native `validate` mode, which has the full
+  shard run to compare against. TheRock `union` mode just runs the burned-in reduced set —
+  nothing verifies that the reduction covered what a full run would have. Producing an
+  equivalent compliance/coverage report for the TheRock path is left as future work.
 - **Windows is unsupported (dapper is forced off).** `dapper_init()` sets
   `MIOPEN_DAPPER_MODE=off` on Windows hosts, so the build falls back to the normal
   full-category test flow. The build-time tooling is not yet Windows-ready; future work to
