@@ -2194,7 +2194,10 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             return min(segments, 32)
         if problem.head_size == 128:
             return min(segments, 16)
-        return min(segments, 64)
+        # D256: sweep (decode_shapes_perf gfx942) shows seg128 wins or ties at
+        # every kv_len — do not cap below the formula value.
+        if problem.head_size != 256:
+            return min(segments, 64)
     return segments
 
 
@@ -2239,6 +2242,26 @@ def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
     # async DMA. (The remaining decode gap vs Torch is structural -- 64-thread /
     # narrow-MFMA / LDS round-trip -- and needs the segment-kernel restructure.)
     return True
+
+
+def _d256_decode_cohort(problem: UnifiedAttentionProblem) -> bool:
+    """Predicate: true when this problem belongs to the D256 bf16 decode cohort.
+
+    Intended for bf16, head_size=256, decode-only (all_decode=True) shapes; the
+    architecture gate (gfx942/gfx950) is enforced by the dispatcher/caller.
+    Excludes sliding window, softcap, sinks, ALiBi, and QQ-bias.
+    """
+    return (
+        problem.head_size == 256
+        and problem.dtype == "bf16"
+        and problem.all_decode
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0.0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+    )
 
 
 def _env_enabled_true(var: str) -> bool:
