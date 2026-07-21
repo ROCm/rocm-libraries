@@ -1050,6 +1050,19 @@ namespace hipsparse
     }
 #endif
 
+#if(CUDART_VERSION >= 13030)
+    inline cusparseSpGEAMAlg_t hipSpGEAMAlgToCudaSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPGEAM_ALG1:
+            return CUSPARSE_SPGEAM_ALG1;
+        default:
+            throw "Non existant cusparseSpGEAMAlg_t";
+        }
+    }
+#endif
+
 #if(CUDART_VERSION >= 11020)
     inline cusparseSparseToDenseAlg_t hipSpToDnAlgToCudaSpToDnAlg(hipsparseSparseToDenseAlg_t alg)
     {

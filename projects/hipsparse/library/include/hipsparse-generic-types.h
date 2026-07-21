@@ -156,6 +156,18 @@ typedef struct hipsparseSpGEMMDescr* hipsparseSpGEMMDescr_t;
 #endif
 
 /*! \ingroup types_module
+ *  \brief Generic API opaque structure holding information for a SpGEAM calculation.
+ *
+ *  \details
+ *  The hipSPARSE descriptor is an opaque structure holding information that is used in hipsparseSpGEAM_bufferSize(),
+ *  hipsparseSpGEAM_nnz(), and hipsparseSpGEAM(). It must be initialized using hipsparseSpGEAM_createDescr(). It
+ *  should be destroyed at the end using hipsparseSpGEAM_destroyDescr().
+ */
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+typedef struct hipsparseSpGEAMDescr* hipsparseSpGEAMDescr_t;
+#endif
+
+/*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a SpSV calculation.
  *
  *  \details
@@ -600,6 +612,20 @@ typedef enum
     HIPSPARSE_SPGEMM_DEFAULT = 0
 } hipsparseSpGEMMAlg_t;
 #endif
+#endif
+
+/*! \ingroup generic_module
+ *  \brief List of hipSPARSE SpGEAM algorithms.
+ *
+ *  \details
+ *  This is a list of the \ref hipsparseSpGEAMAlg_t types that are used by the hipSPARSE
+ *  library to perform sparse matrix sparse matrix addition.
+ */
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+typedef enum
+{
+    HIPSPARSE_SPGEAM_ALG1 = 0 /**< Default SpGEAM algorithm. */
+} hipsparseSpGEAMAlg_t;
 #endif
 
 #endif /* HIPSPARSE_GENERIC_TYPES_H */

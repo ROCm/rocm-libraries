@@ -13,6 +13,7 @@ Documentation for hipSPARSE is available at
 ## hipSPARSE 4.6.0 for ROCm 7.14
 
 ### Added
+* Added the generic API routines `hipsparseSpGEAM_createDescr`, `hipsparseSpGEAM_destroyDescr`, `hipsparseSpGEAM_bufferSize`, `hipsparseSpGEAM_nnz`, and `hipsparseSpGEAM` for sparse matrix-matrix addition (`C = alpha * op(A) + beta * op(B)`), along with the `hipsparseSpGEAMDescr_t` type and the `hipsparseSpGEAMAlg_t` algorithm enum, to match the cuSPARSE 13.3 generic `SpGEAM` API.
 * Added `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
 * Added BSR format support to `hipsparseSpMV`.
 * Added BSR format support to `hipsparseSpMM`.

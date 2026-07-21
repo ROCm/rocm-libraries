@@ -611,6 +611,17 @@ namespace hipsparse
         }
     }
 
+    inline rocsparse_spgeam_alg_ hipSpGEAMAlgToHCCSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPGEAM_ALG1:
+            return rocsparse_spgeam_alg_default;
+        default:
+            throw "Non existent hipsparseSpGEAMAlg_t";
+        }
+    }
+
     inline rocsparse_sddmm_alg_ hipSDDMMAlgToHCCSDDMMAlg(hipsparseSDDMMAlg_t alg)
     {
         switch(alg)

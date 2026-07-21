@@ -21,40 +21,47 @@
 #
 # ########################################################################
 
-# generic
-include: test_axpby.yaml
-include: test_gather.yaml
-include: test_scatter.yaml
-include: test_rot.yaml
-include: test_sddmm_coo_aos.yaml
-include: test_sddmm_coo.yaml
-include: test_sddmm_csc.yaml
-include: test_sddmm_csr.yaml
-include: test_dense_to_sparse_bell_no_set_pointers.yaml
-include: test_dense_to_sparse_coo.yaml
-include: test_dense_to_sparse_csc.yaml
-include: test_dense_to_sparse_csr.yaml
-include: test_sparse_to_dense_coo.yaml
-include: test_sparse_to_dense_csc.yaml
-include: test_sparse_to_dense_csr.yaml
-include: test_spgeam_csr.yaml
-include: test_spgemm_csr.yaml
-include: test_spgemmreuse_csr.yaml
-include: test_spmm_batched_coo.yaml
-include: test_spmm_batched_csc.yaml
-include: test_spmm_batched_csr.yaml
-include: test_spmm_bell.yaml
-include: test_spmm_bsr.yaml
-include: test_spmm_coo.yaml
-include: test_spmm_csc.yaml
-include: test_spmm_csr.yaml
-include: test_spmv_coo_aos.yaml
-include: test_spmv_coo.yaml
-include: test_spmv_csr.yaml
-include: test_spmv_csr_reuse_descr.yaml
-include: test_spmv_sell.yaml
-include: test_spsv_coo.yaml
-include: test_spsv_csr.yaml
-include: test_spsm_coo.yaml
-include: test_spsm_csr.yaml
-include: test_spvv.yaml
+---
+include: hipsparse_common.yaml
+
+
+Tests:
+- name: spgeam_csr_bad_arg
+  category: pre_checkin
+  function: spgeam_csr_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: spgeam_csr
+  category: quick
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: [325, 1057]
+  N: [174, 623]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [-1.5]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+
+- name: spgeam_csr
+  category: pre_checkin
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [3.0]
+  alphai: [0.0]
+  beta: [2.0]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]

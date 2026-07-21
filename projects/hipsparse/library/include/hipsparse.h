@@ -216,6 +216,7 @@
 #include "internal/generic/hipsparse_scatter.h"
 #include "internal/generic/hipsparse_sddmm.h"
 #include "internal/generic/hipsparse_sparse2dense.h"
+#include "internal/generic/hipsparse_spgeam.h"
 #include "internal/generic/hipsparse_spgemm.h"
 #include "internal/generic/hipsparse_spgemm_reuse.h"
 #include "internal/generic/hipsparse_spmm.h"

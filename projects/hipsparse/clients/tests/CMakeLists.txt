@@ -115,6 +115,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bell.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bsr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spgeam_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemmreuse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr.cpp"
