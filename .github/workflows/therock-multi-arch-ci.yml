@@ -137,7 +137,6 @@ jobs:
       # Empty string when run_all_tests=true triggers full build/test in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       expanded_projects: ${{ needs.setup.outputs.expanded_projects }}
-      affected_stages: ${{ needs.setup.outputs.affected_stages }}
       repository: ROCm/TheRock
       ref: users/geomin12/selection-workflow-checkin
     permissions:
