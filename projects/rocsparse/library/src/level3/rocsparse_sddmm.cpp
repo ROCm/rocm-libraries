@@ -497,13 +497,14 @@ try
                        (!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci),
                        rocsparse_status_invalid_value);
 
-    // Batched computation is only supported for CSR format with the default
+    // Batched computation is only supported for CSR and COO formats with the default
     // algorithm.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
         (mat_C->batch_count > 1
-         && (mat_C->format != rocsparse_format_csr || alg != rocsparse_sddmm_alg_default)),
+         && ((mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_coo)
+             || alg != rocsparse_sddmm_alg_default)),
         rocsparse_status_not_implemented);
 
     rocsparse::sddmm_buffer_size_template_t sddmm_buffer_size_function;
@@ -964,13 +965,14 @@ try
                        (!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci),
                        rocsparse_status_invalid_value);
 
-    // Batched computation is only supported for CSR format with the default
+    // Batched computation is only supported for CSR and COO formats with the default
     // algorithm.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
         (mat_C->batch_count > 1
-         && (mat_C->format != rocsparse_format_csr || alg != rocsparse_sddmm_alg_default)),
+         && ((mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_coo)
+             || alg != rocsparse_sddmm_alg_default)),
         rocsparse_status_not_implemented);
 
     if(mat_C->nnz == 0)
@@ -1435,13 +1437,14 @@ try
                        (!Ci_A_B_Ci && !Ci_A_Bi_Ci && !Ci_Ai_B_Ci && !Ci_Ai_Bi_Ci),
                        rocsparse_status_invalid_value);
 
-    // Batched computation is only supported for COO format with the default
+    // Batched computation is only supported for CSR and COO formats with the default
     // algorithm.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
         (mat_C->batch_count > 1
-         && (mat_C->format != rocsparse_format_csr || alg != rocsparse_sddmm_alg_default)),
+         && ((mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_coo)
+             || alg != rocsparse_sddmm_alg_default)),
         rocsparse_status_not_implemented);
 
     if(mat_C->nnz == 0)

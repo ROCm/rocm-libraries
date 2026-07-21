@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -261,10 +261,11 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
                                     int64_t              batch_stride_B,
                                     const T*             beta,
                                     const I*             C_row_data,
-                                    const J*             C_col_data,
-                                    C*                   C_val_data,
                                     int64_t              offsets_batch_stride_C,
-                                    int64_t              columns_values_batch_stride_C,
+                                    const J*             C_col_data,
+                                    int64_t              indices_batch_stride_C,
+                                    C*                   C_val_data,
+                                    int64_t              values_batch_stride_C,
                                     int64_t              batch_count,
                                     rocsparse_index_base C_base,
                                     rocsparse_mat_descr  C_descr,
@@ -273,10 +274,10 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Batched computation is currently only supported for the CSR format.
+        // Batched computation is currently only supported for the CSR and COO formats.
         if(batch_count > 1)
         {
-            return rocsparse_status_not_implemented;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         switch(alg)

@@ -229,11 +229,43 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  This routine supports execution in a hipGraph context only when \p alg == \ref rocsparse_sddmm_alg_default.
 *
 *  \note
-*  Batched computation is supported for the \ref rocsparse_format_csr format when
-*  \p alg == \ref rocsparse_sddmm_alg_default. The batch count is taken from the
-*  sparse matrix \f$C\f$ and must match the batch counts of the dense matrices
-*  \f$A\f$ and \f$B\f$. The per-batch strides are configured via
-*  \ref rocsparse_dnmat_set_strided_batch and \ref rocsparse_csr_set_strided_batch.
+*  Batched computation is supported for the \ref rocsparse_format_csr and \ref rocsparse_format_coo 
+*  formats when \p alg == \ref rocsparse_sddmm_alg_default. The batch count is taken from the
+*  sparse matrix \f$C\f$. Each of the dense matrices \f$A\f$ and \f$B\f$ must either
+*  use the same batch count as \f$C\f$, or be configured with batch count 1 and
+*  batch stride 0 in order to broadcast that operand across all batches of \f$C\f$.
+*  Concretely, the following four configurations are accepted:
+*  \f[
+*    \begin{aligned}
+*      &C_i = (A   \cdot B  ) \circ C_i, &&\text{(both A and B broadcast)} \\
+*      &C_i = (A   \cdot B_i) \circ C_i, &&\text{(A broadcast)} \\
+*      &C_i = (A_i \cdot B  ) \circ C_i, &&\text{(B broadcast)} \\
+*      &C_i = (A_i \cdot B_i) \circ C_i, &&\text{(fully batched)}
+*    \end{aligned}
+*  \f]
+*  Per-batch strides for the dense operands are configured via
+*  \ref rocsparse_dnmat_set_strided_batch, while the per-batch strides for the
+*  sparse output \f$C\f$ are configured with the format-specific routine:
+*  \ref rocsparse_coo_set_strided_batch for \ref rocsparse_format_coo and
+*  \ref rocsparse_csr_set_strided_batch for \ref rocsparse_format_csr.
+*
+*  For COO, \ref rocsparse_coo_set_strided_batch sets a single
+*  per-batch stride that applies to all three COO buffers (row indices, column
+*  indices and values); i.e. the row-index, column-index and value buffers of
+*  batch \f$i\f$ are obtained from the base pointers by adding
+*  \p i * \p batch_stride, and must therefore be laid out with the same stride.
+*  The stride must be at least the per-batch nnz of \f$C\f$, and may be larger
+*  to allow padding.
+*
+*  For CSR, \ref rocsparse_csr_set_strided_batch sets two independent per-batch
+*  strides: \p offsets_batch_stride for the row offset buffer and
+*  \p columns_values_batch_stride for the column-index and value buffers. The
+*  row offset buffer of batch \f$i\f$ is obtained from the base pointer by adding
+*  \p i * \p offsets_batch_stride, and the column-index and value buffers of
+*  batch \f$i\f$ by adding \p i * \p columns_values_batch_stride. The offsets
+*  stride must be at least \f$m + 1\f$, and the columns/values stride must be at
+*  least the per-batch nnz of \f$C\f$; both may be larger to allow padding.
+*
 *  All other formats and algorithms currently return \ref rocsparse_status_not_implemented
 *  when the batch count is greater than one.
 *

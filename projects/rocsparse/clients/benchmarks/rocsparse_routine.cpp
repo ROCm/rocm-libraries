@@ -54,7 +54,7 @@ rocsparse_routine::rocsparse_routine(const char* function)
 //
 //
 rocsparse_routine::rocsparse_routine()
-    : value((value_type)-1){};
+    : value((value_type)-1) {};
 
 //
 //
@@ -240,6 +240,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_gebsrmm.hpp"
 #include "testing_gemmi.hpp"
 #include "testing_sddmm.hpp"
+#include "testing_sddmm_batched_coo.hpp"
 #include "testing_sddmm_batched_csr.hpp"
 #include "testing_spmm_batched_bell.hpp"
 #include "testing_spmm_batched_coo.hpp"
@@ -610,6 +611,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T_REAL_ONLY(roti);
         DEFINE_CASE_T(sctr);
         DEFINE_CASE_IJABCT(sddmm);
+        DEFINE_CASE_IABCT_X(sddmm_batched_coo, testing_sddmm_batched_coo);
         DEFINE_CASE_IJABCT_X(sddmm_batched_csr, testing_sddmm_batched_csr);
         DEFINE_CASE_IT(sparse_to_dense_coo);
         DEFINE_CASE_IJT(sparse_to_dense_csc);

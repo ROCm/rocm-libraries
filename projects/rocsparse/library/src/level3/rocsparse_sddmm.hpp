@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,10 +102,11 @@ namespace rocsparse
                                         int64_t              batch_stride_B,
                                         const T*             beta,
                                         const I*             C_row_data,
-                                        const J*             C_col_data,
-                                        C*                   C_val_data,
                                         int64_t              offsets_batch_stride_C,
-                                        int64_t              columns_values_batch_stride_C,
+                                        const J*             C_col_data,
+                                        int64_t              indices_batch_stride_C,
+                                        C*                   C_val_data,
+                                        int64_t              values_batch_stride_C,
                                         int64_t              batch_count,
                                         rocsparse_index_base C_base,
                                         rocsparse_mat_descr  C_descr,
@@ -391,6 +392,38 @@ namespace rocsparse
             switch(FORMAT)
             {
             case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, T, I, J, A, B, C>::compute(
+                    handle,
+                    trans_A,
+                    trans_B,
+                    mat_A->order,
+                    mat_B->order,
+                    mat_C->rows,
+                    mat_C->cols,
+                    (trans_A == rocsparse_operation_none) ? mat_A->cols : mat_A->rows,
+                    mat_C->nnz,
+                    (const T*)alpha,
+                    (const A*)mat_A->const_values,
+                    mat_A->ld,
+                    mat_A->batch_stride,
+                    (const B*)mat_B->const_values,
+                    mat_B->ld,
+                    mat_B->batch_stride,
+                    (const T*)beta,
+                    (const I*)mat_C->const_row_data,
+                    mat_C->offsets_batch_stride,
+                    (const J*)mat_C->const_col_data,
+                    mat_C->columns_values_batch_stride,
+                    (C*)mat_C->val_data,
+                    mat_C->columns_values_batch_stride,
+                    mat_C->batch_count,
+                    mat_C->idx_base,
+                    mat_C->descr,
+                    alg,
+                    buffer)));
+                return rocsparse_status_success;
+            }
             case rocsparse_format_coo:
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse_sddmm_st<FORMAT, T, I, J, A, B, C>::compute(
@@ -412,10 +445,11 @@ namespace rocsparse
                     mat_B->batch_stride,
                     (const T*)beta,
                     (const I*)mat_C->const_row_data,
+                    mat_C->batch_stride,
                     (const J*)mat_C->const_col_data,
+                    mat_C->batch_stride,
                     (C*)mat_C->val_data,
-                    mat_C->offsets_batch_stride,
-                    mat_C->columns_values_batch_stride,
+                    mat_C->batch_stride,
                     mat_C->batch_count,
                     mat_C->idx_base,
                     mat_C->descr,
@@ -444,9 +478,10 @@ namespace rocsparse
                     mat_B->batch_stride,
                     (const T*)beta,
                     (const I*)mat_C->const_col_data,
-                    (const J*)mat_C->const_row_data,
-                    (C*)mat_C->val_data,
                     mat_C->offsets_batch_stride,
+                    (const J*)mat_C->const_row_data,
+                    mat_C->columns_values_batch_stride,
+                    (C*)mat_C->val_data,
                     mat_C->columns_values_batch_stride,
                     mat_C->batch_count,
                     mat_C->idx_base,
@@ -476,10 +511,11 @@ namespace rocsparse
                     mat_B->batch_stride,
                     (const T*)beta,
                     (const I*)nullptr,
+                    static_cast<int64_t>(0),
                     (const J*)mat_C->const_col_data,
+                    mat_C->batch_stride,
                     (C*)mat_C->val_data,
-                    mat_C->offsets_batch_stride,
-                    mat_C->columns_values_batch_stride,
+                    mat_C->batch_stride,
                     mat_C->batch_count,
                     mat_C->idx_base,
                     mat_C->descr,
@@ -508,10 +544,11 @@ namespace rocsparse
                     mat_B->batch_stride,
                     (const T*)beta,
                     (const I*)mat_C->const_ind_data,
+                    mat_C->batch_stride,
                     (const J*)(((const I*)mat_C->const_ind_data) + 1),
+                    mat_C->batch_stride,
                     (C*)mat_C->val_data,
-                    mat_C->offsets_batch_stride,
-                    mat_C->columns_values_batch_stride,
+                    mat_C->batch_stride,
                     mat_C->batch_count,
                     mat_C->idx_base,
                     mat_C->descr,
