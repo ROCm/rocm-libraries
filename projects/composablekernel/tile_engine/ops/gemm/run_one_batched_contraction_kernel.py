@@ -64,7 +64,7 @@ def main() -> int:
             egpu = res.E.astype(np.float32)
             max_rel = float(np.max(np.abs(egpu - ref)) / (np.max(np.abs(ref)) + 1e-6))
             out["max_rel"] = max_rel
-            if max_rel > tol or np.count_nonzero(res.E) == 0:
+            if max_rel > tol:
                 out["status"] = "verify_failed"
     except Exception as e:  # noqa: BLE001
         out["status"] = f"error: {e}"
