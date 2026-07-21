@@ -309,10 +309,11 @@ function(add_gtest TEST_NAME TEST_CPP)
     # pressure). Register it as a single RUN_SERIAL entry so ctest runs it alone, never alongside
     # another test on the GPU. Skipped when there is no GPU, since these are *GPU* tests.
     if(NOT MIOPEN_NO_GPU)
+      set(SERIAL_TEST_XML ${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml)
       add_test(NAME ${TEST_NAME}_hip_graph_serial
         COMMAND ${TEST_NAME}
           --gtest_filter=*HipGraphExist*
-          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml
+          --gtest_output=xml:${SERIAL_TEST_XML}
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
       set_tests_properties(${TEST_NAME}_hip_graph_serial PROPERTIES
@@ -320,13 +321,8 @@ function(add_gtest TEST_NAME TEST_CPP)
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
       )
       if(MIOPEN_ENABLE_DAPPER_NATIVE)
-        # HipGraphExist runs as its own RUN_SERIAL test (outside the parallel shards), but its
-        # results must still be analyzed by dapper. Append its XML to SHARDS_FILE so dapper_diff
-        # ingests it alongside the shard XMLs. Existence is guaranteed by dapper_add_sharded_test(),
-        # called below: it orders miopen_gtest_sharded_dapper dead-last, after every current-dir
-        # test (this serial test included), and dapper_diff aborts if any listed XML is missing.
-        file(APPEND ${SHARDS_FILE}
-          "${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml\n")
+        # Serial runs are also analyzed by dapper.
+        file(APPEND ${SHARDS_FILE} "${SERIAL_TEST_XML}\n")
       endif()
     endif()
 
