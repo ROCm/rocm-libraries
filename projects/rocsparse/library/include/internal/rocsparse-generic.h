@@ -33,6 +33,7 @@
 #include "generic/rocsparse_check_spmat.h"
 #include "generic/rocsparse_dense_to_sparse.h"
 #include "generic/rocsparse_extract.h"
+#include "generic/rocsparse_fsai.h"
 #include "generic/rocsparse_gather.h"
 #include "generic/rocsparse_rot.h"
 #include "generic/rocsparse_scatter.h"

@@ -112,6 +112,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_csric0.cpp
   test_spic0.cpp
   test_spilu0.cpp
+  test_fsai.cpp
   test_sptrsv.cpp
   test_csrilu0.cpp
   test_csritilu0.cpp
@@ -262,6 +263,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_csric0.cpp
 ../testings/testing_spic0.cpp
 ../testings/testing_spilu0.cpp
+../testings/testing_fsai.cpp
 ../testings/testing_sptrsv.cpp
 ../testings/testing_csrilu0.cpp
 ../testings/testing_csritilu0.cpp

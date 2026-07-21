@@ -196,3 +196,13 @@ rocsparse_spitsv
 ----------------
 
 .. doxygenfunction:: rocsparse_spitsv
+
+rocsparse_fsai_buffer_size()
+----------------------------
+
+.. doxygenfunction:: rocsparse_fsai_buffer_size
+
+rocsparse_fsai()
+----------------
+
+.. doxygenfunction:: rocsparse_fsai

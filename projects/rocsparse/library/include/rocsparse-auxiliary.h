@@ -2020,6 +2020,88 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
                                              rocsparse_error*        p_error);
 
 /*! \ingroup aux_module
+*  \brief Create FSAI descriptor.
+*
+*  \details
+*  \p rocsparse_fsai_descr_create creates the descriptor of the configuration of the
+*  Factorized Sparse Approximate Inverse (FSAI) preconditioner.
+*
+*  @param[in]
+*  handle       the handle to the rocSPARSE library context.
+*  @param[out]
+*  p_descr      pointer to the descriptor of the FSAI routine.
+*  @param[out]
+*  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success.
+*               A null pointer can be passed if an error descriptor is not required.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_invalid_pointer \p p_descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_fsai_descr_create(rocsparse_handle      handle,
+                                             rocsparse_fsai_descr* p_descr,
+                                             rocsparse_error*      p_error);
+
+/*! \ingroup aux_module
+*  \brief Destroy FSAI descriptor.
+*
+*  \details
+*  \p rocsparse_fsai_descr_destroy destroys the descriptor of the configuration of the
+*  Factorized Sparse Approximate Inverse (FSAI) preconditioner.
+*
+*  @param[in]
+*  handle       the handle to the rocSPARSE library context.
+*  @param[in]
+*  descr        descriptor of the FSAI routine.
+*  @param[out]
+*  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success.
+*               A null pointer can be passed if an error descriptor is not required.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_fsai_descr_destroy(rocsparse_handle     handle,
+                                              rocsparse_fsai_descr descr,
+                                              rocsparse_error*     p_error);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_fsai_input data in the FSAI descriptor.
+ *
+ *  \note
+ *  -     \ref rocsparse_fsai_input_alg is \ref rocsparse_fsai_alg. It can only be set before applying any phase.
+ *  -     \ref rocsparse_fsai_input_compute_datatype is \ref rocsparse_datatype. It can only be set before applying any phase.
+ *
+ *  @param[in]
+ *  handle      the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the FSAI descriptor.
+ *  @param[in]
+ *  input       value of \ref rocsparse_fsai_input.
+ *  @param[in]
+ *  data        input data.
+ *  @param[in]
+ *  data_size_in_bytes   input data size in bytes.
+ *  @param[out]
+ *  p_error     error descriptor created if the returned status is not \ref rocsparse_status_success.
+ *              A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle \p handle is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_fsai_descr_set_input(rocsparse_handle     handle,
+                                                rocsparse_fsai_descr descr,
+                                                rocsparse_fsai_input input,
+                                                const void*          data,
+                                                size_t               data_size_in_bytes,
+                                                rocsparse_error*     p_error);
+
+/*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor.
  *  \details
  *  \p rocsparse_coo_get gets the fields of the sparse COO matrix descriptor.

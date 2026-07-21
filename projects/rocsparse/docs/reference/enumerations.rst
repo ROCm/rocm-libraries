@@ -373,3 +373,18 @@ rocsparse_itilu0_option
 
 .. doxygenenum:: rocsparse_itilu0_option
 
+rocsparse_fsai_alg
+------------------
+
+.. doxygenenum:: rocsparse_fsai_alg
+
+rocsparse_fsai_stage
+--------------------
+
+.. doxygenenum:: rocsparse_fsai_stage
+
+rocsparse_fsai_input
+--------------------
+
+.. doxygenenum:: rocsparse_fsai_input
+
