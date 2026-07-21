@@ -523,7 +523,7 @@ defaultBenchmarkCommonParameters = [
     {"WavefrontSize": [-1]},
     {"MatrixInstruction": [[]]},
     {"1LDSBuffer": [0]},
-    {"LDSSegmentInterleave": [-1]},
+    {"LDSSegmentInterleave": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalD": [0]},

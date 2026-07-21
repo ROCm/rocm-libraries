@@ -328,9 +328,22 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
-    # gfx1250 LDS segment-conflict interleave (splits A/B halves across 64KiB LDS segments).
-    # -1 = auto (default): apply only the no-trade-off tight branch, skip the LDS-growing aligned
-    # branch. 0 = force baseline. 1 = force on (tight + aligned).
+    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
+    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
+    # Supported: TDMInst=3 (TDM load for A and B), gfx1250, MIWaveGroup [2,2], dtype bf16 / fp16 /
+    # fp8 (incl. MXFP8). Not applied for 1LDSBuffer, subtile, sparse, or TDMSplit kernels.
+    # Mechanism: reorder LDS from the baseline [A0][A1][B0][B1] to [A0][B0][A1][B1]. Only operand A
+    # is helped -- B's halves move too, but both ports can still hit the same B segment.
+    # Two cases:
+    #   tight   (one A-half + one B-half >= 64KiB): [A0][B0] fills a segment, so [A1][B1] land in
+    #            the next one -- no extra LDS.
+    #   aligned (< 64KiB): pad [A0][B0] up to the segment boundary to push [A1][B1] over -- uses
+    #            more LDS, and needs PrefetchGlobalRead=2.
+    # Values:
+    #   -1 = auto: apply "tight" only (skip "aligned").
+    #    0 = off (default): baseline layout.
+    #    1 = force on: apply both "tight" and "aligned" wherever valid.
+    # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
     "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
