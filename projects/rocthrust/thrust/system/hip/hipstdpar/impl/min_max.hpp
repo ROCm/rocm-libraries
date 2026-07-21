@@ -74,6 +74,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline I max_element(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::hipstd::warn_if_no_xnack();
   return ::thrust::max_element(::thrust::device, f, l, ::std::move(r));
 }
