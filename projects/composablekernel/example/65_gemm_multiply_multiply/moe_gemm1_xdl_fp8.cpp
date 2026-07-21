@@ -178,7 +178,12 @@ static constexpr ck::index_t D0Vec     = 1;
 static constexpr ck::index_t D1Vec     = 1;
 // Activation (ck::Activation): 0: gelu_and_mul, 1: silu_and_mul, 2: swiglustep_and_mul,
 //                              3: swiglu_oai_and_mul, 4: gelu_tanh_and_mul
-static constexpr ck::index_t ActOP     = 1;
+// MOE_ACTOP may be overridden at compile time (e.g. -DMOE_ACTOP=4) so the same example
+// can be built as separate ctest variants exercising different activations.
+#ifndef MOE_ACTOP
+#define MOE_ACTOP 1
+#endif
+static constexpr ck::index_t ActOP     = MOE_ACTOP;
 static constexpr bool MulRoutedWeight  = false;
 using DeviceOpInstance                 = ck::tensor_operation::device::DeviceMoeGemm
     // clang-format off
