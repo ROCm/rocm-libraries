@@ -95,7 +95,7 @@ namespace rocsparse
                                                   void* __restrict__ csr_diag_ind,
                                                   int32_t* __restrict__ done_array,
                                                   void* __restrict__ max_nnz,
-                                                  void* __restrict__ zero_pivot,
+                                                  void*                zero_pivot,
                                                   rocsparse_index_base idx_base,
                                                   rocsparse_diag_type  diag_type,
                                                   rocsparse_fill_mode  mode);

@@ -32,9 +32,7 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -174,6 +172,8 @@ namespace TensileLite
             origami::problem_t origami_problem = {
                 .size        = {m, n, k},
                 .batch       = batch,
+                // Number of CUs the GEMM will run on (CU budget hint); 0 = use all CUs.
+                .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
                 .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
                 .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
                 .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
@@ -223,4 +223,3 @@ namespace TensileLite
     };
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

@@ -11,7 +11,6 @@
 
 import os
 import sys
-import shutil
 
 import pytest
 from types import SimpleNamespace
@@ -21,19 +20,33 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
+from gpu_test_helpers import init_rocisa
+
 
 GFX1250_ISA = (12, 5, 0)
 WAVESIZE_32 = 32
 
 
-def _init_rocisa_gfx1250():
-    from rocisa import rocIsa
-    from Tensile.Common.Architectures import gfxToIsa
-    ri = rocIsa.getInstance()
-    isa = gfxToIsa("gfx1250")
-    asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-    ri.init(isa, asmpath)
-    ri.setKernel(isa, WAVESIZE_32)
+def _gfx1250_asm_supported():
+    """Return True if the host assembler supports gfx1250 instructions."""
+    try:
+        init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
+        from rocisa import rocIsa
+        caps = rocIsa.getInstance().getAsmCaps()
+        return bool(caps.get("s_add_u64", 0))
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _gfx1250_asm_supported(),
+    reason="assembler does not support gfx1250 instructions",
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _rocisa_once():
+    init_rocisa(target="gfx1250", wavesize=WAVESIZE_32)
 
 
 def _mock_dtype(num_bytes=2):
@@ -143,7 +156,6 @@ class TestGfx1250SubtileCodegen:
                              ids=[f"{a}x{b}_wg{w[0]}x{w[1]}" for a, b, w in CONFIGS_1x1 + CONFIGS_MULTI_WAVE])
     def test_tdm_skips_gr_offset_alloc(self, mt_a, mt_b, wg):
         """TDM-enabled kernel: GR offset registers should not be allocated."""
-        _init_rocisa_gfx1250()
         kernel = _create_gfx1250_kernel(mt_a, mt_b, mi_wave_group=wg)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         tiA.allocOffsetRegisters(writer, kernel)
@@ -155,7 +167,6 @@ class TestGfx1250SubtileCodegen:
                              ids=[f"{a}x{b}_wg{w[0]}x{w[1]}" for a, b, w in CONFIGS_MULTI_WAVE])
     def test_lr_tile_assignment_multi_wave(self, mt_a, mt_b, wg):
         """LR tile assignment with multi-wave TDM produces valid assembly."""
-        _init_rocisa_gfx1250()
         from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
         kernel = _create_gfx1250_kernel(mt_a, mt_b, mi_wave_group=wg)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
@@ -173,7 +184,6 @@ class TestGfx1250SubtileCodegen:
                              ids=[f"{a}x{b}" for a, b, _ in CONFIGS_1x1])
     def test_ds_read_dual_load(self, mt_a, mt_b, wg):
         """Wave32 8-VGPR tiles emit two DSLoadB128 (lo + hi K-halves)."""
-        _init_rocisa_gfx1250()
         from Tensile.Components.Subtile.SubtileLREmit import emitSingleDsRead
         kernel = _create_gfx1250_kernel(mt_a, mt_b)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
@@ -201,7 +211,6 @@ class TestGfx1250SubtileCodegen:
 
     def test_zero_tiles_wmma(self):
         """gfx1250 tile zeroing uses v_wmma_f32_16x16x4_f32 with acc2_imm=0."""
-        _init_rocisa_gfx1250()
         from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
         kernel = _create_gfx1250_kernel(32, 32)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
@@ -213,12 +222,54 @@ class TestGfx1250SubtileCodegen:
         assert "v_wmma_f32_16x16x4_f32" in asm
         assert ", 0" in asm  # acc2_imm=0
 
+    # -- scheduler preloop initD placement on the WMMA path --
+
+    def test_initd_preloop_op_wmma_zeroing_gfx1250(self):
+        """Scheduler preloop initD op zeros accumulators via WMMA on gfx1250."""
+        from types import SimpleNamespace
+        from Tensile.Components.Subtile.Kernel import TileInfo, selectDGeometry
+        from Tensile.Components.Subtile.LogicalScheduler import (
+            LogicalScheduler, SchedulerConfig, ReadGranularity, Pass,
+        )
+
+        kernel = _create_gfx1250_kernel(32, 32)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+
+        dTileInfo = TileInfo(selectDGeometry(kernel), 'D', writer, kernel)
+        dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+
+        cfg = SchedulerConfig(
+            numMFMATilesM=tiA.localMMATileGrid[0],
+            numMFMATilesN=tiB.localMMATileGrid[0],
+            numSubIterK=tiA.localMMATileGrid[1],
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=1, k=2),
+            grB=ReadGranularity(mn=1, k=2),
+            pgr=2,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build(stop_after=Pass.EMIT)
+        preloop = sched.build_preloop()
+
+        initd_ops = [em.source for partition in preloop for group in partition
+                     for em in group
+                     if getattr(em.source, 'label', None) == 'initC_overlap']
+        assert len(initd_ops) == 1, "build_preloop must place exactly one initD op"
+
+        # Build the op against the gfx1250 writer (the scheduler's emit-time call).
+        emitter = SimpleNamespace(writer=writer, kernel=kernel, dtileInfo=dTileInfo)
+        asm = str(initd_ops[0].build(emitter))
+        assert "v_wmma_f32_16x16x4_f32" in asm, "gfx1250 preloop initD must use WMMA"
+        assert ", 0" in asm  # acc2_imm=0
+
     # -- globalReadLDSBufferSwap TDM path --
 
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_gr_lds_buffer_swap_tdm(self, tc):
         """TDM LDS buffer swap emits XOR on tracking SGPR."""
-        _init_rocisa_gfx1250()
         from Tensile.Components.Subtile.SubtileGREmit import globalReadLDSBufferSwap
         kernel = _create_gfx1250_kernel(64, 64, mi_wave_group=[2, 2])
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
@@ -233,7 +284,6 @@ class TestGfx1250SubtileCodegen:
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_gr_ptr_updates_tdm(self, tc):
         """TDM pointer update increments Address and syncs descriptor."""
-        _init_rocisa_gfx1250()
         from Tensile.Components.Subtile.SubtileGREmit import globalReadPtrUpdates
         kernel = _create_gfx1250_kernel(64, 64, mi_wave_group=[2, 2])
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
@@ -250,7 +300,6 @@ class TestGfx1250SubtileCodegen:
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_buffer_load_tdm(self, tc):
         """TDM emitSingleBufferLoad emits tensor_load_to_lds."""
-        _init_rocisa_gfx1250()
         from Tensile.Components.Subtile.SubtileGREmit import emitSingleBufferLoad
         kernel = _create_gfx1250_kernel(64, 64)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)

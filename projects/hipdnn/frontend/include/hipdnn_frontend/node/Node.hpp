@@ -133,6 +133,24 @@ public:
         }
     }
 
+    /// @brief Checks if two nodes are logically identical (same type, same attributes).
+    virtual bool logicallyEquals(const INode& /*other*/) const
+    {
+        return false;
+    }
+
+    /// @brief Absolute identical check, including strict attribute properties.
+    virtual bool operator==(const INode& /*other*/) const
+    {
+        return false;
+    }
+
+    /// @brief Concrete inequality check wrapping the polymorphic equality operator.
+    bool operator!=(const INode& other) const
+    {
+        return !(*this == other);
+    }
+
 protected:
     std::vector<std::shared_ptr<INode>> _sub_nodes;
 
@@ -252,6 +270,47 @@ public:
         }
 
         return outputAttributes;
+    }
+
+    /**
+     * @brief Polymorphic evaluation of logical equality across graph operation nodes.
+     * * Verifies if two nodes share an identical node operation footprint and equivalent
+     * structural attributes, enabling safe graph optimizations and pattern matching.
+     * * @param other The target execution node to compare against.
+     * @return true If types match and attributes are structurally equivalent.
+     * @return false Otherwise.
+     */
+    bool logicallyEquals(const INode& other) const override
+    {
+        // Must be the exact same node type
+        if(this->getNodeType() != other.getNodeType())
+        {
+            return false;
+        }
+        // Cast safe to DerivedT because the NodeTypes match
+        const auto& otherDerived = static_cast<const BaseNode<DerivedT, Type>&>(other).self();
+
+        return self().attributes.logicallyEquals(otherDerived.attributes);
+    }
+
+    /**
+     * @brief Polymorphic evaluation of strict state equality across graph operation nodes.
+     * * Assesses absolute identity equivalence between this node and another target node,
+     * validating structural attribute properties as well as non-functional tracking states.
+     * * @param other The target execution node to compare against.
+     * @return true If nodes are perfectly identical across all parameters and metadata.
+     * @return false Otherwise.
+     */
+    bool operator==(const INode& other) const override
+    {
+        if(this->getNodeType() != other.getNodeType())
+        {
+            return false;
+        }
+
+        const auto& otherDerived = static_cast<const BaseNode<DerivedT, Type>&>(other).self();
+
+        return self().attributes == otherDerived.attributes;
     }
 
 private:
