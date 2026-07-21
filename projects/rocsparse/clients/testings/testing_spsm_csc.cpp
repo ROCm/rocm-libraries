@@ -417,7 +417,7 @@ void testing_spsm_csc(const Arguments& arg)
                                          ttype,
                                          alg,
                                          rocsparse_spsm_stage_preprocess,
-                                         nullptr,
+                                         &buffer_size,
                                          dbuffer));
 
     // Perform analysis on device
@@ -432,7 +432,7 @@ void testing_spsm_csc(const Arguments& arg)
                                          ttype,
                                          alg,
                                          rocsparse_spsm_stage_preprocess,
-                                         nullptr,
+                                         &buffer_size,
                                          dbuffer));
 
     //

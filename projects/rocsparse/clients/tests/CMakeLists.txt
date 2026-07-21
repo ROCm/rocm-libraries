@@ -44,9 +44,12 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-# CSC triangular solve support (rocsparse_spsv / rocsparse_sptrsv) ?
 if(BUILD_WITH_CSC_TRSV)
   add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
 endif()
 
 #

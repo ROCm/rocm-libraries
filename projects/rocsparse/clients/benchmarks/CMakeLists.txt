@@ -30,6 +30,14 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
+if(BUILD_WITH_CSC_TRSV)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
+endif()
+
 set(ROCSPARSE_BENCHMARK_SOURCES
   client.cpp
   rocsparse_bench_app.cpp
