@@ -106,7 +106,7 @@ struct philox4x32_10_device_engine : public ::rocrand_device::philox4x32_10_engi
     // m_state from base class
 };
 
-template<typename T, typename Distribution>
+template<typename T, typename Distribution, bool UseLDS = false>
 struct generate_philox
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -175,6 +175,8 @@ struct generate_philox
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = thread_id;
 #ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
         while(index < vec_n)
@@ -187,7 +189,12 @@ struct generate_philox
                 {
                     input[i] = vs[s * input_width + i];
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
             }
             vec_data[index] = *reinterpret_cast<vec_type*>(output);
             // Next position
@@ -210,7 +217,12 @@ struct generate_philox
                 {
                     input[i] = engine();
                 }
-                distribution(input, output[s]);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output[s]);
+                else
+#endif
+                    distribution(input, output[s]);
 
                 for(unsigned int o = 0; o < output_width; ++o)
                 {
@@ -343,23 +355,39 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
-        status = dynamic_dispatch(
-            m_order,
-            [&, this](auto is_dynamic)
+        bool use_lds = false;
+        if constexpr(is_discrete_distribution_v<Distribution>)
+        {
+            use_lds = distribution.check_lds_size();
+        }
+
+        const auto use_lds_variant
+            = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
+        status = std::visit(
+            [&](auto possible_lds_usage)
             {
-                return system_type::template launch<generate_philox<T, Distribution>,
-                                                    ConfigProvider,
-                                                    T,
-                                                    is_dynamic>(target_arch,
-                                                                dim3(config.blocks),
-                                                                dim3(config.threads),
-                                                                0,
-                                                                m_stream,
-                                                                m_engine,
-                                                                data,
-                                                                data_size,
-                                                                distribution);
-            });
+                return dynamic_dispatch(
+                    m_order,
+                    [&, this](auto is_dynamic)
+                    {
+                        return system_type::template launch<
+                            generate_philox<T, Distribution, possible_lds_usage>,
+                            ConfigProvider,
+                            T,
+                            is_dynamic>(target_arch,
+                                        dim3(config.blocks),
+                                        dim3(config.threads),
+                                        0,
+                                        m_stream,
+                                        m_engine,
+                                        data,
+                                        data_size,
+                                        distribution);
+                    });
+            },
+            use_lds_variant);
+
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;

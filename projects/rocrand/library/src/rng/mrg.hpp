@@ -69,7 +69,12 @@ struct init_engines_mrg
     }
 };
 
-template<class ConfigProvider, bool IsDynamic, class Engine, class T, class Distribution>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class Engine,
+         class T,
+         class Distribution,
+         bool UseLDS = false>
 struct generate_mrg
 {
     template<host::target_arch Arch = host::target_arch::unknown>
@@ -111,6 +116,8 @@ struct generate_mrg
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = id;
 #ifdef __HIP_DEVICE_COMPILE__
+        if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+            distribution.stage_to_lds(threadIdx.x, blockDim.x);
         __syncthreads();
 #endif
         while(index < vec_n)
@@ -138,7 +145,12 @@ struct generate_mrg
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -155,7 +167,12 @@ struct generate_mrg
                 {
                     input[i] = engine();
                 }
-                distribution(input, output);
+#ifdef __HIP_DEVICE_COMPILE__
+                if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+                    distribution.generate_lds(input, output);
+                else
+#endif
+                    distribution(input, output);
 
                 for(unsigned int o = 0; o < output_width; o++)
                 {
@@ -388,25 +405,43 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
-        status = dynamic_dispatch(
-            m_order,
-            [&, this](auto is_dynamic)
+        bool use_lds = false;
+        if constexpr(is_discrete_distribution_v<Distribution>)
+        {
+            use_lds = distribution.check_lds_size();
+        }
+
+        const auto use_lds_variant
+            = cpp_utils::constexpr_value_variant<bool, false, true>::create(use_lds);
+
+        status = std::visit(
+            [&](auto possible_lds_usage)
             {
-                return system_type::template launch<
-                    generate_mrg<ConfigProvider, is_dynamic, engine_type, T, Distribution>,
-                    ConfigProvider,
-                    T,
-                    is_dynamic>(target_arch,
-                                dim3(config.blocks),
-                                dim3(config.threads),
-                                0,
-                                m_stream,
-                                m_engines,
-                                m_start_engine_id,
-                                data,
-                                data_size,
-                                distribution);
-            });
+                return dynamic_dispatch(
+                    m_order,
+                    [&, this](auto is_dynamic)
+                    {
+                        return system_type::template launch<generate_mrg<ConfigProvider,
+                                                                         is_dynamic,
+                                                                         engine_type,
+                                                                         T,
+                                                                         Distribution,
+                                                                         possible_lds_usage>,
+                                                            ConfigProvider,
+                                                            T,
+                                                            is_dynamic>(target_arch,
+                                                                        dim3(config.blocks),
+                                                                        dim3(config.threads),
+                                                                        0,
+                                                                        m_stream,
+                                                                        m_engines,
+                                                                        m_start_engine_id,
+                                                                        data,
+                                                                        data_size,
+                                                                        distribution);
+                    });
+            },
+            use_lds_variant);
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)
