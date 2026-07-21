@@ -223,6 +223,9 @@ class wthread {
     ThreadData cached_tdata;
 };
 
+/// Deprecated alias for hip::wthread
+using thread = wthread;
+
 } // namespace internal
 
 //====================================================================================================================//
