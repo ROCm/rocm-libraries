@@ -6719,18 +6719,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       t1a_end = time.perf_counter()
       print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
-      # --- DEBUG: dump StinkyAsmModule BEFORE optimization pipeline ---
-      # Compares the two paths' logical→asm lowering output before shared passes run.
-      if os.environ.get("DUMP_STINKY_MODULE"):
-        _dump_dir = os.environ.get("DUMP_STINKY_MODULE", "/tmp/stinky_dump")
-        os.makedirs(_dump_dir, exist_ok=True)
-        _backend_tag = os.environ.get("ROCISA_BACKEND", "native")
-        _dump_asm = stModule.emitAssembly()
-        _dump_path = os.path.join(_dump_dir, f"stmodule_{_backend_tag}.s")
-        with open(_dump_path, "w") as _df:
-          _df.write(_dump_asm)
-        print2(f"StinkyTofu DEBUG: dumped pre-pipeline module ({len(_dump_asm)} chars) -> {_dump_path}")
-
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)
       t1b_start = time.perf_counter()

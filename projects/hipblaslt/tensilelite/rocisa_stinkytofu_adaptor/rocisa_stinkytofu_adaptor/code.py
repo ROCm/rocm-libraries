@@ -1391,16 +1391,6 @@ class Module(Item):
         lm = _st.LogicalModule(lm_label)
         self._populate_logical_module(lm)
 
-        # --- DEBUG: dump LogicalModule IR before lowering ---
-        import os as _os
-        _dump_dir = _os.environ.get("DUMP_STINKY_MODULE")
-        if _dump_dir:
-            _os.makedirs(_dump_dir, exist_ok=True)
-            _lm_dump = lm.dump()
-            _lm_path = _os.path.join(_dump_dir, "logical_module_adaptor.txt")
-            with open(_lm_path, "w") as _f:
-                _f.write(_lm_dump)
-
         return _PostProcessModule(_st.lower_logical_module(lm, list(arch), options))
 
     def _populate_logical_module(self, lm: Any) -> None:
