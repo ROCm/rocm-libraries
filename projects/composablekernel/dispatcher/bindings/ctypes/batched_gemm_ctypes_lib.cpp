@@ -44,9 +44,13 @@
 // CK_TILE_SINGLE_KERNEL_INCLUDE. Defines: ADataType, BDataType, CDataType,
 // AccDataType, ALayout, BLayout, CLayout, SelectedKernel, KERNEL_NAME.
 
-// GPU architecture - can be overridden via -DGFX_ARCH="gfx90a" at compile time
+// GPU architecture - MUST be supplied at compile time via -DGFX_ARCH="<arch>".
+// Do not default to a specific GPU architecture: the arch is resolved from the
+// host (get_arch / rocminfo) and threaded through as a compile flag so the
+// kernel is never silently built for the wrong target.
 #ifndef GFX_ARCH
-#define GFX_ARCH "gfx942"
+#error \
+    "GFX_ARCH must be defined at compile time (pass -DGFX_ARCH=<arch>); do not default to a specific GPU architecture."
 #endif
 
 namespace {

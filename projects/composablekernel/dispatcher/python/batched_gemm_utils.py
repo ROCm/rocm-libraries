@@ -47,6 +47,49 @@ import gemm_utils as _gu
 
 
 # ============================================================================
+# GPU architecture resolution (never default to gfx942)
+# ============================================================================
+
+_SUPPORTED_ARCHES: Tuple[str, ...] = ("gfx90a", "gfx942", "gfx950")
+
+
+def _get_arch() -> str:
+    """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
+    import subprocess
+
+    arch = ""
+    try:
+        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if "Name:" in line and "gfx" in line:
+                arch = line.split()[-1].strip()
+                break
+    except Exception:
+        arch = ""
+    if not arch:
+        raise RuntimeError(
+            "Could not detect GPU architecture from rocminfo; refusing to default "
+            "to gfx942. Pass gfx_arch explicitly."
+        )
+    if arch not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHES)}"
+        )
+    return arch
+
+
+def _resolve_arch(arch: Optional[str]) -> str:
+    """Resolve an explicit arch (validated) or auto-detect via rocminfo."""
+    if arch is None:
+        return _get_arch()
+    if arch not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHES)}"
+        )
+    return arch
+
+
+# ============================================================================
 # The shared contract: BatchedGemmKernelConfig
 # ============================================================================
 
@@ -59,9 +102,15 @@ class BatchedGemmKernelConfig(_gu.GemmKernelConfig):
     variant to ``"batched"`` so ``.name`` gains the ``_batched`` suffix that the
     codegen (unified_gemm_codegen.py::KernelNaming.generate) also appends -- the
     single thread tying config -> codegen -> runtime name together.
+
+    ``gfx_arch`` is overridden to default to ``None`` (rather than the parent's
+    hardcoded ``"gfx942"``) so the batched bridge never silently builds for the
+    wrong GPU: the build path resolves ``None`` via ``_get_arch()`` (rocminfo)
+    and raises on an unsupported / undetectable arch.
     """
 
     variant: str = "batched"
+    gfx_arch: Optional[str] = None  # type: ignore[assignment]
 
 
 # Extend GemmKernelConfig.name handling for the batched variant. The parent
@@ -453,6 +502,11 @@ def _build_batched_compile_jobs(
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
     obj_file = lib_path.with_suffix(".o")
 
+    # Never default to gfx942: resolve None via rocminfo (_get_arch) and validate
+    # an explicit arch. GFX_ARCH is threaded to the .cpp as a hard requirement
+    # (the source #errors if it is missing).
+    gfx_arch = _resolve_arch(config.gfx_arch)
+
     compile_cmd = [
         _gu._resolve_hipcc(),
         "-c",
@@ -465,8 +519,8 @@ def _build_batched_compile_jobs(
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
         f"-include{header}",
         "-D__HIP_PLATFORM_AMD__",
-        f"--offload-arch={config.gfx_arch}",
-        f'-DGFX_ARCH="{config.gfx_arch}"',
+        f"--offload-arch={gfx_arch}",
+        f'-DGFX_ARCH="{gfx_arch}"',
         # Byte-identical AMDGPU backend flags to the single-problem bridge and
         # Old-TE (see gemm_utils._tile_engine_codegen_flags) -- required for a
         # fair A/B parity comparison.
@@ -484,7 +538,7 @@ def _build_batched_compile_jobs(
         _gu._resolve_hipcc(),
         "-shared",
         "-fPIC",
-        f"--offload-arch={config.gfx_arch}",
+        f"--offload-arch={gfx_arch}",
         "--hip-link",
         str(obj_file),
         "-o",
@@ -535,6 +589,9 @@ def setup_multiple_batched_gemm_dispatchers(
     codegen_args = []
     for i in unique:
         c = configs[i]
+        # Resolve arch here too so codegen and compile target the same detected
+        # (or explicitly-validated) GPU -- never a silent gfx942 default.
+        gpu_target = _resolve_arch(c.gfx_arch)
         codegen_args.append(
             {
                 "index": i,
@@ -543,7 +600,7 @@ def setup_multiple_batched_gemm_dispatchers(
                 "output_dir": str(output_dir),
                 "dtype": c.dtype_a,
                 "layout": c.layout,
-                "gpu_target": c.gfx_arch,
+                "gpu_target": gpu_target,
                 "tile_config_json": c.to_codegen_json(),
                 "hpp_glob_pattern": f"{c.name}.hpp",
                 # Thread the batched variant so the emitted header is the batched
@@ -625,13 +682,18 @@ def setup_multiple_batched_gemm_dispatchers(
 
 def expand_sweep(
     config_path: str,
-    arch: str,
+    arch: Optional[str] = None,
     dtype: str = "fp16",
     layout: str = "rcr",
 ) -> List[BatchedGemmKernelConfig]:
     """Expand a Tile Engine batched GEMM JSON sweep config into
     [BatchedGemmKernelConfig]. Reuses gemm_utils.expand_sweep (same tile/trait
-    sweep + validity gates) and re-stamps each result as the batched variant."""
+    sweep + validity gates) and re-stamps each result as the batched variant.
+
+    ``arch`` is resolved via ``_get_arch()`` (rocminfo) when omitted and
+    validated against the supported set otherwise -- never a silent gfx942
+    default."""
+    arch = _resolve_arch(arch)
     base_configs = _gu.expand_sweep(config_path, arch, dtype=dtype, layout=layout)
     out: List[BatchedGemmKernelConfig] = []
     seen: set = set()
