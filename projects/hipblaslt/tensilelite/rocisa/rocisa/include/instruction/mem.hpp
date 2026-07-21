@@ -3734,24 +3734,34 @@ namespace rocisa
                         const RegContainerPtr& group1,
                         const RegContainerPtr& group2,
                         const RegContainerPtr& group3,
-                        const std::string&     comment = std::string())
+                        bool                   rawStale = false,
+                        const std::string&     comment  = std::string())
             : Instruction(InstType::INST_TDM, comment)
             , group0(group0)
             , group1(group1)
             , group2(group2)
             , group3(group3)
+            , rawStale(rawStale)
         {
-            using std::begin;
-            using std::end;
-            const auto& params = getParams();
-
-            if(std::any_of(begin(params), end(params), [](const InstructionInput& in) {
-                   return std::dynamic_pointer_cast<RegisterContainer>(std::get<ContainerPtr>(in))
-                              ->regType
-                          != "s";
-               }))
+            // In rawStale mode the render is the fixed golden encoding, independent
+            // of operands, so group0/group1 may be null (frontier size-defer loads
+            // that carry no specific descriptor). The live mnemonic path still
+            // requires sgpr operands.
+            if(!rawStale)
             {
-                throw std::invalid_argument("TensorLoadToLds only supports sgpr as operands only");
+                using std::begin;
+                using std::end;
+                const auto& params = getParams();
+
+                if(std::any_of(begin(params), end(params), [](const InstructionInput& in) {
+                       return std::dynamic_pointer_cast<RegisterContainer>(
+                                  std::get<ContainerPtr>(in))
+                                  ->regType
+                              != "s";
+                   }))
+                {
+                    throw std::invalid_argument("TensorLoadToLds only supports sgpr as operands only");
+                }
             }
 
             setInst("tensor_load_to_lds");
@@ -3763,6 +3773,7 @@ namespace rocisa
             , group1(other.group1)
             , group2(other.group2)
             , group3(other.group3)
+            , rawStale(other.rawStale)
         {
         }
 
@@ -3773,12 +3784,15 @@ namespace rocisa
 
         std::vector<InstructionInput> getParams() const override
         {
-            if(group2 && group3)
+            std::vector<InstructionInput> out;
+            for(const auto& g : {group0, group1, group2, group3})
             {
-                return {group0, group1, group2, group3};
+                if(g)
+                {
+                    out.push_back(g);
+                }
             }
-
-            return {group0, group1};
+            return out;
         }
 
         std::vector<InstructionInput> getDstParams() const override
@@ -3788,12 +3802,7 @@ namespace rocisa
 
         std::vector<InstructionInput> getSrcParams() const override
         {
-            if(group2 && group3)
-            {
-                return {group0, group1, group2, group3};
-            }
-
-            return {group0, group1};
+            return getParams();
         }
 
         std::string getArgStr() const
@@ -3814,6 +3823,19 @@ namespace rocisa
 
         std::string toString() const override
         {
+            // The live tensor_load_to_lds mnemonic assembles to the current LLVM
+            // encoding (d0710001), which the FFM correctness model EXECUTES as a
+            // real TDM load -> the descriptor SGPR walks out of range at long
+            // sequences. The golden .sp3 toolchain emits the STALE d0310000
+            // encoding, which FFM treats as inert. rawStale reproduces that
+            // FFM-safe encoding as two typed .long words (word2 stays a separate
+            // node), so the emitter authors a typed instruction (no bare RawNode)
+            // while keeping the exact golden disasm + O+LSE. Same conditional-raw
+            // toString() precedent as VPkFmaF32.
+            if(rawStale)
+            {
+                return formatWithComment("    .long 0xd0310000\n    .long 0x00000000");
+            }
             auto kStr = preStr() + " " + getArgStr();
             return formatWithComment(kStr);
         }
@@ -3823,6 +3845,79 @@ namespace rocisa
         RegContainerPtr group1;
         RegContainerPtr group2;
         RegContainerPtr group3;
+        bool            rawStale = false;
+    };
+
+    // tensor_store_from_lds (VIMAGE_TENSOR, op 0xc5). Mirrors TensorLoadToLds but
+    // for the epilogue D/LSE stores. The golden .sp3 toolchain emits the stale
+    // encoding word0 = 0xd0314000 (DMASK bit differs from the load's d0310000),
+    // word1 = 0. As with the load, the live mnemonic would make FFM execute a real
+    // TDM store; rawStale reproduces the FFM-safe stale word0/word1 as typed .long
+    // (word2 stays a separate VCmpGEU16 node). Same conditional-raw precedent.
+    struct TensorStoreFromLds : public Instruction
+    {
+        using ContainerPtr    = std::shared_ptr<Container>;
+        using RegContainerPtr = std::shared_ptr<RegisterContainer>;
+        TensorStoreFromLds(const RegContainerPtr& group0,
+                           const RegContainerPtr& group1,
+                           bool                   rawStale = false,
+                           const std::string&     comment  = std::string())
+            : Instruction(InstType::INST_TDM, comment)
+            , group0(group0)
+            , group1(group1)
+            , rawStale(rawStale)
+        {
+            if(group0->regType != "s" || group1->regType != "s")
+            {
+                throw std::invalid_argument("TensorStoreFromLds requires sgpr for group0/group1");
+            }
+            setInst("tensor_store_from_lds");
+        }
+
+        TensorStoreFromLds(const TensorStoreFromLds& other)
+            : Instruction(other)
+            , group0(other.group0)
+            , group1(other.group1)
+            , rawStale(other.rawStale)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<TensorStoreFromLds>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {group0, group1};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {group0, group1};
+        }
+
+        std::string toString() const override
+        {
+            if(rawStale)
+            {
+                return formatWithComment("    .long 0xd0314000\n    .long 0x00000000");
+            }
+            std::stringstream ss;
+            ss << preStr() << " " << std::get<ContainerPtr>(getParams().at(0))->toString() << ", "
+               << std::get<ContainerPtr>(getParams().at(1))->toString();
+            return formatWithComment(ss.str());
+        }
+
+    private:
+        RegContainerPtr group0;
+        RegContainerPtr group1;
+        bool            rawStale = false;
     };
 
     struct GlobalPrefetchB8 : public Instruction
