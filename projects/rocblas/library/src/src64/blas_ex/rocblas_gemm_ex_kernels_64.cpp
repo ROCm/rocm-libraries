@@ -469,7 +469,7 @@ rocblas_status rocblas_gemm_ex_template_64(rocblas_handle    handle,
 
 #include "blas_ex/rocblas_gemm_grouped_batched_ex.hpp"
 
-ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
+rocblas_status
     rocblas_internal_gemm_grouped_batched_ex_template_64(rocblas_handle           handle,
                                                          const rocblas_operation* transa_array,
                                                          const rocblas_operation* transb_array,
