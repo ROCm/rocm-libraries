@@ -885,6 +885,10 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
         return problem.block_size
+    # gfx942 full-causal sink prefill: T=2*block_size (paired with mw16, LDS still
+    # fits) feeds the KV loop better than the narrow single-block oracle.
+    if _enable_gfx942_sink_prefill_tuned(problem):
+        return 2 * problem.block_size
     # gfx942 D64. The flash/L4 regime (use_mfma_32x32x8 + sliced-K ring) requires
     # T in {64,128} and a multiple of 32, so force T=64 there (mirrors the D128
     # flash rule below); otherwise paged block_size in {16,32} would yield T=16/32
@@ -1056,6 +1060,10 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     # key, so a drift would silently launch the wrong CTA count, not rebuild).
     if _enable_gfx942_l4(problem):
         return _select_gfx942_flash_num_warps(problem)
+    # gfx942 full-causal sink prefill: nw2 (with mw16/T32/register_pv) beats the
+    # nw4 D64 oracle up to 1.46x.
+    if _enable_gfx942_sink_prefill_tuned(problem):
+        return 2
     # gfx942 D64 oracle.
     #   * prefill: num_warps=4 (BLOCK_M=128) + mw=32, four waves fit the MI300X
     #     64 KB LDS budget and match the direct gfx942 harness.
@@ -1744,6 +1752,30 @@ def _enable_gfx942_small_q_narrow(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _enable_gfx942_sink_prefill_tuned(problem: UnifiedAttentionProblem) -> bool:
+    """gfx942 full-causal bf16 attention-sink prefill -> nw2/mw16/T32 + register_pv.
+
+    GPU-verified up to 1.46x over the shipped nw4/mw32 config, bit-exact
+    (max_abs=0), holding under batch. Full-causal only: register_pv is full-mask
+    (v1 rejects sliding_window), and SWA gains are a wash at long context. Decode
+    (q==1) routes to the 3D path, so it is excluded here.
+    """
+    return (
+        _resolve_attention_arch() == "gfx942"
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.head_size == 64
+        and problem.block_size == 16
+        and problem.num_seqs <= 1
+        and problem.max_seqlen_q > 1
+        and problem.use_sinks
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+    )
+
+
 def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     """Gate the gfx942 fp16 transposed-x8 attention family.
 
@@ -2149,7 +2181,7 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
     """
     if problem.dtype != "bf16":
         return False
-    if problem.use_sinks:
+    if problem.use_sinks and not _enable_gfx942_sink_prefill_tuned(problem):
         return False
     if problem.sliding_window > 0:
         return False
@@ -2546,6 +2578,8 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     if _enable_gfx942_small_q_narrow(problem) and not _enable_gfx942_fp16_flash(
         problem
     ):
+        return 16
+    if _enable_gfx942_sink_prefill_tuned(problem):
         return 16
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
         return 32
