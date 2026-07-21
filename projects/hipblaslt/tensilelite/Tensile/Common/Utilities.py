@@ -368,6 +368,15 @@ def clusterEnabled(clusterDim):
 def log2(x):
     return int(log(x, 2) + 0.5)
 
+def effectiveMatrixInstMN(matrixInstM, matrixInstN, sourceSwap):
+    # Effective per-instruction M/N extents for tiling/layout. SourceSwap on a
+    # non-square MatrixInstruction transposes the accumulator, so the M/N tiling
+    # extents swap; the physical MatrixInstM/N (opcode / accumulator-layout source
+    # of truth) are unchanged. Square MI or SS0 return the inputs unchanged.
+    if sourceSwap and matrixInstM != matrixInstN:
+        return matrixInstN, matrixInstM
+    return matrixInstM, matrixInstN
+
 def ceilDivide(numerator, denominator):
     # import pdb
     # pdb.set_trace()

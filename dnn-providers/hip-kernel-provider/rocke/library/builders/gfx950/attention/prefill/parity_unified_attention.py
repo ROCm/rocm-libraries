@@ -891,7 +891,7 @@ def creative_scenarios() -> List[Scenario]:
         # --- head_size=256 with bf16 ---
         Scenario(
             name="creative_d256_bf16_decode",
-            seq_lens=[(1, 4096), (1, 8192)],
+            seq_lens=[(1, 1024), (1, 2048), (1, 4096), (1, 8192)],
             num_query_heads=16,
             num_kv_heads=2,
             head_size=256,

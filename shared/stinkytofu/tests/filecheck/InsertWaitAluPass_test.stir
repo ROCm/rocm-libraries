@@ -1,19 +1,20 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
 #
-# InsertWaitAluPass: mode-2 s_wait_alu insertion + SCHED_MODE setreg lifecycle.
+# InsertWaitAluPass: whole-kernel mode-2 s_wait_alu insertion + SCHED_MODE enable.
 # - setreg HW_REG_WAVE_SCHED_MODE (size=2, value=2) inserted at function entry
-# - setreg HW_REG_WAVE_SCHED_MODE (size=2, value=0) inserted before s_endpgm / s_setpc_b64
+#   (whole-kernel mode2 stays active across calls and is never disabled)
 # - VALU→VMEM RAW emits s_wait_alu va_vdst(N)
 # - VMEM→VALU dst WAR emits s_wait_alu vm_vsrc(N)
 # - VALU→VALU consumer suppresses va_vdst (HW per-register scoreboard covers it)
 # - Instructions that write EXEC eagerly drain VA_VDST via va_vdst(0)
 
-#--- setreg(SCHED_MODE)=2 at function entry, =0 before s_endpgm.
+#--- setreg(SCHED_MODE)=2 at function entry; mode2 is never disabled, so no
+#--- setreg(0) is emitted before s_endpgm.
 # CHECK-LABEL: @lifecycle_entry_and_return
 # CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(2)
 # CHECK: v_add_f32
-# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(0)
-# CHECK-NEXT: s_endpgm
+# CHECK-NOT: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(0)
+# CHECK: s_endpgm
 
 st.func @lifecycle_entry_and_return() {
 ^entry:
@@ -152,14 +153,13 @@ st.func @va_vdst_ooo_forces_zero() {
   v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
 }
 
-#--- Fall-off exit: the function has no s_endpgm / s_setpc_b64 (mirrors a
-#--- --from-label / --to-label region extracted out of a larger kernel).
-#--- The mode2 disable must still land at the end of the last BB.
+#--- Fall-off exit: the function has no s_endpgm. Mode2 is enabled at entry and
+#--- never disabled (owned across the whole kernel; region-exit disables no
+#--- longer exist), so only the entry enable is emitted.
 # CHECK-LABEL: @fall_off_exit
 # CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(2)
 # CHECK: v_add_f32
-# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(0)
-# CHECK-NOT: s_endpgm
+# CHECK-NOT: "st.s_setreg_IMM32_b32"(0)
 
 st.func @fall_off_exit() {
 ^entry:
