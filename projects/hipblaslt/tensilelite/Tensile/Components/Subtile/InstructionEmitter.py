@@ -155,8 +155,12 @@ class InstructionEmitter:
 
     @property
     def _stinky_owns_waitcnt(self):
-        """True when StinkyTofu waitcnt insertion replaces hand-rolled waits."""
-        return bool(self.kernel.get("_StinkySubtile"))
+        """True when StinkyTofu replaces hand-rolled TDM tensor waits."""
+        return bool(
+            self.kernel.get("_StinkySubtile")
+            and self.kernel.get("enableTDMA", False)
+            and self.kernel.get("enableTDMB", False)
+        )
 
     def emit_mfma(self, placement, unroll_iter=0):
         """Emit MFMA instructions from MFMAPlacement."""

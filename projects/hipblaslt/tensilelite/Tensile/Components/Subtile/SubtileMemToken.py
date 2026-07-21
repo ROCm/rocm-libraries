@@ -85,10 +85,8 @@ def barrierTokens(writer, kernel) -> list[int]:
 
 
 def tagDtlLoad(inst: Instruction, writer, kernel) -> None:
-    if not _stinkySubtileEnabled(kernel):
-        return
-    initSubtileMemTokens(writer, kernel)
-    inst.setMemToken(MemTokenData([writer.states.ldsDirectToLDSTokenIdx]))
+    """Intentionally no-op: StinkyBuildImplicitDependencyPass does not model MUBUF DTL."""
+    return
 
 
 def tagTensorLoad(inst: Instruction, writer, kernel) -> None:

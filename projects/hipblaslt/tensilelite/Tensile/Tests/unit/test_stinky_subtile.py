@@ -39,27 +39,37 @@ def _minimal_subtile_state(isa=GFX1250_ISA, use_subtile=True, stinky_subtile=Fal
 
 
 def test_subtile_stinky_opt_in_sets_derived_flag():
+    import rocisa
     state = _minimal_subtile_state(stinky_subtile=True)
-    Solution._assignStinkySubtile(state)
-    assert state.get("_StinkySubtile") is True
+    Solution._assignStinkySubtile(state, False)
+    if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(state["ISA"])):
+        assert state.get("_StinkySubtile") is not True
+        assert state["Valid"] is False
+    else:
+        assert state.get("_StinkySubtile") is True
 
 
 def test_non_subtile_stinky_opt_in_no_derived_flag():
     state = _minimal_subtile_state(use_subtile=False, stinky_subtile=True)
-    Solution._assignStinkySubtile(state)
+    Solution._assignStinkySubtile(state, False)
     assert "_StinkySubtile" not in state
 
 
 def test_subtile_without_stinky_opt_in_no_derived_flag():
     state = _minimal_subtile_state(stinky_subtile=False)
-    Solution._assignStinkySubtile(state)
+    Solution._assignStinkySubtile(state, False)
     assert "_StinkySubtile" not in state
 
 
-def test_stinky_opt_in_any_isa_sets_derived_flag():
+def test_stinky_opt_in_unsupported_isa_rejects():
+    import rocisa
     state = _minimal_subtile_state(isa=(9, 5, 0), stinky_subtile=True)
-    Solution._assignStinkySubtile(state)
-    assert state.get("_StinkySubtile") is True
+    Solution._assignStinkySubtile(state, False)
+    if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(state["ISA"])):
+        assert state.get("_StinkySubtile") is not True
+        assert state["Valid"] is False
+    else:
+        assert state.get("_StinkySubtile") is True
 
 
 def test_build_stinky_options_waitcnt_only_overrides():
@@ -249,7 +259,7 @@ def test_subtile_mem_token_tag_instructions():
 
     dtl = BufferLoadB128(dst=None, vaddr=vgpr(0), saddr=sgpr(0, 4), soffset=0)
     tagDtlLoad(dtl, writer, kernel)
-    assert dtl.getMemToken().tokens == [0]
+    assert dtl.getMemToken() is None
 
     tdm = TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None)
     tagTensorLoad(tdm, writer, kernel)
@@ -281,7 +291,7 @@ def test_subtile_emit_sync_tags_barrier():
     assert items[0].getMemToken().tokens == [0, 1]
 
 
-def test_subtile_emit_wait_gr_lr_skipped_when_stinky_subtile():
+def test_subtile_emit_wait_gr_lr_skipped_for_tdm_when_stinky_subtile():
     from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
     from Tensile.Components.Subtile.LogicalScheduler import WaitGROp, WaitGRCounts
 
@@ -294,9 +304,21 @@ def test_subtile_emit_wait_gr_lr_skipped_when_stinky_subtile():
     counts = WaitGRCounts(A=1, B=1, SA=0, SB=0)
     source = WaitGROp(wait_gr_counts=counts)
 
-    emitter.kernel = {"_StinkySubtile": True, "enableTDMA": False, "enableTDMB": False}
+    emitter.kernel = {
+        "_StinkySubtile": True,
+        "enableTDMA": True,
+        "enableTDMB": True,
+    }
     assert emitter.emit_wait_gr(source) == []
     assert emitter.emit_wait_lr() == []
+
+    emitter.kernel = {
+        "_StinkySubtile": True,
+        "enableTDMA": False,
+        "enableTDMB": False,
+    }
+    assert len(emitter.emit_wait_gr(source)) == 1
+    assert len(emitter.emit_wait_lr()) == 1
 
     emitter.kernel = {"enableTDMA": False, "enableTDMB": False}
     assert len(emitter.emit_wait_gr(source)) == 1

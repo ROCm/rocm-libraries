@@ -54,7 +54,7 @@ from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
-from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
+from .Common import printWarning, printExit, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2
 from .Common.GlobalParameters import globalParameters
 from Tensile.SolutionStructs.Naming import getKernelNameMin
@@ -5422,6 +5422,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         kernel, moduleKernelBody, fs, 0, option_overrides=waitcnt_overrides)
       if st_asm is not None:
         return (error, st_asm)
+      printExit(
+        f"StinkySubtile kernel generation failed: StinkyTofu pipeline returned no assembly "
+        f"for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}")
 
     return (error, str(moduleKernelBody))
 
