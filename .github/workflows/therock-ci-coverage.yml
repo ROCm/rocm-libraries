@@ -54,9 +54,9 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "reboss/TheRock"
+          repository: "ROCm/TheRock"
           path: TheRock
-          ref: enable-codecov
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
