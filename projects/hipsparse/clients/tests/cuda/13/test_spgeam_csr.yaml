@@ -45,6 +45,23 @@ Tests:
   baseB: [HIPSPARSE_INDEX_BASE_ZERO]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO]
 
+# Edge cases: alpha and/or beta equal to zero. The sparsity pattern of C is the union of
+# A and B and is independent of the values of alpha and beta on both the rocSPARSE and
+# cuSPARSE backends.
+- name: spgeam_csr
+  category: quick
+  function: spgeam_csr
+  precision: *single_double_precisions_complex_real
+  M: [325, 1057]
+  N: [174, 623]
+  alpha: [0.0, 2.0]
+  alphai: [0.0]
+  beta: [0.0, -1.5]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+
 - name: spgeam_csr
   category: pre_checkin
   function: spgeam_csr
