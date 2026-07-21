@@ -44,9 +44,9 @@ static constexpr std::size_t elements_to_bytes(std::size_t n)
     return n * sizeof(T) / ck_tile::numeric_traits<T>::PackedSize;
 }
 
-#ifndef GFX_ARCH
-#define GFX_ARCH "gfx950"
-#endif
+// GPU architecture is derived from the running device at launch time (see the
+// runtime check in dispatcher_run_bquant_gemm) rather than assumed at compile
+// time -- do not hardcode a default architecture here.
 
 static bool g_initialized = false;
 
@@ -131,6 +131,26 @@ int dispatcher_run_bquant_gemm(const void* A,
     {
         std::cerr << "dispatcher_run_bquant_gemm: invalid dimensions\n";
         return -1;
+    }
+
+    // Derive the GPU architecture from the running device (do not assume one at
+    // compile time) and reject unsupported archs, per review feedback.
+    {
+        int dev = 0;
+        hipDeviceProp_t props{};
+        if(hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&props, dev) != hipSuccess)
+        {
+            std::cerr << "dispatcher_run_bquant_gemm: could not query device architecture\n";
+            return -1;
+        }
+        const std::string arch(props.gcnArchName);
+        if(arch.rfind("gfx950", 0) != 0 && arch.rfind("gfx942", 0) != 0 &&
+           arch.rfind("gfx90a", 0) != 0)
+        {
+            std::cerr << "dispatcher_run_bquant_gemm: unsupported GPU architecture '" << arch
+                      << "' (supported: gfx90a, gfx942, gfx950)\n";
+            return -1;
+        }
     }
 
     // Validate that the caller's QK_B/QN_B match the compile-time quant group sizes
