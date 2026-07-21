@@ -22,14 +22,15 @@ st.func @simple_kernel() {
   "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
 }
 
-#--- global_wb comes before v_nop (exact order), and v_nop is not emitted
-#--- before global_wb.
+#--- The first three instructions are exactly global_wb, v_nop, then the
+#--- original first instruction, with nothing inserted between them.
 # CHECK-LABEL: @order_kernel
 # CHECK: "st.global_wb"()
-# CHECK-NOT: "st.v_add_f32"
-# CHECK: "st.v_nop"()
+# CHECK-SAME: scope = "SCOPE_CU"
+# CHECK-NEXT: "st.v_nop"()
+# CHECK-NEXT: "st.v_mul_f32"
 
 st.func @order_kernel() {
 ^entry:
-  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
 }

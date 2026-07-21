@@ -26,6 +26,8 @@ class Pass;
 /// instruction of the entry function so they are the first instructions
 /// executed. It must run late in the pipeline — after scheduling and any pass
 /// that inserts at kernel entry — so nothing is reordered ahead of the prologue.
+///
+/// No-op on non-gfx1250 targets (the opcodes are gfx1250-specific).
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertInitialUnclausedVmemPass();
 
 }  // namespace stinkytofu

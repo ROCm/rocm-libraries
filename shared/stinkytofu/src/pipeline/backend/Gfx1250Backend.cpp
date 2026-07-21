@@ -198,16 +198,19 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
     // SwPrefetchInsertionPass handles multiple functions directly.
     pm.addPass(createFlattenCalleesPass(module.getFunctions()));
-    if (moduleOptions.EnableSwPrefetchInsertion) {
-        pm.addPass(createSwPrefetchInsertionPass(module));
-    }
 
     // gfx1250 hardware-entrypoint prologue: `global_wb SCOPE:SCOPE_CU` + `v_nop`.
     // global_wb makes the first VMEM instruction non-clause-bound (it is a VMEM
     // op that ignores EXEC); v_nop is a safe first VALU instruction. Runs after
-    // flatten + prefetch insertion so nothing is reordered ahead of the prologue,
-    // and before size accounting so the two instructions are counted.
+    // flatten (so the entry's first instruction is the kernel's first) and
+    // before SW-prefetch insertion so the prefetch pass anchors its byte layout
+    // on the final entry (prologue included) and its CP-boundary coverage stays
+    // gap-free.
     pm.addPass(createInsertInitialUnclausedVmemPass());
+
+    if (moduleOptions.EnableSwPrefetchInsertion) {
+        pm.addPass(createSwPrefetchInsertionPass(module));
+    }
 
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
