@@ -1,35 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-#
-# Client-runnable StreamK DP cooperative B-multicast test for gfx1250.
-#
-# MX-FP8 TN, StreamK=3 (TDMInst=3, MXLoadInst=TDM,
-# MXScaleFormat=InMemorySwizzle, WavefrontSize=32, StreamKXCCMapping=0) with the
-# DP cooperative B-multicast fast path (auto-derived from StreamK=3 + ClusterDim):
-#
-#   - ClusterDim: [[2,1],[4,1],[8,1]]   -- 1-D spatial clusters, C in {2,4,8}
-#   - StreamKClusterReduction: [0]      -- mutually exclusive with multicast
-#
-# StreamKMulticast is a derived-only internal state (no YAML opt-in): a StreamK=3
-# ClusterDim != [1,1] config that does not request StreamKClusterReduction
-# auto-enables the DP cooperative B-multicast path.
-#
-# In the DP region the C consecutive workgroups of a [C,1] cluster process
-# M-adjacent tiles that share the same B over full K, so B is TDM-multicast to
-# the whole cluster while A is per-workgroup. The runtime clusterMulticastValid
-# predicate enables the broadcast only on a fully-populated, M-aligned
-# (nWG0 % C == 0) cluster; otherwise B loads normally. The host rounds the grid
-# up to a multiple of C so every launched cluster is full. Every size below keeps
-# nWG0 % C == 0 for the C it dispatches (a violation is a HARD REJECT via
-# ClusterDimCheck at selection time, not a silent fallback).
-#
-# Codegen coverage crosses macro-tile-M in {32,64,128} with PrefetchGlobalRead
-# {1,2}. ScheduleIterAlg is pinned to 4 (the gfx1250 scheduler path). With
-# PrefetchGlobalRead=2 the prologue double-buffers the first main-loop prefetch,
-# so the sizes with K > DepthU (DepthU=256; e.g. K=512 and the K=1920 tail case)
-# ensure that double-buffered prologue prefetch path is actually exercised.
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 GlobalParameters:
   SyncsPerBenchmark: 0
   Architecture: gfx1250
@@ -49,11 +21,8 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  ########################################
-  # MX-FP8 (F8 in, float32 out) TN, Batched -- StreamK DP cooperative multicast.
-  ########################################
   -
-    - # ProblemType: MX-F8 TN
+    -
       OperationType: GEMM
       DataType: F8
       DestDataType: s
@@ -65,7 +34,7 @@ BenchmarkProblems:
       Batched: True
       MXBlockA: 32
       MXBlockB: 32
-    - # BenchmarkProblemSizeGroup
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -121,10 +90,10 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 256]    # nWG0=16 -> multicast ON (C=2,4,8)
-          - Exact: [256, 256, 1, 256]    # nWG0=8  -> multicast ON (C=2,4,8)
-          - Exact: [128, 128, 1, 512]    # nWG0=4  -> ON (C=2,4); K=512
-          - Exact: [256, 256, 2, 256]    # batched (batch=2); nWG0=8 -> ON (C=2,4,8)
-          - Exact: [256, 256, 1, 1920]   # K-tail (K%256=128); nWG0=8 -> ON (C=2,4,8); tail-loop B-multicast loads
+          - Exact: [512, 512, 1, 256]
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [256, 256, 2, 256]
+          - Exact: [256, 256, 1, 1920]
         - ActivationArgs:
           - [Enum: none]

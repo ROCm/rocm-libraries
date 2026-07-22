@@ -2,16 +2,6 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# gfx1250 StreamK=3 + ClusterDim=[2,1] cooperative-load codegen characterization.
-#
-# StreamK=3 with ClusterDim != [1,1]. Under the
-# "bare StreamK cluster" collapse this AUTO-ENABLES the DP cooperative B-multicast
-# path (StreamKMulticast is a derived-only internal state; there is no bare
-# index-only StreamK cluster anymore). So this config exercises BOTH the cluster
-# WG-id decode / enableCluster guard in StreamKTwoTileDPFirst.preLoop AND the
-# auto-derived multicast masks -- with MX-FP4 (C=2), complementing the MX-FP8
-# (C=4) sibling streamk_cluster_multicast.yaml. Mirrors
-# Tests/common/streamk/gfx1250/core/sk_mxf4gemm_tdm.yaml with ClusterDim added.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -22,7 +12,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   -
-    - # ProblemType, TN, MX-FP4
+    -
       OperationType: GEMM
       DataType: F4
       DestDataType: s
@@ -37,7 +27,7 @@ BenchmarkProblems:
       UseBias: 0
       MXBlockA: 32
       MXBlockB: 32
-    - # BenchmarkProblemSizeGroup: StreamK=3, ClusterDim=[2,1]
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]

@@ -237,19 +237,11 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
   StreamKClusterReduction co-locates a StreamK tile's fixup peers in a single
   1-D workgroup cluster (ClusterDim = [C, 1]) and replaces the cross-CU
   global-flag spin-wait with an intra-cluster split barrier. It is an explicit,
-  opt-in fast path (barrier-only in v1); when its solution-level requirements
-  are not met the solution is rejected here at BUILD time with a clear message.
-  See docs/design/streamk-wg-clusters.md.
-
-  Note on the "multiple of the cluster size" limitation: the reduction also
-  requires itersPerTile = ceil(K / DepthU) to be a multiple of ClusterDim[0]=C
-  (otherwise the split barrier over-signals and hangs). That is a HARD REJECT of
-  the cluster solution for non-conforming problems, but it CANNOT be enforced
-  here because itersPerTile depends on the runtime K, which is unknown at build
-  time. It is instead enforced as a per-problem selection reject by the
-  ClusterReductionIterCheck predicate (emitted from Contractions.py), whose
-  diagnostic names the limitation to the user. This is a deliberate reject, not
-  a silent fallback.
+  opt-in fast path (barrier-only in v1); solution-level requirements are rejected
+  here at build time. The runtime requirement itersPerTile = ceil(K/DepthU) % C
+  == 0 (unknown at build time, else the split barrier over-signals) is instead a
+  per-problem selection reject via the ClusterReductionIterCheck predicate
+  (Contractions.py). See docs/design/streamk-wg-clusters.md.
   """
   if not state.get("StreamKClusterReduction", 0):
     return True
@@ -330,14 +322,10 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   Solution-level requirements are rejected here at build time; the runtime
   nWG0 % C "multiple-of-cluster-size" requirement is enforced by the
   ClusterDimCheck predicate at selection time (not a silent fallback).
+  Auto-derived for StreamK=3 + ClusterDim != [1, 1] (the bare index-only cluster
+  state collapsed into this path), so the rejects below reject an unusable
+  cluster rather than an explicit opt-in.
   See docs/design/cluster-load-component-and-streamk-multicast.md.
-
-  StreamKMulticast is auto-derived for StreamK=3 + ClusterDim != [1, 1] in
-  assignProblemIndependentDerivedParameters -- the bare index-only StreamK
-  cluster state was collapsed into this cooperative-load path. When such an
-  auto-derived config cannot meet the requirements below (e.g. TDMInst != 3),
-  the rejects here are the "reject an unusable cluster" behavior, not a
-  rejection of an explicit user opt-in.
   """
   if not state.get("StreamKMulticast", 0):
     return True

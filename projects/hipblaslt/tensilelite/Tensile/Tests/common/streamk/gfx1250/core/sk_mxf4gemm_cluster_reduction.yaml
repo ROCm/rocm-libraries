@@ -1,25 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-#
-# Client-runnable StreamK workgroup-cluster-reduction test for gfx1250, MX-FP4.
-#
-# F4 analog of the sibling core/sk_mxf8gemm_cluster_reduction.yaml (MX-FP8): same
-# cluster/coverage structure, datatype-specific params differ. MX-F4 constraints
-# (DataType F4, MXBlockA/B=32, TDMInst=3, MXLoadInst=TDM,
-# MXScaleFormat=InMemorySwizzle, WavefrontSize=32, DepthU=256,
-# StreamKXCCMapping=0) with the barrier-only cluster reduction fast path:
-#
-#   - StreamKClusterReduction: [1]      -- intra-cluster split-barrier reduce
-#   - ClusterDim: [[2,1],[4,1],[8,1]]   -- 1-D clusters, C in {2,4,8}
-#
-# Sizes force partial-tile reductions (K >> DepthU) and keep both nWG0 % C == 0
-# (cluster selection) and itersPerTile % C == 0 (balanced split barrier). When
-# itersPerTile % C != 0 the split barrier over-signals -> hang, so the
-# ClusterReductionIterCheck predicate HARD-REJECTS such problems at selection
-# time (itersPerTile depends on runtime K, so it cannot be a build-time reject).
-# A K-tail (K % DepthU != 0) is safe as long as itersPerTile % C == 0.
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 GlobalParameters:
   SyncsPerBenchmark: 0
   Architecture: gfx1250
@@ -39,11 +21,8 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  ########################################
-  # MX-FP4 (F4 in, float32 out) TN, Batched -- StreamK cluster reduction.
-  ########################################
   -
-    - # ProblemType: MX-F4 TN
+    -
       OperationType: GEMM
       DataType: F4
       DestDataType: s
@@ -58,7 +37,7 @@ BenchmarkProblems:
       UseBias: 0
       MXBlockA: 32
       MXBlockB: 32
-    - # BenchmarkProblemSizeGroup
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -116,9 +95,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 1024]   # MT32 nWG0=4  (C=2,4 admit; C=8 nWG0%8!=0); itersPerTile=4 -> C=2,4 partial-tile reduce
-          - Exact: [512, 512, 1, 2048]   # MT32 nWG0=16 (C=2,4,8 admit); itersPerTile=8 -> C=2,4,8 partial-tile reduce (safe C=8)
-          - Exact: [256, 256, 1, 1920]   # K-tail: itersPerTile=ceil(1920/256)=8 (8%2,4,8==0), K%256=128 tail -> tail loop inside cluster reduce (C=8 via MT32 nWG0=8)
-          - Exact: [256, 256, 2, 1024]   # batched (batch=2); nWG0=8, itersPerTile=4 -> C=2,4 partial-tile reduce
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [512, 512, 1, 2048]
+          - Exact: [256, 256, 1, 1920]
+          - Exact: [256, 256, 2, 1024]
         - ActivationArgs:
           - [Enum: none]

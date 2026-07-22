@@ -1,40 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Designed StreamK + DP cooperative multicast config for gfx1250 codegen
-# characterization.
-#
-# Mirrors the sibling _designed/gfx1250/streamk_cluster_coop_load.yaml (MX-FP8 TN,
-# StreamK=3, gfx1250 MX constraints: TDMInst=3, MXLoadInst=TDM,
-# MXScaleFormat=InMemorySwizzle, WavefrontSize=32, ISA=(12,5,0),
-# StreamKXCCMapping=0), but enables the DP cooperative B-multicast fast path.
-# StreamKMulticast is a derived-only internal state (no YAML opt-in): StreamK=3 +
-# ClusterDim != [1,1] auto-enables it, so this config only needs to set:
-#
-#   - ClusterDim: [[4, 1]]           -- 1-D spatial cluster, C=4 (power of two)
-#
-# Under this config StreamK.py must emit the split A/B multicast masks (A per-WG
-# self bit, B broadcast across the [C,1] cluster) on the DP TDM loads, gated by
-# the runtime clusterMulticastValid predicate, plus the DP->SK boundary mask
-# clear. See docs/design/cluster-load-component-and-streamk-multicast.md.
-#
-# ClusterDim is pinned to the single C=4 here because the coupled unit test
-# Tensile/Tests/unit/test_streamk_multicast.py derives its states from THIS
-# config (test_accepted_baseline asserts ClusterDim==[4,1]; test_broadcast_mask
-# _value asserts the maskB=(1<<C)-1=0xf, C=4 encoding). The C-spread {2,4,8} is
-# swept and validated in the client GEMM sibling sk_mxf8gemm_cluster_multicast.yaml on
-# the FFM gfx1250 simulator instead.
-#
-# Coverage (mirrors the non-cluster MX-FP8 StreamK MT sweep in
-# Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm.yaml) across the multicast
-# codegen surface -- MacroTile sizes x work-item (MIWaveGroup) sizes:
-#   - MatrixInstruction: 4 variants ->
-#       MT 32x32  (WaveTile 1x1, MIWaveGroup 2x2, 128 work-items)
-#       MT 64x64  (WaveTile 2x2, MIWaveGroup 2x2, 128 work-items)
-#       MT 128x128(WaveTile 4x4, MIWaveGroup 2x2, 128 work-items)
-#       MT 32x16  (WaveTile 1x1, MIWaveGroup 2x1,  64 work-items) -- WI variety
-#   - ClusterDim: C=4
-# => 4 x 1 = 4 fork permutations.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -44,11 +10,8 @@ GlobalParameters:
   Device: 0
 
 BenchmarkProblems:
-  ########################################
-  # MX-FP8 (F8 in, float32 out) TN, Batched -- StreamK DP cooperative multicast.
-  ########################################
   -
-    - # ProblemType: MX-F8 TN
+    -
       OperationType: GEMM
       DataType: F8
       DestDataType: s
@@ -60,7 +23,7 @@ BenchmarkProblems:
       Batched: True
       MXBlockA: 32
       MXBlockB: 32
-    - # BenchmarkProblemSizeGroup
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
