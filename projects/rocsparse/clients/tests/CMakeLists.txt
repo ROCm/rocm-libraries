@@ -44,6 +44,11 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
+# CSC triangular solve support (rocsparse_spsv / rocsparse_sptrsv) ?
+if(BUILD_WITH_CSC_TRSV)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
+endif()
+
 #
 # Client matrices.
 #
@@ -178,9 +183,11 @@ set(ROCSPARSE_TEST_SOURCES
   test_v2_spmv_csc.cpp
   test_v2_spmv_ell.cpp
   test_v2_spmv_sell.cpp
-  test_spsv_csr.cpp
   test_sptrsv_csr.cpp
+  test_sptrsv_csc.cpp
   test_spitsv_csr.cpp
+  test_spsv_csr.cpp
+  test_spsv_csc.cpp
   test_spsv_coo.cpp
   test_sptrsv_coo.cpp
   test_spsm_csr.cpp
@@ -200,6 +207,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_sparse_to_dense_coo.cpp
   test_sparse_to_dense_csr.cpp
   test_sparse_to_dense_csc.cpp
+  test_dense_to_sparse_bell.cpp
   test_dense_to_sparse_coo.cpp
   test_dense_to_sparse_csr.cpp
   test_dense_to_sparse_csc.cpp
@@ -232,6 +240,10 @@ if(BUILD_ROCSPARSE_DEBUGGING)
   list(APPEND ROCSPARSE_TEST_SOURCES
     test_hip_debug.cpp
     )
+endif()
+
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
 endif()
 
 set(ROCSPARSE_CLIENTS_TESTINGS
@@ -334,9 +346,11 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_v2_spmv_csc.cpp
 ../testings/testing_v2_spmv_ell.cpp
 ../testings/testing_v2_spmv_sell.cpp
-../testings/testing_spsv_csr.cpp
 ../testings/testing_sptrsv_csr.cpp
+../testings/testing_sptrsv_csc.cpp
 ../testings/testing_spitsv_csr.cpp
+../testings/testing_spsv_csr.cpp
+../testings/testing_spsv_csc.cpp
 ../testings/testing_spsv_coo.cpp
 ../testings/testing_sptrsv_coo.cpp
 ../testings/testing_spsm_csr.cpp
@@ -356,6 +370,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_sparse_to_dense_coo.cpp
 ../testings/testing_sparse_to_dense_csr.cpp
 ../testings/testing_sparse_to_dense_csc.cpp
+../testings/testing_dense_to_sparse_bell.cpp
 ../testings/testing_dense_to_sparse_coo.cpp
 ../testings/testing_dense_to_sparse_csr.cpp
 ../testings/testing_dense_to_sparse_csc.cpp
@@ -384,6 +399,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_bsrpad_value.cpp
 rocsparse_test_listeners.cpp
   )
+
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+endif()
 
 
 
@@ -455,7 +474,10 @@ endif()
 target_compile_definitions(rocsparse-test PRIVATE GOOGLE_TEST)
 
 # Target compile options
-target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprecated -Wno-unused-command-line-argument -Wall)
+target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -Wno-deprecated -Wno-unused-command-line-argument -Wall)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  target_compile_options(rocsparse-test PRIVATE -mfma)
+endif()
 
 # Internal common header
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)

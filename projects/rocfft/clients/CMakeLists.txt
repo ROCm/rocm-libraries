@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -78,23 +78,6 @@ if(NOT ROCFFT_BUILD_SCOPE AND
   set( BUILD_CLIENTS_SAMPLES ON )
   set( BUILD_CLIENTS_TESTS ON )
   set( BUILD_CLIENTS_BENCH ON )
-endif()
-
-# each backend requires different libraries for host and device code
-if( USE_CUDA )
-  if( NOT DEFINED CUDA_PREFIX )
-    message( FATAL_ERROR "CUDA_PREFIX variable is required." )
-  endif()
-  if( NOT DEFINED CUDA_ARCH )
-    message( FATAL_ERROR "CUDA_ARCH variable is required." )
-  endif()
-  add_compile_options(-I${HIP_ROOT_DIR}/include -I${CUDA_PREFIX}/include -D__HIP_PLATFORM_NVIDIA__)
-  add_link_options(-L${CUDA_PREFIX}/lib64 -pthread)
-  add_compile_options(--cuda-path=${CUDA_PREFIX} --cuda-gpu-arch=${CUDA_ARCH} -xcuda)
-  set( ROCFFT_CLIENTS_HOST_LINK_LIBS -lcudart -ldl -lrt )
-else()
-  set( ROCFFT_CLIENTS_HOST_LINK_LIBS hip::host )
-  set( ROCFFT_CLIENTS_DEVICE_LINK_LIBS hip::device )
 endif()
 
 if( ROCFFT_MPI_ENABLE )

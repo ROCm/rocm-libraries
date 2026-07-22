@@ -3,6 +3,7 @@
  * *************************************************************************/
 
 #include "roclapack_syevd_heevd.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -16,6 +17,7 @@ rocblas_status rocsolver_syevd_heevd_impl(rocblas_handle handle,
                                           S* D,
                                           S* E,
                                           I* info)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "syevd" : "heevd");
     ROCSOLVER_ENTER_TOP(name, "--evect", evect, "--uplo", uplo, "-n", n, "--lda", lda);
@@ -89,6 +91,10 @@ rocblas_status rocsolver_syevd_heevd_impl(rocblas_handle handle,
         handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, info, batch_count,
         (T*)scalars, work1, work2, work3, work4, (S*)tmpz, (I*)splits, (T*)tmptau_W, (T*)tau,
         (T**)workArr, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

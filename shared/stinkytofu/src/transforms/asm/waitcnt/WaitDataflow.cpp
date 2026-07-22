@@ -57,8 +57,13 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         // CK_DS: ds_read / ds_write / ds_atomic; every consumer drains.
         {[](const StinkyInstruction& i) { return isDSRead(i) || isDSWrite(i) || isDSAtomic(i); },
          [](const StinkyInstruction&) { return true; }},
-        // CK_Buffer: vector global/buffer load+store; every consumer drains.
-        {[](const StinkyInstruction& i) { return isBufferMemLoad(i) || isBufferMemStore(i); },
+        // CK_Buffer: vector global/buffer load+store, plus returning MUBUF/FLAT/
+        // GLOBAL atomics (their result completes on the same loadcnt counter as
+        // an ordinary load -- see isReturningAtomic() in StinkyAsmIR.hpp for why
+        // scalar-memory atomics are excluded); every consumer drains.
+        {[](const StinkyInstruction& i) {
+             return isBufferMemLoad(i) || isBufferMemStore(i) || isReturningAtomic(i);
+         },
          [](const StinkyInstruction&) { return true; }},
         // CK_KM: SMRD scalar loads (s_load_*); every consumer drains.
         {[](const StinkyInstruction& i) { return isSMemLoad(i); },
@@ -416,6 +421,16 @@ DataflowState adjustedEntry(BasicBlock& bb, const WaitInsertionPlan& plan,
     return state;
 }
 
+void restoreTensorState(DataflowState& state, const DataflowState& frozen) {
+    state.queues[CK_Tensor] = frozen.queues[CK_Tensor];
+    for (auto& kv : state.phiSummaries) {
+        auto it = frozen.phiSummaries.find(kv.first);
+        kv.second.waits[CK_Tensor] = (it == frozen.phiSummaries.end())
+                                         ? WaitCountSpec::kUnused
+                                         : it->second.waits[CK_Tensor];
+    }
+}
+
 WaitCountSpec mergePlanAndComputed(const WaitInsertionPlan& plan, StinkyInstruction* inst,
                                    const int computed[CK_Count], CounterEmitState emit[CK_Count]) {
     WaitCountSpec applySpec;
@@ -731,8 +746,14 @@ bool WaitDataflow::solve() {
         overflowSites.clear();
         for (BasicBlock* bb : rpo) {
             DataflowState entry = mergeFromPredecessors(*bb);
+            if (!loopCarriedTokenDepsEnabled && iter > 0) {
+                restoreTensorState(entry, result.entryState[bb]);
+            }
             DataflowState working = entry;
             transferBlock(*bb, working);
+            if (!loopCarriedTokenDepsEnabled && iter > 0) {
+                restoreTensorState(working, result.exitState[bb]);
+            }
 
             PASS_DEBUG({
                 for (int c = 0; c < CK_Count; ++c) {
@@ -792,6 +813,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
     // DROPS waits made redundant. Snapshot them before we rebuild.
     const WaitInsertionPlan optimizerPlan = plan;
 
+    std::unordered_map<const BasicBlock*, DataflowState> finalEntry;
     std::unordered_map<const BasicBlock*, DataflowState> finalExit;
     std::unordered_map<StinkyInstruction*, WaitCountSpec> newAnchors;
 
@@ -805,6 +827,11 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
             // optimizer's predecessor tail drains.
             DataflowState state = mergeFromPredecessors(*bb, finalExit);
             state = adjustedEntry(*bb, optimizerPlan, state);
+            if (!loopCarriedTokenDepsEnabled && iter > 0) {
+                auto eit = finalEntry.find(bb);
+                if (eit != finalEntry.end()) restoreTensorState(state, eit->second);
+            }
+            finalEntry[bb] = state;
             CounterEmitState emit[CK_Count];
 
             for (IRBase& ir : *bb) {
@@ -835,6 +862,9 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
             }
 
             auto it = finalExit.find(bb);
+            if (!loopCarriedTokenDepsEnabled && iter > 0 && it != finalExit.end()) {
+                restoreTensorState(state, it->second);
+            }
             if (it == finalExit.end() || !(it->second == state)) {
                 finalExit[bb] = std::move(state);
                 changed = true;
