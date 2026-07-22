@@ -252,8 +252,8 @@ def loadData(filename: str) -> list[Any]:
         filename: Path to YAML logic file.
 
     Returns:
-        list[Any]: ``[filename, data, migrated]`` where *data* is the loaded
-        (and possibly converted) logic, and *migrated* is True when a legacy
+        list[Any]: ``[filename, data, normalized]`` where *data* is the loaded
+        (and possibly converted) logic, and *normalized* is True when a legacy
         list file was converted to dict format, or when an existing dict file
         was rewritten to the canonical layout (no ``Library`` block,
         ``LibraryType`` set to the tuning mode).
@@ -265,12 +265,12 @@ def loadData(filename: str) -> list[Any]:
             ``printExit``.
     """
     data = load_yaml_stream(filename, yaml.CSafeLoader)
-    migrated = False
+    normalized = False
     wasList = isinstance(data, list)
     data = convertToDict(data, filename)
     layoutUpdated = normalizeDictLibraryLayout(data)
-    migrated = wasList or layoutUpdated
-    return [filename, data, migrated]
+    normalized = wasList or layoutUpdated
+    return [filename, data, normalized]
 
 
 def compareDestFolderToYaml(originalDir, incFile, incData: dict[str, Any]):
@@ -478,13 +478,10 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
     iters = zip(logicsFiles.keys())
     logicsList = ParallelMap2(loadData, iters, "Loading Logics...", return_as="list")
     logicsDict = {}
-    for filename, data, migrated in logicsList:
+    for filename, data, normalized in logicsList:
         logicsDict[filename] = data
-        if migrated:
-            LibraryIO.writeYAML(
-                filename, data, explicit_start=False, explicit_end=False, sort_keys=False
-            )
-            msg("Converted", filename, "to dict format")
+        if normalized:
+            msg(filename, "was normalized to canonical dict layout in memory")
 
     for incFile in incrementalFiles:
         basename = os.path.split(incFile)[-1]

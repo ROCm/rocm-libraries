@@ -150,19 +150,19 @@ class TestLoadData:
             explicit_end=False,
             sort_keys=True,
         )
-        fn, data, migrated = loadData(str(out_file))
+        fn, data, normalized = loadData(str(out_file))
         assert fn == str(out_file)
         assert isinstance(data, dict)
-        assert migrated is True
+        assert normalized is True
         assert "Solutions" in data
         assert "ExactLogic" in data
         assert len(data["Solutions"]) == 2
         assert len(data["ExactLogic"]) == 3
 
-    def test_load_dict_fixture_no_list_migration(
+    def test_load_dict_fixture_no_list_normalization(
         self, tmp_path: Path, dict_logic: dict[str, Any]
     ) -> None:
-        """Dict YAML without ``Library`` block is not list-migrated."""
+        """Dict YAML without ``Library`` block is not list-normalized."""
         out_file = tmp_path / "logic.yaml"
         LibraryIO.writeYAML(
             str(out_file),
@@ -171,10 +171,10 @@ class TestLoadData:
             explicit_end=False,
             sort_keys=False,
         )
-        fn, data, migrated = loadData(str(out_file))
+        fn, data, normalized = loadData(str(out_file))
         assert fn == str(out_file)
         assert isinstance(data, dict)
-        assert migrated is False
+        assert normalized is False
 
     def test_convert_list_fixture_to_dict(self, list_logic: list[Any]) -> None:
         """``convertToDict`` turns legacy list fixture into dict layout."""
