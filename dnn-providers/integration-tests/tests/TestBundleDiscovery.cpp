@@ -270,7 +270,7 @@ TEST_F(TestBundleDiscoveryFixture, TieredGoldenDataLayoutIsDiscovered)
 
     auto result = discoverBundles(_tempDir);
     ASSERT_EQ(result.size(), 1u);
-    EXPECT_EQ(result.front().suiteName, "Smoke_BatchnormFwdInference_ncdhw_fp32_Small");
+    EXPECT_EQ(result.front().suiteName, "quick_BatchnormFwdInference_ncdhw_fp32_Small");
     EXPECT_EQ(result.front().testName, "Small");
 }
 
@@ -287,7 +287,7 @@ TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
     const auto* fp32 = findByTest(result, "small_fp32_nchw");
     ASSERT_NE(fp32, nullptr);
     EXPECT_TRUE(fp32->isTemplateSweepCase());
-    EXPECT_EQ(fp32->suiteName, "Smoke_BatchnormFwdInference_Inference");
+    EXPECT_EQ(fp32->suiteName, "quick_BatchnormFwdInference_Inference");
     EXPECT_EQ(fp32->jsonPath,
               _tempDir / "quick" / "BatchnormFwdInference" / "Inference" / "sweep.json");
     EXPECT_EQ(fp32->sweep->templatePath,
@@ -297,7 +297,7 @@ TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
     const auto* fp16 = findByTest(result, "small_fp16_nchw");
     ASSERT_NE(fp16, nullptr);
     EXPECT_TRUE(fp16->isTemplateSweepCase());
-    EXPECT_EQ(fp16->suiteName, "Smoke_BatchnormFwdInference_Inference");
+    EXPECT_EQ(fp16->suiteName, "quick_BatchnormFwdInference_Inference");
     EXPECT_EQ(fp16->sweep->caseId, "small_fp16_nchw");
 }
 

@@ -187,32 +187,10 @@ inline std::string sanitizeForGtest(const std::string& input)
     return result;
 }
 
-// Maps a lowercase tier directory (the CTest-label vocabulary used on disk) to
-// the capitalised GTest suite prefix that add_tiered_test_target()'s filters
-// match. The tiers deliberately use two vocabularies: CTest labels are
-// lowercase (`ctest -L full`), while GTest suite prefixes are capitalised
-// (`--gtest_filter=Full*`) and shared with the C++ INSTANTIATE_TEST_SUITE_P
-// tiers. `quick` maps to `Smoke` because the tier-1 GTest prefix is `Smoke`
-// (the `quick` CTest label is a known naming-debt alias). Unknown first
-// segments pass through unchanged so ad-hoc customer bundle folders still work.
-inline std::string tierPrefixForDir(const std::string& segment)
-{
-    static const std::unordered_map<std::string, std::string> s_tierPrefixes = {
-        {"quick", "Smoke"},
-        {"standard", "Standard"},
-        {"comprehensive", "Comprehensive"},
-        {"full", "Full"},
-    };
-    const auto it = s_tierPrefixes.find(segment);
-    return it != s_tierPrefixes.end() ? it->second : segment;
-}
-
 // Builds the GTest suite from the bundle path relative to the data root by
 // sanitizing each segment and joining with '_'. The first segment is the tier
-// directory, translated via tierPrefixForDir() so bundle suite names align with
-// the capitalised gtest filter patterns in add_tiered_test_target(). Sweep roots
-// must live below the data root; direct bundles have a compatibility exception in
-// deriveTestName() for --golden-data-dir pointing directly at a bundle folder.
+// directory (e.g. "quick", "standard", "full") and passes through as-is so
+// bundle suite names match the on-disk folder structure directly.
 inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
                                    const std::filesystem::path& sourcePath)
 {
@@ -224,20 +202,13 @@ inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
     }
 
     std::string suite;
-    bool isFirst = true;
     for(const auto& segment : relativeDir)
     {
         if(!suite.empty())
         {
             suite += "_";
         }
-        std::string sanitized = sanitizeForGtest(segment.string());
-        if(isFirst)
-        {
-            sanitized = tierPrefixForDir(sanitized);
-            isFirst = false;
-        }
-        suite += sanitized;
+        suite += sanitizeForGtest(segment.string());
     }
     return suite;
 }
