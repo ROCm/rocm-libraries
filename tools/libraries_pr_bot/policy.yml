@@ -20,9 +20,8 @@ pr:
     - '^users\/[A-Za-z0-9][A-Za-z0-9\-]*\/.+'
     # shared/<anything>
     - '^shared\/.+'
-    # Single-segment branches, e.g. ZIP-packaging-RFC, bump-rocm-libraries-936a6c7,
-    # version-numbered branches like yugang-amd-7.14-hiptensor-install-doc.
-    - '^[A-Za-z0-9][A-Za-z0-9\-_.]*$'
+    # Single-segment branches, e.g. ZIP-packaging-RFC, bump-rocm-libraries-936a6c7
+    - '^[A-Za-z0-9][A-Za-z0-9\-_]*$'
     # dependabot/<anything>
     - '^dependabot\/.+'
     # GitHub auto-revert branches, e.g. revert-5217-users/derobins/add_hipfile_support
