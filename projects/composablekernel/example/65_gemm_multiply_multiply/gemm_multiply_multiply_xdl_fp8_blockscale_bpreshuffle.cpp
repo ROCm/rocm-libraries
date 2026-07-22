@@ -53,11 +53,11 @@ using D1Layout = Col;
 using DsLayout = ck::Tuple<>;
 using ELayout  = Row;
 
-void preShuffleBuffer(const FP8* src, FP8* dst, int N, int K, int NXdl)
+void preShuffleBuffer(const FP8* src, FP8* dst, int N, int K, int NXdl, int KPackGroup)
 {
-    int KPack = 16;
     int NLane = NXdl;
-    int KLane = 64 / NLane;
+    int KLane = ck::get_warp_size() / NLane;
+    int KPack = KPackGroup;
 
     int K0 = K / (KLane * KPack);
     // K -> K0 KLane KPack
@@ -262,8 +262,9 @@ int main(int argc, char* argv[])
     // do GEMM
     auto device_op = DeviceOpInstance{};
     int NPerXdl    = device_op.GetPreShuffleParameters();
+    int KPackGroup = device_op.GetPreShuffleKPackGroup();
 
-    preShuffleBuffer(b0_k_n.mData.data(), b0_preshuffled.mData.data(), N, K, NPerXdl);
+    preShuffleBuffer(b0_k_n.mData.data(), b0_preshuffled.mData.data(), N, K, NPerXdl, KPackGroup);
 
     b0_device_buf.ToDevice(b0_preshuffled.mData.data());
     auto invoker  = device_op.MakeInvoker();
