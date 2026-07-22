@@ -90,16 +90,13 @@ struct MulABScaleExpertWeight
     }
 };
 
-void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int NXdl)
+void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int NXdl, int KPackGroup)
 {
-    int KPack = 16 / sizeof(B0DataType);
     int NLane = NXdl;
-    int KLane = 64 / NLane;
+    int KLane = ck::get_warp_size() / NLane;
+    int KPack = KPackGroup;
 
     int K0 = K / (KLane * KPack);
-    // K -> K0 KLane KPack
-    // N -> N0 NLane
-    // N, K -> N0 K0 KLane NLane KPack
     int tempk;
     for(I64 n = 0; n < N; ++n)
     {
@@ -174,11 +171,11 @@ static constexpr ck::index_t MPerBlock = 64; using DeviceOpInstance = ck::tensor
                AElementOp,  BElementOp, CDEElementOp,   GemmSpec,   
                256,  Scale_Block_M, Scale_Block_N, Scale_Block_K,
                MPerBlock,   128,    128,
-               16,   16,
+               16,   32,
                16,   16,
                4,    2,
                S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
-               S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
+               S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
                2,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
                ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, 0, false, false, false, MulRoutedWeight, int32_t, A0DataType>;
 #endif
@@ -396,9 +393,10 @@ int main(int argc, char* argv[])
     // do GEMM
     auto device_op = DeviceOpInstance{};
 
-    int NPerXdl = device_op.GetPreShuffleParameters();
+    int NPerXdl    = device_op.GetPreShuffleParameters();
+    int KPackGroup = device_op.GetPreShuffleKPackGroup();
 
-    preShuffleBuffer(b0_e_n_k.mData.data(), b0_preshuffled.mData.data(), N * experts, K, NPerXdl);
+    preShuffleBuffer(b0_e_n_k.mData.data(), b0_preshuffled.mData.data(), N * experts, K, NPerXdl, KPackGroup);
     b0_device_buf.ToDevice(b0_preshuffled.mData.data());
 
     auto invoker = device_op.MakeInvoker();

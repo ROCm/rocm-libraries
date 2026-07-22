@@ -103,6 +103,7 @@ struct DeviceGemmMultipleD_BlockScale_BPreshuffle : public BaseOperator
     virtual std::unique_ptr<BaseInvoker> MakeInvokerPointer() = 0;
 
     virtual int GetPreShuffleParameters() = 0;
+    virtual int GetPreShuffleKPackGroup() = 0;
 };
 
 template <typename ALayout,
@@ -147,6 +148,7 @@ struct DeviceGemmMultipleD_BlockScale_BPreshuffleSplitK : public BaseOperator
     virtual std::unique_ptr<BaseInvoker> MakeInvokerPointer() = 0;
 
     virtual int GetPreShuffleParameters() = 0;
+    virtual int GetPreShuffleKPackGroup() = 0;
 };
 
 /// @brief Wrapper for backward compatibility that allows to use instances of
@@ -265,6 +267,7 @@ struct DeviceGemmMultipleD_BlockScale_BPreshuffleWrapper
     }
 
     int GetPreShuffleParameters() override { return p_op_->GetPreShuffleParameters(); }
+    int GetPreShuffleKPackGroup() override { return p_op_->GetPreShuffleKPackGroup(); }
 
     std::string GetTypeString() const override { return p_op_->GetTypeString(); }
 

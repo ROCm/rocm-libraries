@@ -178,6 +178,8 @@ struct DeviceGemmMultiD_BlockScale_Xdl_CShuffle_V3_BPreshuffle
         return get_warp_size() == 64 ? WarpTileConfig64.At(1) : WarpTileConfig32.At(1);
     }
 
+    int GetPreShuffleKPackGroup() override { return 16 / sizeof(ComputeTypeB); }
+
     // Invoker
     struct Invoker : public BaseInvoker
     {

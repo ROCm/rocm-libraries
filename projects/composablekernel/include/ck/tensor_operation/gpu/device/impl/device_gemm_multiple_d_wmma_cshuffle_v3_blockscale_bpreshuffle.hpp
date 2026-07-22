@@ -161,6 +161,7 @@ struct DeviceGemmMultiD_BlockScale_Wmma_CShuffle_V3_BPreshuffle
 
     using Argument = typename GridwiseGemm::Argument;
     int GetPreShuffleParameters() override { return NPerWmma; }
+    int GetPreShuffleKPackGroup() override { return GridwiseGemm::KPack; }
 
     using DeviceGemmCommon =
         DeviceGemm_Wmma_CShuffleV3_Common<GridwiseGemm,

@@ -87,15 +87,14 @@ struct MulABScaleExpertWeight
     }
 };
 
-void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int NXdl)
+void preShuffleBuffer(const B0DataType* src, B0DataType* dst, int N, int K, int NXdl, int KPackGroup)
 {
-    int KPack = 16 / sizeof(B0DataType);
     int NLane = NXdl;
-    int KLane = 64 / NLane;
+    int KLane = ck::get_warp_size() / NLane;
+    // KPackGroup = KPack / KGroup: elements per thread per 16-byte memory load
+    int KPack = KPackGroup;
 
     int K0 = K / (KLane * KPack);
-    // K -> K0 KLane KPack
-    // N -> N0 NLane
     // N, K -> N0 K0 KLane NLane KPack
     int tempk;
     for(I64 n = 0; n < N; ++n)
@@ -410,10 +409,11 @@ int main(int argc, char* argv[])
     // do GEMM
     auto device_op = DeviceOpInstance{};
 
-    int NPerXdl = device_op.GetPreShuffleParameters();
+    int NPerXdl    = device_op.GetPreShuffleParameters();
+    int KPackGroup = device_op.GetPreShuffleKPackGroup();
 
     preShuffleBuffer(
-        b0_e_n_k.mData.data(), b0_preshuffled.mData.data(), N * 2 * experts, K, NPerXdl);
+        b0_e_n_k.mData.data(), b0_preshuffled.mData.data(), N * 2 * experts, K, NPerXdl, KPackGroup);
 
     b0_device_buf.ToDevice(b0_preshuffled.mData.data());
 

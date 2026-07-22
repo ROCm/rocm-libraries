@@ -207,6 +207,13 @@ struct DeviceMoeGemmBlockScale
         return get_warp_size() == 64 ? WarpTileConfig64.At(1) : WarpTileConfig32.At(1);
     }
 
+    int GetPreShuffleKPackGroup() override
+    {
+        // KPack/KGroup = 16/sizeof(B): one 16-byte memory instruction loads this many B elements.
+        // BK1 must equal this value for the preshuffle layout to be correct.
+        return 16 / sizeof(ComputeTypeB);
+    }
+
     // Invoker
     struct Invoker : public BaseInvoker
     {
