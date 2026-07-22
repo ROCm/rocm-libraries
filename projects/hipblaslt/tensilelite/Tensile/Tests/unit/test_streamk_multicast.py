@@ -274,6 +274,48 @@ class TestValidation:
     # ClusterDim x at 16), so the "> 16" branch of the validator is defensive
     # and unreachable through valid params -- no test drives it here.
 
+    # --- direct _validateStreamKMulticast reject branches ------------------
+    @staticmethod
+    def _direct_state(**overrides):
+        st = {
+            "StreamKMulticast": 1, "Multicast": 1, "StreamK": 3,
+            "StreamKAtomic": 0, "StreamKXCCMapping": 0, "ClusterDim": [4, 1],
+            "ISA": [12, 5, 0], "TDMInst": 3, "PrefetchGlobalRead": 1,
+        }
+        st.update(overrides)
+        return st
+
+    @staticmethod
+    def _isa_map(has_tdm=True, has_cluster_barrier=True):
+        class _Info:
+            asmCaps = {"HasTDM": has_tdm, "HasClusterBarrier": has_cluster_barrier}
+        return {(12, 5, 0): _Info()}
+
+    def test_reject_streamk_not_3_direct(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            self._direct_state(StreamK=4), False, self._isa_map()) is False
+
+    def test_reject_xcc_mapping_direct(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            self._direct_state(StreamKXCCMapping=3), False, self._isa_map()) is False
+
+    def test_reject_non_gfx1250_isa(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            self._direct_state(ISA=[9, 4, 2]), False, self._isa_map()) is False
+
+    def test_reject_missing_hastdm(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            self._direct_state(), False, self._isa_map(has_tdm=False)) is False
+
+    def test_reject_missing_hasclusterbarrier(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
+        assert _validateStreamKMulticast(
+            self._direct_state(), False, self._isa_map(has_cluster_barrier=False)) is False
+
 
 class TestTDMInstValidation:
     """The tightened TDMInst check: StreamKMulticast requires TDMInst == 3 (the

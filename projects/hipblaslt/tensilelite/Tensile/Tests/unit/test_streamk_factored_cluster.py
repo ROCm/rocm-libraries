@@ -269,3 +269,40 @@ class TestDegenerateByteIdentity:
             assert base[name] == factored[name], (
                 f"Ck==C assembly diverged from pure reduction for {name}"
             )
+
+
+class TestKSplitValidation:
+    """Direct _validateStreamKClusterKSplit reject-branch coverage: the divide /
+    Cs-power-of-two branches need a non-power-of-two ClusterDim[0], unreachable
+    through validated configs, so drive them directly."""
+
+    @staticmethod
+    def _state(clusterDim, ck):
+        return {"ClusterDim": list(clusterDim), "StreamK": 3, "StreamKClusterKSplit": ck}
+
+    def _validate(self, st):
+        from Tensile.SolutionStructs.Solution import _validateStreamKClusterKSplit
+        return _validateStreamKClusterKSplit(st, False)
+
+    def test_accept_pure_multicast(self):
+        assert self._validate(self._state([8, 1], 1)) is True
+
+    def test_accept_factored(self):
+        assert self._validate(self._state([8, 1], 2)) is True
+
+    def test_noop_when_not_cluster(self):
+        assert self._validate(self._state([1, 1], 1)) is True
+
+    def test_reject_ck_not_pow2(self):
+        assert self._validate(self._state([8, 1], 3)) is False
+
+    def test_reject_ck_greater_than_c(self):
+        assert self._validate(self._state([8, 1], 16)) is False
+
+    def test_reject_ck_not_dividing_c(self):
+        # Non-power-of-two C exposes the divisibility branch (Ck=4 does not divide 6).
+        assert self._validate(self._state([6, 1], 4)) is False
+
+    def test_reject_cs_not_pow2(self):
+        # C=12, Ck=4 -> Cs=3 (not a power of two).
+        assert self._validate(self._state([12, 1], 4)) is False
