@@ -119,32 +119,39 @@ namespace rocsparse
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
             // Launch tuning for the one-thread-per-row non-transpose kernel.
-            // The historical 512-thread block is a wave64-era default (8
-            // wavefronts on wave64, but 16 on wave32). On wave32 hardware
-            // (RDNA, e.g. gfx1201) wide-ELL rows (long per-thread reduction
-            // loops) run faster with a smaller block, which spreads rows across
-            // more workgroups and improves occupancy/tail behavior.
+            // The historical 512-thread block is a wave64-era default that is a
+            // COARSE block on every architecture: 8 wavefronts on wave64 and 16
+            // on wave32. For wide-ELL rows (ell_width >= 32, i.e. long per-thread
+            // reduction loops) a smaller block spreads rows across more
+            // workgroups and improves occupancy granularity / tail behavior.
             //
-            // The tuned size is expressed in WAVEFRONTS and, crucially, gated on
-            // wavefront_size == 32: wide-wavefront (wave64) parts keep the
-            // original 512-thread block instead of silently dropping to a
-            // half-occupancy 2-wavefront (128) block, which would regress an
-            // architecture this was never tuned on. Narrow rows are insensitive
-            // to the block size, so they keep 512 on every architecture.
+            // The tuned size is a 4-wavefront block, expressed relative to the
+            // wavefront width so it is performance-portable: 4 * wavefront_size
+            // is 128 on wave32 (RDNA, e.g. gfx1201) and 256 on wave64 (CDNA).
+            // Halving the 512-thread block to 4 wavefronts is a measured win on
+            // both wave widths for wide ELL and neutral on narrow rows:
+            //   gfx1201 (RDNA4) wide-ELL faster; gfx942 (MI300X) +3.7% and
+            //   gfx950 (MI350X) +2.5% geomean on a dense SuiteSparse set, with
+            //   no regression on low-density inputs (which stay at 512 because
+            //   their ell_width < 32).
             uint32_t ELLMVN_DIM = 512;
-            if(handle->wavefront_size == 32 && ell_width >= 32)
+            if(ell_width >= 32)
             {
-                // 128 threads == 4 wavefronts on wave32.
+                // 4 wavefronts: 128 on wave32, 256 on wave64.
                 ELLMVN_DIM = 4u * static_cast<uint32_t>(handle->wavefront_size);
             }
 
-            if(ELLMVN_DIM == 128)
+            switch(ELLMVN_DIM)
             {
+            case 128:
                 LAUNCH_ELLMVN(128);
-            }
-            else
-            {
+                break;
+            case 256:
+                LAUNCH_ELLMVN(256);
+                break;
+            default:
                 LAUNCH_ELLMVN(512);
+                break;
             }
 #undef LAUNCH_ELLMVN
         }
