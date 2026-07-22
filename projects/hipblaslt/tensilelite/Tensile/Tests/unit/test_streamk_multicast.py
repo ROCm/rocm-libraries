@@ -208,10 +208,11 @@ class TestValidation:
                              fork_overrides={"StreamKAtomic": [1]})
         assert _derive_states(cfg) == []
 
-    def test_reject_pgr_gt1(self, tmp_path):
-        """The DP cooperative multicast path currently supports single-buffered
-        global prefetch only, so PrefetchGlobalRead > 1 is rejected while
-        PrefetchGlobalRead <= 1 stays accepted."""
+    def test_accept_pgr2(self, tmp_path):
+        """The DP cooperative multicast path supports double-buffered global
+        prefetch (PrefetchGlobalRead > 1): the prologue double-buffer prefetch
+        multicast load is bracketed by a cluster-scope handshake in codegen, so
+        both PrefetchGlobalRead 1 and 2 are accepted."""
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
 
         class _Info:
@@ -231,14 +232,15 @@ class TestValidation:
                 "PrefetchGlobalRead": pgr,
             }
 
-        st = _state(2)
-        assert _validateStreamKMulticast(st, False, isaInfoMap) is False
-        assert st.get("Valid") is False
+        assert _validateStreamKMulticast(_state(2), False, isaInfoMap) is True
         assert _validateStreamKMulticast(_state(1), False, isaInfoMap) is True
 
         cfg = _write_variant(tmp_path, "pgr2.yaml",
                              fork_overrides={"PrefetchGlobalRead": [2]})
-        assert _derive_states(cfg) == []
+        states = _derive_states(cfg)
+        assert states, "expected the PrefetchGlobalRead=2 multicast config to be accepted"
+        for st in states:
+            assert st["StreamKMulticast"] == 1
 
     def test_xcc_mapping_forced_to_zero(self, tmp_path):
         """StreamKXCCMapping is coerced to 0 (not rejected) under StreamK+ClusterDim.

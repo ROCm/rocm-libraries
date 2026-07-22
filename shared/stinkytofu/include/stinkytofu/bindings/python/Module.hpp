@@ -75,6 +75,7 @@
     X(EnableSwPrefetchInsertion, bool)   \
     X(SwPrefetchScratchSgpr, int)        \
     X(ClusterBarrier, bool)              \
+    X(StreamKMulticast, bool)            \
     X(PrefetchGlobalRead, int)           \
     X(PrefetchLocalRead, int)            \
     X(RemoveInstructions, std::string)   \
