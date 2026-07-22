@@ -167,9 +167,22 @@ if(BQUANT_GEMM_KERNEL_HEADERS)
         grouped_gemm_bquant_ctypes_lib.cpp
         KERNEL_HEADER ${BQUANT_GEMM_KERNEL_HEADER}
     )
+    # Resolve GFX arch from CMAKE_HIP_ARCHITECTURES if available, falling back to
+    # CK_TILE_BQUANT_GFX_ARCH cache variable (default gfx942).
+    # The Python build path always passes -DGFX_ARCH=... explicitly via hipcc.
+    if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH OR CK_TILE_BQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _bquant_gfx_arch)
+        else()
+            set(_bquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_BQUANT_GFX_ARCH "${_bquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built BQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "BQuant ctypes lib GFX_ARCH: ${CK_TILE_BQUANT_GFX_ARCH}")
     target_compile_definitions(dispatcher_grouped_gemm_bquant_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="gfx950"
+        GFX_ARCH="${CK_TILE_BQUANT_GFX_ARCH}"
     )
 else()
     message(STATUS "No BQuant GEMM kernel found for ctypes lib - building without kernel")
@@ -198,9 +211,19 @@ if(AQUANT_GEMM_KERNEL_HEADERS)
         grouped_gemm_aquant_ctypes_lib.cpp
         KERNEL_HEADER ${AQUANT_GEMM_KERNEL_HEADER}
     )
+    if(NOT DEFINED CK_TILE_AQUANT_GFX_ARCH OR CK_TILE_AQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _aquant_gfx_arch)
+        else()
+            set(_aquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_AQUANT_GFX_ARCH "${_aquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built AQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "AQuant ctypes lib GFX_ARCH: ${CK_TILE_AQUANT_GFX_ARCH}")
     target_compile_definitions(dispatcher_grouped_gemm_aquant_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="gfx950"
+        GFX_ARCH="${CK_TILE_AQUANT_GFX_ARCH}"
     )
 else()
     message(STATUS "No AQuant GEMM kernel found for ctypes lib - building without kernel")
@@ -229,9 +252,19 @@ if(ABQUANT_GEMM_KERNEL_HEADERS)
         grouped_gemm_abquant_ctypes_lib.cpp
         KERNEL_HEADER ${ABQUANT_GEMM_KERNEL_HEADER}
     )
+    if(NOT DEFINED CK_TILE_ABQUANT_GFX_ARCH OR CK_TILE_ABQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _abquant_gfx_arch)
+        else()
+            set(_abquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_ABQUANT_GFX_ARCH "${_abquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built ABQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "ABQuant ctypes lib GFX_ARCH: ${CK_TILE_ABQUANT_GFX_ARCH}")
     target_compile_definitions(dispatcher_grouped_gemm_abquant_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="gfx950"
+        GFX_ARCH="${CK_TILE_ABQUANT_GFX_ARCH}"
     )
 else()
     message(STATUS "No ABQuant GEMM kernel found for ctypes lib - building without kernel")

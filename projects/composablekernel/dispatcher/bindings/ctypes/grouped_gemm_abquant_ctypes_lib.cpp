@@ -14,8 +14,8 @@
  *   AQuantGroupSize, BQuantGroupSize
  *
  * ABQuant: both A-side and B-side quantization active.
- *   AQ[ceil(M/aM), ceil(K/aK)] — A-side scale tensor (RowMajor)
- *   BQ[ceil(K/bK), ceil(N/bN)] — B-side scale tensor (RowMajor)
+ *   AQ[ceil(M/aM), ceil(K/aK)] - A-side scale tensor (RowMajor)
+ *   BQ[ceil(K/bK), ceil(N/bN)] - B-side scale tensor (RowMajor)
  *   Constraint: AQuantGroupSize::kK == BQuantGroupSize::kK
  *
  * Memory model: host-pointer (this library owns hipMalloc/hipMemcpy/hipFree).
@@ -121,19 +121,19 @@ int dispatcher_initialize()
  * A, B, AQ, BQ, C are host pointers. This function manages device memory internally.
  *
  * Parameters:
- *   A, B, AQ, BQ, C — host data pointers
- *   M, N, K          — matrix dimensions
- *   stride_A         — leading dim of A (row-major: K)
- *   stride_B         — leading dim of B (col-major: K)
- *   stride_AQ        — leading dim of AQ (row-major: ceil(K/aK))
- *   stride_BQ        — leading dim of BQ (row-major: ceil(N/bN))
- *   stride_C         — leading dim of C  (row-major: N)
- *   QK_A             — ceil(K / aquant_group_k)
- *   QM_A             — ceil(M / aquant_group_m)  (typically == M when aM=1)
- *   QK_B             — ceil(K / bquant_group_k)
- *   QN_B             — ceil(N / bquant_group_n)
- *   k_batch          — split-K factor (1 = no split)
- *   time_ms          — output: kernel execution time in ms (may be NULL)
+ *   A, B, AQ, BQ, C - host data pointers
+ *   M, N, K          - matrix dimensions
+ *   stride_A         - leading dim of A (row-major: K)
+ *   stride_B         - leading dim of B (col-major: K)
+ *   stride_AQ        - leading dim of AQ (row-major: ceil(K/aK))
+ *   stride_BQ        - leading dim of BQ (row-major: ceil(N/bN))
+ *   stride_C         - leading dim of C  (row-major: N)
+ *   QK_A             - ceil(K / aquant_group_k)
+ *   QM_A             - ceil(M / aquant_group_m)  (typically == M when aM=1)
+ *   QK_B             - ceil(K / bquant_group_k)
+ *   QN_B             - ceil(N / bquant_group_n)
+ *   k_batch          - split-K factor (1 = no split)
+ *   time_ms          - output: kernel execution time in ms (may be NULL)
  *
  * Returns 0 on success, negative on error.
  */
