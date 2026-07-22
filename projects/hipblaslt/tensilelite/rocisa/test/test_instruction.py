@@ -455,16 +455,26 @@ def test_instruction_vmax_f16_true16():
     #
     # Assertions are substring/regex based to stay agnostic to the ~50-column
     # comment padding, matching test_instruction_swait_xcnt / _global_wb.
+    import os
     import re
+    import shutil
 
     import rocisa
     from rocisa.container import vgpr
     from rocisa.instruction import EMaxF16
 
-    # Initialize a NoSDWA gfx11 ISA so EMaxF16 selects the true16 path.
+    # Initialize a NoSDWA gfx11 ISA so EMaxF16 selects the true16 path. Resolve
+    # the assembler via ROCM_PATH first (matching test_mubuf.py::_isa_context) so
+    # this works when ROCm's bin dir is not on PATH (common in CI / Windows).
     isa = (11, 0, 0)
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    search_path = os.pathsep.join([
+        os.path.join(rocm_path, "bin"),
+        os.path.join(rocm_path, "lib", "llvm", "bin"),
+    ])
+    assembler = shutil.which("amdclang++", path=search_path) or "amdclang++"
     ri = rocisa.rocIsa.getInstance()
-    ri.init(isa, "amdclang++", False)
+    ri.init(isa, assembler, False)
     ri.setKernel(isa, 32)
     assert ri.getArchCaps()["NoSDWA"], "expected NoSDWA cap for gfx11"
 
