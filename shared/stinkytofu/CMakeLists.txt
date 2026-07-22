@@ -406,8 +406,6 @@ install(FILES
     ${TABLEGEN_OUTPUT_DIR}/hardware/gfxIsa.inc
     DESTINATION include/stinkytofu/hardware
 )
-# Per-arch rocisa conversion mappings, included by the rocisa conversion glue
-# (src/conversion/rocisa/*ArchInfo.hpp) which rocisa compiles into _rocisa.
 install(DIRECTORY ${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa/
     DESTINATION include/stinkytofu/stinkytofu/ir/rocisa
     FILES_MATCHING PATTERN "*.inc"

@@ -64,7 +64,7 @@ New architectures require only adding a `hardware/src/gfx/GfxXXX/` directory wit
 
 ## rocisa vs StinkyTofu
 
-TensileLite uses **rocisa** for older architectures and **StinkyTofu** for newer ones. The split is by architecture: gfx1250 and beyond use StinkyTofu. `src/conversion/rocisa/` bridges rocisa IR to StinkyTofu Asm IR.
+TensileLite uses **rocisa** for older architectures and **StinkyTofu** for newer ones. The split is by architecture: gfx1250 and beyond use StinkyTofu. `projects/hipblaslt/tensilelite/rocisa/rocisa/src/stinkytofu/` bridges rocisa IR to StinkyTofu Asm IR.
 
 ## Intrinsic System
 

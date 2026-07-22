@@ -139,11 +139,11 @@ set(INSTRUCTION_DEF_FILES
 
 ### Step 5: Create Rocisa-related Header
 
-#### 5a. Create `src/conversion/rocisa/GfxYourArchRocisaArchInfo.hpp`
+#### 5a. Create `projects/hipblaslt/tensilelite/rocisa/rocisa/src/stinkytofu/GfxYourArchRocisaArchInfo.hpp`
 
 Copy from `Gfx1250RocisaArchInfo.hpp` and replace `1250` with your arch number.
 
-#### 5b. Update `src/conversion/rocisa/RocisaArchInfo.hpp`
+#### 5b. Update `projects/hipblaslt/tensilelite/rocisa/rocisa/src/stinkytofu/RocisaArchInfo.hpp`
 
 Add:
 

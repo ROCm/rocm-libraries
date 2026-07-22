@@ -156,15 +156,15 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     target_link_libraries(_rocisa PUBLIC roc::origami)
     target_link_libraries(_rocisa PRIVATE hip::host stinkytofu::stinkytofu)
 
-    # rocisa<->stinkytofu conversion glue. These sources live in the stinkytofu
-    # source tree but are rocisa-side bindings (they include rocisa headers and
-    # define init_stinkytofu), so they compile into _rocisa, not libstinkytofu.
-    # rocisa owns them directly here rather than relying on stinkytofu to inject
-    # them, so the de-bundled (find_package) build links them too.
-    set(_stinkytofu_src_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+    # rocisa<->stinkytofu conversion glue. These sources bridge rocisa types to
+    # stinkytofu IR and compile into _rocisa (they include both rocisa and
+    # stinkytofu headers, and define init_stinkytofu).
     target_sources(_rocisa PRIVATE
-        "${_stinkytofu_src_dir}/src/conversion/rocisa/AllHwMappings.cpp"
-        "${_stinkytofu_src_dir}/src/conversion/rocisa/ToStinkyTofuUtils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/stinkytofu/AllHwMappings.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/stinkytofu/ToStinkyTofuUtils.cpp"
+    )
+    target_include_directories(_rocisa PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/stinkytofu"
     )
 
     if(_stinkytofu_from_subdirectory)
@@ -224,7 +224,8 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # which would leave the path empty and make the check scan the CWD. Point it
     # at the real stinkytofu source tree.
     if(NOT STINKYTOFU_ROOT_DIR)
-        cmake_path(ABSOLUTE_PATH _stinkytofu_src_dir NORMALIZE OUTPUT_VARIABLE STINKYTOFU_ROOT_DIR)
+        set(_st_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/stinkytofu")
+        cmake_path(ABSOLUTE_PATH _st_sibling NORMALIZE OUTPUT_VARIABLE STINKYTOFU_ROOT_DIR)
     endif()
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/_build_info.py.in"

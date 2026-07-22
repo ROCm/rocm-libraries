@@ -3,7 +3,7 @@
 
 set(SOURCES
     tablegen.cpp
-    GenRocisaHwMapping.cpp
+    GenRocisaHwMapping.cpp  # TODO: remove when rocisa is replaced by stinkytofu IR
     GenLogicalToAsmMapping.cpp
     GenPatterns.cpp
     GenLogicalIR.cpp
