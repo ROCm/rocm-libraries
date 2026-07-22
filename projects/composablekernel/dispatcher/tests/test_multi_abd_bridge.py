@@ -19,10 +19,14 @@ required, so the suite runs green in CPU-only CI.
 Run: python3 -m pytest tests/test_multi_abd_bridge.py -v
 """
 
+import ctypes
 import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import numpy as np
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
@@ -31,6 +35,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 from gemm_utils import (  # noqa: E402
     GemmKernelConfig,
+    MultiABDDispatcherLib,
     _output_dtype,
     _dtype_from_kernel_name,
 )
@@ -185,6 +190,72 @@ class TestMultiAbdShippedConfigs(unittest.TestCase):
                 tr = data["trait_config"]
                 for key in ("pipeline", "scheduler", "epilogue"):
                     self.assertIn(key, tr, f"{path.name} missing {key}")
+
+
+class TestMultiAbdAbiMarshalling(unittest.TestCase):
+    """GPU-free tests of the C-ABI marshalling in ``MultiABDDispatcherLib``.
+
+    The ``.so`` is mocked (``ctypes.CDLL`` patched), so no generated kernel or
+    GPU is needed. These cover the highest-risk-but-previously-untested surface:
+    the declared ABI, the pointer/stride array packing, the positional argument
+    order, and status forwarding.
+    """
+
+    def _make_lib(self, status=0):
+        fake = mock.MagicMock()
+        fake.dispatcher_run_multi_abd.return_value = status
+        with mock.patch("ctypes.CDLL", return_value=fake):
+            lib = MultiABDDispatcherLib(Path("/nonexistent/multi_abd.so"))
+        return lib, fake
+
+    def test_run_abi_argtypes(self):
+        # The declared argtypes must match, in count and key types, the
+        # positional arguments run() actually passes (19).
+        _, fake = self._make_lib()
+        argt = fake.dispatcher_run_multi_abd.argtypes
+        self.assertEqual(len(argt), 19)
+        for i in range(3):  # A/B/D host-pointer arrays
+            self.assertEqual(argt[i], ctypes.POINTER(ctypes.c_void_p))
+        self.assertEqual(argt[3], ctypes.c_void_p)  # E host pointer
+        for i in (4, 5, 6):  # A/B/D leading-stride arrays
+            self.assertEqual(argt[i], ctypes.POINTER(ctypes.c_int64))
+        self.assertEqual(argt[-1], ctypes.POINTER(ctypes.c_float))  # time_ms
+
+    def test_run_marshals_pointer_arrays_counts_and_order(self):
+        lib, fake = self._make_lib(status=0)
+        na, nb, nd = 2, 2, 2
+        as_arrays = [np.zeros(4, np.float16) for _ in range(na)]
+        bs_arrays = [np.zeros(4, np.float16) for _ in range(nb)]
+        ds_arrays = [np.zeros(4, np.float16) for _ in range(nd)]
+        e = np.zeros(4, np.float16)
+        status, _ = lib.run(
+            as_arrays, bs_arrays, ds_arrays, e,
+            M=2, N=2, K=2, elem_a=2, elem_b=2, elem_d=2, elem_e=2,
+            stride_as=[2, 2], stride_bs=[2, 2], stride_ds=[2, 2], stride_e=2,
+        )
+        self.assertEqual(status, 0)
+        fake.dispatcher_run_multi_abd.assert_called_once()
+        args = fake.dispatcher_run_multi_abd.call_args[0]
+        self.assertEqual(len(args), 19)
+        # A/B/D host-pointer arrays carry exactly one entry per tensor.
+        self.assertEqual(len(args[0]), na)
+        self.assertEqual(len(args[1]), nb)
+        self.assertEqual(len(args[2]), nd)
+        # Tensor counts occupy positions 12/13/14; M/N/K positions 15/16/17.
+        self.assertEqual((args[12], args[13], args[14]), (na, nb, nd))
+        self.assertEqual((args[15], args[16], args[17]), (2, 2, 2))
+
+    def test_run_forwards_nonzero_status(self):
+        # A thin shim must surface the C error code (e.g. -3 tensor-count
+        # mismatch) verbatim rather than swallowing it.
+        lib, fake = self._make_lib(status=-3)
+        a = [np.zeros(4, np.float16)]
+        status, _ = lib.run(
+            a, a, a, np.zeros(4, np.float16),
+            M=1, N=1, K=1, elem_a=2, elem_b=2, elem_d=2, elem_e=2,
+            stride_as=[1], stride_bs=[1], stride_ds=[1], stride_e=1,
+        )
+        self.assertEqual(status, -3)
 
 
 if __name__ == "__main__":
