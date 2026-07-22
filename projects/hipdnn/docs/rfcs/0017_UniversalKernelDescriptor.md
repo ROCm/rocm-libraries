@@ -102,8 +102,8 @@ full provider. This complements build-time codegen rather than replacing it.
 |---|---|---|
 | Single-kernel path: UKD + UMD + UDD + UED + UHD | Yes | None |
 | Fusion: one UMD matches a bounded multi-op subgraph, run as one kernel | Yes ([§5](#5-matching-and-the-umd)) | None |
-| Match constraints: opcode, dtype, shape, layout, attribute, use-count, cross-tensor, bounded optional and commutative slots | Yes ([§5](#5-matching-and-the-umd)) | None |
-| General matching: N-ary commutative, unbounded chains | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
+| Match constraints: opcode, dtype, shape/rank, stride order, packed, attribute, use-count, cross-tensor, bounded commutative slots | Yes ([§5](#5-matching-and-the-umd)) | None |
+| General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
 | Kernel sources | `kpack`, `hsaco` first; `hip`, `hiprtc` follow | new authoring adapters, DSLs ([§8.1](#81-kernel-source-adapters)) |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables ([§8.2](#82-heuristic-adapters)) |
 | Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§10](#10-packaging-and-delivery)) |
@@ -316,7 +316,7 @@ The UMD below matches SDPA forward and binds the tensors and dims its Launch wil
      "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
   ],
   "constraints": [
-    {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "layout": "bhsd",
+    {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "stride_order": [0, 1, 2, 3], "packed": true,  // contiguous bhsd
      "shape": ["batch", "num_heads", "seqlen_q", "head_size"]},  // binds batch, num_heads, seqlen_q, head_size
     {"on": "$k", "dtype": {"one_of": ["BFLOAT16"]}, "shape": ["batch", "num_heads", "seqlen_k", "head_size"]},
     {"on": "$v", "dtype": {"one_of": ["BFLOAT16"]}},
@@ -343,18 +343,70 @@ The constraint vocabulary covers what the hand-written checks do today:
 |---|---|
 | **Opcode** | Exact op, a set of ops, or any op |
 | **Dtype** | Exact, one-of-set, or a relation to another tensor's dtype |
-| **Shape / rank** | Exact dims, rank only, or symbolic dims that unify across the graph and bind a reusable symbol |
-| **Layout** | A dim-order / stride pattern (e.g. NHWC, contiguous) |
+| **Shape / rank** | Exact dims, a set of accepted ranks (e.g. 4D or 5D), or symbolic dims that unify across the graph and bind a reusable symbol |
+| **Stride order** | The physical dim ordering as a permutation of the logical axes (e.g. `[0,2,3,1]` for NHWC, replacing an opaque layout string), or a set of orderings the kernel accepts |
+| **Packed** | Whether the operand must be dense (no padding between dims); expressed on its own because density cannot be read off a stride order alone |
 | **Attribute** | An op attribute compared by `equals` / `not_equals` / `one_of`, or related to another value |
 | **Use-count / exclusivity** | "Used exactly once", or "no consumer outside the pattern", the safety check that a substitution is legal |
 | **Cross-tensor relation** | A relation over two or more bound variables (e.g. same head dim across Q/K/V) |
-| **Optional / variadic operands** | Optional slots (bias, mask, dropout) that a shorter match may skip |
+| **Optional / variadic operands** | A nullable operand (e.g. a bias) the kernel reads only when present, and variadic slots that bind a bounded list of operands |
 | **Device / architecture** | Restrict to specific GPU archs, for example `arch: {one_of: ["gfx942"]}` |
 
 Most constraints target a bound tensor (`$q`) or a matched op node (`root`); `device` is a special
 target for properties of the GPU rather than the graph. The device constraint gates *applicability* at
 match time, while the per-architecture `kpack` manifest ([Section 10](#10-packaging-and-delivery))
 gates *loadability* at install and load; both must agree for a kernel to run.
+
+**Tensor operand properties.** Beyond dtype and shape, a tensor constraint carries a few orthogonal
+properties that today's applicability checks tend to fold into a single opaque layout enum. Splitting
+them keeps each one generic:
+
+- `stride_order` — the physical ordering of the logical axes, given as a permutation from slowest- to
+  fastest-varying dim. `[0, 1, 2, 3]` is fully contiguous; `[0, 2, 3, 1]` is NHWC over logical NCHW. A
+  set (`{"one_of": [...]}`) lets one kernel accept several orderings. This replaces a named layout
+  string so any ordering is expressible, not only the handful an enum happened to name.
+- `packed` — whether the operand is dense, with no padding gaps between dims. Kept as its own value
+  because density cannot be inferred from a stride order alone: a given ordering can be packed or padded
+  independently, and many kernels require dense inputs.
+- `rank` — a set of accepted ranks, e.g. `{"one_of": [4, 5]}` for a kernel that takes both 4D and 5D
+  inputs. Naming dims in `shape` already binds symbols and pins an exact rank; `rank` is the lighter
+  check for a kernel that only cares how many dims there are, without binding each one.
+
+```jsonc
+{"on": "$x",
+ "dtype": {"one_of": ["FLOAT16"]},
+ "rank":  {"one_of": [4, 5]},                                   // 4D or 5D accepted
+ "stride_order": {"one_of": [[0, 2, 3, 1], [0, 2, 3, 4, 1]]},   // NHWC / NDHWC
+ "packed": true}
+```
+
+These are deliberately coarse. The full operand-property set (broadcast, alignment, sparse and ragged
+tensor kinds) is enumerated from MIOpen/hipDNN's existing applicability checks in the UMD RFC
+follow-up; this section shows the shape those properties take, not the final vocabulary.
+
+**Optional and variadic operands.** A prebuilt kernel encodes one fixed graph shape (see *Out of scope*
+below), so it rarely needs these: a static kernel that consumes a bias and one that does not are simply
+two UKDs, and the matcher picks the right one. Optional and variadic operands earn their place once a
+**generated** kernel spans a family — the JIT / normalized-provider path
+([Section 8.3](#83-future-jit-and-normalized-providers)), where the generator emits the exact variant
+for the operands actually present. The descriptor form reserves the vocabulary now so that path needs no
+new syntax; it is sketched here, not exercised in v1.
+
+The shape it takes: an op node marks a slot `optional` (a nullable input read only when present) or
+`variadic` (a bounded list, for an ABI that takes a `count + pointer-array`):
+
+```jsonc
+{"kind": "op", "id": "root", "op": "sdpa_fwd",
+ "operands": {"Q": "$q", "K": "$k", "V": "$v",
+              "bias": {"bind": "$attn_bias", "optional": true}},   // illustrative slot: read only when present
+ "results": {"O": "$o"}}
+```
+
+A constraint on an optional operand is checked only when it is bound (`{"on": "$attn_bias",
+"when_present": true, ...}`); at dispatch a bound operand routes its pointer into the UDD's
+`args_signature` ([Section 6](#6-dispatch-and-workspace)), while a skipped one passes null. Only bounded
+slots are described here; fully unbounded variable-length chains, unlike the bounded `variadic` above,
+are a separate later step of the JIT follow-up.
 
 **Escape hatch.** When a check cannot be expressed declaratively, a UMD constraint may name a
 **native predicate** resolved from a provider-internal registry:
@@ -378,9 +430,10 @@ top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then t
 `id`. When the decision falls to `id`, the provider logs the conflict to the warning log.
 
 **Out of scope for v1.** General N-ary commutative matching and unbounded variable-length chains are
-deferred; bounded commutative pairs and bounded optional slots cover the common fusion cases. A
-prebuilt kernel encodes one fixed graph shape, so it only ever needs bounded matching; general matching
-lands with the JIT follow-up ([Section 8.3](#83-future-jit-and-normalized-providers)).
+deferred; bounded commutative pairs cover the common fusion cases. A prebuilt kernel encodes one fixed
+graph shape, so it only ever needs bounded matching, and operand optionality is handled by shipping
+distinct UKDs rather than optional slots; the generated-kernel uses of optional and variadic operands
+land with the JIT follow-up ([Section 8.3](#83-future-jit-and-normalized-providers)).
 
 **A fused match.** The same UMD form matches several ops as one fusable unit. This UMD matches a Conv,
 Bias, and ReLU chain; the `use_count` constraints make the fusion legal (the intermediate tensors have
@@ -400,8 +453,8 @@ no consumer outside the pattern), so one UKD serves the whole chain as a single 
      "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
   ],
   "constraints": [
-    {"on": "$x", "dtype": {"one_of": ["FLOAT16"]}, "layout": "nhwc"},
-    {"on": "$y", "dtype": {"one_of": ["FLOAT16"]}, "layout": "nhwc",
+    {"on": "$x", "dtype": {"one_of": ["FLOAT16"]}, "stride_order": [0, 2, 3, 1], "packed": true},  // NHWC
+    {"on": "$y", "dtype": {"one_of": ["FLOAT16"]}, "stride_order": [0, 2, 3, 1], "packed": true,   // NHWC
      "shape": ["batch", "out_h", "out_w", "out_channels"]},
     {"on": "$bias", "shape": ["out_channels"]},
     {"on": "$conv_out", "use_count": 1},  // private to the subgraph, so the fusion is legal
@@ -474,7 +527,7 @@ Each argument's `source` is one of a small set: a tensor pointer, a dim or strid
 tensor, an attribute, a computed expression, or the plan-allocated workspace. Together these describe
 the full kernel call as data, so the launcher assembles it without any per-kernel code. In `dim` and
 `stride` sources, `axis` indexes the tensor's logical dimension order (as listed in its `shape`),
-independent of its physical `layout`.
+independent of its physical `stride_order`.
 
 The generic launcher then does the same steps for every kernel: resolve the argument sources against
 the bound variables, evaluate the grid/block/shared/workspace formulas, pack the arguments, load the
@@ -667,7 +720,7 @@ shown below so the example stands on its own; the match descriptor is the SDPA f
      "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
   ],
   "constraints": [
-    {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "layout": "bhsd",
+    {"on": "$q", "dtype": {"one_of": ["BFLOAT16"]}, "stride_order": [0, 1, 2, 3], "packed": true,  // contiguous bhsd
      "shape": ["batch", "num_heads", "seqlen_q", "head_size"]},  // binds batch, num_heads, seqlen_q, head_size
     {"on": "$k", "dtype": {"one_of": ["BFLOAT16"]}, "shape": ["batch", "num_heads", "seqlen_k", "head_size"]},
     {"on": "$v", "dtype": {"one_of": ["BFLOAT16"]}},
