@@ -51,7 +51,7 @@ def make_policy(**overrides: Any) -> pc.Policy:
         branch_patterns=[
             re.compile(r"^users\/[A-Za-z0-9][A-Za-z0-9\-]*\/.+"),
             re.compile(r"^shared\/.+"),
-            re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_]*$"),
+            re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-_.]*$"),
             re.compile(r"^dependabot\/.+"),
             re.compile(r"^revert-[0-9]+-.+"),
         ],
@@ -62,9 +62,6 @@ def make_policy(**overrides: Any) -> pc.Policy:
         description_checklist_patterns=[re.compile(p) for p in _CHECKLIST_PATTERNS],
         block_draft=True,
         forbidden_title_patterns=[re.compile(r"(?i)\bWIP\b")],
-        max_files_changed=50,
-        max_total_changes=2000,
-        max_single_file_changes=700,
         forbidden_paths=["**/*.pem", "**/.env", "**/id_rsa"],
         unit_test_code_extensions=[".py", ".cpp"],
         unit_test_patterns=[
@@ -126,6 +123,10 @@ class BranchNameTests(unittest.TestCase):
             "bump-rocm-libraries-936a6c7",
             "dependabot/github_actions/github-actions-3dfd2199fc",
             "revert-5217-users/derobins/add_hipfile_support",
+            # Version-numbered single-segment branches (dots allowed).
+            "yugang-amd-7.14-hiptensor-install-doc",
+            "release-2.0.1-patch",
+            "bump-1.0.0-rocm-update",
         ]:
             with self.subTest(branch=branch):
                 self.assertEqual(self._errs(branch), [])
@@ -142,7 +143,7 @@ class BranchNameTests(unittest.TestCase):
         # The validator always runs; there is no fork-based skip.
         policy = make_policy()
         e: List[str] = []
-        pc.ensure_branch_name(policy, "BadBranch", e)
+        pc.ensure_branch_name(policy, "bad branch name", e)
         self.assertTrue(e, "Branch name must be validated for fork PRs too")
 
         # A valid branch name passes for both same-repo and fork PRs.
@@ -269,6 +270,27 @@ class DescriptionTests(unittest.TestCase):
         e: List[str] = []
         pc.ensure_pr_description(policy, body, e)
         self.assertEqual(e, [])
+
+    def test_short_description_with_valid_jira_passes(self) -> None:
+        # A short description that contains a valid JIRA reference should pass
+        # the min-length check. The reference itself is the meaningful content.
+        policy = make_policy(description_checklist_patterns=[])
+        for body in [
+            "JIRA ID\nROCM-25197",  # 18 chars, below default min_length=30
+            "JIRA ID\nROCM-1",  # minimal valid JIRA key
+            "#123",  # bare GitHub issue ref
+        ]:
+            with self.subTest(body=body):
+                e: List[str] = []
+                pc.ensure_pr_description(policy, body, e)
+                self.assertEqual(e, [])
+
+    def test_short_description_without_jira_fails_min_length(self) -> None:
+        # A short description with NO valid reference still fails min-length.
+        policy = make_policy(description_checklist_patterns=[])
+        e: List[str] = []
+        pc.ensure_pr_description(policy, "short", e)
+        self.assertTrue(any("too short" in x for x in e))
 
     def test_checklist_ticked_passes(self) -> None:
         policy = make_policy(description_min_length=0, description_issue_patterns=[])
@@ -434,7 +456,7 @@ class IntegrationBlobTests(unittest.TestCase):
 
     def test_fully_noncompliant_pr(self) -> None:
         result = self._evaluate(
-            branch="BadBranch",
+            branch="bad branch name",
             title="wip",
             body="too short",
             files=[make_file("secret.pem"), make_file("src/module.py")],

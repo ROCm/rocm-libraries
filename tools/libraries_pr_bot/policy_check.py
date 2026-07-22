@@ -369,18 +369,33 @@ def ensure_pr_description(policy: Policy, body: str, errors: List[str]) -> None:
 
     Appends a structured message to `errors` if the body is too short, does
     not contain a recognised tracking reference, or has an unticked checklist item.
+
+    The minimum-length check is waived when the body already contains a valid
+    issue reference (JIRA ID / ISSUE ID / closing keyword). A body such as
+    "JIRA ID\\nROCM-25197" is short but meaningful and should not be rejected
+    solely on character count.
     """
     body = (body or "").strip()
-    if policy.description_min_length and len(body) < policy.description_min_length:
+
+    # Detect whether a valid issue reference is present. We check this first so
+    # that the min-length gate can be skipped for short-but-valid JIRA/Issue refs.
+    has_issue_ref = (not policy.description_issue_patterns) or any(
+        p.search(body) for p in policy.description_issue_patterns
+    )
+
+    # Enforce minimum length only when there is NO valid issue reference.
+    if (
+        policy.description_min_length
+        and len(body) < policy.description_min_length
+        and not has_issue_ref
+    ):
         errors.append(
             f"**Error:** PR description is too short ({len(body)} characters).\n"
             f"**Expected:** at least {policy.description_min_length} characters.\n"
             "**Current:** please provide a meaningful description of your changes"
         )
 
-    if policy.description_issue_patterns and not any(
-        p.search(body) for p in policy.description_issue_patterns
-    ):
+    if policy.description_issue_patterns and not has_issue_ref:
         errors.append(
             "**Error:** PR description must reference a JIRA ID, ISSUE ID, or a "
             "GitHub closing keyword.\n"
