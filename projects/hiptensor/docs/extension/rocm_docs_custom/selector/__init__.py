@@ -449,37 +449,22 @@ class SelectedContentDirective(SphinxDirective):
         return [node]
 
 
-def _skip_node(translator, node):
-    raise nodes.SkipNode
-
-
-def _noop(translator, node):
-    pass
-
-
 def setup(app):
-    # For non-HTML builders: skip UI-only nodes entirely, pass through content nodes.
-    _nonhtml = ("latex", "texinfo", "text", "epub", "man")
-
     app.add_node(
         SelectorGroup,
         html=(SelectorGroup.visit_html, SelectorGroup.depart_html),
-        **{b: (_skip_node, None) for b in _nonhtml},
     )
     app.add_node(
         SelectorInfo,
         html=(SelectorInfo.visit_html, SelectorInfo.depart_html),
-        **{b: (_skip_node, None) for b in _nonhtml},
     )
     app.add_node(
         SelectorOption,
         html=(SelectorOption.visit_html, SelectorOption.depart_html),
-        **{b: (_skip_node, None) for b in _nonhtml},
     )
     app.add_node(
         SelectedContent,
         html=(SelectedContent.visit_html, SelectedContent.depart_html),
-        **{b: (_noop, _noop) for b in _nonhtml},
     )
 
     app.add_directive("selector", SelectorGroupDirective)
