@@ -206,6 +206,253 @@ TEST(TestCudnnShimGraphNodes, ReductionValidGraphValidates)
     EXPECT_TRUE(graph.validate().is_good());
 }
 
+// All Tier-1 wiring graphs below run FLOAT end to end; factor the repeated
+// graph type setup so each test is just tensors + the method under test.
+void setFloatGraphTypes(fe::graph::Graph& graph)
+{
+    graph.set_io_data_type(fe::DataType_t::FLOAT)
+        .set_compute_data_type(fe::DataType_t::FLOAT)
+        .set_intermediate_data_type(fe::DataType_t::FLOAT);
+}
+
+// Mirrors native TestGraph.cpp BatchnormNodeCreation shapes.
+TEST(TestCudnnShimGraphNodes, BatchnormValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 2);
+    auto bias = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
+    auto epsilon = graph.tensor(0.001F, fe::graph::ScalarType::COMPILE_TIME_CONST);
+
+    auto [y, mean, invVariance, nextRunningMean, nextRunningVariance]
+        = graph.batchnorm(x, scale, bias, fe::graph::Batchnorm_attributes{}.set_epsilon(epsilon));
+    ASSERT_NE(y, nullptr);
+    ASSERT_NE(mean, nullptr);
+    ASSERT_NE(invVariance, nullptr);
+    EXPECT_EQ(nextRunningMean, nullptr);
+    EXPECT_EQ(nextRunningVariance, nullptr);
+    y->set_output(true).set_uid(4);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraph.cpp BatchnormBackwardNodeCreation shapes.
+TEST(TestCudnnShimGraphNodes, BatchnormBackwardValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
+    auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 2);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
+
+    auto [dx, dscale, dbias]
+        = graph.batchnorm_backward(dy, x, scale, fe::graph::Batchnorm_backward_attributes{});
+    ASSERT_NE(dx, nullptr);
+    ASSERT_NE(dscale, nullptr);
+    ASSERT_NE(dbias, nullptr);
+    dx->set_output(true).set_uid(4);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraph.cpp BatchnormInferenceNodeCreation shapes.
+TEST(TestCudnnShimGraphNodes, BatchnormInferenceValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {1, 2, 3, 4}, {24, 12, 4, 1}, 1);
+    auto mean = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 2);
+    auto invVariance = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 3);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 4);
+    auto bias = hipdnn_shim_test::makeTensor(graph, {1, 2, 1, 1}, {2, 1, 1, 1}, 5);
+
+    auto y = graph.batchnorm_inference(
+        x, mean, invVariance, scale, bias, fe::graph::Batchnorm_inference_attributes{});
+    ASSERT_NE(y, nullptr);
+    y->set_output(true).set_uid(6);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraphLayernormBackward.cpp shapes.
+TEST(TestCudnnShimGraphNodes, LayernormBackwardValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto dy = hipdnn_shim_test::makeTensor(graph, {16, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    auto x = hipdnn_shim_test::makeTensor(graph, {16, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 3);
+    auto mean = hipdnn_shim_test::makeTensor(graph, {16, 1, 1, 1}, {1, 1, 1, 1}, 4);
+    auto invVariance = hipdnn_shim_test::makeTensor(graph, {16, 1, 1, 1}, {1, 1, 1, 1}, 5);
+    auto epsilon = hipdnn_shim_test::makeTensor(graph, {1}, {1}, 6);
+
+    auto [dx, dscale, dbias] = graph.layernorm_backward(dy,
+                                                        x,
+                                                        scale,
+                                                        fe::graph::Layernorm_backward_attributes{}
+                                                            .set_mean(mean)
+                                                            .set_inv_variance(invVariance)
+                                                            .set_epsilon(epsilon));
+    ASSERT_NE(dx, nullptr);
+    ASSERT_NE(dscale, nullptr);
+    ASSERT_NE(dbias, nullptr);
+    dx->set_output(true).set_uid(7);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraph.cpp RMSNormNodeCreation shapes.
+TEST(TestCudnnShimGraphNodes, RmsnormValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
+    auto epsilon = graph.tensor(1e-5F, fe::graph::ScalarType::COMPILE_TIME_CONST);
+
+    auto [y, invRms]
+        = graph.rmsnorm(x,
+                        scale,
+                        fe::graph::Rmsnorm_attributes{}.set_epsilon(epsilon).set_forward_phase(
+                            fe::NormFwdPhase_t::TRAINING));
+    ASSERT_NE(y, nullptr);
+    ASSERT_NE(invRms, nullptr);
+    y->set_output(true).set_uid(3);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraph.cpp RMSNormBackwardNodeCreation shapes.
+TEST(TestCudnnShimGraphNodes, RmsnormBackwardValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    auto x = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 2);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 3);
+    auto invRms = hipdnn_shim_test::makeTensor(graph, {1, 1, 1, 1}, {1, 1, 1, 1}, 4);
+
+    auto [dx, dscale, dbias]
+        = graph.rmsnorm_backward(dy, x, scale, invRms, fe::graph::Rmsnorm_backward_attributes{});
+    ASSERT_NE(dx, nullptr);
+    ASSERT_NE(dscale, nullptr);
+    EXPECT_EQ(dbias, nullptr); // dbias only produced when set_compute_dbias(true)
+    dx->set_output(true).set_uid(5);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraph.cpp ConvolutionDgradNodeCreation shapes. The returned
+// dx dim must be set before validate(), else it fails ATTRIBUTE_NOT_SET.
+TEST(TestCudnnShimGraphNodes, ConvDgradValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    auto w = hipdnn_shim_test::makeTensor(graph, {64, 3, 3, 3}, {27, 9, 3, 1}, 2);
+
+    auto dx = graph.conv_dgrad(
+        dy,
+        w,
+        fe::graph::Conv_dgrad_attributes{}.set_padding({1, 1}).set_stride({1, 1}).set_dilation(
+            {1, 1}));
+    ASSERT_NE(dx, nullptr);
+    dx->set_dim({1, 3, 32, 32});
+    dx->set_output(true).set_uid(3);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraph.cpp ConvolutionWgradNodeCreation shapes. The returned
+// dw dim must be set before validate().
+TEST(TestCudnnShimGraphNodes, ConvWgradValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    auto x = hipdnn_shim_test::makeTensor(graph, {1, 3, 32, 32}, {3072, 1024, 32, 1}, 2);
+
+    auto dw = graph.conv_wgrad(
+        dy,
+        x,
+        fe::graph::Conv_wgrad_attributes{}.set_padding({1, 1}).set_stride({1, 1}).set_dilation(
+            {1, 1}));
+    ASSERT_NE(dw, nullptr);
+    dw->set_dim({64, 3, 3, 3});
+    dw->set_output(true).set_uid(3);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestGraph.cpp Resample MAXPOOL shapes.
+TEST(TestCudnnShimGraphNodes, ResampleValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {1, 3, 4, 4}, {48, 16, 4, 1}, 1);
+
+    auto [y, index] = graph.resample(x,
+                                     fe::graph::Resample_attributes{}
+                                         .set_resample_mode(fe::ResampleMode_t::MAXPOOL)
+                                         .set_padding_mode(fe::PaddingMode_t::ZERO_PAD)
+                                         .set_pre_padding({0, 0})
+                                         .set_post_padding({0, 0})
+                                         .set_stride({2, 2})
+                                         .set_window({2, 2}));
+    ASSERT_NE(y, nullptr);
+    EXPECT_EQ(index, nullptr); // index only produced when generate_index is set
+    y->set_output(true).set_uid(2);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestBlockScaleQuantizeNode shapes; y/scale are node-produced.
+TEST(TestCudnnShimGraphNodes, BlockScaleQuantizeValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+
+    auto [y, scale] = graph.block_scale_quantize(
+        x, fe::graph::Block_scale_quantize_attributes{}.set_block_size(32));
+    ASSERT_NE(y, nullptr);
+    ASSERT_NE(scale, nullptr);
+    y->set_output(true).set_uid(2);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// Mirrors native TestBlockScaleDequantizeNode shapes. The dequantize output must
+// stay virtual (the node rejects a non-virtual y), so it is left unmarked rather
+// than wired with set_output(true) like the other Tier-1 outputs.
+TEST(TestCudnnShimGraphNodes, BlockScaleDequantizeValidGraphValidates)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {2, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    auto scale = hipdnn_shim_test::makeTensor(graph, {2, 2, 32, 32}, {2048, 1024, 32, 1}, 2);
+
+    auto y = graph.block_scale_dequantize(
+        x,
+        scale,
+        fe::graph::Block_scale_dequantize_attributes{}.set_block_size(std::vector<int32_t>{32}));
+    ASSERT_NE(y, nullptr);
+
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
 // --- (b) Tier-2 fail-stub nodes: recorded GRAPH_NOT_SUPPORTED ---------------
 //
 // The error is recorded before any tensor validation, so null inputs are fine.

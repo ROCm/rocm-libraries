@@ -410,14 +410,14 @@ public:
         return {error_code_t::INVALID_VALUE, "Tensor UID was not found"};
     }
 
-    // --- Node-adding methods (RFC 0012 §4.4.2, §7.3 Tier 2) -----------------
+    // --- Node-adding methods -----------------------------------------------
     //
     // Tier-1 nodes with a 1:1 hipDNN engine forward straight to the wrapped
     // graph and flip the graph into Native mode so the plan lifecycle runs
     // against hipDNN. Nodes take their *_attributes BY VALUE, matching cuDNN FE.
     // Tier-2 nodes with no hipDNN equivalent are stamped by
     // HIPDNN_CUDNN_SHIM_FAIL_NODE: they record GRAPH_NOT_SUPPORTED (surfaced at
-    // the next validate()/build_operation_graph(), RFC §4.4.2) and return empty.
+    // the next validate()/build_operation_graph()) and return empty.
 
     std::shared_ptr<Tensor_attributes> conv_fprop(std::shared_ptr<Tensor_attributes> x,
                                                   std::shared_ptr<Tensor_attributes> w,
@@ -591,7 +591,7 @@ public:
         return _graph.block_scale_dequantize(std::move(x), std::move(scale), std::move(attributes));
     }
 
-    // --- Tier-2 fail-stub nodes (no hipDNN engine yet, RFC §4.4.2 / §6.5) ---
+    // --- Tier-2 fail-stub nodes (no hipDNN engine yet) ---------------------
 
     HIPDNN_CUDNN_SHIM_FAIL_NODE(bn_finalize,
                                 (const std::shared_ptr<Tensor_attributes>&,
