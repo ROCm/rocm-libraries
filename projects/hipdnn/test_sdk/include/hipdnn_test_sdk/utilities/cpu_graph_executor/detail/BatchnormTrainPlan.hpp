@@ -333,6 +333,8 @@ public:
                                        MeanVarianceDataTypeEnum);
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 

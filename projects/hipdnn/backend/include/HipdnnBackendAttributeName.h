@@ -470,6 +470,12 @@ typedef enum
     /** @brief Settable: whether this tensor is a runtime pass-by-value scalar (extension) */
     HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT = 1308,
 
+    /** @brief Required byte alignment of the tensor's physical buffer pointer */
+    HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT = 1309,
+
+    /** @brief UID of the ragged-offset aux tensor for this tensor (int64_t, optional) */
+    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC = 1310,
+
     /** @} */
 
     /**
