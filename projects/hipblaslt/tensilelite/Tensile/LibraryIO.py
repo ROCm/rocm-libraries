@@ -38,6 +38,8 @@ from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 from typing import IO, NamedTuple, Dict, Optional, Any
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
+from copy import deepcopy
+
 import io
 import os
 import sys
@@ -790,21 +792,45 @@ def parseLibraryLogicList(data, srcFile="?"):
 
 def rawLibraryLogic(data):
     """Returns a tuple of the data in a library logic file."""
-    versionString = data[0]
-    scheduleName = data[1]
-    architectureName = data[2]
-    deviceNames = data[3]
-    problemTypeState = data[4]
-    solutionStates = data[5]
-    indexOrder = data[6]
-    exactLogic = data[7]
-    rangeLogic = data[8]
-    otherFields = []
+    if isinstance(data, dict):
+        versionString = {"MinimumRequiredVersion": data.get("MinimumRequiredVersion")}
+        scheduleName = data.get("ScheduleName")
 
-    dataLength = len(data)
-    if dataLength > 9:
-        for idx in range(9, dataLength):
-            otherFields.append(data[idx])
+        architectureName = data.get("ArchitectureName")
+        cuCount = data.get("CUCount")
+        if cuCount is not None:
+            architectureName = {"Architecture": architectureName, "CUCount": cuCount}
+
+        deviceNames = data.get("DeviceNames")
+        problemTypeState = data.get("ProblemType")
+        solutionStates = data.get("Solutions")
+        indexOrder = data.get("IndexOrder")
+        exactLogic = data.get("ExactLogic")
+        rangeLogic = data.get("RangeLogic")
+
+        # Preserve legacy optional-field ordering (list format indexes 9..12).
+        otherFields = [
+            data.get("TileSelectionIndices"),
+            data.get("PerfMetric"),
+            data.get("LibraryType"),
+            data.get("DefaultSolution"),
+        ]
+    else:
+        versionString = data[0]
+        scheduleName = data[1]
+        architectureName = data[2]
+        deviceNames = data[3]
+        problemTypeState = data[4]
+        solutionStates = data[5]
+        indexOrder = data[6]
+        exactLogic = data[7]
+        rangeLogic = data[8]
+        otherFields = []
+
+        dataLength = len(data)
+        if dataLength > 9:
+            for idx in range(9, dataLength):
+                otherFields.append(data[idx])
 
     return (versionString, scheduleName, architectureName, deviceNames,\
             problemTypeState, solutionStates, indexOrder, exactLogic, rangeLogic, otherFields)
@@ -880,7 +906,8 @@ def createLibraryLogic(
 
     fileDefaultSolution = dict(sorted(defaultSolution.items()))
 
-    problemTypeState = problemType.state
+    # Avoid mutating the caller-owned ProblemType object while serializing.
+    problemTypeState = deepcopy(problemType.state)
     for field in ("DataType", "MacDataTypeA", "MacDataTypeB", "DataTypeA", "DataTypeB",
                   "DataTypeE", "DataTypeAmaxD", "DestDataType", "ComputeDataType",
                   "ActivationComputeDataType", "ActivationType", "F32XdlMathOp"):

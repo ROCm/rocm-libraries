@@ -150,6 +150,26 @@ def test_raw_library_logic_with_other_fields(snapshot):
     assert _norm(L.rawLibraryLogic(data)) == snapshot
 
 
+def test_raw_library_logic_dict_format(snapshot):
+    data = {
+        "MinimumRequiredVersion": "5.0.0",
+        "ScheduleName": "sched",
+        "ArchitectureName": "gfx942",
+        "CUCount": 228,
+        "DeviceNames": ["Device 0049"],
+        "ProblemType": {"OperationType": "GEMM"},
+        "Solutions": [{"SolutionIndex": 0}],
+        "IndexOrder": [0],
+        "ExactLogic": [["k", "v"]],
+        "RangeLogic": None,
+        "TileSelectionIndices": {"TileSelectionIndices": [3, 4]},
+        "PerfMetric": "perf",
+        "LibraryType": "GridBased",
+        "DefaultSolution": {"KernelLanguage": "Assembly"},
+    }
+    assert _norm(L.rawLibraryLogic(data)) == snapshot
+
+
 # ===========================================================================
 # createLibraryLogic — synthetic problemType/solutions, getCUCount controlled
 # ===========================================================================

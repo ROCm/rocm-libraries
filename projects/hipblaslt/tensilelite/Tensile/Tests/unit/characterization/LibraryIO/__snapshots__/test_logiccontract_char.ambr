@@ -2957,6 +2957,52 @@
     'TileSelectionIndices': None,
   })
 # ---
+# name: test_raw_library_logic_dict_format
+  tuple(
+    dict({
+      'MinimumRequiredVersion': '<VERSION>',
+    }),
+    'sched',
+    dict({
+      'Architecture': 'gfx942',
+      'CUCount': 228,
+    }),
+    list([
+      'Device 0049',
+    ]),
+    dict({
+      'OperationType': 'GEMM',
+    }),
+    list([
+      dict({
+        'SolutionIndex': 0,
+      }),
+    ]),
+    list([
+      0,
+    ]),
+    list([
+      list([
+        'k',
+        'v',
+      ]),
+    ]),
+    None,
+    list([
+      dict({
+        'TileSelectionIndices': list([
+          3,
+          4,
+        ]),
+      }),
+      'perf',
+      'GridBased',
+      dict({
+        'KernelLanguage': 'Assembly',
+      }),
+    ]),
+  )
+# ---
 # name: test_raw_library_logic_minimal
   tuple(
     '<VERSION>',
