@@ -324,7 +324,7 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
         .set_padding_mask(true)
         .set_causal_mask(true)
         .set_causal_mask_bottom_right(true)
-        .set_attn_scale_value(0.125f)
+        .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);

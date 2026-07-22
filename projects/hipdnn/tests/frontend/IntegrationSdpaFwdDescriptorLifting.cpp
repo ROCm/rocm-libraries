@@ -339,7 +339,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
         .set_causal_mask(true)
         .set_causal_mask_bottom_right(true)
         .set_generate_stats(true)
-        .set_attn_scale_value(0.125f)
+        .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_paged_attention_max_seq_len_kv(256)
