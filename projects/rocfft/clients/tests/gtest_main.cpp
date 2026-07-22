@@ -325,7 +325,8 @@ int main(int argc, char* argv[])
     const auto opt_help = app.add_flag("-h, --help", "Produces this help message");
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
-    app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
+
+    const auto opt_nrand = app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
     app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
         ->default_val(system_memory::singleton().get_total_gbytes());
     app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
@@ -456,7 +457,10 @@ int main(int argc, char* argv[])
             test_prob      = 0.0005;
             emulation_prob = 0.005;
             unittest_prob  = 0.2;
-            n_random_tests = 10;
+
+            // Allow nrand to take precedence over this option:
+            if(!opt_nrand->count())
+                n_random_tests = 10;
         });
 
     app.add_flag(
