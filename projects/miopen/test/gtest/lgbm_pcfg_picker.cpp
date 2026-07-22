@@ -111,9 +111,12 @@ std::vector<double> BuildPrefix(const nlohmann::json& pin,
     const double batch    = P("n_mini_batch_size");
     const double dir      = P("direction");
 
-    const std::string dt = pin.at("data_type").get<std::string>();
-    const double dtype_code =
-        dt == "fp32" ? 0.0 : dt == "fp16" ? 1.0 : dt == "bf16" ? 2.0 : dt == "int8" ? 3.0 : -1.0;
+    const std::string dt    = pin.at("data_type").get<std::string>();
+    const double dtype_code = dt == "fp32"   ? 0.0
+                              : dt == "fp16" ? 1.0
+                              : dt == "bf16" ? 2.0
+                              : dt == "int8" ? 3.0
+                                             : -1.0;
 
     const double g       = groups < 1.0 ? 1.0 : groups;
     const double cpg     = channels / g;
@@ -156,7 +159,7 @@ std::vector<double> BuildPrefix(const nlohmann::json& pin,
     return f;
 }
 
-class CPU_LgbmPcfgPickerFixture : public ::testing::Test
+class CPU_LgbmPcfgPicker_NONE : public ::testing::Test
 {
 protected:
     nlohmann::json vectors_by_solver;
@@ -177,7 +180,7 @@ protected:
     }
 };
 
-TEST_F(CPU_LgbmPcfgPickerFixture, ReproducesExportedRanking)
+TEST_F(CPU_LgbmPcfgPicker_NONE, ReproducesExportedRanking)
 {
     int total      = 0;
     int top1_match = 0;

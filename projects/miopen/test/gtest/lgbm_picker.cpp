@@ -63,7 +63,7 @@ using miopen::ai::lgbm::ScoreCandidateMatrixForTest;
 // Metadata loader
 // ---------------------------------------------------------------------------
 
-class CPU_LgbmMetadata : public ::testing::Test
+class CPU_LgbmMetadata_NONE : public ::testing::Test
 {
 protected:
     const LgbmMetadata& meta = LgbmMetadata::Get();
@@ -76,14 +76,14 @@ protected:
     }
 };
 
-TEST_F(CPU_LgbmMetadata, LoadsSolverVocab)
+TEST_F(CPU_LgbmMetadata_NONE, LoadsSolverVocab)
 {
     // v10 ships a non-trivial solver vocabulary; the exact count tracks the
     // model, so just assert it is populated and self-consistent.
     EXPECT_GT(meta.Solvers().size(), 1u);
 }
 
-TEST_F(CPU_LgbmMetadata, CategoricalCodesResolve)
+TEST_F(CPU_LgbmMetadata_NONE, CategoricalCodesResolve)
 {
     EXPECT_GE(meta.CategoricalCode("direction", "1"), 0);
     EXPECT_GE(meta.CategoricalCode("direction", "2"), 0);
@@ -99,7 +99,7 @@ TEST_F(CPU_LgbmMetadata, CategoricalCodesResolve)
     EXPECT_EQ(meta.SolverCode("NotARealSolver"), -1);
 }
 
-TEST_F(CPU_LgbmMetadata, SolverCodeMatchesVocabIndex)
+TEST_F(CPU_LgbmMetadata_NONE, SolverCodeMatchesVocabIndex)
 {
     const auto& solvers = meta.Solvers();
     for(int i = 0; i < static_cast<int>(solvers.size()); ++i)
@@ -110,7 +110,7 @@ TEST_F(CPU_LgbmMetadata, SolverCodeMatchesVocabIndex)
 // Fixture replay
 // ---------------------------------------------------------------------------
 
-class CPU_LgbmPickerFixture : public ::testing::Test
+class CPU_LgbmPicker_NONE : public ::testing::Test
 {
 protected:
     nlohmann::json fixture;
@@ -133,7 +133,7 @@ protected:
 // plus the reference argmax_solver. Scoring those rows and taking the argmax
 // must reproduce argmax_solver exactly (the .so is bit-identical to the trained
 // booster). A regression in feature count, vocab loading, or argmax breaks this.
-TEST_F(CPU_LgbmPickerFixture, ReproducesReferenceArgmax)
+TEST_F(CPU_LgbmPicker_NONE, ReproducesReferenceArgmax)
 {
     const auto& vectors = fixture.at("vectors");
     ASSERT_FALSE(vectors.empty());
@@ -166,8 +166,7 @@ TEST_F(CPU_LgbmPickerFixture, ReproducesReferenceArgmax)
 
         const int argmax = ScoreCandidateMatrixForTest(rows);
         ASSERT_GE(argmax, 0);
-        const std::string picked =
-            v.at("candidate_solvers").at(argmax).template get<std::string>();
+        const std::string picked = v.at("candidate_solvers").at(argmax).template get<std::string>();
         const std::string expected = v.at("argmax_solver").get<std::string>();
         ++total;
         if(picked == expected)
