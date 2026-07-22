@@ -940,3 +940,76 @@ TEST_F(TestGraphDescriptor, LegacyGraphWithoutOverrideShapeFieldRoundTripsToFals
                                 &value));
     EXPECT_FALSE(value);
 }
+
+// ============================================================================
+// GraphDescriptor::hasRaggedTensors() (RFC 0014)
+// ============================================================================
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForNonRaggedGraph)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForEmptyDescriptor)
+{
+    // No operations => no tensors => not ragged.
+    const GraphDescriptor descriptor;
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsTrueWhenTensorCarriesRaggedOffset)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_TRUE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesSerializationRoundTrip)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                          HIPDNN_TYPE_HANDLE,
+                                          1,
+                                          static_cast<const void*>(&handle)));
+    ASSERT_NO_THROW(original.finalize());
+
+    auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_TRUE(revived.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+
+    EXPECT_TRUE(fromJson.hasRaggedTensors());
+}
