@@ -22,8 +22,6 @@
 
 #include "benchmark_utils.hpp"
 
-#include "hipcub/backend/rocprim/block/block_scan.hpp"
-
 #include <hipcub/block/block_scan.hpp>
 
 constexpr unsigned int Trials = 100;

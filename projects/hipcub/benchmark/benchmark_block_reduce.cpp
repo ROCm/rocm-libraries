@@ -22,8 +22,6 @@
 
 #include "benchmark_utils.hpp"
 
-#include "hipcub/backend/rocprim/block/block_reduce.hpp"
-
 #include <hipcub/block/block_reduce.hpp>
 #include <hipcub/thread/thread_operators.hpp>
 
