@@ -14,6 +14,7 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
@@ -213,6 +214,19 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                "page_table_k tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
                                "page_table_v tensor not supported");
+
+    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
+    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
+    if(attrs.scale_tensor_uid().has_value())
+    {
+        const auto& tensorMap = opGraph.getTensorMap();
+        const auto scaleIt = tensorMap.find(attrs.scale_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == tensorMap.end(),
+                                   "scale_tensor_uid not found in tensor map");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
+            "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
 
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
 

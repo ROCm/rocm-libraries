@@ -18,6 +18,7 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <mutex>
@@ -481,6 +482,19 @@ bool SdpaBwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
                                "dropout_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
+
+    // Accept scale_tensor_uid only when it is a runtime pass-by-value scalar
+    // (RFC 0016).  Non-pass-by-value scale tensors are not supported.
+    if(attrs.scale_tensor_uid().has_value())
+    {
+        const auto& scaleTensorMap = opGraph.getTensorMap();
+        const auto scaleIt = scaleTensorMap.find(attrs.scale_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(scaleIt == scaleTensorMap.end(),
+                                   "scale_tensor_uid not found in tensor map");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
+            "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
 
     // --- Validate required tensors ---
 
