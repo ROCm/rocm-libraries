@@ -52,6 +52,13 @@ import gemm_utils as _gu
 
 _SUPPORTED_ARCHES: Tuple[str, ...] = ("gfx90a", "gfx942", "gfx950")
 
+# Byte size of each C output dtype as the compiled kernel writes it
+# (sizeof(CDataType)). The host numpy buffer is memcpy'd verbatim to/from the
+# device, so its element size must match these exactly -- see the F6 check in
+# GpuBatchedGemmRunner.run(). ck_tile bf16_t is a 2-byte type (mirrored on the
+# host by np.uint16); fp16 is 2 bytes; the int8 path accumulates into int32.
+_C_SIZEOF: Dict[str, int] = {"fp16": 2, "bf16": 2, "int32": 4}
+
 
 def _get_arch() -> str:
     """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
@@ -398,6 +405,17 @@ class GpuBatchedGemmRunner:
             raise ValueError(
                 f"unsupported C dtype {out_dtype!r} (from input dtype {dtype!r}); "
                 "add it to _C_NP so the host buffer matches sizeof(CDataType)"
+            )
+        # F6: the host C buffer is memcpy'd byte-for-byte to/from the device
+        # buffer the kernel writes as CDataType, so the numpy element size MUST
+        # equal the C++ sizeof(CDataType). Assert it here so a future _C_NP edit
+        # (e.g. mapping fp16 -> np.float32) fails loudly instead of silently
+        # copying the wrong byte count.
+        if np.dtype(_C_NP[out_dtype]).itemsize != _C_SIZEOF[out_dtype]:
+            raise ValueError(
+                f"host C dtype size mismatch for {out_dtype!r}: numpy "
+                f"{np.dtype(_C_NP[out_dtype]).itemsize} bytes != kernel "
+                f"sizeof(CDataType) {_C_SIZEOF[out_dtype]} bytes"
             )
 
         # Packed per-batch slab element counts (row-major flattened).

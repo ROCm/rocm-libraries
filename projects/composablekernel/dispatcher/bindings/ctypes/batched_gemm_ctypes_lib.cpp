@@ -17,7 +17,7 @@
  *
  * Usage from Python:
  *   lib = ctypes.CDLL("libbatched_gemm_....so")
- *   lib.dispatcher_init()
+ *   lib.dispatcher_initialize()   // the name the Python wrapper binds
  *   lib.dispatcher_run_batched(A, B, C, M, N, K, batch_count, k_batch,
  *                              stride_A, stride_B, stride_C,
  *                              batch_stride_A, batch_stride_B, batch_stride_C,
@@ -120,6 +120,10 @@ int dispatcher_initialize()
     return 0;
 }
 
+// Back-compat alias. `dispatcher_initialize` is the canonical entry (the one the
+// Python BatchedGemmDispatcherLib binds); `dispatcher_init` is kept only so the
+// same symbol name works across every sibling bridge .so that historically
+// exported it. New callers should use dispatcher_initialize.
 int dispatcher_init() { return dispatcher_initialize(); }
 
 /**

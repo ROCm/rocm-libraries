@@ -31,12 +31,14 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 REPO_ROOT = DISPATCHER_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
+sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 import batched_gemm_utils  # noqa: E402
 from batched_gemm_utils import (  # noqa: E402
     BatchedGemmDispatcherLib,
     BatchedGemmKernelConfig,
     BatchedGemmProblem,
+    _C_SIZEOF,
     _get_arch,
     _resolve_arch,
     expand_sweep,
@@ -281,6 +283,74 @@ class TestBatchedDtypeLayoutGate(unittest.TestCase):
     def test_rejects_non_rcr_layout(self):
         with self.assertRaises(ValueError):
             expand_sweep("/nonexistent/config.json", arch="gfx942", layout="rrr")
+
+
+class TestBatchedSplitKContract(unittest.TestCase):
+    """F2: lock the generated split-K reduction contract.
+
+    For ``k_batch > 1`` the ck_tile batched kernel switches its epilogue to
+    ``memory_operation_enum::atomic_add``, so C MUST be zeroed before the launch
+    (a stale C would be accumulated into and silently corrupt the result). For
+    ``k_batch == 1`` the epilogue is ``set`` and C must NOT be pre-zeroed (that
+    is the Old-TE byte-identical parity path). This test renders the batched
+    launch via the codegen and asserts both halves of the contract, so a future
+    codegen edit that drops the memset (or the return check) fails loudly here
+    instead of only on a GPU under split-K.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from codegen_common import TileConfig
+        from unified_gemm_codegen import (
+            CKTileKernelGenerator,
+            GemmVariant,
+            KernelConfig,
+            TraitConfig,
+        )
+
+        tile = TileConfig(
+            tile_m=128, tile_n=128, tile_k=32,
+            warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        )
+        trait = TraitConfig(
+            pipeline="compv3", epilogue="cshuffle", scheduler="intrawave",
+            pad_m=False, pad_n=False, pad_k=False, persistent=False,
+        )
+        cfg = KernelConfig(tile=tile, trait=trait, variant=GemmVariant.BATCHED)
+        cls.src = CKTileKernelGenerator("fp16", "rcr").generate(cfg)
+
+    def test_split_k_branch_zeroes_c(self):
+        # The k_batch>1 branch exists and zeroes C via hipMemsetAsync.
+        self.assertIn("if(args.k_batch > 1)", self.src)
+        self.assertIn("hipMemsetAsync(args.e_ptr", self.src)
+        # The reason is the atomic-add reduction; the contract is documented.
+        self.assertIn("atomic_add", self.src)
+
+    def test_split_k_memset_return_is_checked(self):
+        # The Copilot follow-up: a failed reset must throw, not run silently.
+        self.assertIn("!= hipSuccess", self.src)
+        self.assertIn("failed to reset C", self.src)
+
+    def test_k_batch_one_uses_set_no_memset(self):
+        # The k_batch==1 parity path uses memory_operation_enum::set and must not
+        # pre-zero C (byte-identical to the Old-TE batched launch).
+        self.assertIn("memory_operation_enum::set", self.src)
+        # Exactly one memset in the batched launch: the split-K path only.
+        self.assertEqual(self.src.count("hipMemsetAsync(args.e_ptr"), 1)
+
+
+class TestBatchedCDtypeSizeMap(unittest.TestCase):
+    """F6: the host numpy C dtype size must equal sizeof(CDataType)."""
+
+    def test_c_sizeof_matches_numpy_itemsize(self):
+        _C_NP = {"fp16": np.float16, "bf16": np.uint16, "int32": np.int32}
+        for out_dtype, nbytes in _C_SIZEOF.items():
+            self.assertIn(out_dtype, _C_NP)
+            self.assertEqual(
+                np.dtype(_C_NP[out_dtype]).itemsize, nbytes,
+                f"{out_dtype}: numpy itemsize != declared sizeof(CDataType)",
+            )
 
 
 if __name__ == "__main__":
