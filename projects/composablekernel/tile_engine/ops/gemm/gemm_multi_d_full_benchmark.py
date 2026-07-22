@@ -265,7 +265,12 @@ def main():
         nargs="*",
         help="TE sweep config JSON files (default: gemm_multi_d/configs/default_config.json)",
     )
-    parser.add_argument("--arch", default="gfx942")
+    parser.add_argument(
+        "--arch",
+        default=None,
+        help="GPU arch (gfx90a/gfx942/gfx950); default: auto-detect via rocminfo "
+        "(no silent gfx942 default). Flows into expand_sweep, which resolves None.",
+    )
     parser.add_argument(
         "--dtype",
         default="fp16",

@@ -47,6 +47,78 @@ import ctypes_utils as _cu
 
 
 # ============================================================================
+# GPU architecture resolution (no silent gfx942 default)
+# ============================================================================
+#
+# The tech-lead rule: no source may SILENTLY default to a specific GPU arch.
+# The arch reaches the compiler through ``-DGFX_ARCH="{arch}"`` and
+# ``--offload-arch={arch}`` (see _build_compile_jobs) and through the codegen's
+# ``gpu_target``; if any of those ever saw ``None`` or a stale hardcoded gfx942
+# the kernel would be built for the wrong device. So instead of defaulting we
+# DETECT the real arch via rocminfo and VALIDATE it, raising loudly when the arch
+# is undetectable (refusing to guess) or unsupported.
+
+# Architectures the GEMM bridge codegen/kernels support.
+_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
+
+
+@functools.lru_cache(maxsize=1)
+def _get_arch() -> str:
+    """Detect the GPU architecture from rocminfo and validate it.
+
+    Returns the detected ``gfxNNN`` string. Raises ``RuntimeError`` when no arch
+    can be detected (no GPU / rocminfo unavailable) -- we refuse to silently
+    default to a specific architecture -- and ``ValueError`` when the detected
+    arch is not one this bridge supports.
+    """
+    detected: Optional[str] = None
+    try:
+        out = subprocess.check_output(
+            ["/opt/rocm/bin/rocminfo"], stderr=subprocess.DEVNULL, text=True
+        )
+        for line in out.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Name:") and "gfx" in stripped:
+                name = stripped.split(":", 1)[1].strip()
+                if name.startswith("gfx") and name[3:].isdigit():
+                    detected = name
+                    break
+    except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
+        detected = None
+
+    if detected is None:
+        raise RuntimeError(
+            "Could not detect GPU architecture from rocminfo; refusing to "
+            "default to a specific GPU architecture. Pass an explicit --arch / "
+            "gfx_arch (one of "
+            f"{', '.join(_SUPPORTED_ARCHES)})."
+        )
+    if detected not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {detected!r}; supported: "
+            f"{', '.join(_SUPPORTED_ARCHES)}."
+        )
+    return detected
+
+
+def _resolve_arch(arch: Optional[str]) -> str:
+    """Resolve a possibly-``None`` arch to a validated, supported ``gfxNNN``.
+
+    ``None``/empty -> detect via :func:`_get_arch`. An explicit value is
+    validated against ``_SUPPORTED_ARCHES`` (raising ``ValueError`` if unknown)
+    so a typo can never silently reach the compiler.
+    """
+    if not arch:
+        return _get_arch()
+    if arch not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: "
+            f"{', '.join(_SUPPORTED_ARCHES)}."
+        )
+    return arch
+
+
+# ============================================================================
 # Layout / dtype helpers
 # ============================================================================
 
@@ -185,7 +257,11 @@ class GemmKernelConfig:
     pad_k: bool = True
     persistent: bool = False
 
-    gfx_arch: str = "gfx942"
+    # No silent default: the arch must be resolved (rocminfo-detected or passed
+    # explicitly) before this config feeds the compiler. expand_sweep /
+    # setup_multiple_gemm_dispatchers guarantee a non-None value; a stray None
+    # reaching -DGFX_ARCH / --offload-arch would build for the wrong device.
+    gfx_arch: Optional[str] = None
     variant: str = "standard"
     # Stream-K reduction strategy: "atomic" (default), "linear", or "tree".
     # Only meaningful when variant == "stream_k".
@@ -1351,6 +1427,22 @@ def setup_multiple_gemm_dispatchers(
     if n == 0:
         return results
 
+    # Guard the compile path: every config's gfx_arch must be a concrete,
+    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
+    # expand_sweep already resolves this, but a config built directly (gfx_arch
+    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
+    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
+    _shared_arch: Optional[str] = None
+    resolved_configs: List[GemmKernelConfig] = []
+    for c in configs:
+        if c.gfx_arch:
+            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
+        else:
+            if _shared_arch is None:
+                _shared_arch = _get_arch()
+            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
+    configs = resolved_configs
+
     max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
 
     # Dedupe identical configs by name; compile once, share the path.
@@ -1495,7 +1587,7 @@ def _is_power_of_two(x: int) -> bool:
 
 def expand_sweep(
     config_path: str,
-    arch: str,
+    arch: Optional[str] = None,
     dtype: str = "fp16",
     layout: str = "rcr",
     variant: str = "standard",
@@ -1516,7 +1608,17 @@ def expand_sweep(
     4th char is the D-tensor layout. Each base config is further expanded over
     the config's ``multi_d_config`` (elementwise_ops x num_d_tensors), mirroring
     the codegen's multi_d expansion.
+
+    ``arch`` may be ``None`` (or omitted): it is resolved once here via
+    :func:`_resolve_arch` (rocminfo-detect + validate) so every produced config
+    carries a concrete, supported ``gfx_arch`` -- the compile command's
+    ``-DGFX_ARCH`` / ``--offload-arch`` never see ``None``. An explicit,
+    unsupported arch raises ``ValueError``.
     """
+    # Resolve the arch up front so it cannot silently default: this is the single
+    # value stamped onto every emitted config's .gfx_arch below.
+    arch = _resolve_arch(arch)
+
     with open(config_path) as f:
         cfg = json.load(f)
 
