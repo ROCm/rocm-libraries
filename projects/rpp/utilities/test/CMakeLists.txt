@@ -51,6 +51,7 @@ add_executable(rpp_tests
     image/data_exchange/copy_test.cpp
     image/geometric/crop_test.cpp
     image/statistical/tensor_sum_test.cpp
+    image/statistical/threshold_test.cpp
     # TODO: Reduction kernels below are unusually slow on HIP implementations
     # image/statistical/tensor_min_test.cpp
     # image/statistical/tensor_max_test.cpp
