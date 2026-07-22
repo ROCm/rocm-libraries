@@ -46,6 +46,36 @@ For the specific shape you are optimizing:
    has told you which config to redesign *from* and against which resource
    budget.
 
+> **Caveat — the shipped preset bench is NOT this sweep.** The live benchmark
+> most people reach for
+> (`library/benchmarks/gfx{942,950}/attention/prefill/benchmark_prefill2d_live.py`)
+> sweeps a *curated menu of named presets* (`_variant_flags`:
+> `prod`/`combo`/`fallback`/`r4_t32`/…), **not** the full lever space above. That
+> grammar exposes geometry (`num_warps`, `tile_size`, `block_m_per_warp`, MFMA
+> atom, transpose flags) but **cannot express several default-off flags** —
+> notably `use_softmax_mfma_interleave` (+ `softmax_interleave_mode` /
+> `softmax_interleave_groups`), `use_k_single_buffer`, and `use_register_pv`. So
+> running the preset bench does **not** satisfy Step 0: it systematically skips
+> exactly the default-off levers this step flags as most likely mis-picked. The
+> space it measures is `union(preset menu, production-dispatcher output)`;
+> anything outside that — including winning configs — stays invisible until a
+> human adds it as a candidate.
+>
+> To actually exhaust the space, sweep the **raw flags**, bypassing both the
+> preset grammar and the dispatcher: build the spec from arbitrary flags and
+> launch it directly
+> ([`utilities/tools/dsl_probes/probe_config_sweep.py`](utilities/tools/dsl_probes/probe_config_sweep.py),
+> or the `_select_2d_*` monkey-patch pattern in [§4.3 Attention](#43-attention)),
+> or drive the autotuner ([§12 Autotune](#12-autotuning-strategy)) over the full
+> cartesian product.
+>
+> *Real failure:* the D256 gfx950 softmax↔MFMA interleave win (+9–10% at
+> Sq 4096/8192, correctness-clean) was invisible to the preset-bench sweep for a
+> full optimization loop, because `use_softmax_mfma_interleave` is not in the
+> `_variant_flags` grammar. A raw-lever direct-launch sweep found it in one pass
+> once the profiler pointed at the exposed softmax on a low-occupancy
+> (4 waves/CU) kernel.
+
 This ordering is not optional. Real failures from skipping it: a selector
 routed a shape to a ~2× slower configuration that an exhaustive sweep beat
 immediately; a gap assumed "structural" turned out to be a single mis-set
