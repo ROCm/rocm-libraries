@@ -242,5 +242,68 @@ class TestClusterReductionGate:
         assert _streamk()._streamKClusterReductionEnabled(w, _valid_cluster_kernel()) is False
 
 
+class TestReductionValidation:
+    """Direct _validateStreamKClusterReduction reject-branch coverage. Several
+    branches are unreachable through config derivation, so drive them with a
+    hand-built state (mirrors test_streamk_multicast's direct validator tests)."""
+
+    @staticmethod
+    def _state(**overrides):
+        st = {
+            "StreamKClusterReduction": 1, "StreamKMulticast": 0, "StreamK": 3,
+            "StreamKAtomic": 0, "StreamKForceDPOnly": 0, "StreamKXCCMapping": 0,
+            "ClusterDim": [4, 1], "ISA": [12, 5, 0], "TDMInst": 3,
+        }
+        st.update(overrides)
+        return st
+
+    @staticmethod
+    def _isa_map(has_cluster_barrier=True):
+        class _Info:
+            asmCaps = {"HasClusterBarrier": has_cluster_barrier}
+        return {(12, 5, 0): _Info()}
+
+    def _validate(self, st, isa=None):
+        from Tensile.SolutionStructs.Solution import _validateStreamKClusterReduction
+        return _validateStreamKClusterReduction(st, False, isa if isa is not None else self._isa_map())
+
+    def test_accept_baseline(self):
+        assert self._validate(self._state()) is True
+
+    def test_noop_when_param_off(self):
+        assert self._validate(self._state(StreamKClusterReduction=0)) is True
+
+    def test_reject_multicast_combo(self):
+        # #9611 keeps multicast and cluster reduction mutually exclusive.
+        assert self._validate(self._state(StreamKMulticast=1)) is False
+
+    def test_reject_streamk_not_3(self):
+        assert self._validate(self._state(StreamK=4)) is False
+
+    def test_reject_atomic(self):
+        assert self._validate(self._state(StreamKAtomic=1)) is False
+
+    def test_reject_force_dp_only(self):
+        assert self._validate(self._state(StreamKForceDPOnly=1)) is False
+
+    def test_reject_xcc3(self):
+        assert self._validate(self._state(StreamKXCCMapping=3)) is False
+
+    def test_reject_non_1d_cluster(self):
+        assert self._validate(self._state(ClusterDim=[2, 2])) is False
+
+    def test_reject_non_pow2_cluster(self):
+        assert self._validate(self._state(ClusterDim=[3, 1])) is False
+
+    def test_reject_non_gfx1250(self):
+        assert self._validate(self._state(ISA=[9, 4, 2])) is False
+
+    def test_reject_missing_cluster_barrier(self):
+        assert self._validate(self._state(), self._isa_map(has_cluster_barrier=False)) is False
+
+    def test_reject_tdminst_zero(self):
+        assert self._validate(self._state(TDMInst=0)) is False
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
