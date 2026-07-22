@@ -16,6 +16,7 @@
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 
 namespace hipdnn_frontend::graph
@@ -53,7 +54,7 @@ namespace hipdnn_frontend::graph
  *
  * @code{.cpp}
  * SdpaBackwardAttributes attr;
- * attr.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(d_k)))
+ * attr.set_attn_scale(1.0f / std::sqrt(static_cast<float>(d_k)))
  *     .set_causal_mask(true);
  *
  * auto [dq, dk, dv] = graph.sdpa_backward(q, k, v, o, do_, stats, attr);
@@ -115,6 +116,7 @@ public:
 
     // Enum attributes
     DiagonalAlignment diagonal_alignment = DiagonalAlignment::TOP_LEFT;
+
     // NOLINTEND(readability-identifier-naming)
 
     // -- Input tensor getters --
@@ -291,6 +293,12 @@ public:
         return setInput(InputNames::Attn_scale, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_attn_scale(float value)
+    {
+        attn_scale_value = value;
+        return *this;
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_bias(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::Bias, value);
@@ -451,12 +459,6 @@ public:
         return *this;
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaBackwardAttributes& set_attn_scale_value(float value)
-    {
-        attn_scale_value = value;
-        return *this;
-    }
-    // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_diagonal_band_left_bound(int64_t value)
     {
         left_bound = value;
@@ -473,6 +475,95 @@ public:
     {
         diagonal_alignment = value;
         return *this;
+    }
+
+    // -- cuDNN parity setters --
+    // Each accepts the cuDNN frontend spelling/overload/semantics that is more
+    // than a straight rename of a native setter (overload merge, one-to-many
+    // split, or a capability hipDNN lacks).
+
+    // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_sliding_window_length(int value)
+    {
+        return set_diagonal_band_left_bound(value);
+    }
+    // cuDNN backward set_dropout(mask, scale, scale_inv) is one fused call
+    // carrying the extra inverse-scale; hipDNN sets the three tensors separately.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_dropout(std::shared_ptr<TensorAttributes> mask,
+                                        std::shared_ptr<TensorAttributes> scale,
+                                        std::shared_ptr<TensorAttributes> scaleInv)
+    {
+        set_dropout_mask(std::move(mask));
+        set_dropout_scale(std::move(scale));
+        set_dropout_scale_inv(std::move(scaleInv));
+        return *this;
+    }
+    // cuDNN's programmable score modifier and its backprop are callbacks over the
+    // graph; hipDNN has no equivalent. Accepted for source compatibility,
+    // recorded as unsupported so the graph fails loudly at validate(). Templated
+    // to accept any callable without naming the cuDNN std::function type.
+    template <typename ScoreModifier>
+    SdpaBackwardAttributes&
+        set_score_mod(ScoreModifier&& value) // NOLINT(readability-identifier-naming)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA score modifier is unsupported by hipDNN");
+    }
+    template <typename ScoreModifier>
+    SdpaBackwardAttributes&
+        set_score_mod_bprop(ScoreModifier&& value) // NOLINT(readability-identifier-naming)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA score-modifier backprop is unsupported by hipDNN");
+    }
+    // cuDNN nested-tensor / ragged-batch max-total-seq-len hints have no hipDNN
+    // equivalent yet.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_max_total_seq_len_q(int64_t value)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA max_total_seq_len_q is unsupported by hipDNN");
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_max_total_seq_len_kv(int64_t value)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA max_total_seq_len_kv is unsupported by hipDNN");
+    }
+    // Determinism is correctness-critical; hipDNN cannot guarantee it, so a true
+    // request fails loudly rather than silently running a non-deterministic
+    // kernel. Ignoring false is safe.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_deterministic_algorithm(bool value)
+    {
+        if(value)
+        {
+            return recordUnsupported("Deterministic SDPA backward is unsupported by hipDNN");
+        }
+        return *this;
+    }
+    // cuDNN backward exposes rng_dump; hipDNN's backward attributes do not.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_rng_dump(const std::shared_ptr<TensorAttributes>& value)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA backward RNG dump is unsupported by hipDNN");
+    }
+    // Attention-sink tokens (fwd input + bwd gradient) have no hipDNN backward
+    // equivalent.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_sink_token(const std::shared_ptr<TensorAttributes>& value)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA backward sink token is unsupported by hipDNN");
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaBackwardAttributes& set_dsink_token(const std::shared_ptr<TensorAttributes>& value)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA backward sink-token gradient is unsupported by hipDNN");
     }
 };
 

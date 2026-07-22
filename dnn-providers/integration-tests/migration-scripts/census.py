@@ -66,8 +66,9 @@ def classify(suite: str, param: str) -> str:
     """Bucket a case from its suite name and raw GetParam() text."""
     if _BUNDLE_PARAM_RE.search(param):
         return "bundle"
-    # C++ graph tests are instantiated under Smoke/ or Full/ and named
-    # IntegrationGpu... — the programmatically-built graphs we migrate.
+    # Migration target: IntegrationGpu* suites build a graph and verify it
+    # across GPU plugins — these are the tests whose graphs can be bundled
+    # and re-executed with any plugin.
     leaf = suite.split("/", 1)[-1]
     if leaf.startswith("IntegrationGpu"):
         return "graph"
