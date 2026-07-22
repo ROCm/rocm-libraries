@@ -305,6 +305,7 @@ run_hipblaslt_bench_check() {
         -- "${HIPBLASLT_BENCH}" \
           --precision f32_r \
           --initialization zero \
+          --verify \
           -m 128 \
           -n 128 \
           -k 128 \
@@ -336,35 +337,17 @@ write_tensilelite_check_yaml() {
     # gfx1151 f32 does not support the WMMA instruction shape used by the
     # gfx94x/gfx950 smoke below. Use a small VALU assembly config.
     #
-    # Keep this as a weak smoke for now: running the benchmark path currently
-    # trips a suspected rocjitsu false positive in the TensileLite client helper
-    # kernels (`global_load_d16_u8` destination-merge reads racing with the same
-    # instruction's outstanding VGPR write). ROCm/rocm-systems#8628 fixes that
-    # in rocjitsu. Until that fix is available in this CI path,
-    # `NumBenchmarks: 0` still exercises the Tensile front end, solution
-    # filtering, KernelWriter, code-object build, rocjitsu launch, and
-    # standalone client startup. The real executed GEMM coverage for gfx1151
-    # remains the hipblaslt-bench check above.
+    # The workflow builds rocjitsu from rocm-systems develop, which includes
+    # ROCm/rocm-systems#8628. That fix prevents the D16 destination-merge
+    # bookkeeping from false-firing, so this path can execute and validate the
+    # generated client workload instead of stopping after client startup.
     #
     # TODO(newling): Move these inline YAMLs into checked-in TensileLite test
     # data, or reuse existing TensileLite YAMLs once the component path can
     # consume product-owned workload definitions.
     cat >"${yaml}" <<'YAML'
 GlobalParameters:
-  NumBenchmarks: 0
-  NumElementsToValidate: 0
-  DataInitTypeAB: 0
-  DataInitTypeA: 0
-  DataInitTypeB: 0
-  DataInitTypeC: 0
-  DataInitTypeD: 0
-  DataInitTypeE: 0
-  DataInitTypeBias: 0
-  DataInitTypeScaleA: 0
-  DataInitTypeScaleB: 0
-  DataInitTypeScaleC: 0
-  DataInitTypeScaleD: 0
-  DataInitTypeScaleAlphaVec: 0
+  NumElementsToValidate: -1
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   Device: 0
@@ -520,16 +503,9 @@ run_tensilelite_client_check() {
     return "${status}"
   fi
 
-  if [[ "${TENSILELITE_GPU_TARGET}" == "gfx1151" ]]; then
-    if ! grep -q "clientExit=0 (PASS)" "${RACE_REPORT_DIR}/tensilelite-client.log"; then
-      echo "tensilelite-client smoke did not report a clean client exit" >&2
-      return 1
-    fi
-  else
-    if ! grep -q "PASSED" "${RACE_REPORT_DIR}/tensilelite-client.log"; then
-      echo "tensilelite-client race check did not report validation success" >&2
-      return 1
-    fi
+  if ! grep -q "PASSED" "${RACE_REPORT_DIR}/tensilelite-client.log"; then
+    echo "tensilelite-client race check did not report validation success" >&2
+    return 1
   fi
 
   # As above, client success and race-detector success are distinct signals.
