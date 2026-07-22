@@ -47,6 +47,49 @@ import ctypes_utils as _cu
 
 
 # ============================================================================
+# GPU architecture resolution (never default to gfx942)
+# ============================================================================
+
+_SUPPORTED_ARCHES: Tuple[str, ...] = ("gfx90a", "gfx942", "gfx950")
+
+
+def _get_arch() -> str:
+    """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
+    import subprocess
+
+    arch = ""
+    try:
+        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if "Name:" in line and "gfx" in line:
+                arch = line.split()[-1].strip()
+                break
+    except Exception:
+        arch = ""
+    if not arch:
+        raise RuntimeError(
+            "Could not detect GPU architecture from rocminfo; refusing to default "
+            "to gfx942. Pass gfx_arch explicitly."
+        )
+    if arch not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHES)}"
+        )
+    return arch
+
+
+def _resolve_arch(arch: Optional[str]) -> str:
+    """Resolve an explicit arch (validated) or auto-detect via rocminfo."""
+    if arch is None:
+        return _get_arch()
+    if arch not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHES)}"
+        )
+    return arch
+
+
+# ============================================================================
 # Layout / dtype helpers
 # ============================================================================
 
@@ -197,7 +240,7 @@ class GemmKernelConfig:
     pad_k: bool = True
     persistent: bool = False
 
-    gfx_arch: str = "gfx942"
+    gfx_arch: Optional[str] = None
     variant: str = "standard"
     # Preshuffle-only: selects the B-preshuffle permutation (shuffle_b_permuteN
     # vs shuffle_b). Mirrors Old-TE's permute_n config knob; participates in the
@@ -1135,6 +1178,17 @@ def setup_multiple_gemm_dispatchers(
     if n == 0:
         return results
 
+    # Never let a defaulted/None arch reach the compiler: resolve any config
+    # whose gfx_arch was left unset (e.g. a hand-built GemmKernelConfig that
+    # bypassed expand_sweep) via rocminfo, so -DGFX_ARCH / --offload-arch always
+    # receive a concrete, validated architecture instead of "None"/gfx942.
+    _resolved_arch: Optional[str] = None
+    for c in configs:
+        if getattr(c, "gfx_arch", None) is None:
+            if _resolved_arch is None:
+                _resolved_arch = _resolve_arch(None)
+            c.gfx_arch = _resolved_arch
+
     # Hard-fail rather than build a runnable but WRONG kernel: a preshuffle config
     # with permute_n=True would compile a "_permuteN" kernel whose device pipeline
     # is not yet bridged (it mis-shuffles B -> wrong results; see BRIDGE_PERMUTE_N).
@@ -1295,7 +1349,7 @@ def _is_power_of_two(x: int) -> bool:
 
 def expand_sweep(
     config_path: str,
-    arch: str,
+    arch: Optional[str] = None,
     dtype: str = "fp16",
     layout: str = "rcr",
     variant: str = "standard",
@@ -1310,7 +1364,12 @@ def expand_sweep(
 
     The operand signature (``dtype``, ``layout``) is applied to every emitted
     GemmKernelConfig, so the same sweep expands across any supported dtype/layout.
+
+    ``arch`` is resolved via ``_resolve_arch`` (rocminfo auto-detect + validate)
+    when omitted/None, so every emitted config carries a concrete gfx_arch and
+    the compiler never sees a defaulted/None architecture.
     """
+    arch = _resolve_arch(arch)
     with open(config_path) as f:
         cfg = json.load(f)
 

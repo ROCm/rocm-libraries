@@ -307,7 +307,12 @@ def main():
         choices=tuple(VARIANT_CONFIGS),
         help="GEMM variant (selects the configs/ directory)",
     )
-    parser.add_argument("--arch", default="gfx942")
+    parser.add_argument(
+        "--arch",
+        default=None,
+        help="GPU arch (e.g. gfx942/gfx950). Auto-detected via rocminfo when "
+        "omitted; never silently defaulted to a specific GPU.",
+    )
     parser.add_argument(
         "--dtype",
         default="fp16",

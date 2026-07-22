@@ -39,9 +39,12 @@
 // Kernel header included via -include compiler flag
 // Defines: ADataType, BDataType, CDataType, AccDataType, SelectedKernel, KERNEL_NAME
 
-// GPU architecture - can be overridden via -DGFX_ARCH="gfx90a" at compile time
+// GPU architecture - REQUIRED at compile time (pass -DGFX_ARCH=<arch>).
+// The arch is resolved from the host at build time (see gemm_utils.py
+// _resolve_arch / rocminfo); it is never silently defaulted to a specific GPU.
 #ifndef GFX_ARCH
-#define GFX_ARCH "gfx942"
+#error \
+    "GFX_ARCH must be defined at compile time (pass -DGFX_ARCH=<arch>); do not default to a specific GPU architecture."
 #endif
 
 using namespace ck_tile::dispatcher;
