@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -851,6 +852,7 @@ private:
         // toHipdnnDataType() and are skipped by assembleGraphDescriptor().
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
+
         std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())
         {
@@ -5499,6 +5501,11 @@ public:
         if(attributes.get_name().empty())
         {
             attributes.set_name("SdpaFwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(attributes.unfuse_fma_hint)
+        {
+            HIPDNN_FE_LOG_WARN("Ignoring SDPA unfuse-FMA hint on node '"
+                               << attributes.get_name() << "'; hipDNN selects fusion internally");
         }
         if(q->get_name().empty())
         {
