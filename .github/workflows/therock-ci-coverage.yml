@@ -24,10 +24,10 @@ on:
         type: string
       therock_ref:
         type: string
-        default: b83de89cfee338e04a2b315e866626bdb76ddf35
+        default: 1f7153fff7e4a66aa3b71821bc7cfce0f468628b
       test_therock_ref:
         type: string
-        default: b83de89cfee338e04a2b315e866626bdb76ddf35
+        default: 1f7153fff7e4a66aa3b71821bc7cfce0f468628b
 
 permissions:
   contents: read
