@@ -307,22 +307,30 @@ static void scheduleRegionWithMovableSideEffects(
     // file — e.g. SALU sgpr -> SMEM/tensor_load/VMEM address, VALU vgpr -> VMEM
     // address). Detection per rule: BFS the node's users (skipping PHIs); if a
     // rule.isConsumer user reads a register of rule.regType this node writes, flag it
-    // (dagNodes[i].hazardFlags). This half is what drives the consumer-side gate
-    // (CDNA5ReadyQueue::hazardGates_) and is unconditionally correct regardless of
-    // scheduling order.
+    // (dagNodes[i].hazardFlags). This half drives the consumer-side gate
+    // (CDNA5ReadyQueue::hazardGates_), which blocks the consumer for as long as real
+    // intervening instructions are available to pay the wait -- but see
+    // DAGNode::hazardDeadline's comment (ReadyQueue.hpp) for the case where they run
+    // out and the scheduler's pre-existing "pay the wait via advanceTime, then issue
+    // anyway" fallback applies instead.
     //
-    // Also computes each flagged producer's hazardDeadline: a throughput heuristic,
-    // not a correctness requirement. Let X = cumCycles[consumerId], the hazarded
-    // consumer's estimated absolute cycle (per rule; a producer feeding several
-    // consumers, or matching several rules, takes the earliest/tightest X - cycles
-    // over all of them). CDNA5ReadyQueue::decidePromote() forces the producer once its
-    // *live* clock_ reaches this deadline, not once some proxy node happens to become
-    // structurally ready — clock_ only advances via cycles actually issued, so an
-    // unrelated node becoming ready early can't trigger an early force the way a
-    // node-based trigger could. Approximate (X is computed from original program
-    // order, which real scheduling may depart from) — an inaccurate deadline shifts
-    // when the mandatory force kicks in, never affects correctness, since the
-    // consumer-side gate does not depend on this deadline being right.
+    // Also computes each flagged producer's hazardDeadline: a throughput heuristic
+    // that, when accurate, is what keeps the gate above from ever needing that
+    // fallback. Let X = cumCycles[consumerId], the hazarded consumer's estimated
+    // absolute cycle (per rule; a producer feeding several consumers, or matching
+    // several rules, takes the earliest/tightest deadline over all of them). The
+    // deadline is X - rule.cycles - producerCost: the gate is stamped only after this
+    // producer's own advanceTime has already run (see popNonWmma), so the deadline
+    // must reserve that cost too -- using X - rule.cycles alone would let the
+    // producer start one cost-unit later than it needs to.
+    // CDNA5ReadyQueue::decidePromote() forces the producer once its *live* clock_
+    // reaches this deadline, not once some proxy node happens to become structurally
+    // ready -- clock_ only advances via cycles actually issued, so an unrelated node
+    // becoming ready early can't trigger an early force the way a node-based trigger
+    // could. Still approximate (X is computed from original program order, which real
+    // scheduling may depart from), so it is not a substitute for the gate -- an
+    // inaccurate deadline can leave the gate short of real cycles, same as the
+    // producer-cost bug this fixed.
     for (unsigned i = 0; i < regionSize; ++i) {
         StinkyInstruction* prod = dagNodes[i].inst;
         int bestDeadline = INT_MAX;
@@ -371,8 +379,18 @@ static void scheduleRegionWithMovableSideEffects(
             }
             if (hazardKeys.empty()) continue;
             for (int key : hazardKeys) dagNodes[i].hazardFlags.push_back({ruleIdx, key});
-            if (ruleConsumerId != UINT_MAX)
-                bestDeadline = std::min(bestDeadline, cumCycles[ruleConsumerId] - rule.cycles);
+            if (ruleConsumerId != UINT_MAX) {
+                // The gap is measured from this producer's own FINISH, not its start
+                // (matches the gate: hazardGates_ is stamped to rule.cycles only after
+                // updateWMMAStatus has already advanced clock_ by the producer's own
+                // cost). So the deadline for issuing it must also subtract that cost --
+                // otherwise "clock_ >= deadline" would let it start exactly one cycle
+                // too late relative to X.
+                const int producerCost =
+                    isMatrixInstruction(*prod) ? prod->latencyCycles : prod->issueCycles;
+                bestDeadline =
+                    std::min(bestDeadline, cumCycles[ruleConsumerId] - rule.cycles - producerCost);
+            }
         }
 
         if (!dagNodes[i].hazardFlags.empty()) dagNodes[i].hazardDeadline = bestDeadline;
