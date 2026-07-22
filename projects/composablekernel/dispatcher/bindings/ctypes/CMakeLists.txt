@@ -84,6 +84,9 @@ endif()
 file(GLOB GEMM_MULTI_ABD_KERNEL_HEADERS
     "${CMAKE_BINARY_DIR}/generated_kernels/gemm_*_multiabd_*.hpp")
 if(GEMM_MULTI_ABD_KERNEL_HEADERS)
+    # Sort for deterministic selection: file(GLOB) order is unspecified, so
+    # list(GET 0) could otherwise pick an arbitrary header across configure runs.
+    list(SORT GEMM_MULTI_ABD_KERNEL_HEADERS)
     list(GET GEMM_MULTI_ABD_KERNEL_HEADERS 0 GEMM_MULTI_ABD_KERNEL_HEADER)
     message(STATUS "Found GEMM Multi-ABD kernel for ctypes lib: ${GEMM_MULTI_ABD_KERNEL_HEADER}")
 

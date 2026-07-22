@@ -1811,6 +1811,21 @@ def expand_sweep(
         na_list = _as_list(mabd.get("num_a_tensors"), [num_a_tensors])
         nb_list = _as_list(mabd.get("num_b_tensors"), [num_b_tensors])
         nd_list = _as_list(mabd.get("num_d_tensors"), [num_d_tensors])
+        # CK's GemmKernelMultiABD requires >=1 A and B tensors and
+        # DsLayout::size() > 0 (num_d_tensors >= 1); a 0 or non-integer count
+        # otherwise fails later with a cryptic tuple-size-0 compile error, so
+        # reject it here with a clear message.
+        for _label, _vals in (
+            ("num_a_tensors", na_list),
+            ("num_b_tensors", nb_list),
+            ("num_d_tensors", nd_list),
+        ):
+            for _v in _vals:
+                if not isinstance(_v, int) or _v < 1:
+                    raise ValueError(
+                        f"multi_abd {_label} must be a positive integer (>= 1), "
+                        f"got {_v!r}"
+                    )
         a_ops = _as_list(mabd.get("a_elementwise_op"), [a_elementwise_op])
         b_ops = _as_list(mabd.get("b_elementwise_op"), [b_elementwise_op])
         cde_ops = _as_list(mabd.get("cde_elementwise_op"), [cde_elementwise_op])

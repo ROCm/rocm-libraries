@@ -391,6 +391,12 @@ def main():
     sweep_layout = args.layout
     if bridge_variant == "multi_abd" and len(sweep_layout) == 3:
         sweep_layout = sweep_layout + sweep_layout[2]
+    # multi_abd supports only the 'rcrr' layout today; reject anything else up
+    # front instead of silently building an unsupported/divergent kernel.
+    if bridge_variant == "multi_abd" and sweep_layout != "rcrr":
+        raise SystemExit(
+            f"multi_abd supports only the 'rcrr' layout today, got {sweep_layout!r}"
+        )
 
     # Multi-ABD element-wise ops / tensor counts: CLI overrides win over the
     # config; otherwise expand_sweep falls back to any multi_abd_config block in
