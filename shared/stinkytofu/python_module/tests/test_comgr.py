@@ -240,6 +240,6 @@ class TestRegCaps:
     def test_gfx1250_known_values(self):
         reg = stinkytofu.getHardwareCaps([12, 5, 0])["regCaps"]
         assert reg["MaxVgpr"] == 1024
-        assert reg["MaxSgpr"] == 102
+        assert reg["MaxSgpr"] == 106
         assert reg["PhysicalMaxVgpr"] == 1024
         assert reg["PhysicalMaxVgprCU"] == 4096 * 32

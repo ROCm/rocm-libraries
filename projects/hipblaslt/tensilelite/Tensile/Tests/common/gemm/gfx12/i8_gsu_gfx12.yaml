@@ -4,8 +4,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -18,7 +17,6 @@ GlobalParameters:
   #PrintTensorD: 1
   #PrintTensorRef: 1
   PrintWinnersOnly: True
-  MinKForGSU: 1
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
@@ -159,10 +157,10 @@ BenchmarkProblems:
         - GlobalSplitU: [1] #, 2] #known bug
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
-        - SourceSwap: [1, 0]
+        - SourceSwap: [true, false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -336,10 +334,10 @@ BenchmarkProblems:
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
-        - SourceSwap: [1, 0]
+        - SourceSwap: [true, false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -513,10 +511,10 @@ BenchmarkProblems:
         - GlobalSplitU: [1] #, 2] #known bug
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
-        - SourceSwap: [1, 0]
+        - SourceSwap: [true, false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -690,10 +688,10 @@ BenchmarkProblems:
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [1]
-        - SourceSwap: [1, 0]
+        - SourceSwap: [true, false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -766,7 +764,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [16] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -775,7 +773,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4]
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
