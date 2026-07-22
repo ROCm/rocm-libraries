@@ -849,6 +849,16 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
 
+        # When one wave's read spans a whole LDS component, the component jump lives in the wave
+        # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
+        # keep the baseline wave stride. A/B only: MX scales keep their own stride (relocated, not split).
+        segILWaveSpansComp = False
+        if kernel.get("LDSSegmentInterleave") == 1 and tc in ("A", "B"):
+            _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
+            segILWaveSpansComp = min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vectorWidth >= _compCols
+            if segILWaveSpansComp:
+                strideWave = kernel["LDSSegInterleaveOffsets"]["readWaveStride"]
+
         lsu              = kernel["LocalSplitU"]
 
         if isDTVAB:
@@ -978,7 +988,14 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
                 module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
                     "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
-                module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
+                if kernel.get("LDSSegmentInterleave") == 1 and kernel["LDSSegInterleaveOffsets"].get("footprintPacked") and segILWaveSpansComp:
+                    # wave spans a whole component: stash its component jump; added post-pad in lraFinalOffset.
+                    segOff = writer.vgprPool.checkOut(1, tag="segWaveByteOff")
+                    module.add(vectorStaticMultiply(vgpr(segOff), vgpr(dummy), kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"], tmpSgprInfo, \
+                                             "seg interleave: component byte offset = wtid0 * (fA+fB)"))
+                    tP["gpr"]["segWaveByteOff"] = segOff
+                else:
+                    module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
                                              "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
             if perpBlockSize > 0:
                writer.vgprPool.checkIn(rotVgpr)
