@@ -78,7 +78,7 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   # SupportUserArgs is set, the batch-offset codegen (KernelWriterAssembly /
   # Signature) is gated on GroupedGemm, so grouped and non-grouped kernels
   # differ and must keep distinct keys -- preserve the real value in that case.
-  if not pt["SupportUserArgs"]:
+  if not pt.get("SupportUserArgs", False):
     pt["GroupedGemm"] = False
   if splitGSU:
     s["GlobalSplitU"] = "M" if (gsu_backup > 1 or gsu_backup == -1) else gsu_backup
@@ -172,7 +172,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     # one key. When SupportUserArgs is set the batch-offset codegen depends on
     # GroupedGemm, so grouped and non-grouped kernels are not identical and must
     # keep distinct keys -- preserve the real value in that case.
-    if not state["ProblemType"]["SupportUserArgs"]:
+    if not state["ProblemType"].get("SupportUserArgs", False):
       state["ProblemType"]["GroupedGemm"] = False
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
