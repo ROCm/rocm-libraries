@@ -10,7 +10,7 @@ primbench is a single-header `HIP <https://rocm.docs.amd.com/projects/HIP/en/lat
 
 primbench requires `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ and C++17 or later. `AMD SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/index.html>`_ is required for temperature monitoring and control.
 
-.. note:: 
+.. note::
 
   Because AMD SMI is only supported on Linux, temperature monitoring and control isn't available on Windows.
 
@@ -69,7 +69,7 @@ The ``run()`` function runs the benchmark. ``run()`` must include a call to ``st
 
 The ``state`` class saves the state of the benchmarking run, including the number of reads and writes.
 
-Depending on the algorithm being benchmarked, ``run()`` may call ``state.add_reads()``, ``state.add_writes()``, or both. These functions are used to calculate the number of items or bytes processed per second. 
+Depending on the algorithm being benchmarked, ``run()`` may call ``state.add_reads()``, ``state.add_writes()``, or both. These functions are used to calculate the number of items or bytes processed per second.
 
 ``set_items()`` must be called before ``add_reads()`` or ``add_writes()``. If you call both, call ``add_reads()`` before ``add_writes()``. Call ``state.run()`` after ``set_items()`` and any read or write counters you need.
 
