@@ -7,6 +7,16 @@ if(CK_USE_OCP_FP8)
 endif()
 
 if(GPU_TARGETS MATCHES "gfx95")
+    add_gtest_executable(
+        test_ck_tile_mx_gemm_types_quick test_mx_gemm_quick.cpp
+    )
+    target_compile_options(
+        test_ck_tile_mx_gemm_types_quick PRIVATE ${TEST_MX_GEMM_COMPILE_OPTIONS}
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_mx_gemm_quick test_ck_tile_mx_gemm_types_quick
+    )
+
     add_gtest_executable(test_ck_tile_mx_gemm_async_rcr test_mx_gemm_async_rcr.cpp)
     target_compile_options(test_ck_tile_mx_gemm_async_rcr PRIVATE ${TEST_MX_GEMM_COMPILE_OPTIONS})
     add_gtest_executable(test_ck_tile_mx_gemm_async_rrr test_mx_gemm_async_rrr.cpp)

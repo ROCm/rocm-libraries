@@ -9,6 +9,16 @@ endif()
 list(APPEND TEST_GEMM_COMPILE_OPTIONS -mllvm -enable-noalias-to-md-conversion=0)
 
 if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
+    add_gtest_executable(
+        test_tile_gemm_block_scale_quick test_gemm_block_scale_quick.cpp
+    )
+    target_compile_options(
+        test_tile_gemm_block_scale_quick PRIVATE ${TEST_GEMM_COMPILE_OPTIONS}
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_gemm_block_scale_quick test_tile_gemm_block_scale_quick
+    )
+
     # Typed Test Suite for GEMM Quantization - split into multiple files to reduce compile time
     
     # AQuant tests - split into 10 files

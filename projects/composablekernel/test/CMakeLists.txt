@@ -56,6 +56,79 @@ set(REGRESSION_TESTS
     test_ck_tile_streamk_extended
 )
 
+# Shared quick/standard CTest tiers for a curated CK-Tile subset. The quick
+# entries are filtered aliases of larger kernel tests; the standard entries
+# are complete lightweight executables.
+set(CK_TILE_CTEST_QUICK_TESTS
+    test_ck_tile_gemm_quick
+    test_ck_tile_gemm_block_scale_quick
+    test_ck_tile_mx_gemm_quick
+    test_ck_tile_batched_gemm_quick
+    test_ck_tile_grouped_gemm_quick
+    test_ck_tile_grouped_conv_quick
+    test_ck_tile_fmha_quick
+    test_ck_tile_moe_quick
+    test_ck_tile_pooling_quick
+)
+set(CK_TILE_CTEST_STANDARD_TESTS
+    test_ck_tile_bf16
+    test_ck_tile_fp8
+    test_ck_tile_pk_int4
+    test_ck_tile_tuple_apply
+    test_atomic
+    test_ck_tile_reduce2d
+    test_ck_tile_elementwise_1d
+    test_ck_tile_batched_transpose
+)
+set(CK_TILE_CTEST_CATEGORY_TESTS
+    ${CK_TILE_CTEST_QUICK_TESTS}
+    ${CK_TILE_CTEST_STANDARD_TESTS}
+)
+set(CK_TILE_TEST_CATEGORIES_YAML
+    "${CMAKE_CURRENT_SOURCE_DIR}/ck_tile/test_categories.yaml"
+)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    get_filename_component(
+        ROCM_LIBRARIES_ROOT "${PROJECT_SOURCE_DIR}/../.." ABSOLUTE
+    )
+endif()
+set(_CK_TILE_SHARED_CTEST
+    "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake"
+)
+if(EXISTS "${_CK_TILE_SHARED_CTEST}" AND EXISTS "${CK_TILE_TEST_CATEGORIES_YAML}")
+    include("${_CK_TILE_SHARED_CTEST}")
+endif()
+
+function(_apply_ck_tile_test_category_labels TEST_NAME)
+    if(TEST_NAME IN_LIST CK_TILE_CTEST_CATEGORY_TESTS
+       AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels(
+            "${CK_TILE_TEST_CATEGORIES_YAML}"
+            EXPLICIT_TESTS "${TEST_NAME}"
+        )
+    endif()
+endfunction()
+
+# Register a filtered CTest alias for a larger CK-Tile GTest executable. Keep
+# enough metadata to reproduce the same command in the installed test tree.
+function(add_ck_tile_category_test TEST_NAME TARGET_NAME)
+    if(NOT TARGET "${TARGET_NAME}")
+        return()
+    endif()
+
+    add_test(NAME "${TEST_NAME}" COMMAND $<TARGET_FILE:${TARGET_NAME}> ${ARGN})
+    _apply_ck_tile_test_category_labels("${TEST_NAME}")
+
+    set_property(GLOBAL APPEND PROPERTY CK_TILE_CTEST_ALIAS_TESTS "${TEST_NAME}")
+    set_property(GLOBAL APPEND PROPERTY CK_TILE_CTEST_ALIAS_TARGETS "${TARGET_NAME}")
+    set_property(
+        GLOBAL PROPERTY "CK_TILE_CTEST_ALIAS_TARGET_${TEST_NAME}" "${TARGET_NAME}"
+    )
+    set_property(
+        GLOBAL PROPERTY "CK_TILE_CTEST_ALIAS_ARGS_${TEST_NAME}" "${ARGN}"
+    )
+endfunction()
+
 function(add_test_executable TEST_NAME)
     message(DEBUG "adding test ${TEST_NAME}")
     set(result 1)
@@ -147,6 +220,9 @@ function(add_test_executable TEST_NAME)
     elseif(result EQUAL 0 AND "${TEST_NAME}" IN_LIST REGRESSION_TESTS)
         set_tests_properties(${TEST_NAME} PROPERTIES LABELS "REGRESSION_TEST")
         add_dependencies(regression ${TEST_NAME})
+    endif()
+    if(result EQUAL 0)
+        _apply_ck_tile_test_category_labels("${TEST_NAME}")
     endif()
 endfunction()
 
@@ -259,6 +335,9 @@ function(add_gtest_executable TEST_NAME)
     elseif(result EQUAL 0 AND "${TEST_NAME}" IN_LIST REGRESSION_TESTS)
         set_tests_properties(${TEST_NAME} PROPERTIES LABELS "REGRESSION_TEST")
         add_dependencies(regression ${TEST_NAME})
+    endif()
+    if(result EQUAL 0)
+        _apply_ck_tile_test_category_labels("${TEST_NAME}")
     endif()
 endfunction()
 

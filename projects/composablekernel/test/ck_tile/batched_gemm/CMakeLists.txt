@@ -7,6 +7,24 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
 
     add_gtest_executable(test_ck_tile_batched_gemm_f16 test_batched_gemm_f16.cpp)
     add_gtest_executable(test_ck_tile_batched_gemm_bf16 test_batched_gemm_bf16.cpp)
+    add_gtest_executable(
+        test_ck_tile_batched_gemm_types_quick test_batched_gemm_types_quick.cpp
+    )
+    set(_ck_tile_batched_gemm_quick_compile_options)
+    if(CK_USE_OCP_FP8)
+        list(APPEND
+            _ck_tile_batched_gemm_quick_compile_options -DCK_TILE_USE_OCP_FP8
+        )
+    endif()
+    target_compile_options(
+        test_ck_tile_batched_gemm_types_quick
+        PRIVATE ${_ck_tile_batched_gemm_quick_compile_options}
+    )
+
+    add_ck_tile_category_test(
+        test_ck_tile_batched_gemm_quick
+        test_ck_tile_batched_gemm_types_quick
+    )
 
     add_dependencies(test_ck_tile_batched_gemm
         test_ck_tile_batched_gemm_f16

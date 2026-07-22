@@ -27,6 +27,31 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
         add_gtest_executable(test_ck_tile_gemm_pipeline_persistent test_gemm_pipeline_persistent.cpp)
         add_gtest_executable(test_ck_tile_gemm_pipeline_compv6 test_gemm_pipeline_compv6.cpp)
 
+        set(_ck_tile_gemm_quick_target test_ck_tile_gemm_pipeline_quick)
+        set_source_files_properties(
+            test_gemm_pipeline_quick.cpp PROPERTIES LANGUAGE HIP
+        )
+        add_executable(
+            ${_ck_tile_gemm_quick_target} test_gemm_pipeline_quick.cpp
+        )
+        set_property(
+            TARGET ${_ck_tile_gemm_quick_target}
+            PROPERTY HIP_ARCHITECTURES ${SUPPORTED_GPU_TARGETS}
+        )
+        target_compile_options(
+            ${_ck_tile_gemm_quick_target}
+            PRIVATE
+                -Wno-global-constructors
+                -Wno-undef
+                ${EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS}
+        )
+        target_link_libraries(
+            ${_ck_tile_gemm_quick_target} PRIVATE gtest_main getopt::getopt
+        )
+        add_dependencies(tests ${_ck_tile_gemm_quick_target})
+        add_dependencies(check ${_ck_tile_gemm_quick_target})
+        rocm_install(TARGETS ${_ck_tile_gemm_quick_target} COMPONENT tests)
+
         target_compile_options(test_ck_tile_gemm_pipeline_mem PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
         target_compile_options(test_ck_tile_gemm_pipeline_compv3 PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
         target_compile_options(test_ck_tile_gemm_pipeline_compv4 PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS})
@@ -137,6 +162,33 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
     foreach(test_target ${CK_TILE_GEMM_TEST_TARGETS})
         set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_GEMM_TESTS")
     endforeach()
+
+    if(TARGET test_ck_tile_gemm_pipeline_quick)
+        # Exercise every curated pipeline/layout configuration on one tile,
+        # then sample padded-K and regular shapes across pipeline families.
+        set(_ck_tile_gemm_quick_cases
+            "TestCkTileGemmPipelineQuick/*.SingleTile"
+            "TestCkTileGemmPipelineQuick/0.PaddK"
+            "TestCkTileGemmPipelineQuick/4.PaddK"
+            "TestCkTileGemmPipelineQuick/8.PaddK"
+            "TestCkTileGemmPipelineQuick/10.PaddK"
+            "TestCkTileGemmPipelineQuick/12.PaddK"
+            "TestCkTileGemmPipelineQuick/1.Regular"
+            "TestCkTileGemmPipelineQuick/5.Regular"
+            "TestCkTileGemmPipelineQuick/9.Regular"
+            "TestCkTileGemmPipelineQuick/11.Regular"
+            "TestCkTileGemmPipelineQuick/13.Regular"
+        )
+        list(JOIN _ck_tile_gemm_quick_cases ":" _ck_tile_gemm_quick_filter)
+        add_ck_tile_category_test(
+            test_ck_tile_gemm_quick
+            test_ck_tile_gemm_pipeline_quick
+            "--gtest_filter=${_ck_tile_gemm_quick_filter}"
+        )
+        set_property(
+            TEST test_ck_tile_gemm_quick APPEND PROPERTY LABELS CK_TILE_GEMM_TESTS
+        )
+    endif()
 
     # Umbrella target to build and run all ck_tile gemm tests
     # Usage: ninja ck_tile_gemm_tests

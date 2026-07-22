@@ -1,0 +1,82 @@
+# CK-Tile CTest categories for install-tree and monorepo CI filtering.
+# Tests belong only to their lowest tier; the shared parser adds the broader
+# standard, comprehensive, and full labels automatically.
+
+test_categories:
+  quick:
+    description: "Representative CK-Tile kernel checks for pre-commit validation"
+    test_patterns:
+      - test_ck_tile_gemm_quick
+      - test_ck_tile_gemm_block_scale_quick
+      - test_ck_tile_mx_gemm_quick
+      - test_ck_tile_batched_gemm_quick
+      - test_ck_tile_grouped_gemm_quick
+      - test_ck_tile_grouped_conv_quick
+      - test_ck_tile_fmha_quick
+      - test_ck_tile_moe_quick
+      - test_ck_tile_pooling_quick
+
+  standard:
+    description: "Core CK-Tile validation for pull requests"
+    test_patterns:
+      - test_ck_tile_bf16
+      - test_ck_tile_fp8
+      - test_ck_tile_pk_int4
+      - test_ck_tile_tuple_apply
+      - test_atomic
+      - test_ck_tile_reduce2d
+      - test_ck_tile_elementwise_1d
+      - test_ck_tile_batched_transpose
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    standard: 1800
+    comprehensive: 7200
+    full: 14400
+
+# Keep architecture restrictions visible to installed CTest consumers. This
+# matters for payloads configured with more than one GPU target: CMake may
+# create a target because one listed architecture is supported, while a runner
+# on another listed architecture still needs to exclude it before execution.
+general_exclude:
+  exclude_gpu_gfx90a:
+    test_patterns:
+      - test_ck_tile_gemm_quick
+      - test_ck_tile_gemm_block_scale_quick
+      - test_ck_tile_mx_gemm_quick
+    labels:
+      - ex_gpu_gfx90a
+
+  exclude_gpu_gfx942:
+    test_patterns:
+      - test_ck_tile_mx_gemm_quick
+    labels:
+      - ex_gpu_gfx942
+
+  exclude_gpu_gfx11:
+    test_patterns:
+      - test_ck_tile_gemm_quick
+      - test_ck_tile_gemm_block_scale_quick
+      - test_ck_tile_mx_gemm_quick
+      - test_ck_tile_grouped_conv_quick
+    labels:
+      - ex_gpu_gfx1100
+      - ex_gpu_gfx1101
+      - ex_gpu_gfx1102
+      - ex_gpu_gfx1150
+      - ex_gpu_gfx1151
+      - ex_gpu_gfx1152
+      - ex_gpu_gfx1153
+
+  exclude_gpu_gfx12:
+    test_patterns:
+      - test_ck_tile_gemm_quick
+      - test_ck_tile_mx_gemm_quick
+      - test_ck_tile_grouped_conv_quick
+    labels:
+      - ex_gpu_gfx1200
+      - ex_gpu_gfx1201
+      - ex_gpu_gfx1250

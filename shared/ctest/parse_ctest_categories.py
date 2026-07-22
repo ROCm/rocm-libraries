@@ -14,6 +14,7 @@ import argparse
 import sys
 import os
 import re
+from textwrap import dedent
 import yaml
 
 
@@ -103,6 +104,30 @@ def parse_yaml(path):
     return categories, general_excludes
 
 
+def parse_execution_settings(path):
+    """Return the optional top-level execution_settings mapping."""
+    with open(path, "r") as f:
+        data = yaml.safe_load(f) or {}
+    settings = data.get("execution_settings", {})
+    return settings if isinstance(settings, dict) else {}
+
+
+def category_timeout(category_name, execution_settings):
+    """Return a category timeout after applying the configured multiplier.
+
+    A category-specific value wins over default_timeout. Missing execution
+    settings preserve the parser's historical label-only output.
+    """
+    execution_settings = execution_settings or {}
+    timeouts = execution_settings.get("category_timeouts", {}) or {}
+    base_timeout = timeouts.get(
+        category_name, execution_settings.get("default_timeout")
+    )
+    if base_timeout is None:
+        return None
+    return int(base_timeout * execution_settings.get("timeout_multiplier", 1))
+
+
 def tier_labels(category_name):
     """Return the tiered labels for a category.
 
@@ -137,6 +162,8 @@ def _emit_label_block(lines, test_names, labels_str, comment, explicit_tests=Non
     """
     exact = [t for t in test_names if not is_regex_pattern(t)]
     regex = [t for t in test_names if is_regex_pattern(t)]
+    if explicit_tests is not None:
+        exact = [test for test in exact if test in explicit_tests]
 
     if exact:
         lines.append(f"# {comment} (exact match)")
@@ -214,6 +241,128 @@ def _emit_label_match_block(lines, test_labels, labels_str, comment):
     lines.append("")
 
 
+def _append_cmake_template(lines, template, **values):
+    """Render a dependency-free multiline CMake template into ``lines``."""
+    rendered = dedent(template).strip("\n") % values
+    lines.extend(rendered.splitlines())
+    lines.append("")
+
+
+def _timeout_condition_template(condition, timeout):
+    """Render one conditional minimum-timeout block for a CMake foreach."""
+    return (
+        dedent(
+            """\
+                if(%(condition)s)
+                    get_property(_timeout TEST ${_test} PROPERTY TIMEOUT)
+                    if(NOT _timeout OR _timeout GREATER %(timeout)s)
+                        set_property(TEST ${_test} PROPERTY TIMEOUT %(timeout)s)
+                    endif()
+                endif()"""
+        )
+        % {"condition": condition, "timeout": timeout}
+    )
+
+
+def _emit_timeout_block(lines, test_names, timeout, comment, explicit_tests=None):
+    """Append CMake code that applies a minimum timeout to matching tests."""
+    if timeout is None:
+        return
+
+    exact = [t for t in test_names if not is_regex_pattern(t)]
+    regex = [t for t in test_names if is_regex_pattern(t)]
+    if explicit_tests is not None:
+        exact = [test for test in exact if test in explicit_tests]
+
+    if exact:
+        _append_cmake_template(
+            lines,
+            """\
+            # %(comment)s (exact match)
+            foreach(_test
+            %(tests)s
+            )
+                if(TEST ${_test})
+                    get_property(_timeout TEST ${_test} PROPERTY TIMEOUT)
+                    if(NOT _timeout OR _timeout GREATER %(timeout)s)
+                        set_property(TEST ${_test} PROPERTY TIMEOUT %(timeout)s)
+                    endif()
+                endif()
+            endforeach()""",
+            comment=comment,
+            tests="\n".join(f"    {test}" for test in exact),
+            timeout=timeout,
+        )
+
+    if regex:
+        if explicit_tests is not None:
+            matched = []
+            for pattern in regex:
+                pattern_re = re.compile(f"^{pattern}$")
+                for test in explicit_tests:
+                    if pattern_re.match(test) and test not in matched:
+                        matched.append(test)
+            if matched:
+                _append_cmake_template(
+                    lines,
+                    """\
+                    # %(comment)s (regex match, expanded)
+                    foreach(_test
+                    %(tests)s
+                    )
+                        if(TEST ${_test})
+                            get_property(_timeout TEST ${_test} PROPERTY TIMEOUT)
+                            if(NOT _timeout OR _timeout GREATER %(timeout)s)
+                                set_property(TEST ${_test} PROPERTY TIMEOUT %(timeout)s)
+                            endif()
+                        endif()
+                    endforeach()""",
+                    comment=comment,
+                    tests="\n".join(f"    {test}" for test in matched),
+                    timeout=timeout,
+                )
+        else:
+            conditions = "\n".join(
+                _timeout_condition_template(
+                    f'_test MATCHES "^{pattern}$"', timeout
+                )
+                for pattern in regex
+            )
+            _append_cmake_template(
+                lines,
+                """\
+                # %(comment)s (regex match)
+                get_property(_all_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)
+                foreach(_test ${_all_tests})
+                %(conditions)s
+                endforeach()""",
+                comment=comment,
+                conditions=conditions,
+            )
+
+
+def _emit_timeout_label_match_block(lines, test_labels, timeout, comment):
+    """Apply a minimum timeout to tests carrying any requested label."""
+    if not test_labels or timeout is None:
+        return
+    conditions = "\n".join(
+        _timeout_condition_template(f'"{label}" IN_LIST _test_labels', timeout)
+        for label in test_labels
+    )
+    _append_cmake_template(
+        lines,
+        """\
+        # %(comment)s (match by existing label)
+        get_property(_all_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)
+        foreach(_test ${_all_tests})
+            get_property(_test_labels TEST ${_test} PROPERTY LABELS)
+        %(conditions)s
+        endforeach()""",
+        comment=comment,
+        conditions=conditions,
+    )
+
+
 def _compute_install_labels(categories, general_excludes, test_names):
     """Compute the final, ordered, deduplicated label list per test by
     walking the YAML rules against an explicit list of test names.
@@ -278,7 +427,9 @@ def _compute_install_labels(categories, general_excludes, test_names):
     return labels
 
 
-def generate_cmake_install(categories, general_excludes, test_names):
+def generate_cmake_install(
+    categories, general_excludes, test_names, execution_settings=None
+):
     """Install-tree emission. Emits one `set_tests_properties()` line per
     test with its final, deduplicated label set.
 
@@ -299,14 +450,26 @@ def generate_cmake_install(categories, general_excludes, test_names):
         if not labels_list:
             continue
         labels_str = ";".join(labels_list)
+        matching_timeouts = [
+            category_timeout(category, execution_settings)
+            for category in categories
+            if category in labels_list
+        ]
+        matching_timeouts = [timeout for timeout in matching_timeouts if timeout is not None]
+        timeout_property = (
+            f" TIMEOUT {min(matching_timeouts)}" if matching_timeouts else ""
+        )
         # Quote the test name so names containing spaces (e.g. rocWMMA's
         # "<target> smoke" install entries) survive ctest's tokeniser.
-        lines.append(f'set_tests_properties("{test}" PROPERTIES LABELS "{labels_str}")')
+        lines.append(
+            f'set_tests_properties("{test}" PROPERTIES LABELS "{labels_str}"'
+            f"{timeout_property})"
+        )
     lines.append("")
     return "\n".join(lines) + "\n"
 
 
-def generate_cmake(categories, explicit_tests=None):
+def generate_cmake(categories, explicit_tests=None, execution_settings=None):
     lines = [
         "# Auto-generated by parse_ctest_categories.py",
         "# DO NOT EDIT - modify test_categories.yaml instead",
@@ -331,9 +494,24 @@ def generate_cmake(categories, explicit_tests=None):
             explicit_tests=explicit_tests,
         )
 
+        timeout = category_timeout(category, execution_settings)
+        _emit_timeout_block(
+            lines,
+            test_patterns,
+            timeout,
+            f"Category timeout: {category} - test_patterns",
+            explicit_tests=explicit_tests,
+        )
+
         if test_labels:
             _emit_label_match_block(
                 lines, test_labels, labels_str, f"Category: {category} - test_labels"
+            )
+            _emit_timeout_label_match_block(
+                lines,
+                test_labels,
+                timeout,
+                f"Category timeout: {category} - test_labels",
             )
 
         if excludes:
@@ -454,6 +632,7 @@ def main():
         sys.exit(1)
 
     categories, general_excludes = parse_yaml(input_path)
+    execution_settings = parse_execution_settings(input_path)
 
     if args.print_categories:
         print(";".join(categories.keys()))
@@ -466,10 +645,14 @@ def main():
         # `set_property(TEST ...)` to `--print-labels` / `-L`, so the
         # ordinary build-tree emission would be a silent no-op here.
         cmake_code = generate_cmake_install(
-            categories, general_excludes, explicit_tests
+            categories, general_excludes, explicit_tests, execution_settings
         )
     else:
-        cmake_code = generate_cmake(categories, explicit_tests=explicit_tests)
+        cmake_code = generate_cmake(
+            categories,
+            explicit_tests=explicit_tests,
+            execution_settings=execution_settings,
+        )
         if general_excludes:
             cmake_code += generate_cmake_general_excludes(
                 general_excludes, explicit_tests=explicit_tests

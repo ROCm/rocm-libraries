@@ -20,7 +20,7 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
 
     # Label all ck_tile reduce tests with CK_TILE_REDUCE_TESTS for selective execution
     foreach(test_target ${CK_TILE_REDUCE_TEST_TARGETS})
-        set_tests_properties(${test_target} PROPERTIES LABELS "CK_TILE_REDUCE_TESTS")
+        set_property(TEST ${test_target} APPEND PROPERTY LABELS "CK_TILE_REDUCE_TESTS")
     endforeach()
 
     # Umbrella target to build and run all ck_tile reduce tests
@@ -32,4 +32,3 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
         COMMENT "Running all ck_tile reduce tests..."
     )
 endif()
-
