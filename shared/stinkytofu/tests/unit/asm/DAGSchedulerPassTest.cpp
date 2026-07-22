@@ -884,11 +884,12 @@ TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
 }
 
 // SGPR->tensor_load hazard: a SALU that writes an SGPR a tensor_load reads must be
-// separated from that tensor_load by the fixed hardware gap (kCdna5SgprToTensorLoadHazard,
-// 8 cycles). Mirrors the real case (wmma/ds fill around the SALU): the scheduler hoists
-// the SALU and/or holds the tensor_load so >= 8 cycles of work sit between them. We assert
-// the cycle invariant, not an exact order. A WMMA counts as its latencyCycles (the co-issue
-// window it opens, 8 here), other ops as issueCycles.
+// separated from that tensor_load by the fixed hardware gap (kCdna5HazardRules'
+// SaluSgprToMemAddr entry, 8 cycles). Mirrors the real case (wmma/ds fill around the
+// SALU): the scheduler hoists the SALU and/or holds the tensor_load so >= 8 cycles of
+// work sit between them. We assert the cycle invariant, not an exact order. A WMMA
+// counts as its latencyCycles (the co-issue window it opens, 8 here), other ops as
+// issueCycles.
 TEST_F(DAGSchedulerPassTest, SgprToTensorLoadHazard_AtLeast8CycleGap) {
     BasicBlock* body = bb;
     body->addSuccessor(body);

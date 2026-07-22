@@ -40,6 +40,14 @@ using namespace stinkytofu;
 // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
 
+// One (rule, register) hazard this node's issue must stamp: this node is a
+// producer under kCdna5HazardRules[ruleIdx] and writes the register at
+// regKey (regDepKey — register type folded in). Filled by the pre-scan.
+struct HazardFlag {
+    int ruleIdx;
+    int regKey;
+};
+
 struct DAGNode {
     StinkyInstruction* inst;
     unsigned inDegree;
@@ -48,14 +56,29 @@ struct DAGNode {
     // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects
     // based on DsReadOrder config and WMMA consumer analysis.
     unsigned dsReadPriority = UINT_MAX;
-    // Hardware hazard: the exact register keys (regDepKey) this node writes that a
-    // tensor_load reads as source(s), which the hardware requires be separated by a
-    // fixed number of cycles (SALU sgpr-dest -> tensor_load sgpr-src). Filled by the
-    // pre-scan. Non-empty drives the producer-side hoist (this node drifts earlier so
-    // intervening work absorbs the gap); the keys are stamped into the hazard gate when
-    // the node issues so the tensor_load waits the remainder out. Register type is
-    // encoded in the key, so this extends to other producer->consumer hazards.
-    std::vector<int> tensorLoadHazardKeys;
+    // Hardware hazard: the exact (rule, register) pairs this node writes that some
+    // later consumer reads, per kCdna5HazardRules (a fixed producer->consumer cycle
+    // gap keyed by register file). Filled by the pre-scan via the def-use user walk.
+    // Non-empty means this node's issue must stamp the corresponding hazard gate(s)
+    // (see CDNA5ReadyQueue::hazardGates_) so the consumer waits the gap out — that
+    // half is unconditionally correct regardless of scheduling order. hazardAnchor
+    // below drives a *throughput* heuristic on top of that guarantee.
+    std::vector<HazardFlag> hazardFlags;
+    // Set by the pre-scan (see scheduleRegionWithMovableSideEffects) only when this
+    // node has hazardFlags: the node this producer should be forced to precede, so
+    // enough natural fill work (that node's own latency/issue window) ends up between
+    // this producer and its hazarded consumer instead of being spent before this
+    // producer is even considered. nullptr when no such anchor was found (or none is
+    // needed) — the consumer-side gate alone still guarantees correctness, just
+    // possibly via an explicit stall rather than hidden fill. Approximate: derived
+    // from original program order as a proxy for available filler, not a true
+    // post-reorder critical-path computation.
+    DAGNode* hazardAnchor = nullptr;
+    // Set true by the shared Kahn's-algorithm loop (scheduleRegionWithMovableSideEffects)
+    // right after this node is picked. Lets CDNA5ReadyQueue's hazard-hoist promotion
+    // tell "anchor is ready to be picked" (inDegree == 0 && !issued) apart from
+    // "anchor already issued" (too late to hoist ahead of it).
+    bool issued = false;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };

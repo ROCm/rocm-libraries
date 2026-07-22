@@ -99,6 +99,12 @@ static void scheduleRegionWithMovableSideEffects(
         dagNodes.emplace_back(&getStinkyInst(it), id++);
     }
 
+    // Reverse lookup for the hazard pre-scan below (find a consumer instruction's id
+    // in O(1) instead of rescanning dagNodes per BFS hit).
+    std::unordered_map<StinkyInstruction*, unsigned> instToId;
+    instToId.reserve(regionSize);
+    for (unsigned i = 0; i < regionSize; ++i) instToId[dagNodes[i].inst] = i;
+
     // Graph
     std::vector<std::unordered_set<unsigned>> dagGraph(regionSize);
 
@@ -283,46 +289,93 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
-    // Pre-scan: flag SGPR producers feeding a tensor_load. The hardware requires a fixed
-    // gap between a SALU writing an SGPR and a tensor_load reading that SGPR as a source
-    // (a producer->consumer edge hazard, not either op's own latency). Detection: BFS the
-    // node's users (skipping PHIs); if a tensor_load user reads an SGPR this node writes,
-    // flag it. Drives the consumer-side gate (tensor_load waits the hazard out) and the
-    // producer-side hoist (the flagged producer may issue earlier so intervening work
-    // absorbs the gap). Only SGPR (RegType::S) dest/src overlap counts.
+    // Pre-scan: flag producers feeding a hazarded consumer, per kCdna5HazardRules (a
+    // data-driven table of fixed producer->consumer cycle gaps keyed by register
+    // file — e.g. SALU sgpr -> SMEM/tensor_load/VMEM address, VALU vgpr -> VMEM
+    // address). Detection per rule: BFS the node's users (skipping PHIs); if a
+    // rule.isConsumer user reads a register of rule.regType this node writes, flag it
+    // (dagNodes[i].hazardFlags). This half is what drives the consumer-side gate
+    // (CDNA5ReadyQueue::hazardGates_) and is unconditionally correct regardless of
+    // scheduling order.
+    //
+    // Also computes each flagged producer's hazardAnchor: a throughput heuristic, not
+    // a correctness requirement. Walk backward from the (first-found) consumer's id
+    // across the whole region — skipping the producer's own id, not just the
+    // [producer, consumer) interval, since the producer may need to be reordered
+    // earlier than its own original position to reach real filler work (e.g. hop
+    // ahead of a WMMA that already precedes it in program order) — accumulating each
+    // node's natural fill contribution (a matrix instruction's latencyCycles, a
+    // fixed-latency co-issue window; otherwise issueCycles) until the sum reaches the
+    // rule's required cycle count. The anchor is the earliest node absorbed: forcing
+    // the producer to issue before the anchor becomes ready (see
+    // CDNA5ReadyQueue::decidePromote()) means the anchor's own fill window lands
+    // between the producer and its consumer instead of being spent before the
+    // producer is even considered. Approximate (original program order is a proxy for
+    // available filler, not the true post-reorder critical path) — an imprecise
+    // anchor costs an explicit stall via the gate, never correctness, since the gate
+    // does not depend on the anchor being right.
     for (unsigned i = 0; i < regionSize; ++i) {
         StinkyInstruction* prod = dagNodes[i].inst;
-        // Map this node's SGPR destination indices -> their regDepKey.
-        std::unordered_map<uint32_t, int> sgprDefKey;
-        for (const StinkyRegister& d : prod->getDestRegs()) {
-            if (!d.isRegister() || isPseudoReg(d) || d.reg.type != RegType::S) continue;
-            for (uint32_t off = 0; off < d.reg.num; ++off)
-                sgprDefKey[d.reg.idx + off] = regDepKey(d.reg.type, d.reg.idx + off);
-        }
-        if (sgprDefKey.empty()) continue;
+        int anchorCycles = 0;
+        unsigned consumerId = UINT_MAX;
 
-        std::unordered_set<int> hazardKeys;
-        std::vector<StinkyInstruction*> q(prod->getUsers().begin(), prod->getUsers().end());
-        std::unordered_set<StinkyInstruction*> seen;
-        while (!q.empty()) {
-            StinkyInstruction* u = q.back();
-            q.pop_back();
-            if (!seen.insert(u).second) continue;
-            if (u->getUnifiedOpcode() == GFX::PHI) {
-                for (auto* pu : u->getUsers()) q.push_back(pu);
-                continue;
+        for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
+            const HazardRule& rule = kCdna5HazardRules[ruleIdx];
+            if (!rule.isProducer(*prod)) continue;
+
+            std::unordered_map<uint32_t, int> defKey;
+            for (const StinkyRegister& d : prod->getDestRegs()) {
+                if (!d.isRegister() || isPseudoReg(d) || d.reg.type != rule.regType) continue;
+                for (uint32_t off = 0; off < d.reg.num; ++off)
+                    defKey[d.reg.idx + off] = regDepKey(d.reg.type, d.reg.idx + off);
             }
-            if (!isTensorLoad(*u)) continue;
-            // Record exactly the SGPRs this node writes that the tensor_load reads.
-            for (const StinkyRegister& s : u->getSrcRegs()) {
-                if (!s.isRegister() || isPseudoReg(s) || s.reg.type != RegType::S) continue;
-                for (uint32_t off = 0; off < s.reg.num; ++off) {
-                    auto it = sgprDefKey.find(s.reg.idx + off);
-                    if (it != sgprDefKey.end()) hazardKeys.insert(it->second);
+            if (defKey.empty()) continue;
+
+            std::unordered_set<int> hazardKeys;
+            std::vector<StinkyInstruction*> q(prod->getUsers().begin(), prod->getUsers().end());
+            std::unordered_set<StinkyInstruction*> seen;
+            while (!q.empty()) {
+                StinkyInstruction* u = q.back();
+                q.pop_back();
+                if (!seen.insert(u).second) continue;
+                if (u->getUnifiedOpcode() == GFX::PHI) {
+                    for (auto* pu : u->getUsers()) q.push_back(pu);
+                    continue;
+                }
+                if (!rule.isConsumer(*u)) continue;
+                bool matchedHere = false;
+                for (const StinkyRegister& s : u->getSrcRegs()) {
+                    if (!s.isRegister() || isPseudoReg(s) || s.reg.type != rule.regType) continue;
+                    for (uint32_t off = 0; off < s.reg.num; ++off) {
+                        auto it = defKey.find(s.reg.idx + off);
+                        if (it != defKey.end()) {
+                            hazardKeys.insert(it->second);
+                            matchedHere = true;
+                        }
+                    }
+                }
+                if (matchedHere) {
+                    auto idIt = instToId.find(u);
+                    if (idIt != instToId.end()) consumerId = std::min(consumerId, idIt->second);
                 }
             }
+            for (int key : hazardKeys) dagNodes[i].hazardFlags.push_back({ruleIdx, key});
+            if (!hazardKeys.empty() && rule.cycles > anchorCycles) anchorCycles = rule.cycles;
         }
-        dagNodes[i].tensorLoadHazardKeys.assign(hazardKeys.begin(), hazardKeys.end());
+
+        if (anchorCycles == 0 || consumerId == UINT_MAX) continue;
+
+        int accumulated = 0;
+        unsigned anchorId = UINT_MAX;
+        for (unsigned cid = consumerId; cid-- > 0;) {
+            if (cid == i) continue;  // skip the producer itself
+            StinkyInstruction* mid = dagNodes[cid].inst;
+            accumulated += isMatrixInstruction(*mid) ? mid->latencyCycles : mid->issueCycles;
+            anchorId = cid;
+            if (accumulated >= anchorCycles) break;
+        }
+        if (anchorId != UINT_MAX && accumulated >= anchorCycles)
+            dagNodes[i].hazardAnchor = &dagNodes[anchorId];
     }
 
     PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
@@ -346,6 +399,10 @@ static void scheduleRegionWithMovableSideEffects(
         // Pop the last instruction from the ready queue.
         DAGNode* currentNode = readyQueue.pickOne();
         ++orderInRegion;
+        // Marks this node as no longer a valid hazard-hoist anchor (see
+        // CDNA5ReadyQueue::decidePromote()): once issued, forcing a producer ahead of
+        // it can no longer bank its latency/issue window as filler.
+        currentNode->issued = true;
 
         if (isBarrier(*currentNode->inst)) {
             PASS_DEBUG(std::cerr << "[DAG schedule] bb=\"" << regionBbLabel << "\" orderInRegion="
