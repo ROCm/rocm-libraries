@@ -96,6 +96,7 @@ set(HEADER_FILES
     internal/generic/hipsparse_scatter.h
     internal/generic/hipsparse_sddmm.h
     internal/generic/hipsparse_sparse2dense.h
+    internal/generic/hipsparse_spgeam.h
     internal/generic/hipsparse_spgemm_reuse.h
     internal/generic/hipsparse_spgemm.h
     internal/generic/hipsparse_spmm.h
