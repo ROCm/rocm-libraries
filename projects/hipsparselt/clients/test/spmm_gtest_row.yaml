@@ -102,7 +102,7 @@ Tests:
   orderB: [R]
   orderC: [R]
   orderD: [R]
- gpu_arch: '9(42|50)'
+  gpu_arch: '9(42|50)'
 
 - name: spmm_medium
   category: pre_checkin
