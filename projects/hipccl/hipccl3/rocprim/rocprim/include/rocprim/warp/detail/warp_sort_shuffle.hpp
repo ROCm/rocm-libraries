@@ -405,6 +405,42 @@ struct warp_shuffle_sort_impl
                 }
             });
     }
+
+    /// \brief Applies a permutation to values based on indices provided by a functor.
+    /// This abstracts away the source of the indices (whether simple array or struct array).
+    template<class V, class IndexOp>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    static void apply_permutation(V (&thread_values)[ItemsPerThread], IndexOp get_src_index)
+    {
+        // Create a copy to read from (source)
+        V source_values[ItemsPerThread];
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        {
+            source_values[i] = thread_values[i];
+        }
+
+        // Write into destination
+        ROCPRIM_UNROLL
+        for(unsigned int dst_item = 0; dst_item < ItemsPerThread; ++dst_item)
+        {
+            // Use the functor to get the index!
+            unsigned int src_idx = get_src_index(dst_item);
+
+            unsigned int src_lane        = src_idx / ItemsPerThread;
+            unsigned int src_item_offset = src_idx % ItemsPerThread;
+
+            ROCPRIM_UNROLL
+            for(unsigned int k = 0; k < ItemsPerThread; ++k)
+            {
+                V val = warp_shuffle(source_values[k], src_lane, VirtualWaveSize);
+                if(k == src_item_offset)
+                {
+                    thread_values[dst_item] = val;
+                }
+            }
+        }
+    }
 };
 
 template<class Key, unsigned int VirtualWaveSize, class Value>
@@ -508,39 +544,9 @@ public:
                                                                                   thread_keys,
                                                                                   index);
 
-            // Create a copy of 'thread_values' so we can swizzle them around without overwriting.
-            V copy[ItemsPerThread];
-            ROCPRIM_UNROLL
-            for(unsigned item = 0; item < ItemsPerThread; ++item)
-            {
-                copy[item] = thread_values[item];
-            }
-
-            // We will now write into 'thread_values' from 'copy'. We do this by checking for
-            // the matrix between destination and source index, since we cannot dynamically
-            // index registers.
-            //
-            // This requires IPT^2 shuffles because both need index lane and item offset.
-            ROCPRIM_UNROLL
-            for(unsigned int dst_item = 0; dst_item < ItemsPerThread; ++dst_item)
-            {
-                ROCPRIM_UNROLL
-                for(unsigned src_item = 0; src_item < ItemsPerThread; ++src_item)
-                {
-                    // This shuffle can potentially be moved into the branch. We can then
-                    // trade the extra masking for in-place shuffle which may potentially
-                    // be faster. This may require an extra memory fence since the previous
-                    // duplication into 'copy' must be finalized and we can't reuse
-                    // registers as freely.
-                    V temp = warp_shuffle(copy[src_item],
-                                          index[dst_item] / ItemsPerThread,
-                                          VirtualWaveSize);
-                    if(index[dst_item] % ItemsPerThread == src_item)
-                    {
-                        thread_values[dst_item] = temp;
-                    }
-                }
-            }
+            warp_shuffle_sort_impl<VirtualWaveSize, ItemsPerThread>::apply_permutation(
+                thread_values,
+                [&](unsigned int i) { return index[i]; });
         }
     }
 
