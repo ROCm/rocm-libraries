@@ -383,12 +383,17 @@ static void op_tile_smem_store(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* value = op->operands[op->num_operands - 1];
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     int align = ll_elem_bytes(value->type->name);
-    rocke_ll_emitf(
-        L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
+                   gep,
+                   agg_ty,
+                   base_ptr,
+                   gidx);
     rocke_ll_emitf(L,
                    "  store %s %s, ptr addrspace(3) %s, align %d",
                    rocke_ll_llvm_type(L, value->type),
@@ -404,13 +409,18 @@ static void op_tile_lds_atomic_add(rocke_lower_t* L, const rocke_op_t* op)
     const char* elem_ty = rocke_ll_llvm_type(L, val->type);
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     const char* rmw_op = (val->type->name && strcmp(val->type->name, "f32") == 0) ? "fadd" : "add";
-    rocke_ll_emitf(
-        L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
+                   gep,
+                   agg_ty,
+                   base_ptr,
+                   gidx);
     rocke_ll_emitf(L,
                    "  %s = atomicrmw %s ptr addrspace(3) %s, %s %s %s",
                    ll_res(op),
@@ -428,14 +438,19 @@ static void op_tile_smem_store_vN(rocke_lower_t* L, const rocke_op_t* op)
     int64_t vec = ll_attr_int(op, "vec", 0);
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     const char* elem_ty = rocke_ll_llvm_type(L, value->type->elem);
     int elem_bytes = ll_elem_bytes(value->type->elem->name);
     int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
-    rocke_ll_emitf(
-        L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
+                   gep,
+                   agg_ty,
+                   base_ptr,
+                   gidx);
     rocke_ll_emitf(L,
                    "  store <%lld x %s> %s, ptr addrspace(3) %s, align %lld",
                    (long long)vec,
@@ -452,6 +467,7 @@ static void op_tile_smem_load_v4(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* col = op->operands[2];
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* elems[4];
@@ -462,7 +478,7 @@ static void op_tile_smem_load_v4(rocke_lower_t* L, const rocke_op_t* op)
                    "i32 0, i32 %s, i32 %s",
                    base,
                    agg_ty,
-                   gname,
+                   base_ptr,
                    rocke_ll_operand(L, row),
                    rocke_ll_operand(L, col));
     for(i = 0; i < 4; i++)
@@ -491,6 +507,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     int64_t vec = ll_attr_int(op, "vec", 0);
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
@@ -527,7 +544,7 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    base,
                    agg_ty,
-                   gname,
+                   base_ptr,
                    idx_strs);
     if(vec == 1)
     {
@@ -564,6 +581,7 @@ static void op_tile_smem_store_distributed(rocke_lower_t* L, const rocke_op_t* o
     int n = ll_is_vec(values->type) ? values->type->count : 1;
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* elem_ty = ll_is_vec(values->type) ? rocke_ll_llvm_type(L, values->type->elem)
                                                   : rocke_ll_llvm_type(L, values->type);
@@ -583,7 +601,7 @@ static void op_tile_smem_store_distributed(rocke_lower_t* L, const rocke_op_t* o
                        "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, i32 0, i32 %d",
                        gep,
                        agg_ty,
-                       gname,
+                       base_ptr,
                        i);
         rocke_ll_emitf(L, "  store %s %s, ptr addrspace(3) %s, align 2", elem_ty, ev, gep);
     }
@@ -596,12 +614,17 @@ static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
     int64_t vec = ll_attr_int(op, "vec", 0);
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
     int64_t align = vec * 4;
-    rocke_ll_emitf(
-        L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
+                   gep,
+                   agg_ty,
+                   base_ptr,
+                   gidx);
     if(vec == 1)
     {
         if(ll_is_vec(value->type))
@@ -641,6 +664,7 @@ static void op_tile_smem_load_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
     int64_t vec = ll_attr_int(op, "vec", 0);
     const rocke_type_t* stype = NULL;
     const char* gname = rocke_ll_smem_global_name(L, smem, &stype);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     const char* agg_ty = rocke_ll_smem_storage_type(L, stype);
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
@@ -649,7 +673,7 @@ static void op_tile_smem_load_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
                    "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                    base,
                    agg_ty,
-                   gname,
+                   base_ptr,
                    idx_strs);
     if(vec == 1)
     {
@@ -680,8 +704,10 @@ static void op_tile_smem_load_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 static void op_tile_smem_addr_of(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* smem = op->operands[0];
+    const rocke_type_t* stype = smem->type;
     const char* gname = rocke_ll_smem_global_name(L, smem, NULL);
-    rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), gname);
+    const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
+    rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), base_ptr);
 }
 
 static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)

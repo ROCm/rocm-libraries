@@ -731,32 +731,57 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                             arch);
     }
 
-    /* LDS budget: must fit before we attempt codegen.
-     *   A_smem + B_smem, each (tile_m or tile_n) × row_stride × 2 bytes (f16).
-     *   row_stride = tile_k + k_pad  (k_pad = 8 when tile_k >= 16, else 0).
-     *   compv4 pipeline double-buffers A and B → ×2.
-     *   This mirrors the smem_alloc calls in instance_conv_implicit_gemm_conv_build_glue.c
-     *   and catches the overflow that would otherwise produce CODEGEN_BC_TO_RELOCATABLE. */
+    /* LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
+     * Mirrors the Python is_valid_spec LDS check (added on this branch):
+     *   _ab_dtype_bytes = 4 if dtype_a == "fp32" else 2
+     *   _a_shape = effective_lds_layout().storage_shape(tile_m) = (tile_m, row_stride)
+     *   _b_shape = effective_lds_layout().storage_shape(tile_n) = (tile_n, row_stride)
+     *   _ab_bytes = (a_rows*a_cols + b_rows*b_cols) * _ab_dtype_bytes
+     *   _ab_lds   = _ab_bytes * (2 if double_buffer else 1)
+     *   _c_lds    = tile_m * tile_n * _c_dtype_bytes  (if epilogue == "cshuffle")
+     *   _total_lds = max(_ab_lds, _c_lds)             (not sum -- they can overlap in pool) */
     {
-        /* k_pad and double_buffer mirror build_glue priority order exactly:
-         *   k_pad: has_lds_k_pad → lds_k_pad; async_dma → 0; else (tile_k>=16)?8:0
-         *   double_buffer: compv4 || async_dma || unroll_k */
-        int k_pad
-            = s->has_lds_k_pad ? s->lds_k_pad : (s->async_dma ? 0 : ((s->tile_k >= 16) ? 8 : 0));
-        int row_stride = s->tile_k + k_pad;
-        int ab_single = (s->tile_m + s->tile_n) * row_stride * 2; /* f16 = 2 bytes */
-        int double_buf
+        rocke_conv_lds_layout_t lds_layout;
+        char lds_reason[256];
+        int ab_dtype_bytes;
+        int ab_bytes;
+        int ab_lds;
+        int c_lds;
+        int total_lds;
+        int double_buf;
+        bool is_cshuffle;
+
+        if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
+               s, &lds_layout, lds_reason, sizeof(lds_reason)))
+        {
+            ROCKE_CONVVS_REJECT("%s", lds_reason);
+        }
+
+        ab_dtype_bytes = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
+        /* storage_shape(rows) = (rows, row_stride) */
+        ab_bytes = (s->tile_m * lds_layout.row_stride + s->tile_n * lds_layout.row_stride)
+                   * ab_dtype_bytes;
+
+        double_buf
             = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma || s->unroll_k)
                   ? 1
                   : 0;
-        int bytes_lds = ab_single * (double_buf ? 2 : 1);
-        if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))
+        ab_lds = ab_bytes * (double_buf ? 2 : 1);
+
+        is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {
-            ROCKE_CONVVS_REJECT("LDS budget %d > %d cap (AB=%d, double_buf=%d) on %s",
-                                bytes_lds,
+            int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+            c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
+        }
+        total_lds = (ab_lds > c_lds) ? ab_lds : c_lds;
+
+        if(!rocke_archtarget_fits_lds(target, (long)total_lds))
+        {
+            ROCKE_CONVVS_REJECT("LDS budget %d bytes (A/B=%d, C=%d) > %d cap on %s",
+                                total_lds,
+                                ab_lds,
+                                c_lds,
                                 target->lds_capacity_bytes,
-                                ab_single,
-                                double_buf,
                                 arch);
         }
     }
