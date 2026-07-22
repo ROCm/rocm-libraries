@@ -15,11 +15,11 @@
  * fails *loudly* (never silently) on those nodes, this header declares each
  * missing attribute class and the macros the graph wrapper uses to stamp out a
  * matching `Graph::*` node method that records
- * `error_code_t::GRAPH_NOT_SUPPORTED` (RFC 0012 §4.4.2, §6.5).
+ * `error_code_t::GRAPH_NOT_SUPPORTED`.
  *
  * The error is recorded on the composition Graph and surfaces from the next
  * `validate()` / `build_operation_graph()` — node-adding methods return tensors,
- * not `error_t`, so they cannot report it directly (RFC §4.4.2).
+ * not `error_t`, so they cannot report it directly.
  *
  * @note Internal-to-shim; pulled in by `detail/graph_wrapper.h`.
  */
@@ -43,7 +43,7 @@ namespace detail
 // universal fluent setters every cuDNN attribute type shares (`set_name`,
 // `set_compute_data_type`) so hipified source that chains them still compiles.
 // Node-specific setters are intentionally omitted until a consumer asks for the
-// node (RFC §7.3, consumer-driven landing order); adding one is how the node
+// node (consumer-driven landing order); adding one is how the node
 // graduates from a stub to a real wrapper/alias.
 template <typename Derived>
 class UnsupportedAttributes
@@ -93,7 +93,7 @@ private:
     }
 // NOLINTEND(bugprone-macro-parentheses)
 
-/// @brief RFC 0012 §4.4.2 / §6.5 — unsupported node attribute.
+/// @brief Unsupported node attribute.
 /// hipDNN has no equivalent engine; the node compiles but reports
 /// `error_code_t::GRAPH_NOT_SUPPORTED` at validate()/build().
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(BN_finalize_attributes);
@@ -142,7 +142,7 @@ HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Moe_grouped_matmul_bwd_attributes);
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 
-// Stamp a Tier-2 fail-stub node method body (RFC 0012 §6.5). Records
+// Stamp a Tier-2 fail-stub node method body. Records
 // GRAPH_NOT_SUPPORTED on the composition Graph — surfaced at the next
 // validate()/build_operation_graph() — with a message pointing at the issue
 // tracker, then returns a default-constructed result (null shared_ptr or an

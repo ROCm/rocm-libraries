@@ -46,7 +46,7 @@ using hipdnn_frontend::graph::Tensor_attributes;
 using hipdnn_frontend::graph::TensorAttributes;
 using nv_bfloat16 = hipdnn_frontend::bfloat16;
 
-// Tier-1 node attribute types (RFC 0012 §4.4.2 / Reference §2): each cuDNN v9
+// Tier-1 node attribute types: each cuDNN v9
 // *_attributes class with an exact hipDNN counterpart is aliased 1:1 — zero
 // overhead, no wrapper. The matching Graph::* node method forwards straight to
 // the wrapped hipDNN graph (see detail/graph_wrapper.h).
