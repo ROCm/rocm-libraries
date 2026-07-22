@@ -3,6 +3,5 @@
 
 target_sources(${INTEGRATION_TESTS_EXE}
     PRIVATE
-        IntegrationGpuRMSNorm.cpp
-        IntegrationGpuRMSNormBackward.cpp
+        IntegrationGpuLayernormForward.cpp
 )
