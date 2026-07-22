@@ -375,9 +375,9 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
                             static_cast<size_t>(srcDescPtr->h) * static_cast<size_t>(srcDescPtr->n))
                          : 0;
     size_t requiredSize = histSize + lutSize + yuvSize;
-
+    constexpr bool DEBUG = true;
     // Pre-allocated scratch buffer size from handle (sizeof(Rpp32f) * 8294400)
-    constexpr size_t SCRATCH_BUFFER_SIZE = sizeof(Rpp32f) * 8294400;
+    constexpr size_t SCRATCH_BUFFER_SIZE = (DEBUG) ? 1024 : sizeof(Rpp32f) * 8294400;
 
     // Use handle's pre-allocated scratch buffer if sufficient, otherwise reallocate overflow buffer
     auto hip_async_deleter = [stream = handle.GetStream()](void* ptr) {
@@ -393,7 +393,6 @@ RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
             reinterpret_cast<Rpp8u*>(handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     } else {
         // Reallocate overflow buffer if needed
-        printf("hit overflow path");
         RPP_HIP_RETURN_IF_ERROR(hipMalloc(&scratchBuffer, requiredSize));
         scratchOverflowGuard.reset(scratchBuffer);
     }
