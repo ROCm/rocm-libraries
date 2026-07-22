@@ -19,3 +19,7 @@ CMakeUserPresets.json
 /parametric-chaos-v2.pdf
 /params-=findings.md
 /check_caps.py
+
+# local session/tool scratch (not deliverables)
+/.codex/
+/.handoff/
