@@ -228,14 +228,11 @@ namespace rocsparse
     //   (1) skew guard  -> coarse  (long-tailed rows: cut atomic/dichotomy traffic)
     //   (2) low volume  -> fine    (not enough work to fill the device: occupancy)
     //   (3) density buckets (sparse -> fine, medium -> med, dense -> coarse)
-    static inline uint32_t nnzsplit_nnz_per_thread(const hipDeviceProp_t& prop,
-                                                   uint32_t               block,
-                                                   int64_t                m,
-                                                   int64_t                nnz,
-                                                   int64_t                max_row_nnz)
+    static inline uint32_t nnzsplit_nnz_per_thread(
+        const hipDeviceProp_t& prop, uint32_t block, int64_t m, int64_t nnz, int64_t max_row_nnz)
     {
-        const double avg
-            = (m > 0) ? static_cast<double>(nnz) / static_cast<double>(m) : static_cast<double>(nnz);
+        const double avg = (m > 0) ? static_cast<double>(nnz) / static_cast<double>(m)
+                                   : static_cast<double>(nnz);
 
         // (1) skew guard
         if(m > 0 && max_row_nnz > 0)
@@ -473,8 +470,8 @@ rocsparse_status
     // replays the exact same (block, npt) - the block layout of the arrays
     // allocated below depends on both. Block size is wavefront-relative; the
     // nnz-per-thread granularity folds in the row-skew guard and real occupancy.
-    const uint32_t block        = rocsparse::nnzsplit_block_size(handle);
-    int64_t        max_row_nnz  = 0;
+    const uint32_t block       = rocsparse::nnzsplit_block_size(handle);
+    int64_t        max_row_nnz = 0;
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::csrmv_nnzsplit_max_row_nnz(handle, m, csr_row_ptr, &max_row_nnz));
     const uint32_t npt = rocsparse::nnzsplit_nnz_per_thread(
@@ -679,10 +676,10 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
     {
         block = rocsparse::nnzsplit_block_size(handle);
         npt   = rocsparse::nnzsplit_nnz_per_thread(handle->properties,
-                                                   block,
-                                                   static_cast<int64_t>(m),
-                                                   static_cast<int64_t>(nnz),
-                                                   csrmv_info->nnzsplit.max_row_nnz);
+                                                 block,
+                                                 static_cast<int64_t>(m),
+                                                 static_cast<int64_t>(nnz),
+                                                 csrmv_info->nnzsplit.max_row_nnz);
     }
 
     if(trans == rocsparse_operation_none || descr->type == rocsparse_matrix_type_symmetric)
