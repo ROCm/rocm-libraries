@@ -1488,28 +1488,36 @@ class UnifiedGemmCodegen:
 
     @staticmethod
     def _cshuffle_repeat_ok(tile: TileConfig) -> bool:
-        """CShuffle-store correctness gate.
+        """CShuffle-store correctness gate (narrowed; see issue #9684).
 
-        The CShuffle epilogue stores the accumulator back through LDS in
-        power-of-two MRepeat/NRepeat chunks, so a tile whose per-wave repeat
-        count -- tile / (warp * warp_tile) -- is not a power of two is
-        mis-stored and yields numerically WRONG results at runtime. The kernel
-        still compiles (the epilogue's static_asserts only check divisibility,
-        which such tiles satisfy), so it must be filtered in codegen. Observed
-        on MI350 for tile_m=192 (MRepeat = 192 / (2*32) = 3): verified incorrect
-        on BOTH the bridge and Tile Engine at every shape, including shapes
-        divisible by 192. Power-of-two tiles (64/128/256) are unaffected.
+        The CShuffle epilogue mis-stores the accumulator only for ONE specific
+        combination: an ODD per-wave repeat (>1) -- tile / (warp * warp_tile) --
+        paired with a 32-wide warp tile in that dimension. GPU-verified on
+        gfx942: the tile_m=192 / warp_m=2 / warp_tile_m=32 configs
+        (MRepeat = 192/(2*32) = 3) return garbage (built-in verify=fail,
+        max_rel ~1.3), while EVERY other non-power-of-two repeat is numerically
+        correct -- including MRepeat=3 with warp_tile_m=16 (192/(4*16)) and even
+        non-pow2 repeats such as 6 and 12. Confirmed by building all 116
+        non-pow2-repeat cshuffle/192 configs and running the op's CPU validation:
+        exactly the 26 matching the signature above fail; the other 90 pass. The
+        earlier "per-wave repeat must be a power of two" rule was therefore too
+        broad and needlessly dropped those 90 valid configs.
 
         This is CShuffle-specific: the "default" (DefaultGemm2DEpilogue) path
         stores directly (not through the LDS repack) and is numerically correct
-        for non-pow2 repeats -- verified on gfx942 at tile_m=192/MRepeat=3
-        (max_rel ~5e-4 across shapes divisible by 192, while the same tile under
-        CShuffle returns garbage, max_rel ~1.3). Only call this for kernels
-        whose resolved epilogue is "cshuffle".
+        for non-pow2 repeats. Only call this for kernels whose resolved epilogue
+        is "cshuffle".
         """
+
+        def _dim_bad(repeat: int, warp_tile: int) -> bool:
+            return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
         m_repeat = tile.tile_m // (tile.warp_m * tile.warp_tile_m)
         n_repeat = tile.tile_n // (tile.warp_n * tile.warp_tile_n)
-        return _is_power_of_two(m_repeat) and _is_power_of_two(n_repeat)
+        return not (
+            _dim_bad(m_repeat, tile.warp_tile_m)
+            or _dim_bad(n_repeat, tile.warp_tile_n)
+        )
 
     def _get_configs_for_variant(self, variant: GemmVariant) -> List[KernelConfig]:
         """Get all configurations for a variant

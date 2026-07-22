@@ -1207,6 +1207,23 @@ def _is_power_of_two(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
 
 
+def _cshuffle_store_ok(
+    m_repeat: int, n_repeat: int, warp_tile_m: int, warp_tile_n: int
+) -> bool:
+    """Return False for the one CShuffle-store combination that is numerically
+    wrong (issue #9684): an ODD per-wave repeat (>1) paired with a 32-wide warp
+    tile in that dimension. GPU-verified on gfx942 -- e.g. tile_m=192 / wave_m=2
+    / warp_tile_m=32 (MRepeat=3) returns garbage, while every other non-power-of-
+    two repeat (incl. MRepeat=3 with warp_tile_m=16, and even repeats like 6/12)
+    is correct. Only relevant for the CShuffle epilogue; the default epilogue is
+    exempt."""
+
+    def _dim_bad(repeat: int, warp_tile: int) -> bool:
+        return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
+    return not (_dim_bad(m_repeat, warp_tile_m) or _dim_bad(n_repeat, warp_tile_n))
+
+
 def expand_sweep(
     config_path: str,
     arch: str,
@@ -1320,24 +1337,28 @@ def expand_sweep(
         val = _cu.validate_kernel_config(c.to_ctypes_config())
         if not val.is_valid:
             continue
-        # Tile/CShuffle correctness gate (mirrors unified_gemm_codegen's
-        # TileConfig.is_valid + the power-of-two repeat rule; the ctypes
-        # validate_kernel_config above does NOT enforce either). A block tile must
-        # split evenly across its waves -- tile % (wave * warp_tile) == 0 -- and
-        # the CShuffle epilogue stores the accumulator through LDS in power-of-two
-        # MRepeat/NRepeat chunks, so the per-wave repeat must be a power of two.
-        # Tiles that violate either still compile but produce numerically WRONG
-        # results at runtime. Observed on MI350 for tile_m=192 (MRepeat=3) and
-        # tile_n=192 (e.g. 64x192x64_1x4x1, 192 not divisible by 4*32) -- both
-        # verified incorrect on the bridge and Tile Engine. Power-of-two tiles
-        # (64/128/256) are unaffected.
+        # Tile/CShuffle correctness gate. A block tile must split evenly across
+        # its waves -- tile % (wave * warp_tile) == 0 -- else the kernel is
+        # genuinely invalid.
+        #
+        # Narrowed CShuffle-store gate (issue #9684): the CShuffle epilogue only
+        # mis-stores the accumulator for one specific combination -- an ODD
+        # per-wave repeat (>1) paired with a 32-wide warp tile in that dimension.
+        # GPU-verified on gfx942: the tile_m=192 / wave_m=2 / warp_tile_m=32
+        # configs (MRepeat = 192/(2*32) = 3) return garbage, while EVERY other
+        # non-power-of-two repeat is numerically correct -- including MRepeat=3
+        # with warp_tile_m=16 (192/(4*16)) and even non-pow2 repeats like 6 and
+        # 12. The previous "per-wave repeat must be a power of two" rule was too
+        # broad and needlessly dropped 90 valid configs. The "default" epilogue
+        # stores directly and is exempt.
         m_div = wm * wtm
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
             continue
-        if epi == "cshuffle":
-            if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
-                continue
+        if epi == "cshuffle" and not _cshuffle_store_ok(
+            tm // m_div, tn // n_div, wtm, wtn
+        ):
+            continue
         seen.add(c.name)
         configs.append(c)
 
