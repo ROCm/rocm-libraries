@@ -71,6 +71,14 @@ constexpr bool has_operator_left_shift_v = false;
 template<class T>
 constexpr bool has_operator_left_shift_v<T, std::void_t<decltype(std::declval<T&>() << sizeof(T))>>
     = true;
+
+template<class SizeType, class SizeIn>
+static inline constexpr auto in_range(const SizeIn& size)
+{
+    using common_t = std::common_type_t<SizeIn, SizeType>;
+    return static_cast<common_t>(size)
+            < static_cast<common_t>(std::numeric_limits<SizeType>::max());
+}
 } // namespace device_topk_air_helper
 
 /// \brief This is an implementation of the TopK algorithm.
@@ -236,6 +244,11 @@ struct device_topk_air_impl
         }
 
     public:
+        ROCPRIM_HOST_DEVICE ROCPRIM_FORCE_INLINE void init()
+        {
+            data = 0;
+        }
+
         // Runtime get funtion, and it will be compile time function when Iteration is constexpr
         constexpr ROCPRIM_FORCE_INLINE digit_t get(unsigned int Iteration) const
         {
@@ -307,7 +320,7 @@ struct device_topk_air_impl
     {
         // Item is the input of this iteration
         input,
-        // Item was the cadidate identified in the last iteration
+        // Item was the candidate identified in the last iteration
         candidate,
         // Item is neither the input nor the candidate
         discard
@@ -1173,7 +1186,7 @@ struct device_topk_air_impl
             digit_t digits[num_iterations];
             bool    is_candidate_in_prev_iteration = true;
             // It's actually faster to just directly extract all digits, instead of using runtime variable
-            // last_iteration to determin how many iterations needs to be loaded
+            // last_iteration to determine how many iterations needs to be loaded
             rocprim::detail::constexpr_for_lt<0, num_iterations, 1>(
                 [&](const auto i)
                 { digits[i] = extract_digit_of_cur_iteration<i>(key, decomposer); });
@@ -1210,9 +1223,9 @@ struct device_topk_air_impl
                && less_last_n_bits(digits[last_iteration], last_chosed_bin, cur_bits))
             { // Is candidate of last iteration
                 // This can be also done with thread counter, but in practice, this is super slow
-                // becasue there are a lot of threads even do not have a candidate to store, but if
+                // because there are a lot of threads even do not have a candidate to store, but if
                 // we use thread counter for it, we need to create a buffer to store the counter, which
-                // increases the use of register, so here we use atomicAdd once we have a cadidate to
+                // increases the use of register, so here we use atomicAdd once we have a candidate to
                 // output
                 const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
                 keys_output[output_pos] = key;
@@ -1478,14 +1491,6 @@ private:
                                                  SizeOut,
                                                  Decomposer>;
 
-    template<class SizeType>
-    static inline constexpr auto in_range(const SizeIn& size)
-    {
-        using common_t = std::common_type_t<SizeIn, SizeType>;
-        return static_cast<common_t>(size)
-               < static_cast<common_t>(std::numeric_limits<SizeType>::max());
-    }
-
     // If `DecaySizeIn` is true, launch topk with a decayed SizeIn according
     // to the actual runtime input size. Otherwise, launch topk with the original
     // SizeIn type.
@@ -1500,7 +1505,7 @@ private:
     {
         if constexpr(DecaySizeIn)
         {
-            if(in_range<std::uint32_t>(size))
+            if(device_topk_air_helper::in_range<std::uint32_t>(size))
             {
                 return std::apply(simplified_type<BlockSize,
                                                   ItemsPerThread,
