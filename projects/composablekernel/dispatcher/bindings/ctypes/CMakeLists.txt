@@ -87,42 +87,64 @@ set(MX_GEMM_TE_INCLUDE_DIRS
     ${PROJECT_SOURCE_DIR}/tile_engine/ops/gemm/mx_gemm
 )
 
-file(GLOB MX_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/mx_gemm_*.hpp")
-if(MX_GEMM_KERNEL_HEADERS)
-    list(GET MX_GEMM_KERNEL_HEADERS 0 MX_GEMM_KERNEL_HEADER)
-    message(STATUS "Found MX-GEMM kernel for ctypes lib: ${MX_GEMM_KERNEL_HEADER}")
-
-    add_ctypes_library(dispatcher_mx_gemm_lib
-        mx_gemm_ctypes_lib.cpp
-        KERNEL_HEADER ${MX_GEMM_KERNEL_HEADER}
-    )
-    target_include_directories(dispatcher_mx_gemm_lib PRIVATE ${MX_GEMM_TE_INCLUDE_DIRS})
-    # The generated header only exports SelectedKernel/KERNEL_NAME/ScaleType/...
-    # under this define, so the force-include path requires it. GFX_ARCH is
-    # required by mx_gemm_ctypes_lib.cpp (#error if unset) and the bridge is
-    # gfx950-only (static_assert on preShuffleScaleBuffer_gfx950), so pin it to
-    # gfx950 here -- the only value this op can compile for.
-    target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE
-        CK_TILE_SINGLE_KERNEL_INCLUDE
-        GFX_ARCH="gfx950"
-    )
+# Resolve the configured GPU target GENERICALLY -- do NOT hardcode/default the
+# arch to gfx950. mx_gemm is gfx950-only (it calls the gfx950-only
+# preShuffleScaleBuffer_gfx950 helper), and that requirement is enforced IN THE
+# SOURCE: mx_gemm_ctypes_lib.cpp #errors if GFX_ARCH is unset and static_asserts
+# GFX_ARCH == "gfx950" (plus a runtime device guard). Here we simply pass the
+# real build target through as -DGFX_ARCH and only wire up the target when the
+# build actually targets gfx950, so a gfx942/other dispatcher build is neither
+# broken by the static_assert nor silently built for an unsupported arch.
+if(DEFINED GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "")
+    string(REPLACE ";" " " _mx_gpu_targets_space "${GPU_TARGETS}")
+    string(REPLACE " " ";" _mx_gpu_targets_list "${_mx_gpu_targets_space}")
+    list(GET _mx_gpu_targets_list 0 MX_GEMM_GPU_TARGET)
+elseif(DEFINED CK_TILE_GEMM_GPU_TARGET AND NOT CK_TILE_GEMM_GPU_TARGET STREQUAL "")
+    set(MX_GEMM_GPU_TARGET "${CK_TILE_GEMM_GPU_TARGET}")
 else()
-    message(STATUS "No MX-GEMM kernel found for ctypes lib - building without kernel")
-    add_library(dispatcher_mx_gemm_lib SHARED mx_gemm_ctypes_lib.cpp)
-    target_include_directories(dispatcher_mx_gemm_lib PRIVATE
-        ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/dispatcher/include
-        ${MX_GEMM_TE_INCLUDE_DIRS}
-    )
-    target_link_libraries(dispatcher_mx_gemm_lib PRIVATE hip::device)
-    # Even the no-kernel fallback compiles mx_gemm_ctypes_lib.cpp, which #errors
-    # if GFX_ARCH is unset; define it (gfx950, the only arch this op supports) so
-    # the fallback target builds instead of failing the whole configure/build.
-    target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE GFX_ARCH="gfx950")
-    set_target_properties(dispatcher_mx_gemm_lib PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-    )
+    set(MX_GEMM_GPU_TARGET "")
+endif()
+
+if(NOT MX_GEMM_GPU_TARGET STREQUAL "gfx950")
+    message(STATUS
+        "MX-GEMM ctypes lib is gfx950-only; skipping for GPU target "
+        "'${MX_GEMM_GPU_TARGET}' (configure with GPU_TARGETS=gfx950 to enable).")
+else()
+    file(GLOB MX_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/mx_gemm_*.hpp")
+    if(MX_GEMM_KERNEL_HEADERS)
+        list(GET MX_GEMM_KERNEL_HEADERS 0 MX_GEMM_KERNEL_HEADER)
+        message(STATUS "Found MX-GEMM kernel for ctypes lib: ${MX_GEMM_KERNEL_HEADER}")
+
+        add_ctypes_library(dispatcher_mx_gemm_lib
+            mx_gemm_ctypes_lib.cpp
+            KERNEL_HEADER ${MX_GEMM_KERNEL_HEADER}
+        )
+        target_include_directories(dispatcher_mx_gemm_lib PRIVATE ${MX_GEMM_TE_INCLUDE_DIRS})
+        # The generated header only exports SelectedKernel/KERNEL_NAME/ScaleType/...
+        # under this define. Pass the resolved build target through as -DGFX_ARCH
+        # (the source #errors if unset and static_asserts it is gfx950).
+        target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE
+            CK_TILE_SINGLE_KERNEL_INCLUDE
+            GFX_ARCH="${MX_GEMM_GPU_TARGET}"
+        )
+    else()
+        message(STATUS "No MX-GEMM kernel found for ctypes lib - building without kernel")
+        add_library(dispatcher_mx_gemm_lib SHARED mx_gemm_ctypes_lib.cpp)
+        target_include_directories(dispatcher_mx_gemm_lib PRIVATE
+            ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/dispatcher/include
+            ${MX_GEMM_TE_INCLUDE_DIRS}
+        )
+        target_link_libraries(dispatcher_mx_gemm_lib PRIVATE hip::device)
+        # Pass the resolved build target through as -DGFX_ARCH (the source #errors
+        # if unset and static_asserts it is gfx950).
+        target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE
+            GFX_ARCH="${MX_GEMM_GPU_TARGET}")
+        set_target_properties(dispatcher_mx_gemm_lib PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            CXX_STANDARD 17
+        )
+    endif()
 endif()
 
 # =============================================================================
