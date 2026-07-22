@@ -18,6 +18,12 @@ name: TheRock Multi-Arch CI
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 on:
+  # TEST: Enable presubmit for multi-arch CI testing
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
