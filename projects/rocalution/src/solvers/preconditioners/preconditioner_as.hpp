@@ -41,6 +41,10 @@ namespace rocalution
   * from two preconditioners on the overlapped area which are scaled by \f$1/2\f$.
   * \cite RAS
   *
+  * Example of a four block-decomposed matrix with Additive Schwarz (overlapping) and
+  * Restricted Additive Schwarz is shown in the rocALUTION API reference figure for
+  * Additive Schwarz preconditioners.
+  *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
   * \tparam ValueType - can be float, double, std::complex<float> or std::complex<double>
