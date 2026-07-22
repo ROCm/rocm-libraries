@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from rocisa.code import Label, Module
 from rocisa.container import sgpr
-from rocisa.instruction import (SBarrier, SCBranchSCC0, SCBranchSCC1,
+from rocisa.instruction import (SBarrier, BranchInstruction, SCBranchSCC0,
                                 SCmpEQU32,
                                 MFMAInstruction, MXMFMAInstruction)
 
@@ -128,20 +128,18 @@ def insertClusterBarrier(module, writer, kernel):
             head.add(inst)
         result = head
 
-    # Second pass: place the wait before the first early-exit branch
-    # (SCBranchSCC1) that follows the signal.  This preserves a latency-
-    # hiding gap (typically 8+ WMMAs) between signal and wait while
-    # ensuring no exit path can skip the wait.  If no exit branch follows
-    # the signal, append the wait at the module end.
+    # Second pass: place the wait before the first branch after the signal,
+    # so no exit path can skip it.  Falls back to end-of-module if no branch follows.
+    signalInst = next(s for s in signalItems if isinstance(s, SBarrier))
     items = result.flatitems()
     patched = Module(result.name)
     signalSeen = False
     waitPlaced = False
     for inst in items:
-        if isinstance(inst, SBarrier) and "cluster_barrier signal" in str(inst):
+        if inst is signalInst:
             signalSeen = True
             waitPlaced = False
-        if signalSeen and not waitPlaced and isinstance(inst, SCBranchSCC1):
+        if signalSeen and not waitPlaced and isinstance(inst, BranchInstruction):
             for w in waitItems:
                 patched.add(w)
             waitPlaced = True
