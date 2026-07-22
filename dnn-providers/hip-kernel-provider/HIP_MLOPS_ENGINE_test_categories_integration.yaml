@@ -1,0 +1,92 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider external integration Test Categories Configuration.
+#
+# This file is applied to hipdnn_integration_tests when it is run against the
+# hip-kernel-provider plugin, pinned to HIP_MLOPS_ENGINE via --test-engine. These
+# patterns match hipdnn_integration_tests GTest names, not hip_kernel_provider_tests
+# or hip_kernel_provider_integration_tests names.
+#
+# hipdnn_integration_tests covers ops (conv, matmul, sdpa, reduction, ...) that
+# HIP_MLOPS_ENGINE doesn't implement; the harness's generic engine-support check
+# (checkEngineSupportOrSkip / verifyGraph) skips those automatically, so pinning
+# every tier to the full "*" pattern here is safe — it never runs a case
+# HIP_MLOPS_ENGINE can't service, it just lets the harness make that call instead
+# of narrowing the GTest filter up front.
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+# TEMPORARY TIER REMAPPING (revert once CI has proper test-label support).
+#
+# CI cannot yet select tests by label, so it runs whole tiers by name. To land
+# the hip-kernel-provider mlops integration-test port without overloading the
+# pre-commit/PR jobs, the tiers are temporarily repurposed:
+#   - quick:         commented out below. The standard tier now carries the
+#                    Smoke set, so a separate quick tier is redundant until
+#                    label-based selection lands.
+#   - standard:      all Smoke GPU cases ("Smoke/*"). The full "*" tier is
+#                    ~28 min, dominated by Full-tier large-shape cases, so PR
+#                    runs are trimmed to Smoke (~4-5 min). The harness auto-skips
+#                    ops HIP_MLOPS_ENGINE can't service (see the engine-support
+#                    note above), so the pattern is safe here.
+#   - comprehensive: commented out below (an empty test_patterns list no longer
+#                    validates, so the tier is commented out -> runs nothing).
+#   - full:          commented out below (same reason).
+# Once label-based selection exists, uncomment comprehensive/full and give each
+# tier its intended, distinct pattern set.
+test_categories:
+  # quick: commented out -- the standard tier now runs the Smoke set, so a
+  # dedicated quick tier is redundant. Uncomment and give it a distinct pattern
+  # once label-based selection lands.
+  #
+  # quick:
+  #   description: "Smoke GPU cases"
+  #   test_patterns:
+  #     - "Smoke/*"
+  #   exclude: *common_excludes
+  #   labels:
+  #     - "quick"
+  #     - "pre-commit"
+  #     - "smoke"
+
+  standard:
+    description: "External integration coverage (temporary: runs the Smoke tier only; the full '*' tier is ~28 min, dominated by Full-tier large shapes, until CI label support lands)"
+    test_patterns:
+      - "Smoke/*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  # Commented out (not just left empty): the shared category validator now rejects
+  # a category whose test_patterns is empty ("must define test_patterns and/or
+  # test_yaml"), so these no-op tiers are commented out entirely until CI label
+  # support lands. Uncomment (and give them real, non-empty patterns) to restore.
+  #
+  # comprehensive:
+  #   description: "Disabled for now (temporary: runs nothing until CI label support lands)"
+  #   test_patterns: []
+  #   exclude: *common_excludes
+  #   labels:
+  #     - "comprehensive"
+  #     - "nightly"
+  #     - "extended"
+  #
+  # full:
+  #   description: "Disabled for now (temporary: runs nothing until CI label support lands)"
+  #   test_patterns: []
+  #   exclude: *common_excludes
+  #   labels:
+  #     - "full"
+  #     - "all"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    # standard now runs the Smoke set (~4-5 min); keep a generous ceiling.
+    standard: 2700
+    # comprehensive: 25200
+    # full: 28800

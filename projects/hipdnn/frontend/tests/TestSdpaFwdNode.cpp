@@ -517,3 +517,41 @@ TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)
     const SdpaFwdNode node(SdpaAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::SDPA_FWD);
 }
+
+//==============================================================================
+// Fail-loudly drain of unsupported cuDNN-compat setters
+//==============================================================================
+
+TEST(TestSdpaFwdNode, PreValidateFailsUnsupportedScoreMod)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_score_mod([](int) { return 0; });
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
+{
+    // Q is rank-3 (shape-invalid) AND an unsupported setter is present. The drain
+    // must run first, so the surfaced message is the unsupported one.
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16});
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_score_mod([](int) { return 0; });
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
+    EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
+}

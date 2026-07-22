@@ -17,7 +17,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
-#include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 namespace
 {

@@ -319,6 +319,15 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return inst;
     }
 
+    /// Opaque pseudo-instruction that groups a narrow-exec-write..full-mask-reset span
+    /// so the DAG scheduler treats it as one atomic node. Own descriptor carries no
+    /// IF_HasSideEffect; hasSideEffect() below still inherits it from children.
+    StinkyInstruction* createExecMaskGroup(IRBase* insertBefore) {
+        static const HwInstDesc execGroupMCID{GFX::EXEC_GROUP, GFX::EXEC_GROUP, 0, 0, 0,
+                                              "EXEC_GROUP",    makeFlagSet({})};
+        return create(&execGroupMCID, insertBefore);
+    }
+
     /// Creates and inserts a PHI instruction at the beginning of the block.
     /// The PHI defines one DWORD register and has one placeholder srcReg per
     /// predecessor. sources and users are NOT initialized — the caller
@@ -384,6 +393,18 @@ inline bool isGLOBALStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStore);
 }
 
+inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALAtomic);
+}
+
+inline bool isGLOBAL(const StinkyInstruction& inst) {
+    return isGLOBALLoad(inst) || isGLOBALStore(inst);
+}
+
+inline bool isGLOBALOrAtomic(const StinkyInstruction& inst) {
+    return isGLOBAL(inst) || isGLOBALAtomic(inst);
+}
+
 inline bool isSMemLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemLoad);
 }
@@ -411,6 +432,10 @@ inline bool isFunctionAsmPlacementMarker(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
 }
 
+inline bool isExecMaskGroup(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::EXEC_GROUP;
+}
+
 /// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE, or
 /// FUNCTION_ASM_PLACEMENT_MARKER) that should be skipped for def-use chain
 /// processing of "real" instructions.
@@ -425,11 +450,59 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst) ||
+           isGLOBALAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
     return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst);
+}
+
+/// A destination register is implicit (not printed) when it was added solely
+/// for dependency tracking. Shared between the assembly emitter (decides
+/// whether to print `th:TH_ATOMIC_RETURN`) and the waitcnt dataflow (decides
+/// whether an atomic's destination is a trackable value) so both agree on
+/// exactly the same "does this atomic return a value" answer.
+inline bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& inst) {
+    if (reg.dataType != StinkyRegister::Type::Register) return false;
+
+    RegType t = reg.reg.type;
+
+    if (t == RegType::SCC) {
+        assert(inst.is(InstFlag::IF_ImplicitWriteSCC) &&
+               "SCC should always be an implicit dest or src");
+        return true;
+    }
+
+    if ((t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI) &&
+        inst.is(InstFlag::IF_ImplicitWriteEXEC)) {
+        return true;
+    }
+
+    return false;
+}
+
+/// True iff `inst` is a returning MUBUF/FLAT/GLOBAL atomic -- i.e. one whose
+/// destination is a real (non-pseudo, non-implicit) register that a later
+/// instruction can consume, as opposed to a fire-and-forget atomic with no
+/// usable result. Scalar-memory atomics (IF_SMemAtomic) signal their return
+/// via `glc`, not `th:`, and are excluded here; they are also not currently
+/// reachable through any StinkyTofu-enabled architecture.
+///
+/// NOTE: this class of instruction is deliberately NOT modeled through
+/// MemTokenData/pseudo-register dependency edges the way LDS ops are --
+/// its destination is a plain, real register, so ordinary SSA def-use
+/// already connects a returning atomic to its consumers. `classifyMemOp`
+/// (see WaitDataflow.cpp) still needs to bucket it into a counter so the
+/// waitcnt dataflow can compute -- and safely regenerate -- the wait that
+/// guards that register.
+inline bool isReturningAtomic(const StinkyInstruction& inst) {
+    if (!isMUBUFAtomic(inst) && !isFLATAtomic(inst) && !isGLOBALAtomic(inst)) return false;
+
+    for (const StinkyRegister& d : inst.getDestRegs()) {
+        if (!isPseudoReg(d) && !isImplicitDest(d, inst)) return true;
+    }
+    return false;
 }
 
 inline bool isTensorLoad(const StinkyInstruction& inst) {
@@ -645,6 +718,12 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
         !hasLdsPseudoRegs(inst))
         return true;
+    if (isExecMaskGroup(inst)) {
+        if (const auto* groupData = inst.getModifier<ExecGroupData>()) {
+            for (const StinkyInstruction* child : groupData->children)
+                if (hasSideEffect(*child)) return true;
+        }
+    }
     return false;
 }
 

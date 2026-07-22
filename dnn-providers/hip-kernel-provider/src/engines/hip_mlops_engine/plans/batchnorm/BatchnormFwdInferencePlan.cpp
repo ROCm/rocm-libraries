@@ -267,15 +267,16 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = findDeviceBuffer(_inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer
-        = findDeviceBuffer(_inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer
-        = findDeviceBuffer(_inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
-    auto estMeanBuffer
-        = findDeviceBuffer(_inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
-    auto invVarianceBuffer
-        = findDeviceBuffer(_inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.estMean()->uid(), deviceBuffers, numDeviceBuffers);
+    auto invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+        _inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;
@@ -283,7 +284,7 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
     // Launch kernel with appropriate output buffer
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
-        auto activationOutBuffer = findDeviceBuffer(
+        auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         // Get activation parameters
@@ -309,8 +310,8 @@ void BatchnormFwdInferencePlan::execute(const Handle& handle,
     }
     else
     {
-        auto yBuffer
-            = findDeviceBuffer(_inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
+            _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
         _runnableKernel->launch(handle.getStream(),
                                 xBuffer.ptr,

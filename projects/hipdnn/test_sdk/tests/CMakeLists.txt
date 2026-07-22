@@ -66,6 +66,7 @@ add_executable(
     utilities/cpu_graph_executor/TestConvolutionFwdPlan.cpp
     utilities/cpu_graph_executor/TestConvolutionFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
+    utilities/cpu_graph_executor/TestCpuReferenceRaggedRejection.cpp
     utilities/cpu_graph_executor/TestFusedOperationsCpuGraphExecutor.cpp
     utilities/cpu_graph_executor/TestLayernormBpropPlan.cpp
     utilities/cpu_graph_executor/TestLayernormBpropSignatureKey.cpp
