@@ -21,6 +21,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/detail/error_recorder.h>
+#include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
 #include <hipdnn_frontend/Graph.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
@@ -408,6 +409,320 @@ public:
 
         return {error_code_t::INVALID_VALUE, "Tensor UID was not found"};
     }
+
+    // --- Node-adding methods (RFC 0012 §4.4.2, §7.3 Tier 2) -----------------
+    //
+    // Tier-1 nodes with a 1:1 hipDNN engine forward straight to the wrapped
+    // graph and flip the graph into Native mode so the plan lifecycle runs
+    // against hipDNN. Nodes take their *_attributes BY VALUE, matching cuDNN FE.
+    // Tier-2 nodes with no hipDNN equivalent are stamped by
+    // HIPDNN_CUDNN_SHIM_FAIL_NODE: they record GRAPH_NOT_SUPPORTED (surfaced at
+    // the next validate()/build_operation_graph(), RFC §4.4.2) and return empty.
+
+    std::shared_ptr<Tensor_attributes> conv_fprop(std::shared_ptr<Tensor_attributes> x,
+                                                  std::shared_ptr<Tensor_attributes> w,
+                                                  Conv_fprop_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.conv_fprop(std::move(x), std::move(w), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes> conv_dgrad(std::shared_ptr<Tensor_attributes> dy,
+                                                  std::shared_ptr<Tensor_attributes> w,
+                                                  Conv_dgrad_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.conv_dgrad(std::move(dy), std::move(w), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes> conv_wgrad(std::shared_ptr<Tensor_attributes> dy,
+                                                  std::shared_ptr<Tensor_attributes> x,
+                                                  Conv_wgrad_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.conv_wgrad(std::move(dy), std::move(x), std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 5>
+        batchnorm(std::shared_ptr<Tensor_attributes> x,
+                  std::shared_ptr<Tensor_attributes> scale,
+                  std::shared_ptr<Tensor_attributes> bias,
+                  Batchnorm_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.batchnorm(
+            std::move(x), std::move(scale), std::move(bias), std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 3>
+        batchnorm_backward(std::shared_ptr<Tensor_attributes> dy,
+                           std::shared_ptr<Tensor_attributes> x,
+                           std::shared_ptr<Tensor_attributes> scale,
+                           Batchnorm_backward_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.batchnorm_backward(
+            std::move(dy), std::move(x), std::move(scale), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes>
+        batchnorm_inference(std::shared_ptr<Tensor_attributes> x,
+                            std::shared_ptr<Tensor_attributes> mean,
+                            std::shared_ptr<Tensor_attributes> invVariance,
+                            std::shared_ptr<Tensor_attributes> scale,
+                            std::shared_ptr<Tensor_attributes> bias,
+                            Batchnorm_inference_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.batchnorm_inference(std::move(x),
+                                          std::move(mean),
+                                          std::move(invVariance),
+                                          std::move(scale),
+                                          std::move(bias),
+                                          std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 3>
+        layernorm(std::shared_ptr<Tensor_attributes> x,
+                  std::shared_ptr<Tensor_attributes> scale,
+                  std::shared_ptr<Tensor_attributes> bias,
+                  Layernorm_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.layernorm(
+            std::move(x), std::move(scale), std::move(bias), std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 3>
+        layernorm_backward(std::shared_ptr<Tensor_attributes> dy,
+                           std::shared_ptr<Tensor_attributes> x,
+                           std::shared_ptr<Tensor_attributes> scale,
+                           Layernorm_backward_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.layernorm_backward(
+            std::move(dy), std::move(x), std::move(scale), std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 2>
+        rmsnorm(std::shared_ptr<Tensor_attributes> x,
+                std::shared_ptr<Tensor_attributes> scale,
+                Rmsnorm_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.rmsnorm(std::move(x), std::move(scale), std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 3>
+        rmsnorm_backward(std::shared_ptr<Tensor_attributes> dy,
+                         std::shared_ptr<Tensor_attributes> x,
+                         std::shared_ptr<Tensor_attributes> scale,
+                         std::shared_ptr<Tensor_attributes> invVariance,
+                         Rmsnorm_backward_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.rmsnorm_backward(std::move(dy),
+                                       std::move(x),
+                                       std::move(scale),
+                                       std::move(invVariance),
+                                       std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes> matmul(std::shared_ptr<Tensor_attributes> a,
+                                              std::shared_ptr<Tensor_attributes> b,
+                                              Matmul_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.matmul(std::move(a), std::move(b), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes> pointwise(std::shared_ptr<Tensor_attributes> a,
+                                                 Pointwise_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.pointwise(std::move(a), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes> pointwise(std::shared_ptr<Tensor_attributes> a,
+                                                 std::shared_ptr<Tensor_attributes> b,
+                                                 Pointwise_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.pointwise(std::move(a), std::move(b), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes> pointwise(std::shared_ptr<Tensor_attributes> a,
+                                                 std::shared_ptr<Tensor_attributes> b,
+                                                 std::shared_ptr<Tensor_attributes> c,
+                                                 Pointwise_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.pointwise(std::move(a), std::move(b), std::move(c), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes> reduction(std::shared_ptr<Tensor_attributes> a,
+                                                 Reduction_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.reduction(std::move(a), std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 2> resample(std::shared_ptr<Tensor_attributes> x,
+                                                               Resample_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.resample(std::move(x), std::move(attributes));
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 2>
+        block_scale_quantize(std::shared_ptr<Tensor_attributes> x,
+                             Block_scale_quantize_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.block_scale_quantize(std::move(x), std::move(attributes));
+    }
+
+    std::shared_ptr<Tensor_attributes>
+        block_scale_dequantize(std::shared_ptr<Tensor_attributes> x,
+                               std::shared_ptr<Tensor_attributes> scale,
+                               Block_scale_dequantize_attributes attributes)
+    {
+        _mode = Mode::Native;
+        return _graph.block_scale_dequantize(std::move(x), std::move(scale), std::move(attributes));
+    }
+
+    // --- Tier-2 fail-stub nodes (no hipDNN engine yet, RFC §4.4.2 / §6.5) ---
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(bn_finalize,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 BN_finalize_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 6>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(genstats,
+                                (std::shared_ptr<Tensor_attributes>, Genstats_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 2>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(dbn_weight,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 DBN_weight_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 5>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(instancenorm,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 Instancenorm_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 3>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(instancenorm_backward,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 Instancenorm_backward_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 3>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(adalayernorm,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 AdaLayernorm_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 3>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(adalayernorm_backward,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 AdaLayernorm_backward_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 3>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(rng,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 Rng_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(reshape,
+                                (std::shared_ptr<Tensor_attributes>, Reshape_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(transpose,
+                                (std::shared_ptr<Tensor_attributes>, Transpose_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(rope,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 RoPE_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(rope_backward,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 RoPE_backward_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8_backward,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 SDPA_fp8_backward_attributes),
+                                std::array<std::shared_ptr<Tensor_attributes>, 7>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(diagonal_band_mask,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 DiagonalBandMask_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(slice,
+                                (std::shared_ptr<Tensor_attributes>, Slice_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(concatenate,
+                                (std::vector<std::shared_ptr<Tensor_attributes>>,
+                                 Concatenate_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(moe_grouped_matmul,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 Moe_grouped_matmul_attributes),
+                                std::shared_ptr<Tensor_attributes>)
+
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(moe_grouped_matmul_bwd,
+                                (std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 std::shared_ptr<Tensor_attributes>,
+                                 Moe_grouped_matmul_bwd_attributes),
+                                std::shared_ptr<Tensor_attributes>)
 
 #ifdef HIPDNN_ENABLE_SDPA
     std::array<std::shared_ptr<Tensor_attributes>, 2> sdpa(std::shared_ptr<Tensor_attributes> q,
