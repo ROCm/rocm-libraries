@@ -1,6 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tile/pipeline sweep benchmark for implicit-GEMM forward convolution (gfx950).
+"""Tile/pipeline sweep benchmark for implicit-GEMM convolution (gfx950).
+
+Supports both the forward pass (NHWC × KYXC → NHWK) and the backward-weight
+(wgrad) pass (dY × X → dW).  Select with ``--direction fwd`` (default) or
+``--direction wgrad``.
 
 Builds every valid combination of tile / warp / pipeline / epilogue parameters,
 runs each on GPU, and reports the best configuration ranked by TFLOPS.
@@ -16,8 +20,14 @@ Swept dimensions:
 warp_tile_k is chosen as the largest valid K for the target MFMA atom
 (same policy as bake_off_implicit_gemm.py).
 
-Run:
-  python rocke/library/benchmarks/gfx950/conv/benchmark_implicit_gemm_conv.py \\
+Run (forward):
+  python benchmark_implicit_gemm_conv.py \\
+      --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --Y 3 --X 3 \\
+      --dtype fp16 --top 10
+
+Run (wgrad):
+  python benchmark_implicit_gemm_conv.py \\
+      --direction wgrad \\
       --N 8 --Hi 56 --Wi 56 --C 64 --K 64 --Y 3 --X 3 \\
       --dtype fp16 --top 10
 
@@ -47,6 +57,8 @@ _WARP_MN = (1, 2, 4, 8)
 _WARP_TILE_MN = (16, 32)
 _PIPELINES = ("mem", "compv3", "compv4")
 _EPILOGUES = ("default", "cshuffle")
+# Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
+_SPLIT_K_AUTO = (1, 2, 4, 8, 16, 32, 64, 128)
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +78,7 @@ class Result:
     warp_tile_k: int
     pipeline: str
     epilogue: str
+    split_k: int
     ms: float
     tflops: float
     gbps: float
@@ -85,6 +98,22 @@ def _get_vector_sizes(C: int, K: int, dtype: str):
     return vec_c, vec_c, _vec(K)
 
 
+def _get_vector_sizes_wgrad(C: int, K: int, dtype: str):
+    """Per-operand vector widths for the wgrad direction.
+
+    Last memory dimension of each wgrad operand:
+      A = dY  NHWK  → last dim K  → vec_a
+      B = X   NHWC  → last dim C  → vec_b
+      D = dW  KYXC  → last dim C  → vec_c
+    """
+
+    def _vec(n: int) -> int:
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+        return next(v for v in sizes if n % v == 0)
+
+    return _vec(K), _vec(C), _vec(C)
+
+
 def _grid_for_spec(spec, p):
     """Derive launch grid from spec and problem."""
     M = p.M
@@ -93,6 +122,95 @@ def _grid_for_spec(spec, p):
     gy = (M + spec.tile_m - 1) // spec.tile_m
     # grid_order="NM": x=N-tile, y=M-tile (mirrors bake_off_implicit_gemm)
     return (gx, gy, p.groups)
+
+
+def _verify_kernel(
+    *,
+    rt,
+    launcher,
+    values: dict,
+    grid: tuple,
+    block: tuple,
+    out_dev,
+    out_t,
+    zero_init_out: bool,
+    ref_out,
+    kernel_name: str,
+    dump_fail: "str | None",
+    extra_tensors: "dict | None" = None,
+    u8,
+) -> bool:
+    """Launch a kernel, compare against reference, optionally dump on failure.
+
+    Parameters
+    ----------
+    zero_init_out:
+        Zero the output buffer before launching (required for split-K atomic
+        accumulation; not needed for direct-store kernels).
+    dump_fail:
+        Directory path to dump tensors into on first failure, or ``None`` to
+        just print the error.
+    extra_tensors:
+        Additional {name: tensor} pairs saved alongside out/ref/diff when
+        ``dump_fail`` is set (e.g. ``{"dY": dY_t, "X": X_t}`` for wgrad).
+
+    Returns
+    -------
+    bool
+        ``True`` if the sweep should stop (a dump was triggered), ``False``
+        to continue.
+    """
+    import torch
+
+    if zero_init_out:
+        rt.memset(out_dev, 0, out_t.nbytes)
+
+    from rocke.runtime.launcher import LaunchConfig
+
+    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+
+    out_cpu = torch.empty_like(out_t)
+    rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
+
+    out_f32 = out_cpu.float().cuda()
+    err = float(out_f32.sub(ref_out).abs().max())
+    status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
+    print(f"  verify {kernel_name}: {status}", flush=True)
+
+    if err >= 1e-2 and dump_fail:
+        import pathlib
+        import numpy as np
+
+        dump_dir = pathlib.Path(dump_fail)
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        diff = out_f32.sub(ref_out).abs()
+
+        def _save(name, t):
+            arr = t.cpu().numpy()
+            np.savetxt(
+                dump_dir / f"{kernel_name}_{name}.txt",
+                arr.reshape(-1, arr.shape[-1] if arr.ndim > 1 else 1),
+                fmt="%.6f",
+            )
+
+        _save("out", out_f32)
+        _save("ref", ref_out)
+        _save("diff", diff)
+        for name, tensor in (extra_tensors or {}).items():
+            _save(name, tensor.float())
+
+        max_idx = int(diff.argmax())
+        unravel = np.unravel_index(max_idx, diff.shape)
+        print(
+            f"  [dump] saved to {dump_dir}/  "
+            f"max_diff={err:.4e} at index {unravel} (flat {max_idx})\n"
+            f"  [dump] out={float(out_f32.flatten()[max_idx]):.6f}  "
+            f"ref={float(ref_out.flatten()[max_idx]):.6f}",
+            flush=True,
+        )
+        return True  # caller should stop the sweep
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +327,13 @@ def parse_miopen_cmd(cmd: str):
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Tile/pipeline sweep benchmark for implicit-GEMM forward conv"
+        description="Tile/pipeline sweep benchmark for implicit-GEMM conv (fwd + wgrad)"
+    )
+    parser.add_argument(
+        "--direction",
+        default="fwd",
+        choices=["fwd", "wgrad"],
+        help="convolution direction: forward (fwd) or backward-weight (wgrad) (default: fwd)",
     )
     parser.add_argument(
         "--arch",
@@ -238,6 +362,41 @@ def main() -> int:
         "--verify",
         action="store_true",
         help="verify first valid kernel against torch reference before sweep",
+    )
+    parser.add_argument(
+        "--dump-fail",
+        default=None,
+        metavar="PATH",
+        dest="dump_fail",
+        help=(
+            "on the first verify FAIL, save kernel output, reference, and "
+            "abs-diff tensors to PATH/{kernel_name}_{out,ref,diff}.pt and stop "
+            "the sweep. Implies --verify."
+        ),
+    )
+    parser.add_argument(
+        "--debug-init",
+        action="store_true",
+        dest="debug_init",
+        help=(
+            "initialise X and dY (wgrad) / A and B (fwd) to all-ones instead of "
+            "random. With ones the expected dW[k,y,x,c] = N * valid_spatial_count(y,x) "
+            "— a simple integer pattern easy to verify by eye or compare exactly."
+        ),
+    )
+    parser.add_argument(
+        "--split-k",
+        type=int,
+        default=-1,
+        dest="split_k",
+        metavar="N",
+        help=(
+            "wgrad split-K degree: "
+            "0 = sweep all degrees in %(auto)s, "
+            "1 = disabled, "
+            ">1 = fixed degree, "
+            "-1 = auto (CK formula per tile config)"
+        ).replace("%(auto)s", str(list(_SPLIT_K_AUTO))),
     )
 
     miopen_grp = parser.add_argument_group(
@@ -311,6 +470,11 @@ def main() -> int:
         is_valid_spec,
         is_valid_spec_for_problem,
     )
+    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        build_implicit_gemm_conv_wgrad,
+        is_valid_wgrad_spec,
+    )
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
@@ -368,11 +532,13 @@ def main() -> int:
         if len(cases) > 1:
             print(f"\n{'#'*72}", flush=True)
             print(
-                f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} dtype={dtype}",
+                f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} "
+                f"dtype={dtype} direction={args.direction}",
                 flush=True,
             )
             print(f"{'#'*72}", flush=True)
-        rc = _run_sweep(
+
+        _common = dict(
             args=args,
             problem=problem,
             dtype=dtype,
@@ -380,9 +546,6 @@ def main() -> int:
             target=target,
             compile_kernel=compile_kernel,
             ConvDataSpec=ConvDataSpec,
-            ImplicitGemmConvSpec=ImplicitGemmConvSpec,
-            build_implicit_gemm_conv=build_implicit_gemm_conv,
-            is_valid_spec_for_problem=is_valid_spec_for_problem,
             synchronize_and_release=synchronize_and_release,
             time_launches=time_launches,
             Runtime=Runtime,
@@ -390,6 +553,21 @@ def main() -> int:
             LaunchConfig=LaunchConfig,
             u8=_u8,
         )
+
+        if args.direction == "wgrad":
+            rc = _run_wgrad_sweep(
+                **_common,
+                WgradConvSpec=WgradConvSpec,
+                build_implicit_gemm_conv_wgrad=build_implicit_gemm_conv_wgrad,
+                is_valid_wgrad_spec=is_valid_wgrad_spec,
+            )
+        else:
+            rc = _run_sweep(
+                **_common,
+                ImplicitGemmConvSpec=ImplicitGemmConvSpec,
+                build_implicit_gemm_conv=build_implicit_gemm_conv,
+                is_valid_spec_for_problem=is_valid_spec_for_problem,
+            )
         all_rc = all_rc or rc
     return all_rc
 
@@ -412,6 +590,7 @@ def _run_sweep(
     KernelLauncher,
     LaunchConfig,
     u8,
+    **_ignored,  # absorbs keys from _common not used by this sweep
 ) -> int:
     import torch
     from rocke.helpers.manifest import conv_args_signature
@@ -426,13 +605,21 @@ def _run_sweep(
         "fp32": torch.float32,
     }[dtype]
     torch.manual_seed(42)
+
+    def _make(*shape):
+        return (
+            torch.ones(*shape)
+            if args.debug_init
+            else torch.empty(*shape).uniform_(-1.0, 1.0)
+        )
+
     if p.is_3d:
-        _A_f32 = torch.empty(p.N, p.Di, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
-        _B_f32 = torch.empty(p.K, p.Z, p.Y, p.X, p.C).uniform_(-1.0, 1.0)
+        _A_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
+        _B_f32 = _make(p.K, p.Z, p.Y, p.X, p.C)
         D_t = torch.empty(p.N, p.Do, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     else:
-        _A_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
-        _B_f32 = torch.empty(p.K, p.Y, p.X, p.C).uniform_(-1.0, 1.0)
+        _A_f32 = _make(p.N, p.Hi, p.Wi, p.C)
+        _B_f32 = _make(p.K, p.Y, p.X, p.C)
         D_t = torch.empty(p.N, p.Ho, p.Wo, p.K, dtype=_torch_dtype)
     A_t = _A_f32.to(_torch_dtype)
     B_t = _B_f32.to(_torch_dtype)
@@ -474,9 +661,8 @@ def _run_sweep(
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
     rt.memset(D_dev, 0, D_t.nbytes)
 
-    # Compute reference output once before the sweep (only when --verify).
     ref_out: torch.Tensor | None = None
-    if args.verify:
+    if args.verify or args.dump_fail:
         from rocke.benchmark.conv_reference import conv_reference
 
         ref_out = conv_reference(_A_f32, _B_f32, p)
@@ -561,13 +747,25 @@ def _run_sweep(
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         # Verify every kernel against the pre-computed reference (when --verify).
-        if args.verify:
-            launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
-            D_out = torch.empty_like(D_t)
-            rt.memcpy_d2h(_u8(D_out), D_dev, D_t.nbytes)
-            err = float(D_out.float().cuda().sub(ref_out).abs().max())
-            status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
-            print(f"  verify {artifact.kernel_name}: {status}", flush=True)
+        if args.verify or args.dump_fail:
+            if _verify_kernel(
+                rt=rt,
+                launcher=launcher,
+                values=values,
+                grid=grid,
+                block=block,
+                out_dev=D_dev,
+                out_t=D_t,
+                zero_init_out=False,
+                ref_out=ref_out,
+                kernel_name=artifact.kernel_name,
+                dump_fail=args.dump_fail,
+                u8=_u8,
+            ):
+                rt.free(A_dev)
+                rt.free(B_dev)
+                rt.free(D_dev)
+                return 1
             rt.memset(D_dev, 0, D_t.nbytes)
 
         ms = time_launches(
@@ -593,6 +791,7 @@ def _run_sweep(
                 warp_tile_k=warp_tile_k,
                 pipeline=pipeline,
                 epilogue=epilogue,
+                split_k=1,
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
@@ -637,6 +836,343 @@ def _run_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"{r.pipeline}/{r.epilogue}"
+        )
+        print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
+
+    best = results[0]
+    print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
+    return 0
+
+
+def _run_wgrad_sweep(
+    *,
+    args,
+    problem,
+    dtype: str,
+    arch: str,
+    target,
+    compile_kernel,
+    ConvDataSpec,
+    WgradConvSpec,
+    build_implicit_gemm_conv_wgrad,
+    is_valid_wgrad_spec,
+    synchronize_and_release,
+    time_launches,
+    Runtime,
+    KernelLauncher,
+    LaunchConfig,
+    u8,
+    **_ignored,
+) -> int:
+    """Sweep wgrad configurations and rank by TFLOPS.
+
+    Wgrad GEMM dims:
+        M    = K            (output channels — weight rows)
+        N_wg = Y*X*C        (filter spatial × input channel — weight cols)
+        K_wg = N*Ho*Wo      (output positions — reduction)
+
+    Operands:
+        A (dY): output gradient, shape (N, Ho, Wo, K)
+        B (X):  input activations, shape (N, Hi, Wi, C)
+        D (dW): weight gradient, shape (K, Y, X, C)
+
+    Split-K (``--split-k``):
+        1        — disabled (normal epilogue, z-grid = 1).
+        >1       — fixed degree; dW is zero-initialised before each launch,
+                   kernel atomic-adds partials, result is final dW.
+        0 (auto) — sweep all degrees in _SPLIT_K_AUTO.
+    """
+    import torch
+    from rocke.helpers.manifest import conv_args_signature
+
+    _u8 = u8
+    p = problem
+
+    _torch_dtype = {
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+        "fp32": torch.float32,
+    }[dtype]
+    torch.manual_seed(42)
+
+    def _make(*shape):
+        return (
+            torch.ones(*shape)
+            if args.debug_init
+            else torch.empty(*shape).uniform_(-1.0, 1.0)
+        )
+
+    if p.is_3d:
+        _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
+        _dY_f32 = _make(p.N, p.Do, p.Ho, p.Wo, p.K)
+        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, p.C, dtype=_torch_dtype)
+    else:
+        _X_f32 = _make(p.N, p.Hi, p.Wi, p.C)
+        _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
+        dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype)
+
+    X_t = _X_f32.to(_torch_dtype)
+    dY_t = _dY_f32.to(_torch_dtype)
+
+    bytes_xfer = float(dY_t.nbytes + X_t.nbytes + dW_t.nbytes)
+    flop = float(p.flops)
+
+    vec_a, vec_b, vec_c = _get_vector_sizes_wgrad(p.C, p.K, dtype)
+    sig = conv_args_signature(dtype)
+
+    # split_k degrees to sweep:
+    #   0   → sweep all degrees in _SPLIT_K_AUTO
+    #  -1   → one combo per tile config, degree resolved by CK formula per build
+    #  else → single fixed degree
+    split_k_values = _SPLIT_K_AUTO if args.split_k == 0 else (args.split_k,)
+
+    combos = list(
+        itertools.product(
+            _TILE_MN,
+            _TILE_MN,
+            _TILE_K,
+            _WARP_MN,
+            _WARP_MN,
+            _WARP_TILE_MN,
+            _PIPELINES,
+            _EPILOGUES,
+            split_k_values,
+        )
+    )
+
+    _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
+    print(
+        f"Sweeping {len(combos)} wgrad combinations for {arch} {dtype} {p.short()} "
+        f"(split_k={_spk_label}) ...",
+        flush=True,
+    )
+
+    rt = Runtime()
+    results: List[Result] = []
+    n_built = 0
+    n_skipped = 0
+
+    dY_dev = rt.alloc(dY_t.nbytes)
+    X_dev = rt.alloc(X_t.nbytes)
+    dW_dev = rt.alloc(dW_t.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
+    rt.memset(dW_dev, 0, dW_t.nbytes)
+
+    ref_out: torch.Tensor | None = None
+    if args.verify or args.dump_fail:
+        from rocke.benchmark.conv_reference import wgrad_reference
+
+        ref_out = wgrad_reference(_X_f32, _dY_f32, p)
+        print(
+            f"Wgrad reference computed ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+            flush=True,
+        )
+
+    for (
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_tile_mn,
+        pipeline,
+        epilogue,
+        split_k,
+    ) in combos:
+        # split_k > 1 requires dtype_d in fp32/bf16/fp16 (atomic accumulation).
+        # For split_k == 1 any dtype is fine; skip invalid split_k > 1 + cshuffle.
+        if split_k > 1 and epilogue == "cshuffle":
+            n_skipped += 1
+            continue
+
+        atom = target.mma.select_largest_k(
+            a_dtype=dtype,
+            b_dtype=dtype,
+            c_dtype="fp32",
+            m=warp_tile_mn,
+            n=warp_tile_mn,
+            k_max=tile_k,
+        )
+        if atom is None:
+            n_skipped += 1
+            continue
+
+        warp_tile_k = atom.k
+        # Resolve split_k=-1 once here so the concrete value is used for the
+        # spec, the grid z-axis, the timing loop, and the result record.
+        if split_k == -1:
+            from rocke.helpers.split_k import select_split_k_wgrad
+
+            resolved_split_k = select_split_k_wgrad(
+                wg_M=problem.kpg,
+                wg_N=problem.Y * problem.X * problem.cpg,
+                wg_K=problem.N * problem.Ho * problem.Wo,
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                arch=arch,
+            ).split_k
+        else:
+            resolved_split_k = split_k
+
+        spec = WgradConvSpec(
+            problem=problem,
+            name="rocke_bench_igemm_wgrad",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_tile_m=warp_tile_mn,
+            warp_tile_n=warp_tile_mn,
+            warp_tile_k=warp_tile_k,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            split_k=resolved_split_k,
+            vector_size_a=vec_a,
+            vector_size_b=vec_b,
+            vector_size_c=vec_c,
+        )
+
+        ok, reason = is_valid_wgrad_spec(spec, arch)
+        if not ok:
+            n_skipped += 1
+            continue
+
+        try:
+            kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
+        except ValueError:
+            n_skipped += 1
+            continue
+
+        artifact = compile_kernel(kernel, arch=arch)
+        n_built += 1
+
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=sig,
+        )
+        wg_M = spec.wg_M
+        wg_N = spec.wg_N
+        grid = (
+            (wg_N + tile_n - 1) // tile_n,
+            (wg_M + tile_m - 1) // tile_m,
+            resolved_split_k,  # z-axis: one CTA per K-slice
+        )
+        block = (spec.block_size, 1, 1)
+        stream = 0
+
+        values = {
+            "A": dY_dev,
+            "B": X_dev,
+            "D": dW_dev,
+            "A_bytes": dY_t.nbytes,
+            "B_bytes": X_t.nbytes,
+            "D_bytes": dW_t.nbytes,
+        }
+        cfg = LaunchConfig(grid=grid, block=block, stream=stream)
+
+        if args.verify or args.dump_fail:
+            if _verify_kernel(
+                rt=rt,
+                launcher=launcher,
+                values=values,
+                grid=grid,
+                block=block,
+                out_dev=dW_dev,
+                out_t=dW_t,
+                # Split-K atomic accumulation requires a zero-init buffer.
+                zero_init_out=(resolved_split_k > 1),
+                ref_out=ref_out,
+                kernel_name=artifact.kernel_name,
+                dump_fail=args.dump_fail,
+                extra_tensors={"dY": dY_t, "X": X_t},
+                u8=_u8,
+            ):
+                rt.free(dY_dev)
+                rt.free(X_dev)
+                rt.free(dW_dev)
+                return 1
+
+        # For split_k > 1 the timed loop must zero-init dW before every launch
+        # so the atomic accumulation starts from zero each iteration.
+        if resolved_split_k > 1:
+
+            def _launch_spk():
+                rt.memset(dW_dev, 0, dW_t.nbytes)
+                launcher(values, config=cfg)
+
+            timed_fn = _launch_spk
+        else:
+            timed_fn = lambda: launcher(values, config=cfg)
+
+        ms = time_launches(
+            timed_fn,
+            warmup=args.warmup,
+            iters=args.iters,
+            stream=stream,
+        )
+        synchronize_and_release(stream)
+
+        cur_tflops = (flop / ms) * 1e-9
+        cur_gbps = (bytes_xfer / ms) * 1e-6
+
+        results.append(
+            Result(
+                kernel_name=artifact.kernel_name,
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_mn=warp_tile_mn,
+                warp_tile_k=warp_tile_k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                split_k=resolved_split_k,
+                ms=ms,
+                tflops=cur_tflops,
+                gbps=cur_gbps,
+            )
+        )
+
+        print(
+            f"[{n_built:4d}] tile={tile_m}x{tile_n}x{tile_k} "
+            f"warp={warp_m}x{warp_n} "
+            f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
+            f"{pipeline}/{epilogue:9s} spk{resolved_split_k:<3d} "
+            f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
+            flush=True,
+        )
+
+    rt.free(dY_dev)
+    rt.free(X_dev)
+    rt.free(dW_dev)
+
+    print(f"\nWgrad sweep done: {n_built} built, {n_skipped} skipped.", flush=True)
+
+    if not results:
+        print("No valid wgrad configurations found.", file=sys.stderr)
+        return 1
+
+    results.sort(key=lambda r: r.tflops, reverse=True)
+    top_n = min(args.top, len(results))
+
+    print(f"\n{'='*72}")
+    print(f"Top {top_n} wgrad configurations for {arch} {dtype} {p.short()}")
+    print(f"{'='*72}")
+    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    print(hdr)
+    print("-" * 72)
+    for rank, r in enumerate(results[:top_n], 1):
+        cfg_str = (
+            f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
+            f"warp={r.warp_m}x{r.warp_n} "
+            f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
+            f"{r.pipeline}/{r.epilogue} spk{r.split_k}"
         )
         print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
 

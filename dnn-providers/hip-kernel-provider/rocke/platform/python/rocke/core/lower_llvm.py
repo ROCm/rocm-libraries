@@ -509,6 +509,11 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
         "ptr addrspace(1), <2 x bfloat>)"
     ),
+    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
+    "global.atomic.fadd.v2f16": (
+        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+        "ptr addrspace(1), <2 x half>)"
+    ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
     "ds.read.tr16.b64": (
@@ -1839,6 +1844,26 @@ class _Lowerer:
             f"  {op.result.name} = call <2 x bfloat> "
             f"@llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
             f"ptr addrspace(1) {gep}, <2 x bfloat> {self._operand(val)})"
+        )
+
+    def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
+        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
+
+        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
+        GEPs into the fp16 buffer at ``idx`` and calls
+        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
+        """
+        ptr, idx, val = op.operands
+        self._needs_intrin["global.atomic.fadd.v2f16"] = True
+        gep = self._fresh("gep")
+        self._current().emit(
+            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <2 x half> "
+            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
+            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
