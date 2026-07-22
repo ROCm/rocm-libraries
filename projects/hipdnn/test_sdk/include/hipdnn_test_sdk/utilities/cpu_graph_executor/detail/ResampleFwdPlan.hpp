@@ -147,6 +147,21 @@ public:
             return false;
         }
 
+        const auto mode = nodeAttributes->resample_mode();
+        if(mode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL
+           && mode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING
+           && mode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING)
+        {
+            return false;
+        }
+
+        const auto paddingMode = nodeAttributes->padding_mode();
+        if(paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::NEG_INF_PAD
+           && paddingMode != hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD)
+        {
+            return false;
+        }
+
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);

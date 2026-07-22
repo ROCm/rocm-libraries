@@ -2779,8 +2779,12 @@ inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph(std::optional<bool> generateIndex
-                                                                  = std::nullopt)
+inline flatbuffers::FlatBufferBuilder
+    createValidResampleFwdGraph(std::optional<bool> generateIndex = std::nullopt,
+                                hipdnn_flatbuffers_sdk::data_objects::ResampleMode mode
+                                = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
+                                hipdnn_flatbuffers_sdk::data_objects::PaddingMode paddingMode
+                                = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2828,8 +2832,8 @@ inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph(std::optional<
         &postPadding,
         &stride,
         &window,
-        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL,
-        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD,
+        mode,
+        paddingMode,
         flatbufferGenerateIndex);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;

@@ -116,6 +116,33 @@ TEST(TestResampleFwdPlanBuilder, IsApplicable)
     EXPECT_FALSE(noIndexBuilder.isApplicable(graph.getNode(0), tensorMapCopy));
 }
 
+TEST(TestResampleFwdPlanBuilder, RejectsUnsupportedModes)
+{
+    const ResampleFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
+        planBuilder;
+
+    for(const auto mode : {ResampleMode::NOT_SET, static_cast<ResampleMode>(127)})
+    {
+        auto builder = createValidResampleFwdGraph(std::nullopt, mode);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
+    }
+}
+
+TEST(TestResampleFwdPlanBuilder, RejectsUnsupportedPaddingModes)
+{
+    const ResampleFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::UNSET>
+        planBuilder;
+
+    for(const auto paddingMode : {PaddingMode::PADDING_NOT_SET, static_cast<PaddingMode>(127)})
+    {
+        auto builder
+            = createValidResampleFwdGraph(std::nullopt, ResampleMode::MAXPOOL, paddingMode);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
+    }
+}
+
 TEST(TestResampleFwdPlanBuilder, BuildNodePlan)
 {
     auto builder = createValidResampleFwdGraph();

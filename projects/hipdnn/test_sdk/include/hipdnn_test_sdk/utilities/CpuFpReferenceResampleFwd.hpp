@@ -53,6 +53,7 @@ public:
                               : static_cast<ComputeDataType>(0);
             int64_t validCount = 0;
             auto selectedIndex = static_cast<IndexDataType>(-1);
+            bool selectedCandidate = false;
 
             hipdnn_data_sdk::utilities::iterateAlongDimensions(
                 window, [&](const std::vector<int64_t>& windowIndices) {
@@ -87,10 +88,11 @@ public:
 
                     if(mode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
                     {
-                        if(candidate > result)
+                        if(!selectedCandidate || candidate > result)
                         {
                             result = candidate;
                             selectedIndex = candidateIndex;
+                            selectedCandidate = true;
                         }
                     }
                     else
