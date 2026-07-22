@@ -1153,17 +1153,36 @@ void check(hipStream_t                   stream,
                     synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
             }
         }
-        // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message
+        // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message.
+        // Mirror the unit/norm-check buffer branching: pointer-array mode uses per-batch buffers,
+        // so a strided read over num_batches would compare the wrong buffers / go out of bounds.
         if(arg.unit_check || arg.norm_check)
         {
-            check_special_value_consistency(M[gemmIdx],
-                                            N[gemmIdx],
-                                            ldd[gemmIdx],
-                                            stride_d[gemmIdx],
-                                            hD_gold[gemmIdx].buf(),
-                                            hD_1[gemmIdx].buf(),
-                                            num_batches[gemmIdx],
-                                            To);
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            {
+                check_special_value_consistency(M[gemmIdx],
+                                                N[gemmIdx],
+                                                ldd[gemmIdx],
+                                                stride_d[gemmIdx],
+                                                hD_gold[gemmIdx].buf(),
+                                                hD_1[gemmIdx].buf(),
+                                                num_batches[gemmIdx],
+                                                To);
+            }
+            else
+            {
+                for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
+                {
+                    check_special_value_consistency(M[gemmIdx],
+                                                    N[gemmIdx],
+                                                    ldd[gemmIdx],
+                                                    0,
+                                                    hD_gold[batch].buf(),
+                                                    hD_1[batch].buf(),
+                                                    1,
+                                                    To);
+                }
+            }
         }
         if(arg.unit_check)
         {

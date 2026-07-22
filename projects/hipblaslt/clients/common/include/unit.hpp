@@ -724,8 +724,9 @@ inline void check_special_value_consistency_impl(int64_t M,
                 if(std::isinf(cd))
                 {
                     ASSERT_TRUE(std::isinf(gd) && (std::signbit(cd) == std::signbit(gd)))
-                        << "Special value mismatch: CPU is Inf but GPU is " << gd << " at (i=" << i
-                        << ", j=" << j << ", batch=" << k << ")";
+                        << "Special value mismatch: CPU is " << (std::signbit(cd) ? "-Inf" : "+Inf")
+                        << " but GPU is " << gd << " at (i=" << i << ", j=" << j << ", batch=" << k
+                        << ")";
                 }
                 else if(std::isnan(cd))
                 {
