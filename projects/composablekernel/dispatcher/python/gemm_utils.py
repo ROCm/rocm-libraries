@@ -35,7 +35,7 @@ import multiprocessing
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -45,56 +45,12 @@ import numpy as np
 # python layer. gemm_utils is a thin bridge on top of these.
 import ctypes_utils as _cu
 
-
-# ============================================================================
-# GPU architecture resolution (never default to gfx942)
-# ============================================================================
-
-_SUPPORTED_ARCHES: Tuple[str, ...] = ("gfx90a", "gfx942", "gfx950")
-
-
-def _get_arch() -> str:
-    """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
-    import subprocess
-
-    arch = ""
-    try:
-        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
-        for line in out.splitlines():
-            if "Name:" in line and "gfx" in line:
-                arch = line.split()[-1].strip()
-                break
-    except Exception:
-        arch = ""
-    if not arch:
-        raise RuntimeError(
-            "Could not detect GPU architecture from rocminfo; refusing to default "
-            "to gfx942. Pass gfx_arch explicitly."
-        )
-    if arch not in _SUPPORTED_ARCHES:
-        raise ValueError(
-            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHES)}"
-        )
-    return arch
-
-
-def _resolve_arch(arch: Optional[str]) -> str:
-    """Resolve an explicit arch (validated) or auto-detect via rocminfo."""
-    if arch is None:
-        return _get_arch()
-    if arch not in _SUPPORTED_ARCHES:
-        raise ValueError(
-            f"Unsupported GPU architecture {arch!r}; supported: {list(_SUPPORTED_ARCHES)}"
-        )
-    return arch
-
-
-# ============================================================================
-# Layout / dtype helpers
-# ============================================================================
-
 _LAYOUT_CHAR = {"row": "r", "col": "c", "r": "r", "c": "c"}
 _LAYOUT_WORD = {"r": "row", "c": "col"}
+
+# --- Bridge shared helpers (canonical superset; byte-identical across bridges) ---
+# Supported GPU architectures for the bridge (single source of truth).
+_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
 
 # Single source of truth for the preshuffle B-shuffle permutation used by the
 # bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
@@ -107,6 +63,80 @@ _LAYOUT_WORD = {"r": "row", "c": "col"}
 # this one constant. TODO: to support permute_n=True, emit the permuteN pipeline
 # in unified_gemm_codegen and set this to a swept/config-driven value.
 BRIDGE_PERMUTE_N = False
+
+
+@functools.lru_cache(maxsize=1)
+def _get_arch() -> str:
+    """Detect the GPU architecture from rocminfo and validate it.
+
+    Returns the detected ``gfxNNN`` string. Raises ``RuntimeError`` when no arch
+    can be detected (no GPU / rocminfo unavailable) -- we refuse to silently
+    default to a specific architecture -- and ``ValueError`` when the detected
+    arch is not one this bridge supports.
+    """
+    detected: Optional[str] = None
+    try:
+        out = subprocess.check_output(
+            ["rocminfo"], stderr=subprocess.DEVNULL, text=True
+        )
+        for line in out.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Name:") and "gfx" in stripped:
+                name = stripped.split(":", 1)[1].strip()
+                if name.startswith("gfx"):
+                    detected = name
+                    break
+    except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
+        detected = None
+
+    if detected is None:
+        raise RuntimeError(
+            "Could not detect GPU architecture from rocminfo; refusing to "
+            "default to a specific GPU architecture. Pass an explicit --arch / "
+            "gfx_arch (one of "
+            f"{', '.join(_SUPPORTED_ARCHES)})."
+        )
+    if detected not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {detected!r}; supported: "
+            f"{', '.join(_SUPPORTED_ARCHES)}."
+        )
+    return detected
+
+
+def _resolve_arch(arch: Optional[str]) -> str:
+    """Resolve a possibly-``None`` arch to a validated, supported ``gfxNNN``.
+
+    ``None``/empty -> detect via :func:`_get_arch`. An explicit value is
+    validated against ``_SUPPORTED_ARCHES`` (raising ``ValueError`` if unknown)
+    so a typo can never silently reach the compiler.
+    """
+    if not arch:
+        return _get_arch()
+    if arch not in _SUPPORTED_ARCHES:
+        raise ValueError(
+            f"Unsupported GPU architecture {arch!r}; supported: "
+            f"{', '.join(_SUPPORTED_ARCHES)}."
+        )
+    return arch
+
+
+def _cshuffle_store_ok(
+    m_repeat: int, n_repeat: int, warp_tile_m: int, warp_tile_n: int
+) -> bool:
+    """Return False for the one CShuffle-store combination that is numerically
+    wrong (issue #9684): an ODD per-wave repeat (>1) paired with a 32-wide warp
+    tile in that dimension. GPU-verified on gfx942 -- e.g. tile_m=192 / wave_m=2
+    / warp_tile_m=32 (MRepeat=3) returns garbage, while every other non-power-of-
+    two repeat (incl. MRepeat=3 with warp_tile_m=16, and even repeats like 6/12)
+    is correct. Only relevant for the CShuffle epilogue; the default epilogue is
+    exempt."""
+
+    def _dim_bad(repeat: int, warp_tile: int) -> bool:
+        return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
+    return not (_dim_bad(m_repeat, warp_tile_m) or _dim_bad(n_repeat, warp_tile_n))
+# --- end bridge shared helpers ---
 
 
 def _cap(flag: bool) -> str:
@@ -240,15 +270,41 @@ class GemmKernelConfig:
     pad_k: bool = True
     persistent: bool = False
 
+    # No silent default: the arch must be resolved (rocminfo-detected or passed
+    # explicitly) before this config feeds the compiler. expand_sweep /
+    # setup_multiple_gemm_dispatchers guarantee a non-None value; a stray None
+    # reaching -DGFX_ARCH / --offload-arch would build for the wrong device.
     gfx_arch: Optional[str] = None
     variant: str = "standard"
-    # Preshuffle-only: selects the B-preshuffle permutation (shuffle_b_permuteN
-    # vs shuffle_b). Mirrors Old-TE's permute_n config knob; participates in the
-    # kernel name so it must match unified_gemm_codegen.py::key_name.
-    permute_n: bool = False
     # Stream-K reduction strategy: "atomic" (default), "linear", or "tree".
     # Only meaningful when variant == "stream_k".
     reduction_strategy: str = "atomic"
+
+    # --- Preshuffle only ---------------------------------------------------
+    # Selects the B-preshuffle permutation (shuffle_b_permuteN vs shuffle_b).
+    # Mirrors Old-TE's permute_n config knob; participates in the kernel name so
+    # it must match unified_gemm_codegen.py::key_name. Ignored by other variants.
+    permute_n: bool = False
+
+    # --- Multi-ABD only ----------------------------------------------------
+    # Arrays of A/B/D tensors and per-group element-wise ops. These are
+    # behavior-affecting and appear in .name (and thus in the codegen kernel
+    # name) so distinct tensor counts / ops never collapse to one kernel.
+    # layout_d is the 4th ('D') char of the multi_abd rcrr layout code.
+    num_a_tensors: int = 2
+    num_b_tensors: int = 2
+    num_d_tensors: int = 2
+    a_elementwise_op: str = "PassThrough"
+    b_elementwise_op: str = "PassThrough"
+    cde_elementwise_op: str = "PassThrough"
+    layout_d: str = "row"
+
+    # --- Multi-D only (variant=="multi_d") ---------------------------------
+    #   elementwise_op: "MultiDAdd" | "MultiDMultiply" | "PassThrough"
+    #   d_layout      : row/col of every D tensor (row for the TE multi_d builder)
+    # num_d_tensors (above) is reused as the fused-D operand count for multi_d.
+    elementwise_op: str = "PassThrough"
+    d_layout: str = "row"
 
     # ------------------------------------------------------------------ #
     # Derived string fragments
@@ -261,6 +317,23 @@ class GemmKernelConfig:
             + _LAYOUT_CHAR[self.layout_b]
             + _LAYOUT_CHAR[self.layout_c]
         )
+
+    @property
+    def layout4(self) -> str:
+        """4-char multi_abd layout string (A,B,E,D), e.g. 'rcrr'."""
+        return self.layout + _LAYOUT_CHAR[self.layout_d]
+
+    @property
+    def codegen_layout(self) -> str:
+        """Layout string passed to unified_gemm_codegen.py --layout.
+
+        Multi-D takes a 4-char layout (A,B,C + D); the codegen splits off the
+        4th char as the D-tensor layout. Every other variant uses the 3-char
+        A,B,C layout.
+        """
+        if self.variant == "multi_d":
+            return self.layout + _LAYOUT_CHAR[self.d_layout]
+        return self.layout
 
     @property
     def tile_str(self) -> str:
@@ -284,8 +357,17 @@ class GemmKernelConfig:
         ``dispatcher_get_kernel_name``). This is the single thread tying
         config -> codegen -> runtime together.
         """
+        # Multi-ABD uses the 4-char layout (A,B,E,D); multi_d likewise appends
+        # its D-tensor layout char; every other variant uses the 3-char (A,B,C).
+        # This mirrors KernelNaming.generate in the codegen.
+        if self.variant == "multi_abd":
+            layout_str = self.layout4
+        elif self.variant == "multi_d":
+            layout_str = self.layout + _LAYOUT_CHAR[self.d_layout]
+        else:
+            layout_str = self.layout
         name = (
-            f"gemm_{self.dtype_a}_{self.layout}"
+            f"gemm_{self.dtype_a}_{layout_str}"
             f"_{self.pipeline}_{self.epilogue}_{self.scheduler}"
             f"_{_cap(self.pad_m)}_{_cap(self.pad_n)}_{_cap(self.pad_k)}"
             f"_{_cap(self.persistent)}"
@@ -301,6 +383,18 @@ class GemmKernelConfig:
             # and tree are disambiguated, matching KernelNaming.generate.
             if self.reduction_strategy != "atomic":
                 name += f"_{self.reduction_strategy}"
+        elif self.variant == "multi_abd":
+            # Byte-for-byte match to codegen KernelNaming.generate's multiabd
+            # suffix: tensor counts then the three element-wise ops.
+            name += (
+                f"_multiabd_a{self.num_a_tensors}_b{self.num_b_tensors}"
+                f"_d{self.num_d_tensors}"
+                f"_{self.a_elementwise_op}_{self.b_elementwise_op}"
+                f"_{self.cde_elementwise_op}"
+            )
+        elif self.variant == "multi_d":
+            # Mirror KernelNaming.generate: "_multid_{elementwise_op}_d{num_d}".
+            name += f"_multid_{self.elementwise_op}_d{self.num_d_tensors}"
         elif self.variant == "grouped":
             name += "_grouped"
         return name
@@ -347,6 +441,26 @@ class GemmKernelConfig:
         # kernel (the generator otherwise expands all strategies in its default).
         if self.variant == "stream_k":
             cfg["streamk_config"] = {"reduction_strategy": [self.reduction_strategy]}
+        # Multi-ABD codegen reads its tensor counts / element-wise ops from a
+        # dedicated ``multi_abd_config`` block. These are scalars (one kernel per
+        # config), matching the codegen's _get_configs_for_variant reader.
+        if self.variant == "multi_abd":
+            cfg["multi_abd_config"] = {
+                "num_a_tensors": self.num_a_tensors,
+                "num_b_tensors": self.num_b_tensors,
+                "num_d_tensors": self.num_d_tensors,
+                "a_elementwise_op": self.a_elementwise_op,
+                "b_elementwise_op": self.b_elementwise_op,
+                "cde_elementwise_op": self.cde_elementwise_op,
+            }
+        # Multi-D signature: the codegen expands its multi_d variant over the
+        # (elementwise_op x num_d_tensors) product, so pin both to this config's
+        # single values. Only emitted for multi_d (ignored elsewhere).
+        if self.variant == "multi_d":
+            cfg["multi_d_config"] = {
+                "elementwise_ops": [self.elementwise_op],
+                "num_d_tensors": [self.num_d_tensors],
+            }
         return cfg
 
     def to_dict(self) -> Dict[str, Any]:
@@ -398,8 +512,6 @@ class GemmKernelConfig:
             gfx_arch=self.gfx_arch,
             variant=self.variant,
         )
-
-
 # ============================================================================
 # Problem
 # ============================================================================
@@ -1178,16 +1290,21 @@ def setup_multiple_gemm_dispatchers(
     if n == 0:
         return results
 
-    # Never let a defaulted/None arch reach the compiler: resolve any config
-    # whose gfx_arch was left unset (e.g. a hand-built GemmKernelConfig that
-    # bypassed expand_sweep) via rocminfo, so -DGFX_ARCH / --offload-arch always
-    # receive a concrete, validated architecture instead of "None"/gfx942.
-    _resolved_arch: Optional[str] = None
+    # Guard the compile path: every config's gfx_arch must be a concrete,
+    # supported arch before it reaches -DGFX_ARCH / --offload-arch / gpu_target.
+    # expand_sweep already resolves this, but a config built directly (gfx_arch
+    # left as None) would otherwise emit a literal "None" arch. Resolve/validate
+    # here too, defaulting a None to the rocminfo-detected arch (never gfx942).
+    _shared_arch: Optional[str] = None
+    resolved_configs: List[GemmKernelConfig] = []
     for c in configs:
-        if getattr(c, "gfx_arch", None) is None:
-            if _resolved_arch is None:
-                _resolved_arch = _resolve_arch(None)
-            c.gfx_arch = _resolved_arch
+        if c.gfx_arch:
+            resolved_configs.append(replace(c, gfx_arch=_resolve_arch(c.gfx_arch)))
+        else:
+            if _shared_arch is None:
+                _shared_arch = _get_arch()
+            resolved_configs.append(replace(c, gfx_arch=_shared_arch))
+    configs = resolved_configs
 
     # Hard-fail rather than build a runnable but WRONG kernel: a preshuffle config
     # with permute_n=True would compile a "_permuteN" kernel whose device pipeline
@@ -1197,7 +1314,9 @@ def setup_multiple_gemm_dispatchers(
     # .so that could silently produce incorrect output.
     if not BRIDGE_PERMUTE_N:
         for c in configs:
-            if getattr(c, "variant", "") == "preshuffle" and getattr(c, "permute_n", False):
+            if getattr(c, "variant", "") == "preshuffle" and getattr(
+                c, "permute_n", False
+            ):
                 raise ValueError(
                     "permute_n=True is not supported by the bridge yet "
                     "(BRIDGE_PERMUTE_N=False): refusing to build a permuteN kernel "
@@ -1353,6 +1472,13 @@ def expand_sweep(
     dtype: str = "fp16",
     layout: str = "rcr",
     variant: str = "standard",
+    num_a_tensors: int = 2,
+    num_b_tensors: int = 2,
+    num_d_tensors: int = 2,
+    a_elementwise_op: str = "PassThrough",
+    b_elementwise_op: str = "PassThrough",
+    cde_elementwise_op: str = "PassThrough",
+    mabd_cli_overrides: Optional[Dict[str, Any]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -1365,26 +1491,37 @@ def expand_sweep(
     The operand signature (``dtype``, ``layout``) is applied to every emitted
     GemmKernelConfig, so the same sweep expands across any supported dtype/layout.
 
-    ``arch`` is resolved via ``_resolve_arch`` (rocminfo auto-detect + validate)
-    when omitted/None, so every emitted config carries a concrete gfx_arch and
-    the compiler never sees a defaulted/None architecture.
+    For ``variant='multi_abd'`` the ``layout`` is the 4-char (A,B,E,D) code
+    (e.g. ``rcrr``); the tensor counts and per-group element-wise ops are carried
+    onto every produced config so they participate in the kernel name. For
+    ``variant='multi_d'`` the ``layout`` may be 4-char (4th char = D-tensor
+    layout) and each base config is further expanded over ``multi_d_config``
+    (elementwise_ops x num_d_tensors), mirroring the codegen's multi_d expansion.
+
+    ``arch`` may be ``None`` (or omitted): it is resolved once here via
+    :func:`_resolve_arch` (rocminfo-detect + validate) so every produced config
+    carries a concrete, supported ``gfx_arch`` -- the compile command's
+    ``-DGFX_ARCH`` / ``--offload-arch`` never see ``None``. An explicit,
+    unsupported arch raises ``ValueError``.
     """
+    # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
+    # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
+    # callers get a clear error instead of a runtime failure after kernels compile.
+    if variant == "multi_abd" and dtype != "fp16":
+        raise ValueError(
+            f"multi_abd bridge supports fp16 only, got {dtype!r}; "
+            "codegen, ctypes lib and the runner are all fp16-only for this variant"
+        )
+
+    # Resolve the arch up front so it cannot silently default: this is the single
+    # value stamped onto every emitted config's .gfx_arch below.
     arch = _resolve_arch(arch)
+
     with open(config_path) as f:
         cfg = json.load(f)
 
     tc = cfg.get("tile_config", {})
     tr = cfg.get("trait_config", {})
-    # Preshuffle B-shuffle permutation knob -- pinned to the single source of
-    # truth BRIDGE_PERMUTE_N (see its definition for the full rationale). We
-    # deliberately ignore cfg.get("permute_n"): both default_config.json and
-    # default_ci_config.json ship permute_n=true, but that TE host-marker selects
-    # a permuteN pipeline the bridge does not codegen (it is NOT a distinct
-    # bridged device kernel), so honoring it would mis-shuffle B. Do NOT "fix" this
-    # to read the config until the permuteN pipeline is bridged.
-    # TODO: support permute_n=True by emitting the permuteN pipeline in
-    # unified_gemm_codegen and flipping BRIDGE_PERMUTE_N to a config-driven value.
-    permute_n = BRIDGE_PERMUTE_N
 
     tile_ms = _expand_range(tc["tile_m"])
     tile_ns = _expand_range(tc["tile_n"])
@@ -1404,6 +1541,17 @@ def expand_sweep(
     pad_ks = _expand_values(tr.get("pad_k"), [False])
     persistents = _expand_values(tr.get("persistent"), [False])
 
+    # Preshuffle B-shuffle permutation knob -- pinned to the single source of
+    # truth BRIDGE_PERMUTE_N (see its definition for the full rationale). We
+    # deliberately ignore cfg.get("permute_n"): both default_config.json and
+    # default_ci_config.json ship permute_n=true, but that TE host-marker selects
+    # a permuteN pipeline the bridge does not codegen (it is NOT a distinct
+    # bridged device kernel), so honoring it would mis-shuffle B. Do NOT "fix" this
+    # to read the config until the permuteN pipeline is bridged.
+    # TODO: support permute_n=True by emitting the permuteN pipeline in
+    # unified_gemm_codegen and flipping BRIDGE_PERMUTE_N to a config-driven value.
+    permute_n = BRIDGE_PERMUTE_N
+
     # Stream-K only: sweep reduction strategies (atomic/linear/tree). Other
     # variants keep a single dummy value so the product is unaffected.
     if variant == "stream_k":
@@ -1413,6 +1561,87 @@ def expand_sweep(
         reductions = ["atomic"]
 
     la, lb, lc = layout[0], layout[1], layout[2]
+    # Multi-ABD carries a 4th (D) layout char; default D to C's layout otherwise.
+    ld = layout[3] if (variant == "multi_abd" and len(layout) >= 4) else lc
+
+    # Multi-D: 4th layout char (if present) is the D-tensor layout; default row.
+    d_layout_char = layout[3] if (variant == "multi_d" and len(layout) >= 4) else "r"
+    d_layout_word = _LAYOUT_WORD[d_layout_char]
+
+    # Multi-ABD (B2): the tensor counts and per-group element-wise ops are a real
+    # part of the swept configuration -- distinct ops produce distinct kernels
+    # (different epilogue math). Read them from an optional ``multi_abd_config``
+    # block in the TE config JSON (lists of values), falling back to the scalar
+    # kwargs (which default to the Old-TE 2/2/2 all-PassThrough combo). This is
+    # what lets the driver actually generate + verify a non-PassThrough kernel.
+    #
+    # Allowed ops mirror the Old-TE gemm_multi_abd instance builder:
+    #   {PassThrough, AddScale, MultiDMultiply, MultiDAdd}.
+    if variant == "multi_abd":
+        mabd = dict(cfg.get("multi_abd_config", {}) or {})
+        # CLI overrides win over both the config block and the scalar defaults.
+        if mabd_cli_overrides:
+            mabd.update(mabd_cli_overrides)
+
+        def _as_list(v, default):
+            if v is None:
+                return list(default)
+            return list(v) if isinstance(v, (list, tuple)) else [v]
+
+        na_list = _as_list(mabd.get("num_a_tensors"), [num_a_tensors])
+        nb_list = _as_list(mabd.get("num_b_tensors"), [num_b_tensors])
+        nd_list = _as_list(mabd.get("num_d_tensors"), [num_d_tensors])
+        # CK's GemmKernelMultiABD requires >=1 A and B tensors and
+        # DsLayout::size() > 0 (num_d_tensors >= 1); a 0 or non-integer count
+        # otherwise fails later with a cryptic tuple-size-0 compile error, so
+        # reject it here with a clear message.
+        for _label, _vals in (
+            ("num_a_tensors", na_list),
+            ("num_b_tensors", nb_list),
+            ("num_d_tensors", nd_list),
+        ):
+            for _v in _vals:
+                if not isinstance(_v, int) or _v < 1:
+                    raise ValueError(
+                        f"multi_abd {_label} must be a positive integer (>= 1), "
+                        f"got {_v!r}"
+                    )
+        a_ops = _as_list(mabd.get("a_elementwise_op"), [a_elementwise_op])
+        b_ops = _as_list(mabd.get("b_elementwise_op"), [b_elementwise_op])
+        cde_ops = _as_list(mabd.get("cde_elementwise_op"), [cde_elementwise_op])
+        _ALLOWED_MABD_OPS = {"PassThrough", "AddScale", "MultiDMultiply", "MultiDAdd"}
+        for op in (*a_ops, *b_ops, *cde_ops):
+            if op not in _ALLOWED_MABD_OPS:
+                raise ValueError(
+                    f"Invalid multi_abd element-wise op {op!r}; "
+                    f"valid: {sorted(_ALLOWED_MABD_OPS)}"
+                )
+        mabd_combos = list(
+            itertools.product(na_list, nb_list, nd_list, a_ops, b_ops, cde_ops)
+        )
+    else:
+        # Non-multi_abd variants: a single, inert combo carrying the scalar
+        # kwargs (unused by those code paths' names).
+        mabd_combos = [
+            (
+                num_a_tensors,
+                num_b_tensors,
+                num_d_tensors,
+                a_elementwise_op,
+                b_elementwise_op,
+                cde_elementwise_op,
+            )
+        ]
+
+    # Multi-D expansion combos (elementwise_op, num_d); a single ("PassThrough",0)
+    # entry for non-multi_d variants keeps the loop below variant-agnostic.
+    if variant == "multi_d":
+        mdc = cfg.get("multi_d_config", {})
+        md_ops = _expand_values(mdc.get("elementwise_ops"), ["MultiDAdd"])
+        md_nds = _expand_values(mdc.get("num_d_tensors"), [2])
+        md_combos = list(itertools.product(md_ops, md_nds))
+    else:
+        md_combos = [("PassThrough", 0)]
 
     configs: List[GemmKernelConfig] = []
     seen: set = set()
@@ -1453,59 +1682,75 @@ def expand_sweep(
         persistents,
         reductions,
     ):
-        c = GemmKernelConfig(
-            dtype_a=dtype,
-            dtype_b=dtype,
-            dtype_c=_output_dtype(dtype),
-            dtype_acc=("int32" if dtype == "int8" else "fp32"),
-            layout_a=_LAYOUT_WORD[la],
-            layout_b=_LAYOUT_WORD[lb],
-            layout_c=_LAYOUT_WORD[lc],
-            tile_m=tm,
-            tile_n=tn,
-            tile_k=tk,
-            wave_m=wm,
-            wave_n=wn,
-            wave_k=wk,
-            warp_tile_m=wtm,
-            warp_tile_n=wtn,
-            warp_tile_k=wtk,
-            pipeline=pipe,
-            scheduler=sched,
-            epilogue=epi,
-            pad_m=bool(pm),
-            pad_n=bool(pn),
-            pad_k=bool(pk),
-            persistent=bool(persist),
-            gfx_arch=arch,
-            variant=variant,
-            permute_n=permute_n,
-            reduction_strategy=red,
-        )
-        if c.name in seen:
-            continue
-        val = _cu.validate_kernel_config(c.to_ctypes_config())
-        if not val.is_valid:
-            continue
-        # Tile/CShuffle correctness gate (mirrors unified_gemm_codegen's
-        # TileConfig.is_valid + the power-of-two repeat rule; the ctypes
-        # validate_kernel_config above does NOT enforce either). A block tile must
-        # split evenly across its waves -- tile % (wave * warp_tile) == 0 -- and
-        # the CShuffle epilogue stores the accumulator through LDS in power-of-two
-        # MRepeat/NRepeat chunks, so the per-wave repeat must be a power of two.
-        # Tiles that violate either still compile but produce numerically WRONG
-        # results at runtime. Observed on MI350 for tile_m=192 (MRepeat=3) and
-        # tile_n=192 (e.g. 64x192x64_1x4x1, 192 not divisible by 4*32) -- both
-        # verified incorrect on the bridge and Tile Engine. Power-of-two tiles
-        # (64/128/256) are unaffected.
+        # Tile/CShuffle correctness gate. A block tile must split evenly across
+        # its waves -- tile % (wave * warp_tile) == 0 -- else the kernel is
+        # genuinely invalid.
+        #
+        # Narrowed CShuffle-store gate (issue #9684): the CShuffle epilogue only
+        # mis-stores the accumulator for one specific combination -- an ODD
+        # per-wave repeat (>1) paired with a 32-wide warp tile in that dimension.
+        # GPU-verified on gfx942: the tile_m=192 / wave_m=2 / warp_tile_m=32
+        # configs (MRepeat = 192/(2*32) = 3) return garbage, while EVERY other
+        # non-power-of-two repeat is numerically correct -- including MRepeat=3
+        # with warp_tile_m=16 (192/(4*16)) and even non-pow2 repeats like 6 and
+        # 12. The previous "per-wave repeat must be a power of two" rule was too
+        # broad and needlessly dropped 90 valid configs. The "default" epilogue
+        # stores directly and is exempt.
         m_div = wm * wtm
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
             continue
-        if epi == "cshuffle":
-            if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
-                continue
-        seen.add(c.name)
-        configs.append(c)
+        if epi == "cshuffle" and not _cshuffle_store_ok(
+            tm // m_div, tn // n_div, wtm, wtn
+        ):
+            continue
+
+        for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:
+            for ew_op, md_nd in md_combos:
+                c = GemmKernelConfig(
+                    dtype_a=dtype,
+                    dtype_b=dtype,
+                    dtype_c=_output_dtype(dtype),
+                    dtype_acc=("int32" if dtype == "int8" else "fp32"),
+                    layout_a=_LAYOUT_WORD[la],
+                    layout_b=_LAYOUT_WORD[lb],
+                    layout_c=_LAYOUT_WORD[lc],
+                    tile_m=tm,
+                    tile_n=tn,
+                    tile_k=tk,
+                    wave_m=wm,
+                    wave_n=wn,
+                    wave_k=wk,
+                    warp_tile_m=wtm,
+                    warp_tile_n=wtn,
+                    warp_tile_k=wtk,
+                    pipeline=pipe,
+                    scheduler=sched,
+                    epilogue=epi,
+                    pad_m=bool(pm),
+                    pad_n=bool(pn),
+                    pad_k=bool(pk),
+                    persistent=bool(persist),
+                    gfx_arch=arch,
+                    variant=variant,
+                    reduction_strategy=red,
+                    permute_n=permute_n,
+                    num_a_tensors=m_na,
+                    num_b_tensors=m_nb,
+                    num_d_tensors=(md_nd if variant == "multi_d" else m_nd),
+                    a_elementwise_op=m_aop,
+                    b_elementwise_op=m_bop,
+                    cde_elementwise_op=m_cdeop,
+                    layout_d=_LAYOUT_WORD[ld],
+                    elementwise_op=ew_op,
+                    d_layout=d_layout_word,
+                )
+                if c.name in seen:
+                    continue
+                val = _cu.validate_kernel_config(c.to_ctypes_config())
+                if not val.is_valid:
+                    continue
+                seen.add(c.name)
+                configs.append(c)
 
     return configs

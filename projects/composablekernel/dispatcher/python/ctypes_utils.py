@@ -195,8 +195,6 @@ def get_arch_filter_data() -> Dict[str, Any]:
             },
             "supported_archs": ["gfx90a", "gfx942", "gfx950"],
         }
-
-
 @dataclass
 class ValidationResult:
     """Result of kernel config validation."""
@@ -348,8 +346,6 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
         warnings=warnings,
         suggested_fixes=suggested_fixes,
     )
-
-
 def auto_correct_kernel_config(
     config: "KernelConfig", verbose: bool = False
 ) -> Tuple["KernelConfig", bool, List[str]]:

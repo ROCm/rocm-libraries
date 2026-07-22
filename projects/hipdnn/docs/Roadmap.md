@@ -57,6 +57,10 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Export auto-tuning result to a config file for reuse across runs ⏳
 
 ### Benchmarking & performance testing
+
+> [!IMPORTANT]
+> The dnn-benchmarking tool has moved to its own repository: [ROCm/dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking).
+
 - **Benchmarking & performance Python tools** ⏳
   - Core dnn-benchmarking tool (engine comparison, SDPA/PyTorch references, HIP-event timing) landed ✅
   - Cross-platform (Windows) port in progress ⏳
