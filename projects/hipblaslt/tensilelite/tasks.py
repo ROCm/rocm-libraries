@@ -297,30 +297,13 @@ def build_client(
     """
 
     if enable_asan and enable_tsan:
-        print("Error: ASAN and TSAN cannot be enabled simultaneously", file=sys.stderr)
-        return
+        raise Exit("Error: ASAN and TSAN cannot be enabled simultaneously", code=1)
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
         if not gpu_targets:
-            print("Error: No GPU detected and no gpu_targets provided. Skipping build.")
-            return
+            raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
-
-    # Sanitizers require xnack+ to enable precise memory fault handling.
-    # xnack (eXtended Not-ACKnowledge) allows the GPU to recover from page faults
-    # by signaling the CPU to handle missing pages, which is essential for ASAN/TSAN
-    # to track memory accesses and detect errors in GPU code.
-    if enable_asan or enable_tsan:
-        targets = gpu_targets.split(',')
-        modified_targets = []
-        for target in targets:
-            target = target.strip()
-            if ':xnack' not in target:
-                target = f"{target}:xnack+"
-                print(f"Sanitizers enabled: using {target} (xnack+ required for GPU sanitizers)")
-            modified_targets.append(target)
-        gpu_targets = ','.join(modified_targets)
 
     if rocm_path:
         cmake_c_compiler = os.path.join(rocm_path, "bin", "amdclang")
@@ -330,11 +313,9 @@ def build_client(
             try:
                 subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
             except FileNotFoundError:
-                print(f"Error: compiler not found at {compiler}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler not found at {compiler}", code=1)
             except subprocess.SubprocessError as e:
-                print(f"Error: compiler check failed for {compiler}: {e}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
 
     if rebuild_rocisa:
         _maybe_rebuild_rocisa(c)
@@ -367,9 +348,9 @@ def build_client(
         if export_compile_commands:
             cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
         if enable_asan:
-            cmake_cmd.append("-DENABLE_ASAN=ON")
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_ASAN=ON")
         if enable_tsan:
-            cmake_cmd.append("-DENABLE_TSAN=ON")
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         cmake_cmd.append(f"-DHIPBLASLT_BUNDLE_PYTHON_DEPS={_cmake_bool(bundle_python_deps)}")
 
         c.run(shlex.join(cmake_cmd))

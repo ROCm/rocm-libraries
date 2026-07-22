@@ -1,10 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
-option(ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(TENSILELITE_ENABLE_HOST_ASAN "Enable AddressSanitizer for host code" OFF)
+option(TENSILELITE_ENABLE_HOST_TSAN "Enable ThreadSanitizer for host code" OFF)
 
-if(ENABLE_ASAN AND ENABLE_TSAN)
+if(TENSILELITE_ENABLE_HOST_ASAN AND TENSILELITE_ENABLE_HOST_TSAN)
     message(FATAL_ERROR "ASAN and TSAN cannot be enabled simultaneously")
 endif()
 # Coverage instrumentation for C++ code
@@ -50,7 +50,7 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 
-    if(ENABLE_ASAN)
+    if(TENSILELITE_ENABLE_HOST_ASAN)
         # Apply sanitizer only to host code, not device code
         # Use SHELL: to pass flags that should not be applied to device offload
         target_compile_options(tensilelite-host PUBLIC
@@ -62,7 +62,7 @@ if(TENSILELITE_ENABLE_HOST)
         )
     endif()
 
-    if(ENABLE_TSAN)
+    if(TENSILELITE_ENABLE_HOST_TSAN)
         # Apply sanitizer only to host code, not device code
         # Use SHELL: to pass flags that should not be applied to device offload
         target_compile_options(tensilelite-host PUBLIC
