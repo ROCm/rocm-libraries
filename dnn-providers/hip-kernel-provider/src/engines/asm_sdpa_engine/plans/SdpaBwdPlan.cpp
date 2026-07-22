@@ -504,26 +504,25 @@ void SdpaBwdPlan::execute(const Handle& handle,
     }
 
     // 5. Resolve attention scale at execute time (runtime pass-by-value support).
-    const float resolvedScale = static_cast<float>(hipdnn_plugin_sdk::toDouble(
-        hipdnn_plugin_sdk::resolveScalarOperand(
+    const float resolvedScale
+        = static_cast<float>(hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
             _params.attnScale, deviceBuffers, numDeviceBuffers)));
 
     // 6. Build convenience args struct (mirrors AITER mha_bwd_args).
     // Byte-stride uint32 overflow was already rejected by isApplicable.
-    const MhaBwdArgs mhaArgs = buildMhaBwdArgs(
-        _params,
-        resolvedScale,
-        qPtr,
-        kPtr,
-        vPtr,
-        oPtr,
-        doPtr,
-        lsePtr,
-        dqPtr,
-        dkPtr,
-        dvPtr,
-        dBufPtr,
-        dqAccPtr);
+    const MhaBwdArgs mhaArgs = buildMhaBwdArgs(_params,
+                                               resolvedScale,
+                                               qPtr,
+                                               kPtr,
+                                               vPtr,
+                                               oPtr,
+                                               doPtr,
+                                               lsePtr,
+                                               dqPtr,
+                                               dkPtr,
+                                               dvPtr,
+                                               dBufPtr,
+                                               dqAccPtr);
 
     // 7. Launch kernels on the same stream.
     // a32: 3 kernels — ODO → DQDKDV → DQ_CONVERT (sequential dependencies)

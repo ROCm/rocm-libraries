@@ -223,12 +223,12 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithRuntimePbvScale()
                                                             true)); // is_runtime_pass_by_value
 
     const auto sdpaAttributes = CreateSdpaAttributes(builder,
-                                                      qUid,
-                                                      kUid,
-                                                      vUid,
-                                                      oUid,
-                                                      flatbuffers::nullopt, // attn_mask
-                                                      scaleUid); // scale_tensor_uid
+                                                     qUid,
+                                                     kUid,
+                                                     vUid,
+                                                     oUid,
+                                                     flatbuffers::nullopt, // attn_mask
+                                                     scaleUid); // scale_tensor_uid
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -281,12 +281,12 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
         builder, scaleUid, "scale", DataType::FLOAT, &scaleDims, &scaleDims));
 
     const auto sdpaAttributes = CreateSdpaAttributes(builder,
-                                                      qUid,
-                                                      kUid,
-                                                      vUid,
-                                                      oUid,
-                                                      flatbuffers::nullopt, // attn_mask
-                                                      scaleUid); // scale_tensor_uid
+                                                     qUid,
+                                                     kUid,
+                                                     vUid,
+                                                     oUid,
+                                                     flatbuffers::nullopt, // attn_mask
+                                                     scaleUid); // scale_tensor_uid
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -355,9 +355,11 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaFwdGraph(
-        {4, 8, 256, 128}, {4, 8, 256, 128}, hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-        /*withAttnMask=*/false, /*withScale=*/true);
+    auto builder = createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      /*withAttnMask=*/false,
+                                      /*withScale=*/true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 

@@ -60,8 +60,9 @@ void SdpaFwdPlan::execute(const Handle& handle,
     }
 
     // Attention scale — resolved at execute for runtime pass-by-value support.
-    args.scalar = static_cast<float>(hipdnn_plugin_sdk::toDouble(
-        hipdnn_plugin_sdk::resolveScalarOperand(_params.attnScale, deviceBuffers, numDeviceBuffers)));
+    args.scalar
+        = static_cast<float>(hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
+            _params.attnScale, deviceBuffers, numDeviceBuffers)));
 
     // Q dimensions and strides (convert to bytes: stride * sizeof(bfloat16))
     // TODO: When adding the fp8 kernels, modify this to check for the datatype

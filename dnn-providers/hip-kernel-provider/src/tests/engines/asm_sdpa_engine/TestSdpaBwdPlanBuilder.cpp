@@ -205,18 +205,17 @@ flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithRuntimePbvScale()
                                                             0, // value offset
                                                             true)); // is_runtime_pass_by_value
 
-    const auto sdpaAttributes
-        = CreateSdpaBackwardAttributes(builder,
-                                       qUid,
-                                       kUid,
-                                       vUid,
-                                       oUid,
-                                       doUid,
-                                       statsUid,
-                                       dqUid,
-                                       dkUid,
-                                       dvUid,
-                                       scaleUid); // scale_tensor_uid
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -286,18 +285,17 @@ flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithNonPbvScaleTensor()
     tensorAttributes.push_back(CreateTensorAttributesDirect(
         builder, scaleUid, "scale", DataType::FLOAT, &scaleDims, &scaleDims));
 
-    const auto sdpaAttributes
-        = CreateSdpaBackwardAttributes(builder,
-                                       qUid,
-                                       kUid,
-                                       vUid,
-                                       oUid,
-                                       doUid,
-                                       statsUid,
-                                       dqUid,
-                                       dkUid,
-                                       dvUid,
-                                       scaleUid); // scale_tensor_uid
+    const auto sdpaAttributes = CreateSdpaBackwardAttributes(builder,
+                                                             qUid,
+                                                             kUid,
+                                                             vUid,
+                                                             oUid,
+                                                             doUid,
+                                                             statsUid,
+                                                             dqUid,
+                                                             dkUid,
+                                                             dvUid,
+                                                             scaleUid); // scale_tensor_uid
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
@@ -360,9 +358,9 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         GTEST_SKIP();
     }
 
-    auto builder = createSdpaBwdGraph(
-        {4, 8, 256, 128}, hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-        /*withScale=*/true);
+    auto builder = createSdpaBwdGraph({4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      /*withScale=*/true);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
