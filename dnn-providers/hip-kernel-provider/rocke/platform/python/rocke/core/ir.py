@@ -1158,6 +1158,15 @@ class IRBuilder:
     def global_load_bf16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
         return self.global_load(ptr, idx, BF16, align=align)
 
+    def global_load_i8(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, I8, align=align)
+
+    def global_load_i16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
+        return self.global_load(ptr, idx, I16, align=align)
+
+    def global_load_bf8e5m2(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
+        return self.global_load(ptr, idx, BF8E5M2, align=align)
+
     def global_load_fp8e4m3(self, ptr: Value, idx: Value, *, align: int = 1) -> Value:
         return self.global_load(ptr, idx, FP8E4M3, align=align)
 
