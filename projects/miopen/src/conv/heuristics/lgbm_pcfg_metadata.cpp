@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
@@ -78,9 +81,22 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
                 auto& dst = m.buckets[bit.key()];
                 for(const auto& c : bit.value())
                 {
+                    const auto& jargs = c.at("args");
+                    // The picker indexes args[0..arg_count) positionally when
+                    // building the feature row; a candidate with the wrong arg
+                    // count would be an out-of-bounds read. Skip (and log) any
+                    // mismatch rather than trust file-loaded data blindly. The
+                    // exporter's parity gate guarantees a match, so this only
+                    // guards against a desynced catalog/meta pair.
+                    if(jargs.size() != static_cast<std::size_t>(m.arg_count))
+                    {
+                        MIOPEN_LOG_W("lgbm_pcfg: skipping candidate in "
+                                     << it.key() << " bucket " << bit.key() << " (args="
+                                     << jargs.size() << ", expected " << m.arg_count << ")");
+                        continue;
+                    }
                     Candidate cand;
                     cand.desc = c.at("desc").get<std::string>();
-                    const auto& jargs = c.at("args");
                     cand.args.reserve(jargs.size());
                     for(const auto& a : jargs)
                     {
