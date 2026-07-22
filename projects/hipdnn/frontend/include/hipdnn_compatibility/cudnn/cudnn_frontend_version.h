@@ -25,4 +25,10 @@
 #define CUDNN_FRONTEND_VERSION                                                     \
     ((CUDNN_FRONTEND_MAJOR_VERSION * 10000) + (CUDNN_FRONTEND_MINOR_VERSION * 100) \
      + CUDNN_FRONTEND_PATCH_VERSION)
+
+// Shim-presence signal: defined whenever the compatibility headers are on the
+// include path, so consumer source can conditionally compile against the shim
+// (e.g. `#if defined(HIPDNN_COMPATIBILITY_CUDNN_FRONTEND)`), independent of the
+// build-time HIPDNN_ENABLE_CUDNN_COMPATIBILITY option which only gates install.
+#define HIPDNN_COMPATIBILITY_CUDNN_FRONTEND 1
 // NOLINTEND(modernize-macro-to-enum,cppcoreguidelines-macro-to-enum)

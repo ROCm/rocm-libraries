@@ -5769,6 +5769,13 @@ class KernelWriterAssembly(KernelWriter):
           module.add(vectorStaticMultiplyAdd(vgpr("LocalReadAddr%s"%tc), vgpr(rReg), int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), vgpr("LocalReadAddr%s"%tc), tmpSgprInfo, \
                                        "Final Offset: padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
 
+      # footprintPacked seg-interleave: add the component jump (wtid0*(fA+fB), bytes) AFTER re-pad
+      # so A1/B1 pack exactly at the previous tile's end regardless of padA vs padB.
+      if "segWaveByteOff" in tP.get("gpr", {}):
+        module.add(VAddU32(dst=vgpr("LocalReadAddr%s"%tc), src0=vgpr(tP["gpr"]["segWaveByteOff"]), \
+                           src1=vgpr("LocalReadAddr%s"%tc), comment="seg interleave: += wtid0*(fA+fB) (post-pad)"))
+        self.vgprPool.checkIn(tP["gpr"].pop("segWaveByteOff"))
+
       # release resources
       self.vgprPool.checkIn(tmpVgpr)
       self.vgprPool.checkIn(wave_id)
@@ -5891,13 +5898,18 @@ class KernelWriterAssembly(KernelWriter):
     # no need to generate add code if LdsOffset is 0 or DirectToVgprB
     if (tc in ("A", "B", "MXSA", "MXSB")) and kernel["DirectToVgpr%s"%tc]:
       module = Module("lraDeclareAddresses (Empty)")
-    elif (kernel["LdsOffset%s"%tc] != 0):
-      module.add(VAddCOU32(
-          dst=vgpr("LocalReadAddr%s+0"%tc), \
-          dst1=VCC(), \
-          src0=hex(kernel["LdsOffset%s"%tc]), \
-          src1=vgpr("LocalReadAddr%s+0"%tc), \
-          comment=" += LdsOffset%s (lower)"%tc))
+    elif (kernel["LdsOffset%s"%tc] != 0) or \
+         (kernel.get("LDSSegmentInterleave") == 1 and tc in ("B", "MXSA", "MXSB")):
+      _segOff = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+      if tc == "B" and kernel.get("LDSSegmentInterleave") == 1:
+        _ldsBase = _segOff["ldsBaseB"]
+      elif tc in ("MXSA", "MXSB") and _segOff.get("ldsBase" + tc) is not None:
+        _ldsBase = _segOff["ldsBase" + tc]   # relocated MX scale base
+      else:
+        _ldsBase = kernel["LdsOffset%s"%tc]
+      module.add(VAddCOU32(dst=vgpr("LocalReadAddr%s+0"%tc), dst1=VCC(),
+                           src0=hex(_ldsBase), src1=vgpr("LocalReadAddr%s+0"%tc),
+                           comment=" += LdsOffset%s (lower)"%tc))
 
     if tP["isA"]:
       numVgpr = self.states.a.numVgprLocalReadAddr
@@ -8452,6 +8464,45 @@ class KernelWriterAssembly(KernelWriter):
     return abStr
 
   ##############################################################################
+  # MXS TileSpan scale-select
+  #
+  # With the TileSpan optimization, N MXS scale ds_loads collapse to N/2 loads: within
+  # each group of 2*VW scale blocks, the lower half-wave of the single ds_load holds the
+  # first VW blocks and the upper half-wave holds the partner VW blocks (LRA produces this
+  # layout for both MIWaveGroup==1 and >1). The consuming WMMA reads each block directly
+  # from that one loaded register via the gfx1250 matrix_{a,b}_scale:N select. This maps a
+  # logical scale block index
+  # to the register that actually holds it plus the scale-select (0 = lower half-wave,
+  # 1 = partner half-wave).
+  ##############################################################################
+  def mxsUsesScaleSel(self, kernel):
+    # The scale-select path is only valid where localReadMX (gfx1250 WMMA_V3 +
+    # InMemorySwizzle) produces the half-wave partner scale layout.
+    return (self.states.asmCaps.get("HasWMMA_V3", False)
+            and kernel.get("MXScaleFormat") == "InMemorySwizzle")
+
+  def mxsTileSpanScaleSel(self, kernel, tP, idxAB):
+    tc = tP["tensorChar"]
+    if "MXS" not in tc or not self.mxsUsesScaleSel(kernel):
+      return idxAB, 0
+    component = Component.LocalRead.find(self)
+    info = component.getMxsTileSpanInfo(kernel, tc, tP["tile01Idx"], self.states.asmCaps)
+    if info is None:
+      return idxAB, 0
+    vectorWidth = info["vectorWidth"]
+    groupSize   = 2 * vectorWidth
+    group       = idxAB // groupSize
+    within      = idxAB %  groupSize
+    scaleSel    = within // vectorWidth          # 0 = lower half-wave, 1 = partner half-wave
+    regInHalf   = within %  vectorWidth
+    # Only the lower half-wave of each group is loaded (LocalRead packs the loaded groups
+    # contiguously and drops the partner-half vgprs), so map the logical block to the
+    # compacted register: group g owns vectorWidth registers, not 2*vectorWidth. The partner
+    # block (scaleSel==1) shares the same loaded register and is selected by matrix_*_scale.
+    mappedIdx   = group * vectorWidth + regInHalf
+    return mappedIdx, scaleSel
+
+  ##############################################################################
   # MAC Iteration
   ##############################################################################
   def macIter(self, kernel, tPA, tPB, bufferIdx, iuiCount, useMacro, isTail=False):
@@ -9427,19 +9478,27 @@ class KernelWriterAssembly(KernelWriter):
           Str0     = aStr if tPB["tile01Idx"] else bStr
           Str1     = bStr if tPB["tile01Idx"] else aStr
 
+          mxsaScaleSel = 0
+          mxsbScaleSel = 0
           if kernel["ProblemType"]["MXBlockA"]:
-            mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, idxA)
+            mxsaIdx, mxsaScaleSel = self.mxsTileSpanScaleSel(kernel, tPA["MX"], idxA)
+            mxsaStr_base = self.generateSrcStrForMFMA(kernel, tPA["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSA, m, u, iui, mxsaIdx)
             mxsaStr = vgpr(mxsaStr_base, vgprPerInputMXSA)
           else:
             mxsaStr = vgpr("ValuMXSDummy") if kernel["ProblemType"]["MXBlockB"] == 32 else vgpr("ValuMXSDummy",2)
           if kernel["ProblemType"]["MXBlockB"]:
-            mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, idxB)
+            mxsbIdx, mxsbScaleSel = self.mxsTileSpanScaleSel(kernel, tPB["MX"], idxB)
+            mxsbStr_base = self.generateSrcStrForMFMA(kernel, tPB["MX"], innerUnroll, vregSetIdx, vgprPerInputMXSB, m, u, iui, mxsbIdx)
             mxsbStr = vgpr(mxsbStr_base, vgprPerInputMXSB)
           else:
             mxsbStr = vgpr("ValuMXSDummy") if kernel["ProblemType"]["MXBlockA"] == 32 else vgpr("ValuMXSDummy",2)
 
           StrMX0 = mxsaStr if tPB["tile01Idx"] else mxsbStr
           StrMX1 = mxsbStr if tPB["tile01Idx"] else mxsaStr
+          # matrix_a_scale/matrix_b_scale correspond to the mxsa/mxsb operand *positions*
+          # (which follow the same tile01Idx swap as StrMX0/StrMX1).
+          scaleSelMX0 = mxsaScaleSel if tPB["tile01Idx"] else mxsbScaleSel
+          scaleSelMX1 = mxsbScaleSel if tPB["tile01Idx"] else mxsaScaleSel
 
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             idxM     = idxB if kernel["ProblemType"]["Sparse"] == 2 else idxA
@@ -9528,6 +9587,8 @@ class KernelWriterAssembly(KernelWriter):
               src1 = Str0
               srcMX0 = StrMX1
               srcMX1 = StrMX0
+              scaleSelSrc0 = scaleSelMX1
+              scaleSelSrc1 = scaleSelMX0
               miInScale0InstType = miInScaleBInstType
               miInScale1InstType = miInScaleAInstType
             else:
@@ -9535,6 +9596,8 @@ class KernelWriterAssembly(KernelWriter):
               src1 = Str1
               srcMX0 = StrMX0
               srcMX1 = StrMX1
+              scaleSelSrc0 = scaleSelMX0
+              scaleSelSrc1 = scaleSelMX1
               miInScale0InstType = miInScaleAInstType
               miInScale1InstType = miInScaleBInstType
 
@@ -9603,6 +9666,7 @@ class KernelWriterAssembly(KernelWriter):
                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                       a=src0, b=src1, **acc2_args, \
                                       mxsa=srcMX0, mxsb=srcMX1, block=block, \
+                                      mxScaleASel=scaleSelSrc0, mxScaleBSel=scaleSelSrc1, \
                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
@@ -19078,14 +19142,27 @@ class KernelWriterAssembly(KernelWriter):
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      # Interleave rewrites only A/B; MX scales keep their own stride, relocated via ldsBaseMXS*.
+      _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and tc in ("A", "B")
+      _segFootprint = _segAB and kernel["LDSSegInterleaveOffsets"].get("footprintPacked", False)
+      if _segAB:
+          dataBytes = kernel["LDSSegInterleaveOffsets"]["writeStrideBytes"]
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
-      if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+      # footprintPacked: writeStrideBytes is the post-pad footprint fA+fB; A/B tiles are packed
+      # exactly, so the component jump must NOT be re-padded (tile-internal pad is set below).
+      if ldsBlockSizePerPad != 0 and ldsPadSize != 0 and not _segFootprint:
         mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
                 f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
         mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
                 f"padBytes = numPadBlocks * ({ldsPadSize=})"))
         mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
                 "woffset += padBytes"))
+      if kernel.get("LDSSegmentInterleave") == 1 and tc == "B":
+          ldsConstOffset = kernel["LDSSegInterleaveOffsets"]["ldsBaseB"]
+      elif kernel.get("LDSSegmentInterleave") == 1 and tc in ("MXSA", "MXSB"):
+          _mxBase = kernel["LDSSegInterleaveOffsets"].get("ldsBase" + tc)
+          if _mxBase is not None:
+              ldsConstOffset = _mxBase   # relocated MX scale base
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
