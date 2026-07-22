@@ -44,6 +44,10 @@ public:
 
     Error pre_validate_node() const override
     {
+        HIPDNN_RETURN_IF_TRUE(attributes.hasUnsupportedUsage(),
+                              ErrorCode::INVALID_VALUE,
+                              attributes.getUnsupportedReason());
+
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
         const auto v = attributes.get_v();
