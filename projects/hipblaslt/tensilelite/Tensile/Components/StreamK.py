@@ -153,13 +153,26 @@ class StreamKMemoryOrdering(Component):
         return module
 
     @abc.abstractmethod
-    def releaseFence(self, writer) -> Module:
-        """Memory fence ordering prior partial-tile stores before the flag store."""
+    def releaseFence(self, writer, scope=None) -> Module:
+        """Memory fence ordering prior partial-tile stores before the flag store.
+
+        `scope` optionally overrides the cache scope of the writeback (arches
+        with explicit fences only); None keeps the arch default. The cluster
+        split-barrier reduction passes CacheScope.SCOPE_SYS so the peer's
+        partials are pushed past gfx1250's partitioned L2 to the
+        system-coherent point the owner reads from after the barrier.
+        """
         pass
 
     @abc.abstractmethod
-    def acquireFence(self, writer) -> Module:
-        """Memory fence after observing the flag and before reading partials."""
+    def acquireFence(self, writer, scope=None) -> Module:
+        """Memory fence after observing the flag and before reading partials.
+
+        `scope` optionally overrides the cache scope of the invalidate (arches
+        with explicit fences only); None keeps the arch default. Paired with
+        the release-side scope so a cross-partition release/acquire is
+        symmetric.
+        """
         pass
 
     @abc.abstractmethod
@@ -180,12 +193,14 @@ class StreamKMemoryOrderingDefault(StreamKMemoryOrdering):
     """
     archCaps = {"HasInvWbDevFences": False}
 
-    def releaseFence(self, writer) -> Module:
+    def releaseFence(self, writer, scope=None) -> Module:
+        # `scope` is meaningful only for arches with explicit global_wb/inv
+        # fences; the default path has no cache-scoped op to retarget.
         module = Module("StreamK release fence (default)")
         module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
         return module
 
-    def acquireFence(self, writer) -> Module:
+    def acquireFence(self, writer, scope=None) -> Module:
         return Module("StreamK acquire fence (default, no-op)")
 
     def readFlag(self, writer, dst, soffset) -> Module:
@@ -212,24 +227,30 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
     """
     archCaps = {"HasInvWbDevFences": True}
 
-    def releaseFence(self, writer) -> Module:
+    def releaseFence(self, writer, scope=None) -> Module:
+        # Default to SCOPE_DEV; callers may escalate (e.g. SCOPE_SYS for the
+        # cluster split-barrier reduction, whose peers can straddle a gfx1250
+        # L2 partition boundary and therefore need a system-coherent push).
+        wbScope = scope if scope is not None else CacheScope.SCOPE_DEV
         module = Module("StreamK release fence (dev-scope)")
         module.add(SWaitCnt(vlcnt=0,
             comment="release: drain in-flight loads before global_wb"))
         module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
-        module.add(GlobalWb(scope=CacheScope.SCOPE_DEV,
+        module.add(GlobalWb(scope=wbScope,
             comment="release: writeback partials to L2-coherent point"))
         module.add(SWaitCnt(vlcnt=0, vscnt=0,
             comment="release: wait for global_wb"))
         return module
 
-    def acquireFence(self, writer) -> Module:
-        # Drop stale dev-scope cache lines so the next dependent read (the flag
-        # word in getFlagValue, or the partials after the flag is observed) is
-        # re-fetched from the L2-coherent point.
+    def acquireFence(self, writer, scope=None) -> Module:
+        # Drop stale cache lines so the next dependent read (the flag word in
+        # getFlagValue, or the partials after the flag is observed) is
+        # re-fetched from the coherent point. Scope must match the paired
+        # release: SCOPE_DEV by default, SCOPE_SYS for the cluster reduction.
+        invScope = scope if scope is not None else CacheScope.SCOPE_DEV
         module = Module("StreamK acquire fence (dev-scope)")
-        module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
-            comment="acquire: invalidate before dependent dev-scope read"))
+        module.add(GlobalInv(scope=invScope,
+            comment="acquire: invalidate before dependent read"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module
 
@@ -977,7 +998,14 @@ class StreamK(Component):
                     module.add(SCBranchSCC0(labelName=skClusterSetupDone.getLabelName(), comment="not intra-cluster: use global-flag reduction"))
                     module.add(self.clusterReduceSignal(writer, kernel))   # owner arrives at the cluster barrier
                     module.add(self.clusterReduceWait(writer, kernel))     # wait until all C cluster members arrived
-                    module.add(memOrder.acquireFence(writer))              # once: observe peers' published partials
+                    # System-scope acquire: the split barrier orders execution
+                    # but not memory. On gfx1250's partitioned L2 a SCOPE_DEV
+                    # invalidate is not guaranteed to re-fetch a peer partial
+                    # written back on a different partition, so escalate the
+                    # cluster-reduction acquire (paired with the SCOPE_SYS
+                    # release below) to the system-coherent point. Held fix for
+                    # the PGR1 boundary-cluster race; see red-pgr1-fix notes.
+                    module.add(memOrder.acquireFence(writer, scope=CacheScope.SCOPE_SYS))  # once: observe peers' published partials
                     module.add(skClusterSetupDone)
 
                 module.add(skFixupLabel)
@@ -1383,7 +1411,16 @@ class StreamK(Component):
             #     kStr += PreLoopVmcntCaseStr
 
             # Set flag
-            module.add(memOrder.releaseFence(writer))
+            # For cluster-reduction kernels the peer publishes its partial and
+            # then arrives at the split barrier; escalate the release writeback
+            # to SCOPE_SYS so the partial is globally visible past gfx1250's
+            # partitioned L2 before the owner's paired SCOPE_SYS acquire reads
+            # it. Non-cluster StreamK keeps the SCOPE_DEV default. Held fix for
+            # the PGR1 boundary-cluster race; see red-pgr1-fix notes.
+            releaseScope = (CacheScope.SCOPE_SYS
+                            if self._streamKClusterReductionEnabled(writer, kernel)
+                            else None)
+            module.add(memOrder.releaseFence(writer, scope=releaseScope))
             module.add(SBarrier(comment="store all data before setting flag"))
 
             # Non-owner peer fast path: after publishing the partial and the
