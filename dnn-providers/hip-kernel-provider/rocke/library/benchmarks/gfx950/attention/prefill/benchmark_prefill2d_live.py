@@ -46,7 +46,7 @@ import math
 import sys
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from rocke.assets import shape_utils_dir
 
@@ -381,7 +381,7 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
 
 
 class CkVariantBench:
-    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 256):
+    def __init__(self, *, compile_backend: Optional[str] = None, num_sms: int = 256):
         self.compile_backend = compile_backend
         self.num_sms = num_sms
         self._launchers: dict[tuple, Any] = {}
@@ -416,7 +416,10 @@ class CkVariantBench:
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from kernels.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import (
+            _attn_signature,
+            _select_2d_compile_backend,
+        )
         from rocke.runtime import KernelLauncher
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
@@ -477,7 +480,13 @@ class CkVariantBench:
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec)
-            artifact = compile_kernel(kernel, capture_ir_text=False)
+            backend = self.compile_backend or _select_2d_compile_backend(problem)
+            if backend == "hipcc":
+                from rocke.helpers.compile import compile_kernel_via_hipcc
+
+                artifact = compile_kernel_via_hipcc(kernel)
+            else:
+                artifact = compile_kernel(kernel, capture_ir_text=False)
             self._launchers[key] = (
                 KernelLauncher(
                     hsaco=artifact.hsaco,
@@ -718,6 +727,16 @@ def main() -> int:
     # cap=8192 vs 1.11x at cap=65536.
     ap.add_argument("--cap-blocks", type=int, default=65536)
     ap.add_argument("--num-sms", type=int, default=256)
+    ap.add_argument(
+        "--compile-backend",
+        choices=("auto", "llvm", "hipcc"),
+        default="auto",
+        help="Compile backend for all CK DSL lanes (prod + build() variants). "
+        "'auto' (default) matches production dispatch "
+        "(_select_2d_compile_backend); 'llvm'/'hipcc' force a backend for A/B. "
+        "Forcing 'llvm' mismeasures cohorts whose production backend is hipcc "
+        "(e.g. D256 large prefill) by ~3x.",
+    )
     ap.add_argument("--tol", type=float, default=5e-2)
     ap.add_argument("--shape-utils-path", type=Path, default=DEFAULT_SHAPE_UTILS)
     ap.add_argument(
@@ -753,7 +772,8 @@ def main() -> int:
     print(f"device: {torch.cuda.get_device_name(0)}")
     print(f"shapes: {len(shapes)}  variants: {args.variants}  flydsl={args.flydsl}")
 
-    bench = CkVariantBench(num_sms=args.num_sms)
+    _cb = None if args.compile_backend == "auto" else args.compile_backend
+    bench = CkVariantBench(num_sms=args.num_sms, compile_backend=_cb)
     results = []
     n_fly_supported = 0
     n_fly_correct = 0
