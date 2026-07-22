@@ -49,6 +49,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed the install RPATH for `MIOpenDriver` and Composable Kernel (CK) backend libraries.
 * Fixed a dangling lambda capture that could cause a segfault at `MIOPEN_LOG_LEVEL=6`.
 * [Windows] Enabled long-path support for `addkernels`.
+* Fixed a GCC 15 build failure by removing the obsolete `<ciso646>` include.
 
 ### Removed
 * Removed OpenCL solver `ConvOclDirectFwd1x1`.
