@@ -733,7 +733,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         {
             throw rocblas_status_memory_error;
         }
-        workspace = prob.handle->gsu_workspace;        
+        workspace = prob.handle->gsu_workspace;
         hipblaslt_alpha_beta_type<Tc> alpha, beta;
         if(prob.alpha != nullptr)
         {
