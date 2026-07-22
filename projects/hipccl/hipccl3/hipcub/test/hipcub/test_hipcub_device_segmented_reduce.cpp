@@ -966,9 +966,22 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
     HIP_CHECK(hipSetDevice(device_id));
 
     using input_type  = typename TestFixture::params::input_type;
-    using Iterator    = typename hipcub::ArgIndexInputIterator<input_type*, int>;
-    using key_value   = typename Iterator::value_type;
-    using offset_type = unsigned int;
+    using offset_type = int;
+#if defined(__HIP_PLATFORM_AMD__)
+    using Iterator  = typename hipcub::ArgIndexInputIterator<input_type*, int>;
+    using key_value = typename Iterator::value_type;
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+    using UnaryFunction     = hipcub::detail::reduce::generate_idx_value<input_type*, input_type>;
+    using CountingIteratorT = test_utils::counting_iterator<offset_type>;
+    using TransformInputIteratorT
+        = test_utils::transform_iterator<CountingIteratorT, UnaryFunction>;
+    using Iterator  = std::conditional_t<UseFixedSize,
+                                         TransformInputIteratorT,
+                                         typename hipcub::ArgIndexInputIterator<input_type*, int>>;
+    using key_value = std::conditional_t<UseFixedSize,
+                                         _HIPCUB_STD::pair<offset_type, input_type>,
+                                         typename Iterator::value_type>;
+#endif
 
     hipStream_t stream = 0; // default
     if constexpr(TestFixture::params::use_graphs)
@@ -1020,7 +1033,6 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
                 const size_t segment_length
                     = UseFixedSize ? fixed_segment_length : segment_length_dis(gen);
                 offsets.push_back(offset);
-                Iterator x(&values_input[offset]);
 
                 const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
@@ -1029,7 +1041,23 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
                     key_value aggregate(0, values_input[offset]);
                     for(size_t i = 0; i < end - offset; i++)
                     {
-                        aggregate = host_op(aggregate, x[i]);
+                        if constexpr(UseFixedSize)
+                        {
+                            Iterator x =
+#if defined(__HIP_PLATFORM_AMD__)
+                                Iterator(&values_input[offset]);
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+                                thrust::make_transform_iterator(
+                                    CountingIteratorT{0},
+                                    UnaryFunction(&values_input[offset], fixed_segment_length));
+#endif
+                            aggregate = host_op(aggregate, x[i]);
+                        }
+                        else
+                        {
+                            Iterator x = Iterator(&values_input[offset]);
+                            aggregate  = host_op(aggregate, x[i]);
+                        }
                     }
                     aggregates_expected.push_back(aggregate);
                 }
@@ -1132,11 +1160,30 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
 
             for(size_t i = 0; i < segments_count; i++)
             {
-                ASSERT_NO_FATAL_FAILURE(
-                    test_utils::assert_eq(aggregates_output[i].key, aggregates_expected[i].key));
-                ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output[i].value,
-                                                                aggregates_expected[i].value,
-                                                                precision));
+                if constexpr(UseFixedSize)
+                {
+#if defined(__HIP_PLATFORM_AMD__)
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output[i].key,
+                                                                  aggregates_expected[i].key));
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output[i].value,
+                                                                    aggregates_expected[i].value,
+                                                                    precision));
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output[i].first,
+                                                                  aggregates_expected[i].first));
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output[i].second,
+                                                                    aggregates_expected[i].second,
+                                                                    precision));
+#endif
+                }
+                else
+                {
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output[i].key,
+                                                                  aggregates_expected[i].key));
+                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output[i].value,
+                                                                    aggregates_expected[i].value,
+                                                                    precision));
+                }
             }
 
             if constexpr(TestFixture::params::use_graphs)
@@ -1171,8 +1218,12 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, ArgMax)
 TYPED_TEST(HipcubDeviceSegmentedReduce, ArgMinFixedSize)
 {
     using T = typename TestFixture::params::input_type;
-    // Because NVIDIA's hipcub::ArgMin doesn't work with bfloat16 (HOST-SIDE)
-    using HostOp = typename ArgMinSelector<T>::type;
+    using HostOp =
+#if defined(__HIP_PLATFORM_AMD__)
+        typename ArgMinSelector<T>::type;
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+        hipcub::detail::arg_min;
+#endif
     test_argminmax<TestFixture, ArgMinDispatch, HostOp, true /*UseFixedSize*/>(
         test_utils::numeric_limits<T>::max());
 }
@@ -1180,8 +1231,12 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, ArgMinFixedSize)
 TYPED_TEST(HipcubDeviceSegmentedReduce, ArgMaxFixedSize)
 {
     using T = typename TestFixture::params::input_type;
-    // Because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
-    using HostOp = typename ArgMaxSelector<T>::type;
+    using HostOp =
+#if defined(__HIP_PLATFORM_AMD__)
+        typename ArgMaxSelector<T>::type;
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+        hipcub::detail::arg_max;
+#endif
     test_argminmax<TestFixture, ArgMaxDispatch, HostOp, true /*UseFixedSize*/>(
         test_utils::numeric_limits<T>::lowest());
 }
