@@ -23,10 +23,10 @@
 * ************************************************************************ */
 
 #include "rocsparse_arguments_config.hpp"
+#include "rocsparse-auxiliary.h"
 #include "rocsparse_clients_matrices_dir.hpp"
 #include "rocsparse_enum.hpp"
 #include "rocsparse_importer_format_t.hpp"
-
 rocsparse_arguments_config::rocsparse_arguments_config()
 {
     //
@@ -331,7 +331,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      value<std::string>(&this->function_name)->default_value("axpyi"),
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
-     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csrsv, csritsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
+     "  Level2: bsrmv, bsrxmv, bsrsv, coomv, coomv_aos, csrmv, csrmv_managed, csritsv, csrsv, cscsv, coosv, ellmv, hybmv, gebsrmv, gemvi, sellmv\n"
      "  Level3: bsrmm, bsrsm, gebsrmm, csrmm, csrmm_batched, coomm, coomm_batched, cscmm, cscmm_batched, csrsm, coosm, gemmi, sddmm\n"
      "  Extra: bsrgeam, bsrgemm, csrgeam, csrgemm, csrgemm_reuse\n"
      "  Preconditioner: bsric0, bsrilu0, csric0, csrilu0, csritilu0, gtsv, gtsv_no_pivot, gtsv_no_pivot_strided_batch, gtsv_interleaved_batch, gpsv_interleaved_batch\n"

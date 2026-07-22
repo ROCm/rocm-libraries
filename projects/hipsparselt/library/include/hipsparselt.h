@@ -381,7 +381,7 @@ hipsparseStatus_t hipsparseLtDestroy(const hipsparseLtHandle_t* handle);
  *  @param[in]
  *  alignment  memory alignment in bytes (not used by the HIP backend).
  *  @param[in]
- *  valueType  data type of the matrix. See \ref hipDataType.
+ *  valueType  data type of the matrix. Data type: hipDataType.
  *  @param[in]
  *  order      memory layout: \p HIPSPARSE_ORDER_COL or \p HIPSPARSE_ORDER_ROW.
  *
@@ -418,7 +418,7 @@ hipsparseStatus_t hipsparseLtDenseDescriptorInit(const hipsparseLtHandle_t*  han
  *  @param[in]
  *  alignment  memory alignment in bytes (not used by the HIP backend).
  *  @param[in]
- *  valueType  data type of the matrix. See \ref hipDataType.
+ *  valueType  data type of the matrix. Data type: hipDataType.
  *  @param[in]
  *  order      memory layout: \p HIPSPARSE_ORDER_COL or \p HIPSPARSE_ORDER_ROW.
 
@@ -637,6 +637,22 @@ hipsparseStatus_t
                                       hipsparseLtMatmulAlgSelection_t*     algSelection,
                                       const hipsparseLtMatmulDescriptor_t* matmulDescr,
                                       hipsparseLtMatmulAlg_t               alg);
+
+/*! \ingroup matmul_algo_module
+ *  \brief Destroy the algorithm selection descriptor.
+ *  \details
+ *  \p hipsparseLtMatmulAlgSelectionDestroy releases the resources used by an instance
+ *  of the algorithm selection. This function is the last call with a specific algorithm selection
+ *  instance.
+ *
+ *  @param[in]
+ *  algSelection  the algorithm selection descriptor
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p algSelection is invalid.
+ */
+HIPSPARSELT_EXPORT
+hipsparseStatus_t hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection);
 
 /*! \ingroup matmul_algo_module
  *  \brief Specify the algorithm attribute of a algorithm selection descriptor.

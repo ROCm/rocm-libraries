@@ -3,6 +3,7 @@
 #include "HardwareCaps.hpp"
 
 #include <array>
+#include <cstdint>
 #include <mutex>
 #include <unordered_map>
 
@@ -267,6 +268,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["HasMXScaleSwizzle"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
     rv["HasInvWbDevFences"] = checkInList(v, {{12, 5, 0}});
     rv["RequiresXCntForVolatileVMEM"] = checkInList(v, {{12, 5, 0}});
+    rv["DefaultScopeIsCULocal"] = checkInList(v, {{12, 5, 0}});
 
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4;
@@ -280,7 +282,7 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     std::map<std::string, int> rv;
 
     rv["MaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 256;
-    rv["MaxSgpr"] = 102;
+    rv["MaxSgpr"] = (v[0] == 12 && v[1] == 5) ? 106 : 102;
     rv["PhysicalMaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 512;
     rv["PhysicalMaxSgpr"] = 800;
     rv["maxLDSConstOffset"] = 65536;

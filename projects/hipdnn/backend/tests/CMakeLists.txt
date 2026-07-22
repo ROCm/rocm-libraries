@@ -46,6 +46,7 @@ add_executable(
     descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
     descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
+    descriptors/TestProfilingControlDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationFromNode.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
@@ -59,6 +60,7 @@ add_executable(
     descriptors/TestBatchnormInferenceVarianceExtOperationFromNode.cpp
     descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorLayernorm.cpp
+    descriptors/TestGraphDescriptorLayernormBackward.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestGraphDescriptorLifting.cpp
     descriptors/TestGraphDescriptorPointwise.cpp
@@ -67,6 +69,8 @@ add_executable(
     descriptors/TestConvolutionBwdOperationFromNode.cpp
     descriptors/TestLayernormOperationDescriptor.cpp
     descriptors/TestLayernormOperationFromNode.cpp
+    descriptors/TestLayernormBackwardOperationDescriptor.cpp
+    descriptors/TestLayernormBackwardOperationFromNode.cpp
     descriptors/TestPointwiseOperationDescriptor.cpp
     descriptors/TestPointwiseOperationFromNode.cpp
     descriptors/TestReductionOperationDescriptor.cpp
@@ -93,6 +97,7 @@ add_executable(
     main.cpp
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
+    TestGraphAndPlanSerializationApi.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp
@@ -228,4 +233,4 @@ add_dependencies(hipdnn_backend_tests
     ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
 )
 
-add_unit_test_target(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

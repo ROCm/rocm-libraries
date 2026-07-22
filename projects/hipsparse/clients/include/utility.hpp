@@ -270,7 +270,15 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
-#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT) ASSERT_EQ(STATUS, EXPECT)
+#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \
+    do                                                                                           \
+    {                                                                                            \
+        hipsparseStatus_t expect_hipsparse_status_status_ = (STATUS);                            \
+        hipsparseStatus_t expect_hipsparse_status_expect_ = (EXPECT);                            \
+        ASSERT_EQ(expect_hipsparse_status_status_, expect_hipsparse_status_expect_)              \
+            << "received " << hipsparseStatusToString(expect_hipsparse_status_status_)           \
+            << ", expected " << hipsparseStatusToString(expect_hipsparse_status_expect_) << "."; \
+    } while(0)
 #else
 #define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
     if(status != expect)                                                                    \
@@ -1452,6 +1460,92 @@ bool generate_csr_matrix(const std::string    filename,
     }
 
     return false;
+}
+
+/* ============================================================================================ */
+/*! \brief  Generate Blocked ELL matrix from file or randomly. File can be either mtx or bin. If filename
+ *  is empty a random CSR matrix is generated and converted to Blocked ELL format. Otherwise the matrix is
+ *  loaded in CSR format from the file and then converted to Blocked ELL format. The ELL width is computed
+ *  as the maximum number of non-zeros across all rows. Entries in the ELL arrays that lie beyond a
+ *  row's actual non-zero count are padded with column index -1 and value 0. */
+template <typename I, typename T>
+bool generate_bell_matrix(const std::string    filename,
+                          I&                   mb,
+                          I&                   nb,
+                          I&                   ellCols,
+                          I                    ellBlockSize,
+                          std::vector<I>&      ellColInd,
+                          std::vector<T>&      ellVal,
+                          hipsparseIndexBase_t idxBase)
+{
+    // Generate or load the matrix in CSR format first.
+    I              nnz;
+    std::vector<I> csrRowPtr;
+    std::vector<I> csrColInd;
+    std::vector<T> csrVal;
+
+    if(!generate_csr_matrix(filename, mb, nb, nnz, csrRowPtr, csrColInd, csrVal, idxBase))
+    {
+        return false;
+    }
+
+    // Compute the ELL block width: maximum number of non-zero blocks in any block row.
+    I ellBlockWidth = 0;
+    for(I i = 0; i < mb; ++i)
+    {
+        I rowNnz      = csrRowPtr[i + 1] - csrRowPtr[i];
+        ellBlockWidth = std::max(ellBlockWidth, rowNnz);
+    }
+
+    ellCols = ellBlockWidth * ellBlockSize;
+
+    ellColInd.resize(static_cast<size_t>(ellBlockWidth) * mb);
+    ellVal.resize(static_cast<size_t>(mb) * ellBlockSize * ellCols);
+
+    // Convert CSR (block level) to Blocked-ELL, padding short rows with -1 / zeros.
+    for(I i = 0; i < mb; ++i)
+    {
+        I p        = 0;
+        I rowStart = csrRowPtr[i] - idxBase;
+        I rowEnd   = csrRowPtr[i + 1] - idxBase;
+
+        for(I j = rowStart; j < rowEnd; ++j)
+        {
+            // Column index stored in row-major [mb][ell_block_width] layout.
+            ellColInd[static_cast<size_t>(i) * ellBlockWidth + p] = csrColInd[j];
+
+            // Values in cuSPARSE row-major layout:
+            //   val[(blockRow * ellBlockSize + r) * nEllCols + ellBlockCol * ellBlockSize + c]
+            for(I r = 0; r < ellBlockSize; r++)
+            {
+                for(I c = 0; c < ellBlockSize; c++)
+                {
+                    ellVal[(static_cast<size_t>(i) * ellBlockSize + r) * ellCols
+                           + static_cast<size_t>(p) * ellBlockSize + c]
+                        = random_generator<T>();
+                }
+            }
+            ++p;
+        }
+
+        // Pad remaining ELL slots with sentinel column index -1 and zero values.
+        for(I j = p; j < ellBlockWidth; ++j)
+        {
+            ellColInd[static_cast<size_t>(i) * ellBlockWidth + j] = static_cast<I>(-1);
+
+            for(I r = 0; r < ellBlockSize; r++)
+            {
+                for(I c = 0; c < ellBlockSize; c++)
+                {
+                    ellVal[(static_cast<size_t>(i) * ellBlockSize + r) * ellCols
+                           + static_cast<size_t>(j) * ellBlockSize + c]
+                        = make_DataType<T>(0.0);
+                }
+            }
+        }
+    }
+
+    return true;
 }
 
 /* ============================================================================================ */
@@ -3392,7 +3486,7 @@ inline void host_csrmv(hipsparseOperation_t trans,
     {
         // Get device properties
         int             dev;
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
 
         std::ignore = hipGetDevice(&dev);
         std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -3565,6 +3659,112 @@ inline void host_bsrmm(J                     Mb,
             else
             {
                 C[idx_C] = sum + testing_mult(beta, C[idx_C]);
+            }
+        }
+    }
+}
+
+template <typename I, typename T>
+inline void host_bellmm(I                     Mb,
+                        I                     N,
+                        I                     Kb,
+                        I                     ellCols,
+                        I                     ellBlockSize,
+                        hipsparseOperation_t  transA,
+                        hipsparseOperation_t  transB,
+                        T                     alpha,
+                        const std::vector<I>& bellColIndA,
+                        const std::vector<T>& bellValA,
+                        const std::vector<T>& B,
+                        int64_t               ldb,
+                        hipsparseOrder_t      orderB,
+                        T                     beta,
+                        std::vector<T>&       C,
+                        int64_t               ldc,
+                        hipsparseOrder_t      orderC,
+                        hipsparseIndexBase_t  base)
+{
+    if(transA != HIPSPARSE_OPERATION_NON_TRANSPOSE)
+    {
+        return;
+    }
+
+    bool conj_A    = (transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
+    bool conj_B    = (transB == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
+    bool do_transB = (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE);
+
+    const I m = Mb * ellBlockSize;
+
+    // Scale C by beta (or zero it out)
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I i = 0; i < m; i++)
+    {
+        for(I j = 0; j < N; j++)
+        {
+            int64_t idx_C
+                = (orderC == HIPSPARSE_ORDER_COL) ? i + (int64_t)j * ldc : (int64_t)i * ldc + j;
+            if(beta == make_DataType<T>(0))
+                C[idx_C] = make_DataType<T>(0);
+            else
+                C[idx_C] = testing_mult(beta, C[idx_C]);
+        }
+    }
+
+    // Accumulate alpha * op(A) * op(B) into C.
+    // ellCols is nEllCols = ell_block_width * ellBlockSize (cuSPARSE convention).
+    // The number of ELL block columns per block row is ellCols / ellBlockSize.
+    // ell_col_ind layout : row-major [Mb][ell_block_width], index = br * (ellCols/ellBlockSize) + ei.
+    // ell_val layout     : row-major m × nEllCols,
+    //   index = (br * ellBlockSize + r) * ellCols + ei * ellBlockSize + c
+    const I ellBlockWidth = ellCols / ellBlockSize;
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I br = 0; br < Mb; br++)
+    {
+        for(I ei = 0; ei < ellBlockWidth; ei++)
+        {
+            const I bc = bellColIndA[static_cast<size_t>(br) * ellBlockWidth + ei] - base;
+            if(bc < 0)
+                break;
+
+            // Access A_block[r, c] from the row-major value array.
+            auto a_val = [&](I r, I c) -> T {
+                int64_t idx
+                    = ((int64_t)br * ellBlockSize + r) * ellCols + (int64_t)ei * ellBlockSize + c;
+                return testing_conj(bellValA[idx], conj_A);
+            };
+
+            // Access B element at logical position (b_row, n)
+            auto b_val = [&](I b_row, I n) -> T {
+                int64_t idx;
+                if(!do_transB)
+                    idx = (orderB == HIPSPARSE_ORDER_COL) ? b_row + (int64_t)n * ldb
+                                                          : (int64_t)b_row * ldb + n;
+                else
+                    idx = (orderB == HIPSPARSE_ORDER_COL) ? n + (int64_t)b_row * ldb
+                                                          : (int64_t)n * ldb + b_row;
+                return testing_conj(B[idx], conj_B);
+            };
+
+            // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
+            for(I r = 0; r < ellBlockSize; r++)
+            {
+                I C_row = br * ellBlockSize + r;
+                for(I n = 0; n < N; n++)
+                {
+                    int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? C_row + (int64_t)n * ldc
+                                                                    : (int64_t)C_row * ldc + n;
+                    T       sum   = make_DataType<T>(0);
+                    for(I c = 0; c < ellBlockSize; c++)
+                    {
+                        sum = testing_fma(a_val(r, c), b_val(bc * ellBlockSize + c, n), sum);
+                    }
+                    C[idx_C] = C[idx_C] + testing_mult(alpha, sum);
+                }
             }
         }
     }
@@ -4928,7 +5128,7 @@ static inline void host_lssolve(J                     M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5070,7 +5270,7 @@ static inline void host_ussolve(J                     M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5343,7 +5543,7 @@ void host_csr_lsolve(J                    M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5450,7 +5650,7 @@ void host_csr_usolve(J                    M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);

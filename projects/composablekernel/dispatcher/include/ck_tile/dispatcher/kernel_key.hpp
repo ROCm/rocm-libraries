@@ -48,7 +48,8 @@ enum class Pipeline : std::uint8_t
     CompV5,       // Compute pipeline v5
     CompV6,       // Compute pipeline v6
     PreShuffleV1, // Weight preshuffle pipeline v1
-    PreShuffleV2  // Weight preshuffle pipeline v2 (optimized)
+    PreShuffleV2, // Weight preshuffle pipeline v2 (optimized)
+    Wavelet       // Wavelet pipeline (specialized math + load waves)
 };
 
 /// Epilogue strategies for output processing
@@ -70,6 +71,30 @@ enum class Scheduler : std::uint8_t
     Intrawave,
     Interwave
 };
+
+/// Stream-K partial-sum reduction strategy. `None` = not a Stream-K kernel.
+/// Mirrors ck_tile::StreamKReductionStrategy (Atomic/Linear/Tree).
+enum class ReductionStrategy : std::uint8_t
+{
+    None = 0,
+    Atomic,
+    Linear,
+    Tree
+};
+
+/// Canonical lower-case name for a reduction strategy. Matches the codegen suffix
+/// scheme (atomic -> "atomic", etc.) so callers/drivers share one spelling.
+inline const char* to_string(ReductionStrategy r)
+{
+    switch(r)
+    {
+    case ReductionStrategy::Atomic: return "atomic";
+    case ReductionStrategy::Linear: return "linear";
+    case ReductionStrategy::Tree: return "tree";
+    case ReductionStrategy::None: return "none";
+    }
+    return "none";
+}
 
 /// KernelKey: Compile-time kernel configuration metadata
 /// Organized into Signature (what operation) and Algorithm (how it's implemented)
@@ -146,6 +171,11 @@ struct KernelKey
         bool pad_m = true; // Support arbitrary M dimensions via padding
         bool pad_n = true; // Support arbitrary N dimensions via padding
         bool pad_k = true; // Support arbitrary K dimensions via padding
+
+        // Stream-K (workgroup K-stream) parameters
+        bool streamk                         = false;                   // is a Stream-K kernel
+        ReductionStrategy reduction_strategy = ReductionStrategy::None; // atomic / linear / tree
+        bool workspace = false; // needs a device accumulation buffer (linear/tree)
     } algorithm;
 
     std::string gfx_arch; // e.g. "gfx942", "gfx90a", "gfx908"
@@ -194,7 +224,10 @@ struct KernelKey
                         algorithm.num_wave_groups,
                         algorithm.pad_m,
                         algorithm.pad_n,
-                        algorithm.pad_k);
+                        algorithm.pad_k,
+                        algorithm.streamk,
+                        algorithm.reduction_strategy,
+                        algorithm.workspace);
     }
 
     /// Equality comparison
@@ -291,6 +324,7 @@ inline std::string to_string(Pipeline pipeline)
     case Pipeline::CompV6: return "compv6";
     case Pipeline::PreShuffleV1: return "preshufflev1";
     case Pipeline::PreShuffleV2: return "preshufflev2";
+    case Pipeline::Wavelet: return "wavelet";
     default: return "unknown";
     }
 }
@@ -316,6 +350,8 @@ inline Pipeline string_to_pipeline(const std::string& str)
         return Pipeline::PreShuffleV1;
     if(str == "preshufflev2")
         return Pipeline::PreShuffleV2;
+    if(str == "wavelet")
+        return Pipeline::Wavelet;
     return Pipeline::Mem; // Default
 }
 
@@ -368,6 +404,11 @@ inline std::string to_string(Scheduler scheduler)
 inline Scheduler string_to_scheduler(const std::string& str)
 {
     if(str == "auto")
+        return Scheduler::Auto;
+    // Preshuffle kernels emit "default"; the codegen maps it to Scheduler::Auto
+    // (see codegen_common.py SCHEDULER_TO_DISPATCHER), so mirror that here
+    // instead of silently falling through to Intrawave.
+    if(str == "default")
         return Scheduler::Auto;
     if(str == "intrawave")
         return Scheduler::Intrawave;
@@ -435,6 +476,18 @@ inline std::string KernelKey::encode_identifier() const
         oss << "_sparse";
     if(algorithm.preshuffle)
         oss << "_preshuffle";
+
+    // Stream-K suffix -- must match unified_gemm_codegen.py KernelNaming.generate():
+    //   atomic -> "..._streamk"   linear -> "..._streamk_linear"   tree -> "..._streamk_tree"
+    // Guarded by algorithm.streamk so non-Stream-K identifiers stay byte-identical.
+    if(algorithm.streamk)
+    {
+        oss << "_streamk";
+        if(algorithm.reduction_strategy == ReductionStrategy::Linear)
+            oss << "_linear";
+        else if(algorithm.reduction_strategy == ReductionStrategy::Tree)
+            oss << "_tree";
+    }
 
     return oss.str();
 }

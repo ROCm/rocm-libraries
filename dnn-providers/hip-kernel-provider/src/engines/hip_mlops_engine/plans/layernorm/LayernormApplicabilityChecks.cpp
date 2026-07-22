@@ -115,7 +115,7 @@ void LayernormValidator::validateNormalizedDim(const std::vector<int64_t>& ioTen
 
 // --- Component Validators
 
-void LayernormValidator::checkTensorIDLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
+void LayernormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
     std::vector<TensorDescriptor> tensors;
@@ -124,7 +124,7 @@ void LayernormValidator::checkTensorIDLayoutsAndDimsSupported(const std::vector<
     for(const auto& id : tensorIds)
     {
         auto attr = _tensorMap.at(id);
-        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(attr))
         {
             tensors.emplace_back(attr);
         }
@@ -135,34 +135,20 @@ void LayernormValidator::checkTensorIDLayoutsAndDimsSupported(const std::vector<
     validateConsistentLayouts(tensors);
 }
 
-void LayernormValidator::checkTensorLayoutsAndDimsSupported()
-{
-    // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
-    std::vector<int64_t> tensorIds;
-    tensorIds.reserve(_tensorMap.size());
-    for(const auto& [id, attr] : _tensorMap)
-    {
-        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
-        {
-            tensorIds.emplace_back(id);
-        }
-    }
-
-    checkTensorIDLayoutsAndDimsSupported(tensorIds);
-}
-
 void LayernormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
                                                        const std::vector<int64_t>& affineTensorIds,
                                                        const std::vector<int64_t>& statTensorIds,
                                                        const std::vector<int64_t>& epsilonTensorIds)
 {
     const auto allowedIoTypes = type_configs::getAllowedIoTypes();
-    validateConsistentDataTypes(
-        ioTensorIds,
-        allowedIoTypes,
-        "Layernorm implementation supports only FLOAT, HALF and BFLOAT16 data types for x and y "
-        "tensors.",
-        "All IO tensors for layernorm must have the same data type.");
+    for(const auto ioTensorId : ioTensorIds)
+    {
+        const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorId);
+        validateDataTypeIsSupported(ioTensorAttr.data_type(),
+                                    allowedIoTypes,
+                                    "Layernorm implementation supports only FLOAT, HALF and "
+                                    "BFLOAT16 data types for x and y tensors.");
+    }
 
     const auto allowedAffineTypes = type_configs::getAllowedAffineTypes();
     validateConsistentDataTypes(
@@ -179,21 +165,6 @@ void LayernormValidator::checkTensorDataTypesSupported(const std::vector<int64_t
         "Layernorm implementation supports only FLOAT, HALF and BFLOAT16 data types for mean and "
         "inverse variance tensors.",
         "All stat tensors for layernorm must have the same data type.");
-
-    std::vector<int64_t> allTensorIds;
-    allTensorIds.insert(allTensorIds.end(), ioTensorIds.begin(), ioTensorIds.end());
-    allTensorIds.insert(allTensorIds.end(), affineTensorIds.begin(), affineTensorIds.end());
-    allTensorIds.insert(allTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
-
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allAllowedTypes;
-    allAllowedTypes.insert(allowedIoTypes.begin(), allowedIoTypes.end());
-    allAllowedTypes.insert(allowedAffineTypes.begin(), allowedAffineTypes.end());
-    allAllowedTypes.insert(allowedStatTypes.begin(), allowedStatTypes.end());
-    validateConsistentDataTypes(
-        allTensorIds,
-        allAllowedTypes,
-        "Layernorm implementation only supports FLOAT, HALF and BFLOAT16 data types.",
-        "All IO, affine and stat tensors for layernorm must have the same data type.");
 
     const auto allowedEpsilonTypes = type_configs::getAllowedEpsilonTypes();
     if(allowedEpsilonTypes.size() == 1)
@@ -271,7 +242,7 @@ void LayernormValidator::checkTensorConfigSupported(
         = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
     ioAndStatTensorIds.insert(ioAndStatTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
 
-    checkTensorIDLayoutsAndDimsSupported(ioAndStatTensorIds);
+    checkTensorLayoutsAndDimsSupported(ioAndStatTensorIds);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);

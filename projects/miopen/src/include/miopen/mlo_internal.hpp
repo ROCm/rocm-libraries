@@ -57,11 +57,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <miopen/config.hpp>
 
-#if MIOPEN_BACKEND_OPENCL
-#include <miopen/oclkernel.hpp>
-#include <miopen/clhelper.hpp>
-#include <miopen/ocldeviceinfo.hpp>
-#endif
 #include <miopen/db_path.hpp>
 #include <miopen/conv/db_getter.hpp>
 #include <miopen/execution_context.hpp>
@@ -69,15 +64,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <miopen/problem_description.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/ramdb.hpp>
-
-#if MIOPEN_BACKEND_OPENCL
-#define CL_TARGET_OPENCL_VERSION 120
-#ifdef __APPLE__
-#include <OpenCL/opencl.h>
-#else
-#include <CL/cl.h>
-#endif
-#endif
 
 #ifdef __APPLE__
 #include <mach/mach_time.h> // for mach_absolute_time() and friends
@@ -246,6 +232,13 @@ std::vector<miopen::solver::ConvSolution>
 FindAllFFTSolutions(const miopen::ExecutionContext& ctx,
                     const miopen::conv::ProblemDescription& problem,
                     const miopen::AnyInvokeParams& invoke_ctx);
+
+// Returns the SolverDbId of every convolution solver listed in the Find solver
+// containers defined in mlo_dir_conv.cpp. Used by a unit test to assert that
+// every solver reachable by Find is also present in the solver Id registry,
+// guarding against find-list/registry drift.
+MIOPEN_INTERNALS_EXPORT
+std::vector<std::string> GetAllFindSolverDbIds();
 
 struct mlo_construct_base
 {

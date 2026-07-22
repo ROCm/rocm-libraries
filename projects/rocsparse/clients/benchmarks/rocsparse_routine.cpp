@@ -97,10 +97,6 @@ rocsparse_status rocsparse_routine::dispatch_indextype(const char cindextype, co
     const bool                mixed     = (cindextype == 'm');
     switch(indextype)
     {
-    case rocsparse_indextype_u16:
-    {
-        break;
-    }
     case rocsparse_indextype_i32:
     {
         return dispatch_call<FNAME, T, int32_t>(arg);
@@ -226,6 +222,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_spmv_csr.hpp"
 #include "testing_spmv_ell.hpp"
 #include "testing_spsv_coo.hpp"
+#include "testing_spsv_csc.hpp"
 #include "testing_spsv_csr.hpp"
 #include "testing_sptrsv.hpp"
 #include "testing_v2_spmv_bsr.hpp"
@@ -282,6 +279,9 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_gtsv_interleaved_batch.hpp"
 #include "testing_gtsv_no_pivot.hpp"
 #include "testing_gtsv_no_pivot_strided_batch.hpp"
+#ifdef ROCSPARSE_WITH_ILDLT0
+#include "testing_spildlt0.hpp"
+#endif
 
 // Conversion
 #include "testing_bsr2csr.hpp"
@@ -302,6 +302,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_dense2coo.hpp"
 #include "testing_dense2csc.hpp"
 #include "testing_dense2csr.hpp"
+#include "testing_dense_to_sparse_bell.hpp"
 #include "testing_dense_to_sparse_coo.hpp"
 #include "testing_dense_to_sparse_csc.hpp"
 #include "testing_dense_to_sparse_csr.hpp"
@@ -555,8 +556,12 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT_X(csrsm, testing_spsm_csr);
         DEFINE_CASE_T_FLOAT_ONLY(csrsort);
         DEFINE_CASE_IJT_X(csrsv, testing_spsv_csr);
+        DEFINE_CASE_IJT_X(cscsv, testing_spsv_csc);
         DEFINE_CASE_IJT_X(spitsv_csr, testing_spitsv_csr);
         DEFINE_CASE_IJT(spic0);
+#ifdef ROCSPARSE_WITH_ILDLT0
+        DEFINE_CASE_IJT(spildlt0);
+#endif
         DEFINE_CASE_IJT(spilu0);
         DEFINE_CASE_IJT(sptrsv);
         DEFINE_CASE_T(csritsv);
@@ -571,6 +576,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T(dense2coo);
         DEFINE_CASE_T(dense2csc);
         DEFINE_CASE_T(dense2csr);
+        DEFINE_CASE_IT(dense_to_sparse_bell);
         DEFINE_CASE_IT(dense_to_sparse_coo);
         DEFINE_CASE_IJT(dense_to_sparse_csc);
         DEFINE_CASE_IJT(dense_to_sparse_csr);

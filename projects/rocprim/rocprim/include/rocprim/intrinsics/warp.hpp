@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,10 +30,10 @@
 
 #include <type_traits>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup intrinsicsmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// Evaluate predicate for all active work-items in the warp and return an integer
 /// whose <tt>i</tt>-th bit is set if and only if \p predicate is <tt>true</tt>
@@ -177,9 +177,9 @@ bool group_elect(lane_mask_type mask)
     return prev_same_count == 0 && mask != 0;
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group intrinsicsmodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_WARP_HPP_
