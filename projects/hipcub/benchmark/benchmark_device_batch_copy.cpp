@@ -184,14 +184,14 @@ BatchCopyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_buf
         = std::accumulate(h_buffer_num_elements.begin(), h_buffer_num_elements.end(), size_t{0});
 
     // Generate data.
-    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
+    std::independent_bits_engine<std::mt19937_64, 64, unsigned long long> bits_engine{rng};
 
-    const size_t num_ints = benchmark_utils::ceiling_div(result.get_bytes(), sizeof(uint64_t));
-    auto h_input = std::make_unique<unsigned char[]>(num_ints * sizeof(uint64_t));
+    const size_t num_ints = benchmark_utils::ceiling_div(result.get_bytes(), sizeof(unsigned long long));
+    auto h_input = std::make_unique<unsigned char[]>(num_ints * sizeof(unsigned long long));
 
-    std::for_each(reinterpret_cast<uint64_t*>(h_input.get()),
-                  reinterpret_cast<uint64_t*>(h_input.get() + num_ints * sizeof(uint64_t)),
-                  [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+    std::for_each(reinterpret_cast<unsigned long long*>(h_input.get()),
+                  reinterpret_cast<unsigned long long*>(h_input.get() + num_ints * sizeof(unsigned long long)),
+                  [&bits_engine](unsigned long long& elem) { ::new(&elem) unsigned long long{bits_engine()}; });
 
     HIP_CHECK(hipMalloc(&result.d_input, result.get_bytes()));
     HIP_CHECK(hipMalloc(&result.d_output, result.get_bytes()));
