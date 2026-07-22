@@ -43,7 +43,6 @@
 #include <cstring>
 #include <exception>
 #include <iostream>
-#include <memory>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -82,58 +81,6 @@ int env_int(const char* name, int fallback)
     return std::atoi(v);
 }
 
-bool env_flag(const char* name, bool fallback)
-{
-    const char* v = std::getenv(name);
-    if(!v)
-        return fallback;
-    // Accept 1/true/on/yes (case-insensitive first char) as true; 0/false/off as
-    // false.
-    const char c = v[0];
-    return !(c == '0' || c == 'f' || c == 'F' || c == 'n' || c == 'N');
-}
-
-#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
-// ---- Optional persistent device-buffer cache for sweep mode. ----
-// By default (opt-out) each dispatcher_run_mx_gemm() allocates and frees its
-// device buffers, which is the simplest lifetime model but churns hipMalloc/
-// hipFree on every call. For throughput sweeps that call run() thousands of times
-// this alloc/free churn both slows the sweep and perturbs the thermal steady
-// state relative to a persistent-buffer profiler. When
-// CK_TILE_MX_GEMM_REUSE_BUFFERS is enabled (default on), the buffers below are
-// kept alive between calls and only (re)allocated when a larger capacity is
-// needed. Correctness is unchanged: A/B/scales are still uploaded and C is still
-// zeroed every call, so per-shape data is never stale; only the allocations are
-// reused. Set CK_TILE_MX_GEMM_REUSE_BUFFERS=0 to restore per-call alloc/free.
-struct ReusableDeviceBuffer
-{
-    std::unique_ptr<ck_tile::DeviceMem> mem;
-    std::size_t capacity = 0;
-
-    // Ensure the buffer holds at least `bytes`, reallocating (growing) only when
-    // needed. Returns the device pointer.
-    void* ensure(std::size_t bytes)
-    {
-        if(!mem || capacity < bytes)
-        {
-            mem      = std::make_unique<ck_tile::DeviceMem>(bytes);
-            capacity = bytes;
-        }
-        return mem->GetDeviceBuffer();
-    }
-};
-
-struct MxGemmBufferCache
-{
-    ReusableDeviceBuffer a, b, c, scale_a, scale_b;
-};
-
-// One cache for the single compiled-in kernel. dispatcher is used single-kernel
-// per .so and callers drive it from one thread at a time (the Python ctypes
-// wrapper holds the GIL across the call), so a plain static is sufficient.
-MxGemmBufferCache g_buf_cache;
-#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
-
 } // namespace
 
 extern "C" {
@@ -156,15 +103,7 @@ const char* dispatcher_get_kernel_name()
 }
 int dispatcher_get_kernel_count() { return 1; }
 
-void dispatcher_cleanup()
-{
-    g_initialized = false;
-#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
-    // Release any persistent sweep-mode device buffers so cleanup() frees all
-    // device memory this lib allocated.
-    g_buf_cache = MxGemmBufferCache{};
-#endif
-}
+void dispatcher_cleanup() { g_initialized = false; }
 
 /**
  * Run microscaling GEMM: C[M,N] = (A[M,K] * scale_a) . (B[K,N] * scale_b).
@@ -377,69 +316,30 @@ int dispatcher_run_mx_gemm(const void* A,
     const std::size_t scale_a_bytes = scale_a_shuffled.get_element_space_size_in_bytes();
     const std::size_t scale_b_bytes = scale_b_shuffled.get_element_space_size_in_bytes();
 
-    // Sweep mode reuses persistent device allocations across calls (default on) to
-    // avoid per-call hipMalloc/hipFree churn; opt out via
-    // CK_TILE_MX_GEMM_REUSE_BUFFERS=0 to get simple per-call alloc/free.
-    const bool reuse_buffers = env_flag("CK_TILE_MX_GEMM_REUSE_BUFFERS", true);
-
     float exec_time = 0.0f;
     try
     {
-        // Device pointers, resolved below either from the persistent cache (reuse
-        // path) or from call-local DeviceMem (per-call path). Both paths upload
-        // A/B/scales and zero C every call, so per-shape data is never stale.
-        void* a_ptr       = nullptr;
-        void* b_ptr       = nullptr;
-        void* c_ptr       = nullptr;
-        void* scale_a_ptr = nullptr;
-        void* scale_b_ptr = nullptr;
+        // Call-local device buffers, sized via HostTensor (packing-correct).
+        // Each call allocates and (via RAII) frees its own DeviceMem -- the same
+        // per-call lifetime model the batched/multi_abd bridges use. A/B/scales
+        // are uploaded and C is zeroed every call, so per-shape data is fresh.
+        ck_tile::DeviceMem a_dev(a_bytes);
+        ck_tile::DeviceMem b_dev(b_bytes);
+        ck_tile::DeviceMem c_dev(c_bytes);
+        ck_tile::DeviceMem sa_dev(scale_a_bytes);
+        ck_tile::DeviceMem sb_dev(scale_b_bytes);
 
-        // Call-local buffers kept in scope for the non-reuse path; empty (never
-        // allocated) when reusing the cache.
-        std::unique_ptr<ck_tile::DeviceMem> a_local, b_local, c_local, sa_local, sb_local;
+        a_dev.ToDevice(a_m_k.data());
+        b_dev.ToDevice(b_k_n.data());
+        c_dev.SetZero();
+        sa_dev.ToDevice(scale_a_shuffled.data());
+        sb_dev.ToDevice(scale_b_shuffled.data());
 
-        auto upload = [](void* dst, const void* src, std::size_t bytes) {
-            if(hipMemcpy(dst, src, bytes, hipMemcpyHostToDevice) != hipSuccess)
-                throw std::runtime_error("hipMemcpy H2D failed");
-        };
-
-        if(reuse_buffers)
-        {
-            a_ptr       = g_buf_cache.a.ensure(a_bytes);
-            b_ptr       = g_buf_cache.b.ensure(b_bytes);
-            c_ptr       = g_buf_cache.c.ensure(c_bytes);
-            scale_a_ptr = g_buf_cache.scale_a.ensure(scale_a_bytes);
-            scale_b_ptr = g_buf_cache.scale_b.ensure(scale_b_bytes);
-
-            // Upload exactly the shape's byte count (cached buffers may be larger).
-            upload(a_ptr, a_m_k.data(), a_bytes);
-            upload(b_ptr, b_k_n.data(), b_bytes);
-            upload(scale_a_ptr, scale_a_shuffled.data(), scale_a_bytes);
-            upload(scale_b_ptr, scale_b_shuffled.data(), scale_b_bytes);
-            if(hipMemset(c_ptr, 0, c_bytes) != hipSuccess)
-                throw std::runtime_error("hipMemset C failed");
-        }
-        else
-        {
-            // ---- Call-local device buffers, sized via HostTensor (packing-correct). ----
-            a_local  = std::make_unique<ck_tile::DeviceMem>(a_bytes);
-            b_local  = std::make_unique<ck_tile::DeviceMem>(b_bytes);
-            c_local  = std::make_unique<ck_tile::DeviceMem>(c_bytes);
-            sa_local = std::make_unique<ck_tile::DeviceMem>(scale_a_bytes);
-            sb_local = std::make_unique<ck_tile::DeviceMem>(scale_b_bytes);
-
-            a_local->ToDevice(a_m_k.data());
-            b_local->ToDevice(b_k_n.data());
-            c_local->SetZero();
-            sa_local->ToDevice(scale_a_shuffled.data());
-            sb_local->ToDevice(scale_b_shuffled.data());
-
-            a_ptr       = a_local->GetDeviceBuffer();
-            b_ptr       = b_local->GetDeviceBuffer();
-            c_ptr       = c_local->GetDeviceBuffer();
-            scale_a_ptr = sa_local->GetDeviceBuffer();
-            scale_b_ptr = sb_local->GetDeviceBuffer();
-        }
+        void* a_ptr       = a_dev.GetDeviceBuffer();
+        void* b_ptr       = b_dev.GetDeviceBuffer();
+        void* c_ptr       = c_dev.GetDeviceBuffer();
+        void* scale_a_ptr = sa_dev.GetDeviceBuffer();
+        void* scale_b_ptr = sb_dev.GetDeviceBuffer();
 
         // ---- Build MxGemmHostArgs in the exact profiler argument order:
         // a_ptr, scale_a, b_ptr, scale_b, ds{}, c_ptr, split_k, m, n, k,
@@ -477,8 +377,7 @@ int dispatcher_run_mx_gemm(const void* A,
             return -2;
         }
 
-        // D2H from the resolved c_ptr (works for both the cached and per-call
-        // paths); copy exactly c_bytes since a cached buffer may be larger.
+        // D2H from c_ptr into the host output tensor.
         if(hipMemcpy(c_m_n.data(), c_ptr, c_bytes, hipMemcpyDeviceToHost) != hipSuccess)
             throw std::runtime_error("hipMemcpy D2H failed");
     }

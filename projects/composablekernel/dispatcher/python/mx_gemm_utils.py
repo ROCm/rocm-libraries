@@ -66,9 +66,17 @@ def _get_arch() -> str:
         arch = ""
     if not arch:
         raise RuntimeError("Could not detect GPU architecture from rocminfo; refusing to default. Pass gfx_arch explicitly.")
-    _supported = ("gfx90a", "gfx942", "gfx950")
+    # mx_gemm is gfx950-ONLY: the C++ bridge (mx_gemm_ctypes_lib.cpp) has a
+    # static_assert(GFX_ARCH == "gfx950") because it uses the gfx950-only
+    # preShuffleScaleBuffer_gfx950 host helper. Validating a broader set here
+    # would let a gfx942/gfx90a caller past detection only to fail later at
+    # build/runtime with a less actionable error, so restrict it to gfx950.
+    _supported = ("gfx950",)
     if arch not in _supported:
-        raise ValueError(f"Unsupported GPU architecture {arch!r}; supported: {list(_supported)}")
+        raise ValueError(
+            f"mx_gemm is gfx950-only; detected {arch!r} is not supported "
+            f"(supported: {list(_supported)})"
+        )
     return arch
 
 # MX GEMM scales every 32 K-elements with one e8m0 byte.
@@ -750,10 +758,14 @@ def setup_multiple_mx_gemm_dispatchers(
     # compiled for `arch` -- an arch mismatch between the header and the binary.
     # Resetting _name_cache forces the name to be recomputed for the chosen arch.
     if gfx_arch is not None:
-        _supported = ("gfx90a", "gfx942", "gfx950")
+        # mx_gemm is gfx950-only (the C++ bridge static_asserts GFX_ARCH==gfx950);
+        # reject any other explicit arch here so a build that can never succeed
+        # fails early with a clear message instead of at compile/runtime.
+        _supported = ("gfx950",)
         if gfx_arch not in _supported:
             raise ValueError(
-                f"Unsupported GPU architecture {gfx_arch!r}; supported: {list(_supported)}"
+                f"mx_gemm is gfx950-only; requested {gfx_arch!r} is not supported "
+                f"(supported: {list(_supported)})"
             )
         for c in configs:
             if c.gpu_target != gfx_arch:

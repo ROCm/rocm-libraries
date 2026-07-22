@@ -69,6 +69,9 @@ class TestCodegenJson(unittest.TestCase):
             warp_m=2, warp_n=2, warp_k=1,
             warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
             k_block_per_cu=3,
+            # Pin the arch so to_codegen_config() does not shell out to rocminfo;
+            # keeps this a CPU-only test on non-ROCm runners.
+            gpu_target="gfx950",
         )
         j = cfg.to_codegen_config()
         self.assertEqual(j["datatype"], "fp8")
@@ -100,6 +103,8 @@ class TestValidity(unittest.TestCase):
         # codegen-level gate (_validate) refuse dtype="bf8".
         cfg = default_fp8_config()
         cfg.datatype = "bf8"
+        # Pin the arch so to_codegen_config() below stays CPU-only (no rocminfo).
+        cfg.gpu_target = "gfx950"
         self.assertFalse(cfg.is_valid())
 
         try:
@@ -248,6 +253,8 @@ class TestCodegenNameContract(unittest.TestCase):
         except Exception as exc:  # noqa: BLE001
             self.skipTest(f"codegen import unavailable: {exc}")
         cfg = default_fp8_config()
+        # Pin the arch so to_codegen_config() stays CPU-only (no rocminfo).
+        cfg.gpu_target = "gfx950"
         try:
             name = kernel_name(cfg.to_codegen_config())
         except Exception as exc:  # noqa: BLE001

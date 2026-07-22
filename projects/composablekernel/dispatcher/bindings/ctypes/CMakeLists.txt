@@ -98,9 +98,13 @@ if(MX_GEMM_KERNEL_HEADERS)
     )
     target_include_directories(dispatcher_mx_gemm_lib PRIVATE ${MX_GEMM_TE_INCLUDE_DIRS})
     # The generated header only exports SelectedKernel/KERNEL_NAME/ScaleType/...
-    # under this define, so the force-include path requires it.
+    # under this define, so the force-include path requires it. GFX_ARCH is
+    # required by mx_gemm_ctypes_lib.cpp (#error if unset) and the bridge is
+    # gfx950-only (static_assert on preShuffleScaleBuffer_gfx950), so pin it to
+    # gfx950 here -- the only value this op can compile for.
     target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE
         CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="gfx950"
     )
 else()
     message(STATUS "No MX-GEMM kernel found for ctypes lib - building without kernel")
@@ -111,6 +115,10 @@ else()
         ${MX_GEMM_TE_INCLUDE_DIRS}
     )
     target_link_libraries(dispatcher_mx_gemm_lib PRIVATE hip::device)
+    # Even the no-kernel fallback compiles mx_gemm_ctypes_lib.cpp, which #errors
+    # if GFX_ARCH is unset; define it (gfx950, the only arch this op supports) so
+    # the fallback target builds instead of failing the whole configure/build.
+    target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE GFX_ARCH="gfx950")
     set_target_properties(dispatcher_mx_gemm_lib PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         CXX_STANDARD 17
