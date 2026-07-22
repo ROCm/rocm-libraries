@@ -240,14 +240,10 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   Solution-level requirements are rejected here at build time; the runtime
   nWG0 % C "multiple-of-cluster-size" requirement is enforced by the
   ClusterDimCheck predicate at selection time (not a silent fallback).
+  Auto-derived for StreamK=3 + ClusterDim != [1, 1] (the bare index-only cluster
+  state collapsed into this path), so the rejects below reject an unusable
+  cluster rather than an explicit opt-in.
   See docs/design/cluster-load-component-and-streamk-multicast.md.
-
-  StreamKMulticast is auto-derived for StreamK=3 + ClusterDim != [1, 1] in
-  assignProblemIndependentDerivedParameters -- the bare index-only StreamK
-  cluster state was collapsed into this cooperative-load path. When such an
-  auto-derived config cannot meet the requirements below (e.g. TDMInst != 3),
-  the rejects here are the "reject an unusable cluster" behavior, not a
-  rejection of an explicit user opt-in.
   """
   if not state.get("StreamKMulticast", 0):
     return True

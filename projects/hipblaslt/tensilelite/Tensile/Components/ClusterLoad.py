@@ -2,23 +2,13 @@
 # SPDX-License-Identifier: MIT
 """Cluster (multicast) TDM load component.
 
-Centralizes the multicast ("cluster load") mask machinery that was previously
-duplicated across ``KernelWriter``/``KernelWriterAssembly``/``SubtileGREmit``:
-
-  * the mask *value* computation (``computeMasks``),
-  * the ``MulticastMask*`` SGPR declare/undeclare (``declareSgprs`` /
-    ``undeclareSgprs``),
-  * the topology decision (``usesCombinedMask`` / ``maskSgprName``), and
-  * the descriptor attach at each load site (``applyToDescriptor``).
-
-This is a behavior-preserving extraction: every method emits byte-identical
-assembly to the original inline code. ``computeMasks`` therefore receives the
-exact SGPR operands the caller already holds (it does not re-allocate) so the
-instruction stream and register indices are unchanged.
-
-Selection is capability-based (``HasTDM`` + ``TDMInst == 3``), identical to how
-``TensorDataMoverLoad`` is found: ``ClusterLoad.find(writer)`` returns the TDM
-impl on gfx1250 and ``None`` (fallback -> no multicast) elsewhere.
+Centralizes the multicast ("cluster load") mask machinery (value compute,
+``MulticastMask*`` SGPR declare/undeclare, combined-vs-split topology decision,
+and per-load-site descriptor attach) that was previously duplicated across
+``KernelWriter``/``KernelWriterAssembly``/``SubtileGREmit``. Behavior-preserving:
+every method emits byte-identical assembly, receiving the SGPR operands the
+caller already holds rather than re-allocating. Capability-selected
+(``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad``.
 """
 
 from ..Component import ClusterLoad
@@ -40,20 +30,14 @@ class ClusterLoadTDM(ClusterLoad):
     # -- topology decision ---------------------------------------------------
 
     def usesCombinedMask(self, kernel: Mapping) -> bool:
-        """Single-parity combined ``MulticastMask`` predicate.
+        """True when the single-parity combined ``MulticastMask`` applies.
 
-        Subtile issues both A and B loads on every wave (no wave-parity load
-        split), so the single-parity ``MulticastMask`` is wrong there -- it
-        would OR one tensor's mask into both descriptors. Use the split A/B
-        masks in that case. This is the single source of truth for the
-        combined-vs-split decision used by declare/undeclare/computeMasks.
+        Single source of truth for the combined-vs-split decision. Subtile and
+        StreamK DP multicast both need the split A/B masks: subtile issues A and
+        B on every wave (no wave-parity split), and StreamK broadcasts only B
+        across the [C,1] cluster while A stays per-workgroup -- the combined
+        parity mask would be wrong for both.
         """
-        # StreamK DP cooperative multicast needs the SPLIT A/B masks: A is
-        # loaded per-workgroup (MulticastMaskA = self bit) while B is broadcast
-        # across the [C,1] cluster (MulticastMaskB = all-C bits). The combined
-        # single-parity mask instead selects maskA on even waves / maskB on odd
-        # waves (for the wave-separated A-even/B-odd load split), which is wrong
-        # here, so force split whenever StreamKMulticast is on. Inert otherwise.
         if kernel.get("StreamKMulticast", 0):
             return False
         tdmA: bool = kernel["enableTDMA"]
@@ -62,21 +46,13 @@ class ClusterLoadTDM(ClusterLoad):
 
     def maskSgprName(self, kernel: Mapping, tc: str, *, subtile: bool = False,
                      waveSeparated: bool = False) -> str:
-        """Central multicast-mask SGPR name resolver.
+        """Resolve the multicast-mask SGPR name.
 
-        Reproduces the three prior naming rules exactly:
-          * wave-separated (non-subtile): the combined ``"MulticastMask"``;
-          * dense and subtile: the split ``f"MulticastMask{tc}"`` with any
-            ``MXS`` prefix stripped (dense passed ``MXSA``/``MXSB`` tensor
-            chars; subtile only ever passes ``A``/``B`` so the strip is a
-            no-op there).
+        Wave-separated (non-subtile) uses the combined ``"MulticastMask"``;
+        dense/subtile and StreamK multicast use the split ``f"MulticastMask{tc}"``
+        (any ``MXS`` prefix stripped). StreamK forces the split name so B never
+        resolves to the never-declared combined SGPR.
         """
-        # StreamK DP cooperative multicast always uses the split A/B masks
-        # (usesCombinedMask() returns False for it). The wave-separated dense
-        # apply site would otherwise resolve to the combined "MulticastMask"
-        # name, which is never declared on this path -> the B descriptor would
-        # OR an undefined SGPR. Force the split name so A binds MulticastMaskA
-        # (self) and B binds MulticastMaskB (broadcast).
         if kernel.get("StreamKMulticast", 0):
             string = tc.removeprefix("MXS") if tc.startswith("MXS") else tc
             return f"MulticastMask{string}"
@@ -86,11 +62,7 @@ class ClusterLoadTDM(ClusterLoad):
         return f"MulticastMask{string}"
 
     def cooperativeThreadPartition(self, kernel: Mapping, tc: str) -> int:
-        """Number of cooperating workgroups for tensor ``tc``.
-
-        ``ClusterDim[1]`` for A, ``ClusterDim[0]`` for B. Shared math with the
-        GL2 prefetch cooperative loads.
-        """
+        """Cooperating-workgroup count for ``tc``: ClusterDim[1] (A) / [0] (B)."""
         subTc: str = tc[-1]
         return kernel["ClusterDim"][1] if subTc == "A" else kernel["ClusterDim"][0]
 
@@ -130,11 +102,9 @@ class ClusterLoadTDM(ClusterLoad):
                      sgprWgX: int, sgprWgY: int, sgprNWgX: int, sTmp: int) -> Module:
         """Compute the multicast mask value(s) into the ``MulticastMask*`` SGPRs.
 
-        Verbatim lift of the ``defineAndResources`` mask compute. The caller
-        passes the exact SGPR operands it already holds (``sgprWgX`` = wg_x,
-        ``sgprWgY`` = wg_y, ``sgprNWgX`` = nwg_x, and ``sTmp`` whose ``+4`` slot
-        is scratch) so the emitted instructions and register indices are
-        byte-identical to the original inline code.
+        Verbatim lift of the ``defineAndResources`` mask compute; the caller
+        passes the operands it already holds (``sgprWgX``/``sgprWgY``/``sgprNWgX``
+        and ``sTmp`` whose ``+4`` slot is scratch) so the output is byte-identical.
         """
         mod = Module()
         if not kernel["Multicast"]:
@@ -193,9 +163,8 @@ class ClusterLoadTDM(ClusterLoad):
                           waveSeparated: bool = False) -> Module:
         """OR the multicast mask into descriptor ``Group1[word0]``.
 
-        Folds the ``kernel["Multicast"] and enableCluster`` gate, the mask-name
-        choice, and the ``SOrB32`` attach. Returns an empty ``Module`` when the
-        gate is not satisfied -- identical to today's skipped ``if``.
+        Folds the ``Multicast and enableCluster`` gate, mask-name choice, and the
+        ``SOrB32`` attach; returns an empty ``Module`` when the gate is not met.
         """
         from .TensorDataMover import TensorDataMoverLoad
         mod = Module()
