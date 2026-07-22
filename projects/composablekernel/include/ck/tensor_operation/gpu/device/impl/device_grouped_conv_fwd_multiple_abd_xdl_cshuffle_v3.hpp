@@ -250,7 +250,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 
         if constexpr(GridwiseGemm::DirectLoadEnabled)
         {
-#if defined(__gfx950__)
+#if defined(__gfx950__) || defined(__gfx125__)
             GridwiseGemm::template Run_2Lds<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
                 karg.p_a_grid + a_group_offset + a_n_offset,
                 karg.p_b_grid + b_group_offset,
@@ -1453,14 +1453,14 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 
         float Run(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            if(get_warp_size() == 64)
-            {
-                if constexpr(MXdlPerWave64 > 0)
-                {
-                    return RunImp<GridwiseGemm64>(arg, stream_config);
-                }
-            }
-            else
+            // if(get_warp_size() == 64)
+            // {
+            //     if constexpr(MXdlPerWave64 > 0)
+            //     {
+            //         return RunImp<GridwiseGemm64>(arg, stream_config);
+            //     }
+            // }
+            // else
             {
                 if constexpr(MXdlPerWave32 > 0)
                 {
@@ -1844,29 +1844,29 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         const index_t GemmK =
             arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) * arg.a_grid_desc_ak0_m_ak1_.GetLength(I2);
 
-        if(get_warp_size() == 64)
-        {
-            if constexpr(MXdlPerWave64 > 0)
-            {
-                typename GridwiseGemm64::Argument gemm_arg{nullptr,
-                                                           nullptr,
-                                                           {},
-                                                           nullptr,
-                                                           GemmM,
-                                                           GemmN,
-                                                           GemmK,
-                                                           I0,
-                                                           I0,
-                                                           {},
-                                                           I0,
-                                                           I1 /*KBatch*/,
-                                                           arg.a_element_op_,
-                                                           arg.b_element_op_,
-                                                           arg.cde_element_op_};
-                return GridwiseGemm64::CheckValidity(gemm_arg);
-            }
-        }
-        else
+        // if(get_warp_size() == 64)
+        // {
+        //     if constexpr(MXdlPerWave64 > 0)
+        //     {
+        //         typename GridwiseGemm64::Argument gemm_arg{nullptr,
+        //                                                    nullptr,
+        //                                                    {},
+        //                                                    nullptr,
+        //                                                    GemmM,
+        //                                                    GemmN,
+        //                                                    GemmK,
+        //                                                    I0,
+        //                                                    I0,
+        //                                                    {},
+        //                                                    I0,
+        //                                                    I1 /*KBatch*/,
+        //                                                    arg.a_element_op_,
+        //                                                    arg.b_element_op_,
+        //                                                    arg.cde_element_op_};
+        //         return GridwiseGemm64::CheckValidity(gemm_arg);
+        //     }
+        // }
+        // else
         {
             if constexpr(MXdlPerWave32 > 0)
             {

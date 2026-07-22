@@ -934,14 +934,14 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                 e_g_n_k_wos_strides_[0] * NumGroupsToMerge;
             compute_ptr_offset_of_n_.BatchStrideE_ = e_g_n_k_wos_strides_[1] * conv_N_per_block_;
 
-            if(get_warp_size() == 64)
-            {
-                if constexpr(MXdlPerWave64 > 0)
-                {
-                    InitGridDesc<GridwiseGemm64, GridwiseGemmCTranspose64>();
-                }
-            }
-            else
+            // if(get_warp_size() == 64)
+            // {
+            //     if constexpr(MXdlPerWave64 > 0)
+            //     {
+            //         InitGridDesc<GridwiseGemm64, GridwiseGemmCTranspose64>();
+            //     }
+            // }
+            // else
             {
                 if constexpr(MXdlPerWave32 > 0)
                 {
@@ -1489,18 +1489,18 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 
         float Run(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            if(get_warp_size() == 64)
-            {
-                if constexpr(MXdlPerWave64 > 0)
-                {
-                    return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64>(arg, stream_config);
-                }
-                else
-                {
-                    return 0;
-                }
-            }
-            else
+            // if(get_warp_size() == 64)
+            // {
+            //     if constexpr(MXdlPerWave64 > 0)
+            //     {
+            //         return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64>(arg, stream_config);
+            //     }
+            //     else
+            //     {
+            //         return 0;
+            //     }
+            // }
+            // else
             {
                 if constexpr(MXdlPerWave32 > 0)
                 {
@@ -1834,45 +1834,45 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
             }
         }
         // check Gridwise GEMM
-        if(get_warp_size() == 64)
-        {
-            if constexpr(MXdlPerWave64 > 0)
-            {
-                if constexpr(isMultiA || isMultiB)
-                {
-                    // Genarate tuples with the same descriptors
-                    const auto as_grid_desc_ak0_m_ak1 = generate_tuple(
-                        [&](auto) { return arg.a_grid_desc_m_k_; }, Number<NumATensor>{});
-                    const auto bs_grid_desc_bk0_n_bk1 = generate_tuple(
-                        [&](auto) { return arg.b_grid_desc_n_k_; }, Number<NumBTensor>{});
-                    return GridwiseGemm64::CheckValidity(as_grid_desc_ak0_m_ak1,
-                                                         bs_grid_desc_bk0_n_bk1,
-                                                         arg.ds_grid_desc_m_n_,
-                                                         arg.e_grid_desc_m_n_,
-                                                         arg.block_2_etile_map_);
-                }
-                else
-                {
-                    if constexpr(CTranspose)
-                    {
-                        return GridwiseGemmCTranspose64::CheckValidity(arg.b_grid_desc_n_k_,
-                                                                       arg.a_grid_desc_m_k_,
-                                                                       arg.ds_grid_desc_m_n_,
-                                                                       arg.e_grid_desc_m_n_,
-                                                                       arg.block_2_etile_map_);
-                    }
-                    else
-                    {
-                        return GridwiseGemmCTranspose64::CheckValidity(arg.a_grid_desc_m_k_,
-                                                                       arg.b_grid_desc_n_k_,
-                                                                       arg.ds_grid_desc_m_n_,
-                                                                       arg.e_grid_desc_m_n_,
-                                                                       arg.block_2_etile_map_);
-                    }
-                }
-            }
-        }
-        else
+        // if(get_warp_size() == 64)
+        // {
+        //     if constexpr(MXdlPerWave64 > 0)
+        //     {
+        //         if constexpr(isMultiA || isMultiB)
+        //         {
+        //             // Genarate tuples with the same descriptors
+        //             const auto as_grid_desc_ak0_m_ak1 = generate_tuple(
+        //                 [&](auto) { return arg.a_grid_desc_m_k_; }, Number<NumATensor>{});
+        //             const auto bs_grid_desc_bk0_n_bk1 = generate_tuple(
+        //                 [&](auto) { return arg.b_grid_desc_n_k_; }, Number<NumBTensor>{});
+        //             return GridwiseGemm64::CheckValidity(as_grid_desc_ak0_m_ak1,
+        //                                                  bs_grid_desc_bk0_n_bk1,
+        //                                                  arg.ds_grid_desc_m_n_,
+        //                                                  arg.e_grid_desc_m_n_,
+        //                                                  arg.block_2_etile_map_);
+        //         }
+        //         else
+        //         {
+        //             if constexpr(CTranspose)
+        //             {
+        //                 return GridwiseGemmCTranspose64::CheckValidity(arg.b_grid_desc_n_k_,
+        //                                                                arg.a_grid_desc_m_k_,
+        //                                                                arg.ds_grid_desc_m_n_,
+        //                                                                arg.e_grid_desc_m_n_,
+        //                                                                arg.block_2_etile_map_);
+        //             }
+        //             else
+        //             {
+        //                 return GridwiseGemmCTranspose64::CheckValidity(arg.a_grid_desc_m_k_,
+        //                                                                arg.b_grid_desc_n_k_,
+        //                                                                arg.ds_grid_desc_m_n_,
+        //                                                                arg.e_grid_desc_m_n_,
+        //                                                                arg.block_2_etile_map_);
+        //             }
+        //         }
+        //     }
+        // }
+        // else
         {
 
             if constexpr(MXdlPerWave32 > 0)
