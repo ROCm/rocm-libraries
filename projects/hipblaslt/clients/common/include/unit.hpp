@@ -698,3 +698,103 @@ inline void unit_check_general(int64_t     M,
         break;
     }
 }
+
+/*! \brief Check that CPU and GPU agree on Inf/NaN: where CPU is Inf, GPU must be Inf with the same sign;
+ *  where CPU is NaN, GPU must be NaN. Fails with a clear message (e.g. "CPU is Inf but GPU is NaN").
+ *  Only for FP types that can have Inf/NaN; no-op for others. Run before unit_check so Inf->NaN bugs are reported clearly. */
+#ifdef GOOGLE_TEST
+template <typename T>
+inline void check_special_value_consistency_impl(int64_t M,
+                                                 int64_t N,
+                                                 int64_t lda,
+                                                 int64_t strideA,
+                                                 const T* hCPU,
+                                                 const T* hGPU,
+                                                 int64_t  batch_count)
+{
+    for(int64_t k = 0; k < batch_count; k++)
+        for(int64_t j = 0; j < N; j++)
+            for(int64_t i = 0; i < M; i++)
+            {
+                size_t idx = i + j * size_t(lda) + k * size_t(strideA);
+                T      c   = hCPU[idx];
+                T      g   = hGPU[idx];
+                double cd = double(c);
+                double gd = double(g);
+                if(std::isinf(cd))
+                {
+                    ASSERT_TRUE(std::isinf(gd) && (std::signbit(cd) == std::signbit(gd)))
+                        << "Special value mismatch: CPU is Inf but GPU is " << gd << " at (i=" << i
+                        << ", j=" << j << ", batch=" << k << ")";
+                }
+                else if(std::isnan(cd))
+                {
+                    ASSERT_TRUE(std::isnan(gd))
+                        << "Special value mismatch: CPU is NaN but GPU is " << gd << " at (i=" << i
+                        << ", j=" << j << ", batch=" << k << ")";
+                }
+            }
+}
+
+inline void check_special_value_consistency(int64_t     M,
+                                           int64_t     N,
+                                           int64_t     lda,
+                                           int64_t     strideA,
+                                           void*       hCPU,
+                                           void*       hGPU,
+                                           int64_t     batch_count,
+                                           hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const float*>(hCPU),
+                                            static_cast<const float*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_64F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const double*>(hCPU),
+                                            static_cast<const double*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_16F:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const hipblasLtHalf*>(hCPU),
+                                            static_cast<const hipblasLtHalf*>(hGPU),
+                                            batch_count);
+        break;
+    case HIP_R_16BF:
+        check_special_value_consistency_impl(M,
+                                            N,
+                                            lda,
+                                            strideA,
+                                            static_cast<const hip_bfloat16*>(hCPU),
+                                            static_cast<const hip_bfloat16*>(hGPU),
+                                            batch_count);
+        break;
+    default:
+        break; // no-op for non-FP or FP8 types
+    }
+}
+#else
+inline void check_special_value_consistency(int64_t     M,
+                                           int64_t     N,
+                                           int64_t     lda,
+                                           int64_t     strideA,
+                                           void*       hCPU,
+                                           void*       hGPU,
+                                           int64_t     batch_count,
+                                           hipDataType type)
+{}
+#endif

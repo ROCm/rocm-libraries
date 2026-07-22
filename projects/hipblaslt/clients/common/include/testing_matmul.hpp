@@ -1153,6 +1153,18 @@ void check(hipStream_t                   stream,
                     synchronize(hBias[gemmIdx], dBias[gemmIdx], 0, 0, 0, 0, 1, false, stream));
             }
         }
+        // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message
+        if(arg.unit_check || arg.norm_check)
+        {
+            check_special_value_consistency(M[gemmIdx],
+                                            N[gemmIdx],
+                                            ldd[gemmIdx],
+                                            stride_d[gemmIdx],
+                                            hD_gold[gemmIdx].buf(),
+                                            hD_1[gemmIdx].buf(),
+                                            num_batches[gemmIdx],
+                                            To);
+        }
         if(arg.unit_check)
         {
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)

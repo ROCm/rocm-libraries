@@ -108,6 +108,20 @@ Tests:
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
 
+# Special floating-point inputs (+0, -0, +Inf, -Inf, NaN) on 64x64, FP types only. Exercises
+# check_special_value_consistency(): CPU and GPU must agree on Inf/NaN (no Inf->NaN).
+- name: matmul_special_fp_64x64
+  category: pre_checkin
+  function:
+    matmul: *floating_point_precisions_special_fp
+  matrix_size:
+    - { M: 64, N: 64, K: 64 }
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: [ zero, neg_zero, inf, neg_inf, nan ]
+
 # ROCM-1545: hipblasLtMatmul with INF inputs and computeType HIPBLAS_COMPUTE_32F_FAST_TF32
 # returns NaN on gfx950 (MI355). This test expects correct behavior (no NaN in output).
 - {name: matmul_tf32_inf_ROCM1545, category: pre_checkin, precision: *xf32_precision,
