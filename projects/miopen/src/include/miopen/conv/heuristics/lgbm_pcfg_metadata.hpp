@@ -7,6 +7,8 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
+
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -54,7 +56,7 @@ inline constexpr int kNumBaseProbFeatures = 27;
 //   <SystemDbPath>/lgbm_pcfg_model_meta.json   (feat schema, per solver)
 //   <SystemDbPath>/lgbm_pcfg_catalog.json      (per-bucket candidates)
 // If either file is missing/invalid, IsReady() is false and the picker abstains.
-class LgbmPcfgMetadata
+class MIOPEN_INTERNALS_EXPORT LgbmPcfgMetadata
 {
 public:
     static const LgbmPcfgMetadata& Get();

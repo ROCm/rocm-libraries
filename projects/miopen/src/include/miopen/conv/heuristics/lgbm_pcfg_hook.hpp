@@ -7,6 +7,8 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
+
 #include <string>
 #include <vector>
 
@@ -30,9 +32,8 @@ namespace pcfg {
 // element means "use the solver default config" (walk terminator). Returns an
 // empty vector to abstain (picker disabled, no model for the solver, or unknown
 // bucket). Env-gated internally (MIOPEN_DEBUG_LGBM_PCFG).
-std::vector<std::string> MaybePickConfig(const std::string& solver_db_id,
-                                         const conv::ProblemDescription& problem,
-                                         const Handle& handle);
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> MaybePickConfig(
+    const std::string& solver_db_id, const conv::ProblemDescription& problem, const Handle& handle);
 
 } // namespace pcfg
 } // namespace lgbm

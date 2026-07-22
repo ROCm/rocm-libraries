@@ -7,6 +7,8 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
+
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -31,7 +33,7 @@ inline constexpr int kNumFeatures = 61;
 // v10 is runtime-pure: no spec_id, no triple_vocab masking, no margin/appl
 // thresholds. The picker scores the full solver vocabulary and takes the
 // global argmax, so only the vocab + solver list are needed here.
-class LgbmMetadata
+class MIOPEN_INTERNALS_EXPORT LgbmMetadata
 {
 public:
     static const LgbmMetadata& Get();

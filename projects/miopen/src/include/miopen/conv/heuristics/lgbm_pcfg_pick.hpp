@@ -7,6 +7,8 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
+
 #include <string>
 #include <vector>
 
@@ -34,9 +36,9 @@ namespace pcfg {
 //   - the solver has no perf-config model,
 //   - the bucket is unknown / empty.
 // `solver_name` must be the solver's registry name (solver::Id::ToString()).
-std::vector<std::string> PickConfig(const std::string& solver_name,
-                                    const conv::ProblemDescription& problem,
-                                    const Handle& handle);
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> PickConfig(const std::string& solver_name,
+                                                            const conv::ProblemDescription& problem,
+                                                            const Handle& handle);
 
 // Test seam: score a pre-built feature row (problem prefix already filled; the
 // candidate arg tail is appended internally per candidate) for `solver_name`
@@ -44,10 +46,11 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 // best->worst (same order PickConfig produces). Lets gtest validate the scoring +
 // ranking path against exported test vectors without a GPU or a
 // ProblemDescription. Returns an empty vector if the solver model is unavailable.
-std::vector<std::string> ScorePickForTest(const std::string& solver_name,
-                                          const std::vector<double>& prob_feature_prefix,
-                                          const std::vector<std::string>& cand_descs,
-                                          const std::vector<std::vector<double>>& cand_args);
+MIOPEN_INTERNALS_EXPORT std::vector<std::string>
+ScorePickForTest(const std::string& solver_name,
+                 const std::vector<double>& prob_feature_prefix,
+                 const std::vector<std::string>& cand_descs,
+                 const std::vector<std::vector<double>>& cand_args);
 
 } // namespace pcfg
 } // namespace lgbm

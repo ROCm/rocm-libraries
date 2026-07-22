@@ -7,6 +7,8 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
+
 #include <cstdint>
 #include <vector>
 
@@ -27,14 +29,15 @@ namespace lgbm {
 // No candidate masking or applicability check is done here: the caller walks the
 // ranked list and applies IsApplicable lazily (the MIOpen TunaNet contract), so
 // the picker only needs the Handle, not an ExecutionContext.
-std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
-                                       const Handle& handle);
+MIOPEN_INTERNALS_EXPORT std::vector<uint64_t>
+PickSolverRanked(const conv::ProblemDescription& problem, const Handle& handle);
 
 // Test seam: score a pre-built candidate matrix (each row is a full encoded
 // feature vector; categoricals as integer codes, missing as NaN) and return the
 // index of the argmax row, or -1 on error. Lets gtest validate the
 // encoding+scoring+argmax against the reference fixture without a GPU.
-int ScoreCandidateMatrixForTest(const std::vector<std::vector<double>>& candidate_rows);
+MIOPEN_INTERNALS_EXPORT int
+ScoreCandidateMatrixForTest(const std::vector<std::vector<double>>& candidate_rows);
 
 } // namespace lgbm
 } // namespace ai
