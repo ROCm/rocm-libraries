@@ -50,6 +50,12 @@ add_executable(rpp_tests
     image/bitwise/bitwise_not_test.cpp
     image/data_exchange/copy_test.cpp
     image/geometric/crop_test.cpp
+    image/statistical/tensor_sum_test.cpp
+    # TODO: Reduction kernels below are unusually slow on HIP implementations
+    # image/statistical/tensor_min_test.cpp
+    # image/statistical/tensor_max_test.cpp
+    # image/statistical/tensor_mean_test.cpp
+    # image/statistical/tensor_stddev_test.cpp
 )
 target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(rpp_INCLUDE_DIR)
