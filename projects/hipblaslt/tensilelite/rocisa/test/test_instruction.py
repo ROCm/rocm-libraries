@@ -25,6 +25,8 @@ from rocisa.container import sgpr, vgpr
 from copy import deepcopy
 import math
 
+import pytest
+
 def test_instruction_common():
     from rocisa.instruction import SMovB32
 
@@ -428,6 +430,64 @@ def test_instruction_scalar_float():
         assert b.comment == "orig"
         assert "// orig" in str(b)
         assert "// mutated" not in str(b)
+
+
+@pytest.mark.xfail(
+    reason="ROCM-3994 (W-KNOWN-BUG two-PR flow): the EMaxF16 true16 helper does not "
+           "exist on develop, so this reproducer fails at import. The true16 fix PR "
+           "(users/ericwan/true16-patch) must delete this marker; strict=True flips "
+           "the resulting XPASS to a failure if it is left behind. Time-box: next "
+           "hipBLASLt release.",
+    strict=True,
+    raises=(ImportError, AttributeError),
+)
+def test_instruction_vmax_f16_true16():
+    # Regression for the true16 (real-true16) activation-clamp defect (ROCM-3994).
+    #
+    # On a NoSDWA target (isaVersion 11/12) the EMaxF16 helper must emit the
+    # v_max_f16 activation clamp in true16 form, binding a half-word selector
+    # (.l) to every register operand. The abs() source keeps its suffix *inside*
+    # the closing paren: abs(v[..].l) is valid, abs(v[..]).l is not.
+    #
+    # RED on develop: EMaxF16 (and the VMaxF16 true16 kwarg) do not exist there,
+    # so the import / construction below fails outright. GREEN on the fix branch:
+    # the emitted text carries the .l selectors.
+    #
+    # Assertions are substring/regex based to stay agnostic to the ~50-column
+    # comment padding, matching test_instruction_swait_xcnt / _global_wb.
+    import re
+
+    import rocisa
+    from rocisa.container import vgpr
+    from rocisa.instruction import EMaxF16
+
+    # Initialize a NoSDWA gfx11 ISA so EMaxF16 selects the true16 path.
+    isa = (11, 0, 0)
+    ri = rocisa.rocIsa.getInstance()
+    ri.init(isa, "amdclang++", False)
+    ri.setKernel(isa, 32)
+    assert ri.getArchCaps()["NoSDWA"], "expected NoSDWA cap for gfx11"
+
+    # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
+    inst = EMaxF16(vgpr("Output"), vgpr("Output"), vgpr("Value+0", isAbs=True))
+    s = str(inst)
+    assert re.search(
+        r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+abs\(v\[vgprValue\+0\]\.l\)",
+        s,
+    ), f"activation clamp not in true16 form: {s!r}"
+    # The suffix must be inside the abs() paren, never outside it.
+    assert "abs(v[vgprValue+0].l)" in s
+    assert "abs(v[vgprValue+0]).l" not in s
+    # And it must not be the bare fake16 form.
+    assert "abs(v[vgprValue+0])," not in s and not s.rstrip().endswith("abs(v[vgprValue+0])")
+
+    # Plain register sources (the merge_sum shape): every operand gets .l.
+    inst2 = EMaxF16(vgpr("Output"), vgpr("Output"), vgpr("OutputB"))
+    s2 = str(inst2)
+    assert re.search(
+        r"v_max_f16\s+v\[vgprOutput\]\.l,\s+v\[vgprOutput\]\.l,\s+v\[vgprOutputB\]\.l",
+        s2,
+    ), f"merge clamp not in true16 form: {s2!r}"
 
 
 if __name__ == "__main__":
