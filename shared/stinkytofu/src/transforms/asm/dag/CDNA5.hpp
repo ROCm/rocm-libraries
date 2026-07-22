@@ -242,6 +242,11 @@ static std::vector<BarrierTokenGroup> groupBarrierTokens(
 //      non-WMMA queues drain once. Cross-BB via LoopDetection.
 //
 class CDNA5ReadyQueue : public ReadyQueue {
+    // Which phase, if any, decidePromote() forces this pick (None = normal selection).
+    // Values name the gateable phases of pickOne(); isPromote(p) is true when nothing
+    // is promoted (every phase runs) or when p is the promoted phase (only it runs).
+    enum class PromotePhase { None, Wmma, NonWmmaFill, ForcedWmma, Barrier };
+
     // --- Priority buckets (DAG ids compare smaller = earlier in source) ---
     ReadySetByDAGid wmmaQueue;
     ReadySetByDAGid globalReadQueue;  // tensor_load_to_lds when distributeGlobalRead
@@ -339,6 +344,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     DAGNode* lastPickedNode_ = nullptr;
 
+    // Set by decidePromote() each pick: which phase is forced (None = normal selection)
+    // and the exact node that phase will issue. Read via isPromote() to gate the phases.
+    PromotePhase promotedPhase_ = PromotePhase::None;
+    DAGNode* promotedNode_ = nullptr;
+
     std::map<int, int> crossBBDsResiduals_;
 
     void advanceTime(int cycles);
@@ -357,6 +367,20 @@ class CDNA5ReadyQueue : public ReadyQueue {
                                      int* outWait = nullptr) const;
 
     bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
+
+    // Promotion = split the old forced-barrier phase into a pure decision + a per-phase
+    // gate, run once before the normal phases. decidePromote() records which phase must
+    // fire now (promotedPhase_) and the exact node it will issue (promotedNode_),
+    // mutating no queue. Each phase guards its body with isPromote(ThisPhase): when
+    // nothing is promoted every phase runs normally; when something is promoted only
+    // that phase runs, so the promoted node issues through its own existing phase (one
+    // entry point), never a second dedicated path. A new forcing rule is a new case in
+    // decidePromote(), not a new phase. Currently the only promotion is a barrier whose
+    // per-barrier WMMA-issued threshold is met (formerly the forced-barrier phase).
+    void decidePromote();
+    bool isPromote(PromotePhase phase) const {
+        return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
+    }
     DAGNode* extractForcedBarrier();
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> computeBarrierAfterThresholds(
         IRList::iterator regionStart, IRList::iterator regionEnd);
@@ -730,6 +754,28 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
     *outNode = best;
     *kindOut = kind;
     return true;
+}
+
+// Pure promotion decision, run once at the top of each pickOne(). Records which phase
+// must fire now and the exact node it will issue, without mutating any queue. Currently
+// the sole rule: a barrier whose WMMA-issued threshold is met is promoted (this is what
+// the dedicated forced-barrier phase used to do ahead of WMMA). Add further forcing
+// rules here as new PromotePhase cases.
+void CDNA5ReadyQueue::decidePromote() {
+    promotedPhase_ = PromotePhase::None;
+    promotedNode_ = nullptr;
+
+    if (!barrierQueue.empty() && !barrierWmmaThresholds_.empty()) {
+        for (DAGNode* node : barrierQueue) {
+            auto thIt = barrierWmmaThresholds_.find(node->inst);
+            if (thIt != barrierWmmaThresholds_.end() &&
+                wmmaIssuedCountThisRegion_ >= thIt->second) {
+                promotedPhase_ = PromotePhase::Barrier;
+                promotedNode_ = node;
+                return;
+            }
+        }
+    }
 }
 
 // Drain barrierQueue to find the lowest-id barrier whose WMMA threshold is met,
@@ -1136,15 +1182,11 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         return node;
     };
 
-    // Phase A — forced barrier: issue the lowest-id barrier whose WMMA threshold is met.
-    if (DAGNode* forced = extractForcedBarrier()) {
-        PASS_DEBUG(std::cerr << "[CDNA5 pickOne] forced barrier: wmmaIssued="
-                             << wmmaIssuedCountThisRegion_
-                             << " threshold=" << barrierWmmaThresholds_.at(forced->inst)
-                             << " barrierId=" << forced->id << std::flush << "\n");
-        updateWMMAStatus(forced);
-        return rememberPick(forced);
-    }
+    // Promotion decision (formerly the forced-barrier phase). Records which phase must
+    // fire now; the non-promoted phases below gate themselves off via isPromote(), and
+    // the promoted node issues through its own phase — one entry point, no side effects
+    // here.
+    decidePromote();
 
     // Pre-compute the best DS read by dsReadPriority once for all phases.
     DAGNode* pickedDS = nullptr;
@@ -1156,7 +1198,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     bool otherQueuesHaveWork = !globalReadQueue.empty() || !localReadQueue.empty() ||
                                !otherQueue.empty() || !valuQueue.empty();
 
-    if (!wmmaQueue.empty()) {
+    if (isPromote(PromotePhase::Wmma) && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
 
         DAGNode* smallestPickable = nullptr;
@@ -1196,25 +1238,26 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         }
     }
 
-    // Phase C — inside WMMA latency window: fill with non-WMMA work.
-    if (coIssueCyclePos_ < activeWmmaLatency_) {
-        DAGNode* smallestPickable = nullptr;
-        int pickKind = -1;
-        int pickWait = 0;
-        if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
-            PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
-                                 << smallestPickable->id << " kind=" << pickKind
-                                 << " wait=" << pickWait << "\n");
-            // Pay any hidden stall (hidden under the WMMA latency) before issuing.
-            if (pickWait > 0) advanceTime(pickWait);
-            return rememberPick(popNonWmma(smallestPickable, pickKind));
+    // Phase C+D — NonWmmaFill: fill with non-WMMA work (inside then outside the window).
+    if (isPromote(PromotePhase::NonWmmaFill)) {
+        // Phase C — inside WMMA latency window.
+        if (coIssueCyclePos_ < activeWmmaLatency_) {
+            DAGNode* smallestPickable = nullptr;
+            int pickKind = -1;
+            int pickWait = 0;
+            if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
+                PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
+                                     << smallestPickable->id << " kind=" << pickKind
+                                     << " wait=" << pickWait << "\n");
+                // Pay any hidden stall (hidden under the WMMA latency) before issuing.
+                if (pickWait > 0) advanceTime(pickWait);
+                return rememberPick(popNonWmma(smallestPickable, pickKind));
+            }
+
+            advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
         }
 
-        advanceTime(activeWmmaLatency_ - coIssueCyclePos_);
-    }
-
-    // Phase D — outside WMMA latency: pick smallest-id from any non-WMMA queue.
-    {
+        // Phase D — outside WMMA latency.
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
         int pickWait = 0;
@@ -1226,20 +1269,28 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     }
 
     // Phase E — forced WMMA: pick the most-ready WMMA before barriers.
-    if (!wmmaQueue.empty()) {
+    if (isPromote(PromotePhase::ForcedWmma) && !wmmaQueue.empty()) {
         auto [bestWMMA, bestLatency] = findMostReadyWMMA();
         (void)bestLatency;
         DAGNode* node = pickOneFromWMMA(bestWMMA);
         return rememberPick(node);
     }
 
-    // Phase F — barriers after all compute work is done.
-    if (!barrierQueue.empty()) {
-        DAGNode* barrier = barrierQueue.top();
-        barrierQueue.pop();
+    // Barrier phase — the single entry point for issuing a barrier. When a barrier was
+    // promoted (threshold met), the phases above gated off and we arrive here to issue
+    // that exact node (formerly the forced-barrier phase ahead of WMMA). Otherwise this
+    // is the drain case: issue the lowest-id barrier once all compute has been picked.
+    if (isPromote(PromotePhase::Barrier) && !barrierQueue.empty()) {
+        DAGNode* barrier;
+        if (promotedPhase_ == PromotePhase::Barrier) {
+            barrier = extractForcedBarrier();  // removes the promoted (threshold-met) node
+        } else {
+            barrier = barrierQueue.top();
+            barrierQueue.pop();
+        }
         updateWMMAStatus(barrier);
-        PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] Phase F barrierQueue dagId=" << barrier->id
-                             << " (non-barrier buckets empty for this pick)\n";
+        PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
+                             << " promoted=" << (promotedPhase_ == PromotePhase::Barrier) << "\n";
                    barrier->inst->dump(std::cerr); std::cerr << "\n");
         return rememberPick(barrier);
     }
