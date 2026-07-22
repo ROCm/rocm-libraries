@@ -555,6 +555,13 @@ namespace rocisa
         // gfx1250 WMMA matrix-reuse hints (see MFMAInstruction).
         bool                               reuseA = false;
         bool                               reuseB = false;
+        // gfx1250 MX scale-select (matrix_a_scale:N / matrix_b_scale:N). Selects which MX
+        // scale slot the WMMA reads: 0 = default (lower half-wave), 1 = partner (upper
+        // half-wave). Used by the MXS TileSpan optimization to read the partner block's
+        // scale directly from a single wave-split ds_load. 0 is emitted implicitly (no
+        // modifier).
+        int                                mxScaleASel = 0;
+        int                                mxScaleBSel = 0;
 
         MXMFMAInstruction(InstType                                  instType,
                           InstType                                  accType,
@@ -571,7 +578,9 @@ namespace rocisa
                           int                                       block        = 0,
                           const std::string&                        comment      = "",
                           bool                                      reuseA       = false,
-                          bool                                      reuseB       = false)
+                          bool                                      reuseB       = false,
+                          int                                       mxScaleASel  = 0,
+                          int                                       mxScaleBSel  = 0)
             : Instruction(instType, comment)
             , accType(accType)
             , mxScaleAType(mxScaleAType)
@@ -588,6 +597,8 @@ namespace rocisa
             , block(block)
             , reuseA(reuseA)
             , reuseB(reuseB)
+            , mxScaleASel(mxScaleASel)
+            , mxScaleBSel(mxScaleBSel)
         {
         }
 
@@ -606,7 +617,9 @@ namespace rocisa
                           int                                       block        = 0,
                           const std::string&                        comment      = "",
                           bool                                      reuseA       = false,
-                          bool                                      reuseB       = false)
+                          bool                                      reuseB       = false,
+                          int                                       mxScaleASel  = 0,
+                          int                                       mxScaleBSel  = 0)
             : Instruction(instType, comment)
             , accType(accType)
             , mxScaleAType(mxScaleAType)
@@ -623,6 +636,8 @@ namespace rocisa
             , block(block)
             , reuseA(reuseA)
             , reuseB(reuseB)
+            , mxScaleASel(mxScaleASel)
+            , mxScaleBSel(mxScaleBSel)
         {
         }
 
@@ -642,6 +657,8 @@ namespace rocisa
             , block(other.block)
             , reuseA(other.reuseA)
             , reuseB(other.reuseB)
+            , mxScaleASel(other.mxScaleASel)
+            , mxScaleBSel(other.mxScaleBSel)
         {
         }
 
@@ -877,6 +894,15 @@ namespace rocisa
                 break;
             }
 
+            // MX scale-select (gfx1250): matrix_{a,b}_scale must be emitted BEFORE the
+            // matrix_{a,b}_scale_fmt modifiers. The assembler enforces the modifier order
+            // matrix_*_fmt -> matrix_*_scale -> matrix_*_scale_fmt and rejects any other
+            // ordering with "not a valid operand". 0 is the default (no modifier emitted).
+            if(mxScaleASel)
+                inputPermuteStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
+            if(mxScaleBSel)
+                inputPermuteStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
+
             switch(mxScaleAType)
             {
             case InstType::INST_E5M3:
@@ -912,6 +938,13 @@ namespace rocisa
                 reuseStr += " matrix_a_reuse";
             if(reuseB)
                 reuseStr += " matrix_b_reuse";
+            // MX scale-select (gfx1250): pick the partner scale slot from a single wave-split
+            // ds_load. 0 is the default and emitted implicitly (no modifier).
+            std::string scaleSelStr = "";
+            if(mxScaleASel)
+                scaleSelStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
+            if(mxScaleBSel)
+                scaleSelStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
             if(getAsmCaps()["HasMFMA"])
             {
                 std::string mxsaStr = mxsa ? mxsa->toString() : "";
@@ -925,14 +958,19 @@ namespace rocisa
                     result += vop3->toString();
                 }
                 result += mfmaInputPermuteStr();
+                result += scaleSelStr;
                 result += reuseStr;
                 return result;
             }
             else
             {
+                // Note: scale-select (matrix_{a,b}_scale) is emitted inside
+                // wmmaInputPermuteStr() so it precedes matrix_{a,b}_scale_fmt as the
+                // assembler requires; do not append scaleSelStr here again.
                 return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                        + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
-                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr() + reuseStr;
+                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr()
+                       + reuseStr;
             }
         }
 
