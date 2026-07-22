@@ -53,7 +53,7 @@ struct MXGemmConfigTDMV1Prefetch
     static constexpr bool kPadK = false;
 
     static constexpr bool TransposeC       = true;
-    static constexpr bool DoubleSmemBuffer  = true;
+    static constexpr bool DoubleSmemBuffer = true;
 
     static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchA = DataCachePrefetchA_;
     static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB = DataCachePrefetchB_;
@@ -73,18 +73,18 @@ template <typename GemmConfig,
           typename BScaleDataType,
           bool CompareWithNoPrefetch>
 float invoke_mx_gemm_tdm_v1(ck_tile::DeviceMem& a_dev_buf,
-                             ck_tile::DeviceMem& b_dev_buf,
-                             ck_tile::DeviceMem& c_dev_buf,
-                             ck_tile::DeviceMem& scale_a_dev_buf,
-                             ck_tile::DeviceMem& scale_b_dev_buf,
-                             ck_tile::index_t M,
-                             ck_tile::index_t N,
-                             ck_tile::index_t K,
-                             ck_tile::index_t stride_A,
-                             ck_tile::index_t stride_B,
-                             ck_tile::index_t stride_C,
-                             int n_warmup,
-                             int n_repeat)
+                            ck_tile::DeviceMem& b_dev_buf,
+                            ck_tile::DeviceMem& c_dev_buf,
+                            ck_tile::DeviceMem& scale_a_dev_buf,
+                            ck_tile::DeviceMem& scale_b_dev_buf,
+                            ck_tile::index_t M,
+                            ck_tile::index_t N,
+                            ck_tile::index_t K,
+                            ck_tile::index_t stride_A,
+                            ck_tile::index_t stride_B,
+                            ck_tile::index_t stride_C,
+                            int n_warmup,
+                            int n_repeat)
 {
     using namespace ck_tile;
 
@@ -106,92 +106,87 @@ float invoke_mx_gemm_tdm_v1(ck_tile::DeviceMem& a_dev_buf,
 
     using TilePartitioner = GemmSpatiallyLocalTilePartitioner<GemmShape, 8, 4>;
 
-    using GemmUniversalTraits =
-        TileGemmUniversalTraits<GemmConfig::kPadM,
-                                GemmConfig::kPadN,
-                                GemmConfig::kPadK,
-                                GemmConfig::DoubleSmemBuffer,
-                                ALayout,
-                                BLayout,
-                                CLayout,
-                                GemmConfig::TransposeC,
-                                false, // UseStructuredSparsity
-                                false, // UsePersistentKernel
-                                1,     // NumWaveGroups
-                                false, // Preshuffle
-                                16,    // VectorSize
-                                GemmConfig::DataCachePrefetchA,
-                                GemmConfig::DataCachePrefetchB>;
+    using GemmUniversalTraits = TileGemmUniversalTraits<GemmConfig::kPadM,
+                                                        GemmConfig::kPadN,
+                                                        GemmConfig::kPadK,
+                                                        GemmConfig::DoubleSmemBuffer,
+                                                        ALayout,
+                                                        BLayout,
+                                                        CLayout,
+                                                        GemmConfig::TransposeC,
+                                                        false, // UseStructuredSparsity
+                                                        false, // UsePersistentKernel
+                                                        1,     // NumWaveGroups
+                                                        false, // Preshuffle
+                                                        16,    // VectorSize
+                                                        GemmConfig::DataCachePrefetchA,
+                                                        GemmConfig::DataCachePrefetchB>;
 
     using AComputeDataType = ADataType;
     using BComputeDataType = BDataType;
 
-    using UniversalGemmProblem =
-        MxGemmPipelineProblem<ADataType,
-                              BDataType,
-                              AccDataType,
-                              GemmShape,
-                              GemmUniversalTraits,
-                              GemmPipelineScheduler::Intrawave,
-                              element_wise::PassThrough,
-                              element_wise::PassThrough,
-                              AComputeDataType,
-                              BComputeDataType,
-                              AScaleDataType,
-                              BScaleDataType,
-                              GemmConfig::ScaleBlockSize>;
+    using UniversalGemmProblem = MxGemmPipelineProblem<ADataType,
+                                                       BDataType,
+                                                       AccDataType,
+                                                       GemmShape,
+                                                       GemmUniversalTraits,
+                                                       GemmPipelineScheduler::Intrawave,
+                                                       element_wise::PassThrough,
+                                                       element_wise::PassThrough,
+                                                       AComputeDataType,
+                                                       BComputeDataType,
+                                                       AScaleDataType,
+                                                       BScaleDataType,
+                                                       GemmConfig::ScaleBlockSize>;
 
-    using GemmPipeline =
-        GemmPipelineAgBgCrCompTDMV1<UniversalGemmProblem,
-                                    GemmPipelineAgBgCrCompTDMDefaultPolicy<
-                                        false, // WaveSpecialized
-                                        GemmConfig::DataCachePrefetchA,
-                                        GemmConfig::DataCachePrefetchB>>;
+    using GemmPipeline = GemmPipelineAgBgCrCompTDMV1<
+        UniversalGemmProblem,
+        GemmPipelineAgBgCrCompTDMDefaultPolicy<false, // WaveSpecialized
+                                               GemmConfig::DataCachePrefetchA,
+                                               GemmConfig::DataCachePrefetchB>>;
 
-    using GemmEpilogue = TdmEpilogue<
-        CShuffleEpilogueProblem<ADataType,
-                                BDataType,
-                                tuple<>,    // DsDataType
-                                AccDataType,
-                                CDataType,
-                                tuple<>,    // DsLayout
-                                CLayout,
-                                element_wise::PassThrough,
-                                TilePartitioner::MPerBlock,
-                                TilePartitioner::NPerBlock,
-                                M_Warp,
-                                N_Warp,
-                                M_Warp_Tile,
-                                N_Warp_Tile,
-                                K_Warp_Tile,
-                                UniversalGemmProblem::TransposeC,
-                                1,     // NumWaveGroups
-                                false, // FixedVectorSize
-                                1,     // VectorSizeC
-                                1,     // BlockedXDLN_PerWarp
-                                GemmConfig::DoubleSmemBuffer,
-                                AComputeDataType,
-                                BComputeDataType>>;
+    using GemmEpilogue = TdmEpilogue<CShuffleEpilogueProblem<ADataType,
+                                                             BDataType,
+                                                             tuple<>, // DsDataType
+                                                             AccDataType,
+                                                             CDataType,
+                                                             tuple<>, // DsLayout
+                                                             CLayout,
+                                                             element_wise::PassThrough,
+                                                             TilePartitioner::MPerBlock,
+                                                             TilePartitioner::NPerBlock,
+                                                             M_Warp,
+                                                             N_Warp,
+                                                             M_Warp_Tile,
+                                                             N_Warp_Tile,
+                                                             K_Warp_Tile,
+                                                             UniversalGemmProblem::TransposeC,
+                                                             1,     // NumWaveGroups
+                                                             false, // FixedVectorSize
+                                                             1,     // VectorSizeC
+                                                             1,     // BlockedXDLN_PerWarp
+                                                             GemmConfig::DoubleSmemBuffer,
+                                                             AComputeDataType,
+                                                             BComputeDataType>>;
 
     using Kernel = MxGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
     constexpr index_t ScaleBlockSize = GemmConfig::ScaleBlockSize;
 
-    MxGemmHostArgs<1, 1, 0> args(
-        {a_dev_buf.GetDeviceBuffer()},
-        {scale_a_dev_buf.GetDeviceBuffer()},
-        {b_dev_buf.GetDeviceBuffer()},
-        {scale_b_dev_buf.GetDeviceBuffer()},
-        {},
-        c_dev_buf.GetDeviceBuffer(),
-        1, // k_batch
-        M,
-        N,
-        K,
-        {stride_A},
-        {stride_B},
-        {},
-        stride_C);
+    MxGemmHostArgs<1, 1, 0> args({a_dev_buf.GetDeviceBuffer()},
+                                 {scale_a_dev_buf.GetDeviceBuffer()},
+                                 {b_dev_buf.GetDeviceBuffer()},
+                                 {scale_b_dev_buf.GetDeviceBuffer()},
+                                 {},
+                                 c_dev_buf.GetDeviceBuffer(),
+                                 1, // k_batch
+                                 M,
+                                 N,
+                                 K,
+                                 {stride_A},
+                                 {stride_B},
+                                 {},
+                                 stride_C);
 
     auto kargs = Kernel::MakeKernelArgs(args);
 
@@ -205,35 +200,35 @@ float invoke_mx_gemm_tdm_v1(ck_tile::DeviceMem& a_dev_buf,
     }
 
     auto kind_str = [](ck_tile::DataCachePrefetchKind k) {
-        return k == ck_tile::DataCachePrefetchKind::L1    ? "L1"
-               : k == ck_tile::DataCachePrefetchKind::L2  ? "L2"
-                                                          : "None";
+        return k == ck_tile::DataCachePrefetchKind::L1   ? "L1"
+               : k == ck_tile::DataCachePrefetchKind::L2 ? "L2"
+                                                         : "None";
     };
-    std::cout << "Launching MX GEMM TDM V1 kernel with data cache prefetch"
-              << " (A " << kind_str(GemmConfig::DataCachePrefetchA)
-              << " / B " << kind_str(GemmConfig::DataCachePrefetchB) << ")\n"
+    std::cout << "Launching MX GEMM TDM V1 kernel with data cache prefetch" << " (A "
+              << kind_str(GemmConfig::DataCachePrefetchA) << " / B "
+              << kind_str(GemmConfig::DataCachePrefetchB) << ")\n"
               << "  Grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}"
               << ", Blocks: {" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}"
               << std::endl;
 
-    float ave_time = launch_kernel(
-        stream_config{nullptr, true, 1, n_warmup, n_repeat, true, true, 50},
-        make_kernel<1>(Kernel{}, grids, blocks, 0, kargs));
+    float ave_time =
+        launch_kernel(stream_config{nullptr, true, 1, n_warmup, n_repeat, true, true, 50},
+                      make_kernel<1>(Kernel{}, grids, blocks, 0, kargs));
 
     constexpr int APackedSize = numeric_traits<ADataType>::PackedSize;
     constexpr int BPackedSize = numeric_traits<BDataType>::PackedSize;
 
-    std::size_t flop = std::size_t(2) * M * N * K;
-    std::size_t num_byte =
-        sizeof(ADataType) * M * K / APackedSize + sizeof(BDataType) * N * K / BPackedSize +
-        sizeof(CDataType) * M * N + sizeof(AScaleDataType) * M * (K / ScaleBlockSize) +
-        sizeof(BScaleDataType) * N * (K / ScaleBlockSize);
+    std::size_t flop     = std::size_t(2) * M * N * K;
+    std::size_t num_byte = sizeof(ADataType) * M * K / APackedSize +
+                           sizeof(BDataType) * N * K / BPackedSize + sizeof(CDataType) * M * N +
+                           sizeof(AScaleDataType) * M * (K / ScaleBlockSize) +
+                           sizeof(BScaleDataType) * N * (K / ScaleBlockSize);
 
     float tflops     = static_cast<float>(flop) / 1.E9 / ave_time;
     float gb_per_sec = num_byte / 1.E6 / ave_time;
 
-    std::cout << "  M=" << M << " N=" << N << " K=" << K << " : " << ave_time << " ms, "
-              << tflops << " TFlops, " << gb_per_sec << " GB/s" << std::endl;
+    std::cout << "  M=" << M << " N=" << N << " K=" << K << " : " << ave_time << " ms, " << tflops
+              << " TFlops, " << gb_per_sec << " GB/s" << std::endl;
 
     return ave_time;
 }
@@ -329,16 +324,14 @@ int run_mx_gemm_tdm_v1_prefetch(int argc, char* argv[])
     index_t stride_B = arg_parser.get_int("stride_b");
     index_t stride_C = arg_parser.get_int("stride_c");
 
-    index_t init_method = arg_parser.get_int("init");
-    index_t n_warmup    = arg_parser.get_int("warmup");
-    index_t n_repeat    = arg_parser.get_int("repeat");
-    bool compare        = arg_parser.get_int("compare") == 1;
-    auto prefetch_kind_a = arg_parser.get_int("prefetch_a_l1") == 1
-                               ? DataCachePrefetchKind::L1
-                               : DataCachePrefetchKind::L2;
-    auto prefetch_kind_b = arg_parser.get_int("prefetch_b_l1") == 1
-                               ? DataCachePrefetchKind::L1
-                               : DataCachePrefetchKind::L2;
+    index_t init_method  = arg_parser.get_int("init");
+    index_t n_warmup     = arg_parser.get_int("warmup");
+    index_t n_repeat     = arg_parser.get_int("repeat");
+    bool compare         = arg_parser.get_int("compare") == 1;
+    auto prefetch_kind_a = arg_parser.get_int("prefetch_a_l1") == 1 ? DataCachePrefetchKind::L1
+                                                                    : DataCachePrefetchKind::L2;
+    auto prefetch_kind_b = arg_parser.get_int("prefetch_b_l1") == 1 ? DataCachePrefetchKind::L1
+                                                                    : DataCachePrefetchKind::L2;
 
     stride_A = get_default_stride(M, K, stride_A, is_row_major(ALayout{}));
     stride_B = get_default_stride(K, N, stride_B, is_row_major(BLayout{}));
@@ -355,13 +348,13 @@ int run_mx_gemm_tdm_v1_prefetch(int argc, char* argv[])
     index_t scale_K_dim = K / ScaleBlockSize;
     // Pad M to M_Warp_Tile boundary for scale_a (required by hardware layout)
     constexpr index_t M_Warp_Tile = MXGemmConfigTDMV1Prefetch<ADataType>::M_Warp_Tile;
-    index_t scale_padded_M = integer_least_multiple(M, M_Warp_Tile);
+    index_t scale_padded_M        = integer_least_multiple(M, M_Warp_Tile);
 
     // scale_a: (padded_M, K/ScaleBlockSize) row-major
     HostTensor<AScaleDataType> scale_a(
         {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(scale_K_dim)},
         {static_cast<std::size_t>(scale_K_dim), std::size_t{1}});
-    // scale_b: (N, K/ScaleBlockSize) row-major — K is the fast-changing dimension
+    // scale_b: (N, K/ScaleBlockSize) row-major -> K is the fast-changing dimension
     HostTensor<BScaleDataType> scale_b(
         {static_cast<std::size_t>(N), static_cast<std::size_t>(scale_K_dim)},
         {static_cast<std::size_t>(scale_K_dim), std::size_t{1}});
@@ -417,35 +410,54 @@ int run_mx_gemm_tdm_v1_prefetch(int argc, char* argv[])
 
     auto run_prefetch = [&](auto prefetch_a_tag, auto prefetch_b_tag) {
         using Config = MXGemmConfigTDMV1Prefetch<ADataType,
-                                                  decltype(prefetch_a_tag)::value,
-                                                  decltype(prefetch_b_tag)::value>;
-        return invoke_mx_gemm_tdm_v1<Config, ADataType, BDataType, AccDataType, CDataType, ALayout,
-                                     BLayout, CLayout, AScaleDataType, BScaleDataType, false>(
-            a_dev_buf, b_dev_buf, c_dev_buf, scale_a_dev_buf, scale_b_dev_buf, M, N, K,
-            stride_A, stride_B, stride_C, n_warmup, n_repeat);
+                                                 decltype(prefetch_a_tag)::value,
+                                                 decltype(prefetch_b_tag)::value>;
+        return invoke_mx_gemm_tdm_v1<Config,
+                                     ADataType,
+                                     BDataType,
+                                     AccDataType,
+                                     CDataType,
+                                     ALayout,
+                                     BLayout,
+                                     CLayout,
+                                     AScaleDataType,
+                                     BScaleDataType,
+                                     false>(a_dev_buf,
+                                            b_dev_buf,
+                                            c_dev_buf,
+                                            scale_a_dev_buf,
+                                            scale_b_dev_buf,
+                                            M,
+                                            N,
+                                            K,
+                                            stride_A,
+                                            stride_B,
+                                            stride_C,
+                                            n_warmup,
+                                            n_repeat);
     };
 
     float ave_time_prefetch = 0.f;
-    ignore = ave_time_prefetch;
+    ignore                  = ave_time_prefetch;
     if(prefetch_kind_a == Kind::L1 && prefetch_kind_b == Kind::L1)
     {
-        ave_time_prefetch = run_prefetch(
-            std::integral_constant<Kind, Kind::L1>{}, std::integral_constant<Kind, Kind::L1>{});
+        ave_time_prefetch = run_prefetch(std::integral_constant<Kind, Kind::L1>{},
+                                         std::integral_constant<Kind, Kind::L1>{});
     }
     else if(prefetch_kind_a == Kind::L1 && prefetch_kind_b == Kind::L2)
     {
-        ave_time_prefetch = run_prefetch(
-            std::integral_constant<Kind, Kind::L1>{}, std::integral_constant<Kind, Kind::L2>{});
+        ave_time_prefetch = run_prefetch(std::integral_constant<Kind, Kind::L1>{},
+                                         std::integral_constant<Kind, Kind::L2>{});
     }
     else if(prefetch_kind_a == Kind::L2 && prefetch_kind_b == Kind::L1)
     {
-        ave_time_prefetch = run_prefetch(
-            std::integral_constant<Kind, Kind::L2>{}, std::integral_constant<Kind, Kind::L1>{});
+        ave_time_prefetch = run_prefetch(std::integral_constant<Kind, Kind::L2>{},
+                                         std::integral_constant<Kind, Kind::L1>{});
     }
     else
     {
-        ave_time_prefetch = run_prefetch(
-            std::integral_constant<Kind, Kind::L2>{}, std::integral_constant<Kind, Kind::L2>{});
+        ave_time_prefetch = run_prefetch(std::integral_constant<Kind, Kind::L2>{},
+                                         std::integral_constant<Kind, Kind::L2>{});
     }
 
     c_dev_buf.FromDevice(c_rslt_host.data());
@@ -459,12 +471,30 @@ int run_mx_gemm_tdm_v1_prefetch(int argc, char* argv[])
 
         DeviceMem c_dev_buf_noprefetch(c_rslt_host.get_element_space_size_in_bytes());
 
-        using ConfigNoPrefetch =
-            MXGemmConfigTDMV1Prefetch<ADataType, Kind::None, Kind::None>;
-        invoke_mx_gemm_tdm_v1<ConfigNoPrefetch, ADataType, BDataType, AccDataType, CDataType,
-                              ALayout, BLayout, CLayout, AScaleDataType, BScaleDataType, false>(
-            a_dev_buf, b_dev_buf, c_dev_buf_noprefetch, scale_a_dev_buf, scale_b_dev_buf, M, N, K,
-            stride_A, stride_B, stride_C, n_warmup, n_repeat);
+        using ConfigNoPrefetch = MXGemmConfigTDMV1Prefetch<ADataType, Kind::None, Kind::None>;
+        invoke_mx_gemm_tdm_v1<ConfigNoPrefetch,
+                              ADataType,
+                              BDataType,
+                              AccDataType,
+                              CDataType,
+                              ALayout,
+                              BLayout,
+                              CLayout,
+                              AScaleDataType,
+                              BScaleDataType,
+                              false>(a_dev_buf,
+                                     b_dev_buf,
+                                     c_dev_buf_noprefetch,
+                                     scale_a_dev_buf,
+                                     scale_b_dev_buf,
+                                     M,
+                                     N,
+                                     K,
+                                     stride_A,
+                                     stride_B,
+                                     stride_C,
+                                     n_warmup,
+                                     n_repeat);
 
         std::cout << "\n=== Comparison Summary ===" << std::endl;
         std::cout << "Check timing above to compare performance with/without data cache prefetch."
@@ -489,13 +519,17 @@ int run_mx_gemm_tdm_v1_prefetch(int argc, char* argv[])
                 scale_a_ref(m, k) = scale_a(m, k);
 
         // scale_b is (N, K/ScaleBlockSize) row-major; reference expects (K/ScaleBlockSize, N)
-        // col-major — same memory layout, just different descriptor
+        // col-major -> same memory layout, just different descriptor
         HostTensor<BScaleDataType> scale_b_ref(
             {static_cast<std::size_t>(scale_K_dim), static_cast<std::size_t>(N)},
             {std::size_t{1}, static_cast<std::size_t>(scale_K_dim)});
         std::copy(scale_b.mData.begin(), scale_b.mData.end(), scale_b_ref.mData.begin());
 
-        reference_mx_gemm<ADataType, BDataType, AScaleDataType, BScaleDataType, AccDataType,
+        reference_mx_gemm<ADataType,
+                          BDataType,
+                          AScaleDataType,
+                          BScaleDataType,
+                          AccDataType,
                           CDataType>(a_host, b_host, c_ref_host, scale_a_ref, scale_b_ref);
 
         const float rtol = 1e-2;
@@ -503,8 +537,8 @@ int run_mx_gemm_tdm_v1_prefetch(int argc, char* argv[])
 
         pass = check_err(c_rslt_host, c_ref_host, "Error: Incorrect results!", rtol, atol);
 
-        std::cout << "Relative error threshold: " << rtol
-                  << " Absolute error threshold: " << atol << std::endl;
+        std::cout << "Relative error threshold: " << rtol << " Absolute error threshold: " << atol
+                  << std::endl;
         std::cout << "Verification: " << (pass ? "PASSED" : "FAILED") << std::endl;
     }
 
@@ -550,8 +584,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            std::cerr << "Unsupported precision: " << prec
-                      << ". Supported: fp8, fp4" << std::endl;
+            std::cerr << "Unsupported precision: " << prec << ". Supported: fp8, fp4" << std::endl;
             return EXIT_FAILURE;
         }
     }
