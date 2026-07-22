@@ -70,6 +70,9 @@ STINKYTOFU_EXPORT std::string matrixScaleFmtToStr(MatrixScaleFmt fmt);
 // Parse assembly string to MatrixScaleFmt enum.
 STINKYTOFU_EXPORT MatrixScaleFmt parseMatrixScaleFmt(std::string_view s);
 
+// Parse MX scale-select assembly string.
+STINKYTOFU_EXPORT int parseMatrixScaleSel(std::string_view s);
+
 enum class MUBUFScope : uint8_t {
     SCOPE_NONE = 0,
     SCOPE_CU = 1,
@@ -1049,10 +1052,12 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     // Must check all fields, to avoid a false "empty":
     // e.g. v_wmma_scale_f32_32x16x128_f4 carries no fmtA/fmtB but is not really
     // empty — it still sets scaleFmtA/scaleFmtB. Checking fmtA/fmtB alone would
-    // drop its matrix_*_scale_fmt.
+    // drop its matrix_*_scale_fmt. Likewise a non-zero scale-select (matrix_*_scale:1)
+    // is meaningful on its own and must not be treated as empty.
     bool empty() const {
         return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE &&
-               scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE;
+               scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE &&
+               scaleSelA == 0 && scaleSelB == 0;
     }
 };
 
