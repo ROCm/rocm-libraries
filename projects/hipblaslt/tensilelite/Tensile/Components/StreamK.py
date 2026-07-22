@@ -1573,24 +1573,14 @@ class StreamK(Component):
         return module
 
     def clusterReduceIntraCheck(self, writer, kernel):
-        """Emit the uniform intra-cluster predicate; leaves SCC=1 (fast path)
-        when this workgroup's cluster hosts a single, fully-populated StreamK
-        tile, SCC=0 (fall back to the global-flag path) otherwise.
+        """Emit the uniform intra-cluster predicate: SCC=1 (fast path) when this
+        cluster hosts a single fully-populated StreamK tile, SCC=0 (fall back to
+        the global-flag path) otherwise.
 
-        The predicate is a pure function of the cluster's top StreamK index and
-        the SK grid size (both uniform across a cluster), so every member of a
-        cluster -- owner and peers alike -- computes the identical verdict. This
-        is what makes the fast path deadlock-safe: a cluster is never split
-        between barrier signalers and flag setters.
-
-        Contract (host accounting, StreamKClusterReduction): ClusterDim=[C,1]
-        with C a power of two; cluster c owns the contiguous StreamK index range
-        [c*C, c*C+C) which is exactly one tile's peer group (skSplit==C, fixed
-        even split); skGrid is rounded up to a multiple of C. Under that
-        contract cluster_last = StreamKIdx | (C-1) < skGrid holds for every SK
-        workgroup, so the fast path is taken; a partially-filled trailing
-        cluster (contract violated) fails the check and the whole cluster falls
-        back safely.
+        A pure function of the cluster's top StreamK index and the SK grid size
+        (both cluster-uniform), so every peer computes the identical verdict --
+        the cluster is never split between barrier signalers and flag setters
+        (deadlock-safe). See docs/design/streamk-wg-clusters.md.
         """
         module = Module("StreamK cluster intra-cluster check")
         C = kernel["ClusterDim"][0]
@@ -2661,7 +2651,7 @@ class StreamKTwoTileDPFirst(StreamK):
         On failure MulticastMaskB is rewritten to the self-only MulticastMaskA so
         B is loaded per-workgroup (correct for all sizes, never leaving a masked
         target without a matching load). See
-        docs/design/factored-cluster-mode-plan.md (section 2).
+        docs/design/streamk-wg-clusters.md.
         """
         module = Module("StreamK factored multicast mask compute")
         if not kernel.get("StreamKMulticast", 0):
@@ -2812,20 +2802,12 @@ class StreamKTwoTileDPFirst(StreamK):
     def streamKMulticastPrologueSignal(self, writer, kernel):
         """Elect wave 0 to arrive at the cluster split barrier once per workgroup.
 
-        The gfx1250 cluster-barrier pass emits a WAIT-only half
-        (``s_barrier_wait -3``) before the kernel's first ``tensor_load_to_lds``
-        and expects a matching prologue ``s_barrier_signal -3`` to already
-        exist. On the StreamKMulticast path (GlobalSplitU == 0) the label that
-        would otherwise anchor that prologue arrive is never emitted, so this
-        helper supplies it: one wave per workgroup arrives (the remaining waves
-        branch over the signal), pairing the pass's first-load wait so the
-        cluster-scope signal/wait counts stay balanced.
-
-        The arrive is unconditional on the StreamKMulticast path -- it is not
-        gated on the runtime clusterMulticastValid predicate -- so every cluster
-        peer participates in the barrier uniformly. Only the wave-0 election
-        gates it, matching the cluster reduce-signal idiom. Inert unless
-        StreamKMulticast.
+        Supplies the prologue ``s_barrier_signal -3`` that the gfx1250
+        cluster-barrier pass's first-load wait expects but that is otherwise
+        never anchored on the StreamKMulticast path (GlobalSplitU == 0). One
+        wave per workgroup arrives (others branch over it), uniformly across
+        peers, keeping cluster-scope signal/wait counts balanced. Inert unless
+        StreamKMulticast. See docs/design/cluster-load-component-and-streamk-multicast.md.
         """
         module = Module("StreamK multicast prologue signal")
         if not kernel.get("StreamKMulticast", 0):
@@ -2844,24 +2826,15 @@ class StreamKTwoTileDPFirst(StreamK):
         return module
 
     def streamKMulticastProloguePrefetchHandshake(self, writer, kernel):
-        """Bracket the prologue double-buffer prefetch multicast load with a
-        cluster-scope handshake.
+        """Bracket the PGR>=2 prologue double-buffer prefetch multicast load with
+        a self-contained cluster-scope arrive/wait handshake.
 
-        The double-buffer ("LDS1") prefetch load in the PrefetchGlobalRead >= 2
-        prologue is emitted inside the single-iteration guard branch, so the
-        generic per-load bracketing does not reach it (the guard branch is a
-        segment boundary that the backward anchor scan stops at). On the
-        StreamKMulticast path every cooperative-multicast tensor_load_to_lds
-        must be immediately preceded by a cluster-scope arrive/wait handshake;
-        emit a self-contained one here (one wave arrives, all waves wait) so the
-        prefetch load is synchronized and the cluster-scope signal/wait counts
-        stay balanced.
-
-        The guard branches on LoopCounterL, which is uniform across the
-        co-located cluster peers (they process M-adjacent tiles sharing the same
-        K), so all peers execute this handshake in lockstep. Only the wave-0
-        election gates the arrive, matching the existing prologue-signal idiom.
-        Inert unless StreamKMulticast.
+        That "LDS1" prefetch load sits inside the single-iteration guard branch,
+        which the generic per-load bracketing's backward anchor scan stops at, so
+        it needs its own handshake (one wave arrives, all waves wait). The guard
+        branches on LoopCounterL, uniform across co-located peers, so peers run it
+        in lockstep. Inert unless StreamKMulticast.
+        See docs/design/cluster-load-component-and-streamk-multicast.md.
         """
         module = Module("StreamK multicast prologue prefetch cluster handshake")
         if not kernel.get("StreamKMulticast", 0):
@@ -2883,25 +2856,14 @@ class StreamKTwoTileDPFirst(StreamK):
     def streamKMulticastZeroIterClusterWait(self, writer, kernel):
         """Consume the prologue cluster arrive on the zero-iteration skip path.
 
-        The prologue arrive (``streamKMulticastPrologueSignal``) fires once per
-        cluster peer, uniformly, before the first cooperative-multicast load.
-        Its only matching cluster-scope ``s_barrier_wait -3`` is the pass's
-        first-load wait, which sits *after* the last-iteration guard
-        (``checkLastIter`` -> long-branch to ``PrefetchGlobalLastIterEnd``). On
-        the zero-full-iteration path (a participating workgroup that runs only
-        the tail/fixup, reachable when K is not a whole multiple of DepthU) that
-        long branch skips the first-load wait, leaving the arrive unmatched and
-        the cluster-scope barrier unbalanced on that edge.
-
-        Emit the matching cluster wait on that skip edge so every cluster peer
-        executes exactly one arrive and exactly one wait on every control-flow
-        path out of the prologue. ``checkLastIter`` has set scc (scc1 ==
-        numIterL == 0). Branch over the wait on scc0 (>=1 full iteration -> the
-        first-load wait pairs the arrive); on scc1 emit the all-waves cluster
-        wait (mirroring the all-waves first-load wait so the arrive is consumed
-        exactly once). The wait leaves scc intact, so the standard scc1 long
-        branch that follows still takes the skip edge. Inert unless
-        StreamKMulticast.
+        The prologue arrive's only matching wait is the pass's first-load wait,
+        which sits after the last-iteration guard; on the zero-full-iteration
+        path (K not a whole multiple of DepthU) that guard skips the wait,
+        leaving the arrive unbalanced. Emit the matching all-waves wait on the
+        skip edge (scc1 == numIterL == 0; branch over it on scc0) so every peer
+        does exactly one arrive + one wait on every path. The wait leaves scc
+        intact for the following long branch. Inert unless StreamKMulticast.
+        See docs/design/cluster-load-component-and-streamk-multicast.md.
         """
         module = Module("StreamK multicast zero-iteration cluster wait")
         if not kernel.get("StreamKMulticast", 0):

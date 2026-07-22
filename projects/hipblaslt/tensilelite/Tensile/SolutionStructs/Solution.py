@@ -241,7 +241,7 @@ def _validateStreamKClusterKSplit(state, printRejectionReason):
   which run only when their derived axis is active). Ck must be a power of two
   that divides C, with Cs also a power of two. Ck==1 => pure multicast (Cs=C),
   Ck==C => pure reduction (Cs=1), 1<Ck<C => factored (both axes).
-  See docs/design/factored-cluster-mode-plan.md.
+  See docs/design/streamk-wg-clusters.md.
   """
   if state["ClusterDim"] == [1, 1] or state.get("StreamK", 0) != 3:
     return True
@@ -269,29 +269,16 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
 
   StreamKClusterReduction co-locates a StreamK tile's fixup peers in a single
   1-D workgroup cluster (ClusterDim = [C, 1]) and replaces the cross-CU
-  global-flag spin-wait with an intra-cluster split barrier. It is an explicit,
-  opt-in fast path (barrier-only in v1); when its solution-level requirements
-  are not met the solution is rejected here at BUILD time with a clear message.
-  See docs/design/streamk-wg-clusters.md.
-
-  Note on the "multiple of the cluster size" limitation: the reduction also
-  requires itersPerTile = ceil(K / DepthU) to be a multiple of ClusterDim[0]=C
-  (otherwise the split barrier over-signals and hangs). That is a HARD REJECT of
-  the cluster solution for non-conforming problems, but it CANNOT be enforced
-  here because itersPerTile depends on the runtime K, which is unknown at build
-  time. It is instead enforced as a per-problem selection reject by the
-  ClusterReductionIterCheck predicate (emitted from Contractions.py), whose
-  diagnostic names the limitation to the user. This is a deliberate reject, not
-  a silent fallback.
+  global-flag spin-wait with an intra-cluster split barrier (opt-in, barrier-only
+  in v1). Solution-level requirements are rejected here at build time; the
+  runtime requirement itersPerTile = ceil(K/DepthU) % C == 0 (unknown at build
+  time, else the split barrier over-signals) is instead a per-problem selection
+  reject via the ClusterReductionIterCheck predicate (Contractions.py). Composes
+  with StreamKMulticast under factored mode (orthogonal Ck/Cs axes of C = Cs*Ck,
+  validated by _validateStreamKClusterKSplit). See docs/design/streamk-wg-clusters.md.
   """
   if not state.get("StreamKClusterReduction", 0):
     return True
-
-  # Factored 2-D cluster mode makes the K-split reduction (Ck>1) and the spatial
-  # B-multicast (Cs>1) ORTHOGONAL axes of one C = Cs*Ck factoring, so they are
-  # now composable rather than mutually exclusive. StreamKMulticast being on
-  # here means Cs>1 (a valid factoring), which _validateStreamKClusterKSplit has
-  # already checked; no reject.
 
   # SK3 (StreamKTwoTileDPFirst) only; SK4/SK5 dynamic/atomic peer sets can not
   # be statically clustered.
@@ -361,23 +348,14 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   Solution-level requirements are rejected here at build time; the runtime
   nWG0 % C "multiple-of-cluster-size" requirement is enforced by the
   ClusterDimCheck predicate at selection time (not a silent fallback).
+  Auto-derived for StreamK=3 + ClusterDim != [1, 1] (the bare index-only cluster
+  state collapsed into this path), so the rejects below reject an unusable
+  cluster rather than an explicit opt-in. Composes with StreamKClusterReduction
+  under factored mode (orthogonal Cs/Ck axes; see _validateStreamKClusterKSplit).
   See docs/design/cluster-load-component-and-streamk-multicast.md.
-
-  StreamKMulticast is auto-derived for StreamK=3 + ClusterDim != [1, 1] in
-  assignProblemIndependentDerivedParameters -- the bare index-only StreamK
-  cluster state was collapsed into this cooperative-load path. When such an
-  auto-derived config cannot meet the requirements below (e.g. TDMInst != 3),
-  the rejects here are the "reject an unusable cluster" behavior, not a
-  rejection of an explicit user opt-in.
   """
   if not state.get("StreamKMulticast", 0):
     return True
-
-  # Factored 2-D cluster mode makes the spatial B-multicast (Cs>1) and the
-  # K-split reduction (Ck>1) ORTHOGONAL axes of one C = Cs*Ck factoring, so they
-  # are now composable rather than mutually exclusive. StreamKClusterReduction
-  # being on here means Ck>1 (a valid factoring), which
-  # _validateStreamKClusterKSplit has already checked; no reject.
 
   # StreamKMulticast is auto-enabled by ClusterDim on SK3, but the multicast mask
   # SGPRs are gated on the (derived) Multicast flag while the mask predicate /
@@ -1308,7 +1286,7 @@ class Solution(collections.abc.Mapping):
     # factoring rather than incompatible cluster semantics. The legacy explicit
     # StreamKClusterReduction=1 opt-in (no StreamKClusterKSplit) is the Ck==C,
     # Cs==1 degenerate, so it derives byte-identically to before.
-    # See docs/design/factored-cluster-mode-plan.md.
+    # See docs/design/streamk-wg-clusters.md.
     if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
       clusterC = state["ClusterDim"][0]
       ck = state.get("StreamKClusterKSplit", 1)

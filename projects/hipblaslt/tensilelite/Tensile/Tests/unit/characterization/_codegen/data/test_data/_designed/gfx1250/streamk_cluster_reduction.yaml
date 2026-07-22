@@ -1,35 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Designed StreamK + workgroup-cluster-reduction config for gfx1250 codegen
-# characterization.
-#
-# Mirrors the sibling _designed/gfx1250/streamk.yaml (MX-FP8 TN, StreamK=3,
-# gfx1250 MX constraints: TDMInst=3, MXLoadInst=TDM,
-# MXScaleFormat=InMemorySwizzle, WavefrontSize=32, ISA=(12,5,0),
-# StreamKXCCMapping=0), but enables the workgroup-cluster reduction fast path:
-#
-#   - StreamKClusterReduction: [1]   -- opt-in barrier-only cluster reduction
-#   - ClusterDim: [[2, 1], [4, 1]]   -- 1-D clusters, C in {2, 4} (power of two)
-#
-# Under this config StreamK.py must emit the intra-cluster split-barrier
-# handshake on the fast path (s_barrier_signal -3 on the non-owner/peer arrive,
-# s_barrier_wait -3 on the owner wait) while keeping the global-flag reduction
-# compiled in as the runtime fallback. See docs/design/streamk-wg-clusters.md
-# (sections 2.3, 3, 5).
-#
-# Coverage (mirrors the non-cluster MX-FP8 StreamK MT sweep in
-# Tests/common/streamk/gfx1250/core/sk_mxf8gemm_tdm.yaml) across the cluster
-# codegen surface -- MacroTile sizes x work-item (MIWaveGroup) sizes x C:
-#   - MatrixInstruction: 4 variants ->
-#       MT 32x32  (WaveTile 1x1, MIWaveGroup 2x2, 128 work-items)
-#       MT 64x64  (WaveTile 2x2, MIWaveGroup 2x2, 128 work-items)
-#       MT 128x128(WaveTile 4x4, MIWaveGroup 2x2, 128 work-items)
-#       MT 32x16  (WaveTile 1x1, MIWaveGroup 2x1,  64 work-items) -- WI variety
-#   - ClusterDim: C in {2, 4}
-# => 4 x 2 = 8 fork permutations (the char harness emits limit=8; the client
-# GEMM sibling sk_mxf8gemm_cluster_reduction.yaml adds C=8 + real problem-size
-# sweeps validated on a gfx1250 simulation environment).
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -39,11 +10,8 @@ GlobalParameters:
   Device: 0
 
 BenchmarkProblems:
-  ########################################
-  # MX-FP8 (F8 in, float32 out) TN, Batched -- StreamK cluster reduction.
-  ########################################
   -
-    - # ProblemType: MX-F8 TN
+    -
       OperationType: GEMM
       DataType: F8
       DestDataType: s
@@ -55,7 +23,7 @@ BenchmarkProblems:
       Batched: True
       MXBlockA: 32
       MXBlockB: 32
-    - # BenchmarkProblemSizeGroup
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]

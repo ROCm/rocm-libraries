@@ -166,7 +166,7 @@ class TestValidation:
         Cs=2), the two features become ORTHOGONAL axes and co-exist: the collapse
         derives BOTH StreamKMulticast=1 (Cs>1) and StreamKClusterReduction=1
         (Ck>1), and the validators accept the combination instead of rejecting
-        it. See docs/design/factored-cluster-mode-plan.md (section 6)."""
+        it. See docs/design/streamk-wg-clusters.md."""
         cfg = _write_variant(tmp_path, "factored.yaml",
                              fork_overrides={"StreamKClusterKSplit": [2],
                                              "ClusterDim": [[4, 1]]})

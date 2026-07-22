@@ -1,42 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-#
-# Client-runnable StreamK DP cooperative B-multicast test for gfx1250, MX-FP4.
-#
-# F4 analog of the sibling core/sk_mxf8gemm_cluster_multicast.yaml (MX-FP8): same
-# cluster/coverage structure, datatype-specific params differ. MX-F4 constraints
-# (DataType F4, MXBlockA/B=32, TDMInst=3, MXLoadInst=TDM,
-# MXScaleFormat=InMemorySwizzle, WavefrontSize=32, DepthU=256,
-# StreamKXCCMapping=0) with the DP cooperative B-multicast fast path
-# (auto-derived from StreamK=3 + ClusterDim):
-#
-#   - ClusterDim: [[2,1],[4,1],[8,1]]   -- 1-D spatial clusters, C in {2,4,8}
-#   - StreamKClusterReduction: [0]      -- mutually exclusive with multicast
-#
-# StreamKMulticast is a derived-only internal state (no YAML opt-in): a StreamK=3
-# ClusterDim != [1,1] config that does not request StreamKClusterReduction
-# auto-enables the DP cooperative B-multicast path.
-#
-# In the DP region the C consecutive workgroups of a [C,1] cluster process
-# M-adjacent tiles that share the same B over full K, so B is TDM-multicast to
-# the whole cluster while A is per-workgroup. The runtime clusterMulticastValid
-# predicate enables the broadcast only on a fully-populated, M-aligned
-# (nWG0 % C == 0) cluster; otherwise B loads normally. The host rounds the grid
-# up to a multiple of C so every launched cluster is full. Each size below is
-# chosen so nWG0 % C == 0 for the C it dispatches (a violation is a HARD REJECT
-# via ClusterDimCheck at selection time, not a silent fallback); solution/size
-# pairs whose nWG0 is not a multiple of the cluster C are simply rejected.
-#
-# Codegen coverage is broad: the MatrixInstruction list spans macro-tile-M in
-# {32,64,128,256}, crossed with LDSTrInst {True,False}, PrefetchGlobalRead {1,2}.
-# ScheduleIterAlg is pinned to 4 (the StinkyTofu-scheduled gfx1250 path) -- SIA3 is
-# intentionally excluded so the tests exercise the real gfx1250 scheduler. The small
-# sizes exercise the compact tiles at
-# various nWG0; the two large [2048,...] sizes keep nWG0 % C == 0 for every tile
-# (including MT-M=256) so the widest tile is covered on-cluster, and add a K-tail
-# case (K % 256 != 0) for tail-loop B-multicast loads.
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 GlobalParameters:
   SyncsPerBenchmark: 0
   Architecture: gfx1250
@@ -56,11 +21,8 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  ########################################
-  # MX-FP4 (F4 in, float32 out) TN, Batched -- StreamK DP cooperative multicast.
-  ########################################
   -
-    - # ProblemType: MX-F4 TN
+    -
       OperationType: GEMM
       DataType: F4
       DestDataType: s
@@ -75,7 +37,7 @@ BenchmarkProblems:
       UseBias: 0
       MXBlockA: 32
       MXBlockB: 32
-    - # BenchmarkProblemSizeGroup
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -83,11 +45,11 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 1, 1, 2, 2]   # MT-M=32
-          - [16, 16, 128, 1, 1, 2, 2, 2, 2]   # MT-M=64
-          - [16, 16, 128, 1, 1, 4, 4, 2, 2]   # MT-M=128
-          - [16, 16, 128, 1, 1, 8, 8, 2, 2]   # MT-M=256
-          - [16, 16, 128, 1, 1, 1, 1, 2, 1]   # MT-M=32, WGN=1
+          - [16, 16, 128, 1, 1, 1, 1, 2, 2]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+          - [16, 16, 128, 1, 1, 1, 1, 2, 1]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -133,12 +95,12 @@ BenchmarkProblems:
       JoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 256]    # nWG0=16 (MT-M=32) -> multicast ON (C=2,4,8)
-          - Exact: [256, 256, 1, 256]    # nWG0=8  (MT-M=32) -> multicast ON (C=2,4,8)
-          - Exact: [128, 128, 1, 512]    # nWG0=4  (MT-M=32) -> ON (C=2,4); K=512
-          - Exact: [256, 256, 2, 256]    # batched (batch=2); nWG0=8 (MT-M=32) -> ON (C=2,4,8)
-          - Exact: [256, 256, 1, 1920]   # K-tail (K%256=128); nWG0=8 (MT-M=32) -> ON (C=2,4,8); tail-loop B-multicast loads
-          - Exact: [2048, 256, 1, 1024]  # nWG0 in {64,32,16,8} across MT-M {32,64,128,256} -> ON (C=2,4,8) incl. widest tile
-          - Exact: [2048, 512, 1, 1056]  # K-tail (K%256=32); nWG0 in {64,32,16,8} -> ON (C=2,4,8) incl. widest tile
+          - Exact: [512, 512, 1, 256]
+          - Exact: [256, 256, 1, 256]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [256, 256, 2, 256]
+          - Exact: [256, 256, 1, 1920]
+          - Exact: [2048, 256, 1, 1024]
+          - Exact: [2048, 512, 1, 1056]
         - ActivationArgs:
           - [Enum: none]

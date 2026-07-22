@@ -866,7 +866,7 @@ validParameters = { # we need to make sure this matches develop
     # booleans fall out of the factoring in Solution.py, so the two features are
     # composable rather than mutually exclusive. Must be a power of two that
     # divides ClusterDim[0], with Cs = ClusterDim[0]//Ck also a power of two.
-    # See docs/design/factored-cluster-mode-plan.md.
+    # See docs/design/streamk-wg-clusters.md.
     "StreamKClusterKSplit": [1, 2, 4, 8, 16],
     # NOTE: StreamKMulticast (the gfx1250 StreamK DP cooperative cluster-load /
     # TDM B-multicast fast path) is intentionally NOT a valid/benchmark
