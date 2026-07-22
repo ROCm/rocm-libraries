@@ -153,7 +153,7 @@ bool BnBwdTrainingSpatial::IsApplicable(
         return false;
     }
 #endif
-    if(!IsOCLBwdTypeValid(bn_problem))
+    if(!IsBwdTypeValid(bn_problem))
         return false;
 
     int activ_mode = bn_problem.GetActivationDesc().GetMode();
