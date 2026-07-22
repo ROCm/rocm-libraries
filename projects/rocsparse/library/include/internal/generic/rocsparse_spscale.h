@@ -92,9 +92,8 @@ rocsparse_status rocsparse_spscale_buffer_size(rocsparse_handle            handl
 *
 *  \note The following formats are supported: \ref rocsparse_format_coo,
 *  \ref rocsparse_format_coo_aos, \ref rocsparse_format_csr, \ref rocsparse_format_csc,
-*  \ref rocsparse_format_bsr, \ref rocsparse_format_ell and \ref rocsparse_format_sell. \p A and
-*  \p C must use the same format. \ref rocsparse_format_bell is not supported yet and returns
-*  \ref rocsparse_status_not_implemented.
+*  \ref rocsparse_format_bsr, \ref rocsparse_format_ell, \ref rocsparse_format_bell and
+*  \ref rocsparse_format_sell. \p A and \p C must use the same format.
 *  \note Only the non-transpose operation is supported.
 *  \note
 *  This routine does not support execution in a hipGraph context.

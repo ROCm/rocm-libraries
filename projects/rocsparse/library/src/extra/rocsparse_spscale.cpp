@@ -41,9 +41,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    // Formats supported by rocsparse_spscale. Blocked-ELL (BELL) is intentionally not part of
-    // this set: it currently falls through to rocsparse_status_not_implemented (see the note in
-    // the header and CHANGELOG).
+    // Formats supported by rocsparse_spscale (all generic sparse formats).
     static bool spscale_is_supported_format(rocsparse_format format)
     {
         switch(format)
@@ -54,10 +52,9 @@ namespace rocsparse
         case rocsparse_format_csc:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
+        case rocsparse_format_bell:
         case rocsparse_format_sell:
             return true;
-        case rocsparse_format_bell:
-            return false;
         }
         return false;
     }
@@ -257,8 +254,18 @@ namespace rocsparse
         }
         case rocsparse_format_bell:
         {
-            // Blocked-ELL is not supported yet.
-            return rocsparse_status_not_implemented;
+            // Blocked-ELL: the descriptor stores rows and ell_cols in block units (rows is the
+            // number of block-rows, ell_cols is the ELL block-width), matching how the client
+            // bell_matrix and rocsparse_create_bell_descr are wired up. col_data holds one
+            // block-column index per block, laid out as rows * ell_cols. val holds a
+            // block_dim x block_dim dense block per ELL position, laid out as
+            // rows * ell_cols * block_dim * block_dim scalars. There is no row_data.
+            const int64_t block_dim      = mat_A->block_dim;
+            const int64_t col_ind_length = rows * mat_A->ell_cols;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->col_data, mat_A->const_col_data, size_t(col_ind_length) * col_size));
+            val_length = rows * mat_A->ell_cols * block_dim * block_dim;
+            break;
         }
         }
 

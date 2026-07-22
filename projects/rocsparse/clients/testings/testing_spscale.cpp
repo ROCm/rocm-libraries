@@ -275,8 +275,13 @@ void testing_spscale(const Arguments& arg)
     }
     case rocsparse_format_bell:
     {
-        // Blocked-ELL is not supported by rocsparse_spscale yet and is excluded from the tests.
-        CHECK_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // The Blocked-ELL matrix factory requires a single index type (I == J).
+        I                                 m = arg.M, n = arg.N;
+        I                                 block_dim = arg.block_dim;
+        rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
+        host_bell_matrix<T, I>            hA;
+        matrix_factory.init_bell(hA, m, n, block_dim, base);
+        testing_spscale_dispatch<T, host_bell_matrix<T, I>, device_bell_matrix<T, I>>(arg, hA);
         break;
     }
     }
