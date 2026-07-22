@@ -596,11 +596,8 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     if(arg.api & c_API_64)
         cfg_64 = grouped_gemm_ex_test_config_from_arg<Tc, int64_t>(arg);
 
-    const rocblas_int group_count   = rocblas_int(cfg.group_count);
-    const rocblas_int problem_count = rocblas_int(cfg.problem_count);
-
-    if(group_count <= 0 || problem_count <= 0)
-        return;
+    const int64_t group_count   = cfg.group_count;
+    const int64_t problem_count = cfg.problem_count;
 
     rocblas_local_handle handle{arg};
     rocblas_gemm_algo    algo = rocblas_gemm_algo(arg.algo);
@@ -661,9 +658,9 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
         copy_matrix_with_different_leading_dimensions(hC, hD_gold);
 
         int64_t idx = 0;
-        for(rocblas_int g = 0; g < group_count; ++g)
+        for(int64_t g = 0; g < group_count; ++g)
         {
-            for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
+            for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
             {
                 ref_gemm<Ti, To_hpa, Tc>(cfg.transa_array[g],
                                          cfg.transb_array[g],
@@ -768,10 +765,10 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
 
         if(arg.unit_check)
         {
-            rocblas_int idx = 0;
-            for(rocblas_int g = 0; g < group_count; ++g)
+            int64_t idx = 0;
+            for(int64_t g = 0; g < group_count; ++g)
             {
-                for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
+                for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
                 {
                     unit_check_general<To, To_hpa>(
                         cfg.m_array[g], cfg.n_array[g], cfg.ldd_array[g], hD_gold[idx], hD[idx]);
@@ -781,11 +778,11 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
 
         if(arg.norm_check)
         {
-            double      error = 0;
-            rocblas_int idx   = 0;
-            for(rocblas_int g = 0; g < group_count; ++g)
+            double  error = 0;
+            int64_t idx   = 0;
+            for(int64_t g = 0; g < group_count; ++g)
             {
-                for(rocblas_int p = 0; p < cfg.group_size[g]; ++p, ++idx)
+                for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
                 {
                     error = std::max(error,
                                      std::abs(norm_check_general<To>('F',
@@ -882,7 +879,7 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
         freq_monitor.stop();
 
         double gflop_count = 0.0;
-        for(rocblas_int g = 0; g < group_count; ++g)
+        for(int64_t g = 0; g < group_count; ++g)
             gflop_count += cfg.group_size[g]
                            * gemm_gflop_count<Tc>(cfg.m_array[g], cfg.n_array[g], cfg.k_array[g]);
 
