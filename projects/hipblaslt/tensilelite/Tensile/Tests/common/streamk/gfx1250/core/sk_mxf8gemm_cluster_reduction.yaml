@@ -43,9 +43,8 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 1, 1, 2, 2]
-          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
-          - [16, 16, 128, 1, 1, 4, 4, 2, 2]
           - [16, 16, 128, 1, 1, 1, 1, 2, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -90,9 +89,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 1024]
           - Exact: [512, 512, 1, 2048]
-          - Exact: [256, 256, 1, 1920]
-          - Exact: [256, 256, 2, 1024]
+          - Exact: [1024, 512, 1, 2048]
+          - Exact: [512, 512, 1, 4096]
+          - Exact: [512, 1024, 2, 2048]
         - ActivationArgs:
           - [Enum: none]
