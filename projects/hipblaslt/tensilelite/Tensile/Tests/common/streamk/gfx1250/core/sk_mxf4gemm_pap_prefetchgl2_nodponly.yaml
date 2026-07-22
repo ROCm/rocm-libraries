@@ -1,15 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-#
-# TEST 2 (probe yaml, untracked): PrefetchGL2 on NON-DP-only StreamK + PAP.
-# Based on sk_mxf4gemm_tdm_pap.yaml. Pins StreamKForceDPOnly:[0] (full-SK,
-# partial-tile/fixup path) and adds PrefetchGL2:[1] to probe whether PrefetchGL2
-# can coexist with non-DP-only StreamK==3 + PrefetchAcrossPersistent on gfx1250.
-# GSU=0, strided batch, single small problem group to stay tractable on FFM sim.
-# NOTE: the committed guard in Solution.py rejects this (PrefetchGL2 only allowed
-# for DP-only SK); Phase 2B relaxes the guard as a THROWAWAY probe.
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 GlobalParameters:
   SyncsPerBenchmark: 0
   Architecture: gfx1250
@@ -29,11 +21,8 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  #######################################
-  # TN - TDM + PrefetchAcrossPersistent + PrefetchGL2 (NON-DP-only)
-  #######################################
   -
-    - # ProblemType, TN
+    -
       OperationType: GEMM
       DataType: F4
       DestDataType: s
@@ -49,7 +38,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # BenchmarkProblemSizeGroup - Standard
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -59,6 +48,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
           - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
         - DepthU: [256]
         - AssertSummationElementMultiple: [256]
         - ClusterLocalRead: [0]
@@ -104,5 +95,6 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [512, 512, 1, 512]
+          - Exact: [520, 520, 1, 512]
         - ActivationArgs:
           - [Enum: none]
