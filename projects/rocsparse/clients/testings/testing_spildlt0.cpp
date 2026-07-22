@@ -691,7 +691,6 @@ void testing_spildlt0(const Arguments& arg)
                                                        sizeof(compute_datatype),
                                                        p_error));
 
-
     //
     // Perform analysis.
     //
