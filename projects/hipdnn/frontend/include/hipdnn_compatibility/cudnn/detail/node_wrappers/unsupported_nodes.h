@@ -67,6 +67,9 @@ public:
     }
 
 private:
+    friend Derived;
+
+    UnsupportedAttributes() = default;
     Derived& self()
     {
         return static_cast<Derived&>(*this);
@@ -79,12 +82,16 @@ private:
 } // namespace detail
 
 // Stamp a Tier-2 fail-stub attribute class from an upstream cuDNN v9 class name.
-// The class is default-constructible, copyable (node methods take it by value),
-// and offers the universal setter surface via detail::UnsupportedAttributes.
-#define HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(name)        \
-    class name : public detail::UnsupportedAttributes<name> \
-    {                                                       \
+// The user-provided constructor keeps C++17 brace-init from aggregate-initializing
+// the private CRTP base constructor directly.
+// NOLINTBEGIN(bugprone-macro-parentheses): name is a type token, not an expression.
+#define HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(name)         \
+    class name : public detail::UnsupportedAttributes<name>  \
+    {                                                        \
+    public:                                                  \
+        name() {} /* NOLINT(modernize-use-equals-default) */ \
     }
+// NOLINTEND(bugprone-macro-parentheses)
 
 /// @brief RFC 0012 §4.4.2 / §6.5 — unsupported node attribute.
 /// hipDNN has no equivalent engine; the node compiles but reports
