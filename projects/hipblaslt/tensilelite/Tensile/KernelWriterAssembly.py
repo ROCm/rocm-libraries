@@ -14273,6 +14273,33 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.coutRowPtrE    = _hoistedIdx["coutRowPtrE"]
       self.vgprs.coutRowPtrBias = _hoistedIdx["coutRowPtrBias"]
       self.states.subtileHoistedWriteIndices = None
+      # PLSIN numIter<PGR (TENSILE_PLSIN_MIN_ITER lowered the fused-store gate below
+      # PGR): the PGR>=2 preloop takes SkipToNLL for numIter<PGR (e.g. K==DepthU), so
+      # the NGLL init-hoist never ran and the hoisted coord VGPRs hold garbage -> the
+      # branch-free full-tile store would fault. RECOMPUTE the write indices here, at
+      # runtime, INTO those same hoisted VGPRs (subtileRecomputeCoords reuses the live
+      # registers -> zero extra register pressure). Guarded on numIter<PGR so the
+      # common numIter>=PGR path keeps the latency-hidden hoisted coords and pays only
+      # a scalar compare + (not-taken) branch. Emitted only when the gate is actually
+      # relaxed, so default (minIter==PGR) builds stay byte-identical.
+      pgr = kernel["PrefetchGlobalRead"]
+      if pgr >= 2 and self._plsinMinIter(kernel) < pgr:
+        depthU = kernel["DepthU"]
+        skipRecompute = Label(label=self.labels.getNameInc("PLSIN_coordsValid"), comment="")
+        module.addComment1("PLSIN numIter<PGR: refill hoisted store coords when NGLL was skipped")
+        with self.allocTmpSgpr(1, tag="plsinRecompute_numIter") as nTmp:
+          module.add(SLShiftRightB32(dst=sgpr(nTmp.idx),
+                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                                     shiftHex=hex(log2(depthU)),
+                                     comment="numIter = SizesSum / DepthU"))
+          module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=pgr,
+                               comment="numIter >= PGR? (NGLL ran -> hoisted coords valid)"))
+          module.add(SCBranchSCC1(labelName=skipRecompute.getLabelName(),
+                                  comment="coords already computed by NGLL init-hoist -> skip recompute"))
+        self.states.subtileRecomputeCoords = True
+        module.add(self.computeStoreVgprs(kernel))
+        self.states.subtileRecomputeCoords = False
+        module.add(skipRecompute)
     else:
       module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
@@ -15451,6 +15478,21 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # PostLoopStoreInNll: effective-alpha==1 fast-path support
   ##############################################################################
+  def _plsinMinIter(self, kernel):
+    """Minimum numIter (= SizesSum/DepthU) that still takes the FUSED store. Default
+    is PGR: the NGLL init-hoist arm only executes when the PGR=2 preloop dispatch does
+    NOT take SkipToNLL (numIter >= PGR), so below PGR the hoisted write-index coords
+    are never computed at runtime. TENSILE_PLSIN_MIN_ITER lowers this (=1 enables the
+    numIter==1 / K==DepthU case) -- correct only in tandem with the runtime coord
+    recompute emitted in buildSubtileFusedStore (which refills the hoisted coord VGPRs
+    when numIter < PGR). Clamped to [1, PGR] so it can only ever RELAX the gate."""
+    pgr = kernel["PrefetchGlobalRead"]
+    try:
+      v = int(plsinDebugEnv("TENSILE_PLSIN_MIN_ITER", str(pgr)))
+    except (TypeError, ValueError):
+      v = pgr
+    return max(1, min(v, pgr))
+
   def _plsinAlphaSkipEligible(self, kernel):
     """The fused store may skip its epilogue alpha multiply only when this returns
     True: PostLoopStoreInNll is active and the compute type is fp32 (the scalar-scale
@@ -15545,14 +15587,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCmpEQU32(src0=sgpr(tTmp.idx), src1=0, comment="no tail (NLL terminal)?"))
         module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="has tail -> not fused"))
       pgr = kernel["PrefetchGlobalRead"]
-      if pgr >= 2:
-        module.addComment1("PLSIN guard-hoist: fold numIter>=PGR into PostLoopAlphaIsOne (pre-loop shadow)")
+      minIter = self._plsinMinIter(kernel)
+      if pgr >= 2 and minIter > 1:
+        module.addComment1("PLSIN guard-hoist: fold numIter>=%u into PostLoopAlphaIsOne (pre-loop shadow)" % minIter)
         with self.allocTmpSgpr(1, tag="plsinFused_numIter") as nTmp:
           module.add(SLShiftRightB32(dst=sgpr(nTmp.idx),
                                      src=sgpr("SizesSum+%u" % self.states.unrollIdx),
                                      shiftHex=hex(log2(depthU)),
                                      comment="numIter = SizesSum / DepthU"))
-          module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=pgr, comment="numIter >= PGR (real NLL drain)?"))
+          module.add(SCmpGeU32(src0=sgpr(nTmp.idx), src1=minIter, comment="numIter >= minIter (real NLL drain)?"))
           module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="too few K-iters -> not fused"))
     return module
 
@@ -15622,56 +15665,31 @@ class KernelWriterAssembly(KernelWriter):
         else:
           module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                   comment="has tail -> not fused"))
-      # Degenerate short-K guard: require numIter (= SizesSum/DepthU) >= PGR so the NLL
-      # pipeline has a real iteration to drain; otherwise the hoisted write-index coords
-      # are never validly computed and the branch-free full-tile D store faults (illegal
-      # memory access at K == DepthU, e.g. the K=256 / MT256x256x256 repro). The fp32
-      # path folds this into PostLoopAlphaIsOne above; this inline copy covers the rest.
+      # Degenerate short-K guard: require numIter (= SizesSum/DepthU) >= minIter so the
+      # NLL pipeline has a real iteration to drain; otherwise the hoisted write-index
+      # coords are never validly computed and the branch-free full-tile D store faults
+      # (illegal memory access at K == DepthU, e.g. the K=256 / MT256x256x256 repro).
+      # minIter defaults to PGR; TENSILE_PLSIN_MIN_ITER=1 lowers it (numIter==1 case),
+      # which is correct only with the runtime coord recompute in buildSubtileFusedStore.
+      # The fp32 path folds this into PostLoopAlphaIsOne above; this inline copy covers
+      # the rest.
       pgr = kernel["PrefetchGlobalRead"]
-      if pgr >= 2:
-        module.addComment1("Fused-store guard: enough K-iters for NLL drain (numIter=SizesSum/DepthU >= PGR=%u) else -> %s" % (pgr, targetLabel.getLabelName()))
+      minIter = self._plsinMinIter(kernel)
+      if pgr >= 2 and minIter > 1:
+        module.addComment1("Fused-store guard: enough K-iters for NLL drain (numIter=SizesSum/DepthU >= %u) else -> %s" % (minIter, targetLabel.getLabelName()))
         with self.allocTmpSgpr(1, tag="fusedStoreGuard_numIter") as tmpSgprInfo:
           module.add(SLShiftRightB32(dst=sgpr(tmpSgprInfo.idx),
                                      src=sgpr("SizesSum+%u" % self.states.unrollIdx),
                                      shiftHex=hex(log2(depthU)),
                                      comment="numIter = SizesSum / DepthU (no tail here)"))
-          module.add(SCmpGeU32(src0=sgpr(tmpSgprInfo.idx), src1=pgr,
-                               comment="fused guard: numIter >= PGR (real NLL drain)?"))
+          module.add(SCmpGeU32(src0=sgpr(tmpSgprInfo.idx), src1=minIter,
+                               comment="fused guard: numIter >= minIter (real NLL drain)?"))
           if longBranch:
             module.add(self.longBranchScc0(targetLabel, posNeg=1,
                                            comment="too few K-iters -> not fused (long)"))
           else:
             module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                     comment="too few K-iters -> not fused"))
-    # Small/medium-K ceiling (B4): PLSIN's win is hiding the FIXED-size epilogue
-    # store behind the terminal MFMAs. That store cost is K-independent, so as a
-    # share of runtime it vanishes as K grows, while the fused path's cost (extra
-    # register pressure -> occupancy, work woven into the now-dominant compute-bound
-    # main loop / terminal MFMA tail) does not. Past a crossover K the trade nets
-    # negative (measured: fp4 256x256 tiles regress for K >= 4k). Fall back to the
-    # PLAIN NLL + normal post-loop store for large-K problems at RUNTIME so a single
-    # kernel stays correct and optimal across the whole K range. maxK is the largest
-    # summation size (in elements) that still fuses; <= 0 disables the ceiling. The
-    # default is 0 (ceiling DISABLED) so very-large-K problems still take the fused
-    # path: with the scalar front-guard hoisted off the serial NLL prologue into the
-    # pre-loop shadow (computePostLoopAlphaIsOne fold) the fixed guard overhead that
-    # motivated the old K>=4k ceiling is absorbed by the compute-bound loop, so
-    # capping large K is no longer a net win. The env var remains a TEST-ONLY tuning
-    # override (see plsinDebugEnv) to re-impose a ceiling for A/B measurement.
-    maxK = int(plsinDebugEnv("TENSILE_PLSIN_MAX_K", "0"))
-    if maxK > 0:
-      module.addComment1("Fused-store guard: small/medium-K only (SizesSum <= %u) else -> %s" % (maxK, targetLabel.getLabelName()))
-      # Use a plain s_cmp_gt_u32 with a 32-bit literal rather than the s_cmpk_gt_u32
-      # K-form: the K-form immediate is only 16 bits, so any maxK > 0xFFFF (e.g. a
-      # large heuristic value or the TEST env override) would fail to assemble.
-      module.add(SCmpGtU32(src0=sgpr("SizesSum+%u" % self.states.unrollIdx), src1=maxK,
-                           comment="fused guard: K (SizesSum) > maxK (large-K)?"))
-      if longBranch:
-        module.add(self.longBranchScc1(targetLabel, posNeg=1,
-                                       comment="large K -> not fused (long)"))
-      else:
-        module.add(SCBranchSCC1(labelName=targetLabel.getLabelName(),
-                                comment="large K -> not fused"))
     # (effective alpha == 1 is folded into PostLoopAlphaIsOne along with no-tail /
     # numIter>=PGR on the eligible fp32 path above -- no separate alpha branch here.)
     # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).

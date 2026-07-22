@@ -394,6 +394,7 @@ class StateValues:
   subtileWeaveEmitted: Optional[set]     = None    # store-pairs whose MFMAs are already emitted
   subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
   subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
+  subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
   subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
   subtileM32ValidBlocksSgpr: Optional[int] = None  # SubtileMGuard SGPR
   subtileN16ValidBlocksSgpr: Optional[int] = None  # SubtileNGuard SGPR
