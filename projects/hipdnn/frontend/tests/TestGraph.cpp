@@ -306,8 +306,11 @@ public:
 }
 
 // Creates a minimal batchnorm inference graph for testing. Used both by TestGraph
-// fixture methods and by standalone helper functions.
-static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
+// fixture methods and by standalone helper functions. When @p withRaggedOffset is
+// true, the primary input tensor is given a ragged-offset aux tensor so the graph
+// auto-detects as ragged-tensor enabled.
+static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph,
+                                                                   bool withRaggedOffset = false)
 {
     graph.set_name("TestGraph")
         .set_compute_data_type(DataType::FLOAT)
@@ -320,6 +323,17 @@ static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8})
         .set_data_type(DataType::FLOAT);
+
+    if(withRaggedOffset)
+    {
+        auto raggedOffset = std::make_shared<TensorAttributes>();
+        raggedOffset->set_uid(10)
+            .set_name("RaggedOffset")
+            .set_dim({2, 1, 1, 1})
+            .set_stride({1, 1, 1, 1})
+            .set_data_type(DataType::INT64);
+        x->set_ragged_offset(raggedOffset);
+    }
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
