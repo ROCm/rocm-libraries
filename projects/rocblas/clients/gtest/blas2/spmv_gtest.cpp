@@ -97,7 +97,15 @@ namespace
                     name << '_' << arg.stride_y;
 
                 if(SPMV_TYPE != SPMV)
+                {
                     name << '_' << arg.batch_count;
+
+                    if(arg.alpha_beta_stride)
+                    {
+                        name << '_' << arg.stride_c;
+                        name << '_' << arg.stride_d;
+                    }
+                }
             }
 
             if(arg.api & c_API_64)
