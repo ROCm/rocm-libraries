@@ -118,15 +118,25 @@ namespace rocsparse
         descr->base,                                                       \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
-            // RDNA4 (gfx1201, wavefront size 32) launch tuning for the
-            // one-thread-per-row non-transpose kernel. The historical fixed
-            // 512-thread block is a wave64-era default. On wave32 hardware,
-            // wide-ELL rows (long per-thread reduction loops) run faster with a
-            // smaller 128-thread block, which spreads rows across more
-            // workgroups and improves occupancy/tail behavior. Narrow rows are
-            // insensitive to the block size, so 512 is kept for them to avoid
-            // regressing the configurations it was tuned for.
-            const uint32_t ELLMVN_DIM = (ell_width >= 32) ? 128 : 512;
+            // Launch tuning for the one-thread-per-row non-transpose kernel.
+            // The historical 512-thread block is a wave64-era default (8
+            // wavefronts on wave64, but 16 on wave32). On wave32 hardware
+            // (RDNA, e.g. gfx1201) wide-ELL rows (long per-thread reduction
+            // loops) run faster with a smaller block, which spreads rows across
+            // more workgroups and improves occupancy/tail behavior.
+            //
+            // The tuned size is expressed in WAVEFRONTS and, crucially, gated on
+            // wavefront_size == 32: wide-wavefront (wave64) parts keep the
+            // original 512-thread block instead of silently dropping to a
+            // half-occupancy 2-wavefront (128) block, which would regress an
+            // architecture this was never tuned on. Narrow rows are insensitive
+            // to the block size, so they keep 512 on every architecture.
+            uint32_t ELLMVN_DIM = 512;
+            if(handle->wavefront_size == 32 && ell_width >= 32)
+            {
+                // 128 threads == 4 wavefronts on wave32.
+                ELLMVN_DIM = 4u * static_cast<uint32_t>(handle->wavefront_size);
+            }
 
             if(ELLMVN_DIM == 128)
             {
