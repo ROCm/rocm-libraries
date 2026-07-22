@@ -551,6 +551,11 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
     if (!aScaleVal.empty()) fmts.scaleFmtA = parseMatrixScaleFmt(aScaleVal);
     if (!bScaleVal.empty()) fmts.scaleFmtB = parseMatrixScaleFmt(bScaleVal);
 
+    auto aScaleSel = extractValue("matrix_a_scale:");
+    auto bScaleSel = extractValue("matrix_b_scale:");
+    if (!aScaleSel.empty()) fmts.scaleSelA = parseMatrixScaleSel(aScaleSel);
+    if (!bScaleSel.empty()) fmts.scaleSelB = parseMatrixScaleSel(bScaleSel);
+
     return fmts;
 }
 

@@ -58,19 +58,31 @@ constexpr int kCdna5GlobalReadPerWmma = 1;
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
 // -------------------------------------------------------------------------
 
-// Scheduling rule (2): simulate ds_load completion over [blockBegin, regionStart) — outstanding
-// VGPR latencies decrease by each instruction's issueCycles; each ds_load overwrites dest VGPRs
-// with that op's latencyCycles (WAW). Remaining counts seed wmmaRegisterLatencyCounters so the
-// first WMMA in a region sees preloop / in-BB loads the register DAG may not edge to that WMMA
-// (double-buffer: WMMA on X0 while in-loop ds fills X1). Caller: onInitRegion.
+// Register-file-aware key for the data-ready (RAW) and elapse-touch maps. These maps
+// were keyed on reg.idx alone, which conflates register files: e.g. a WMMA writing its
+// accumulator v[12:20) would stamp indices 12..19 and falsely gate a later SALU that
+// reads s14/s15 (same indices, different file). Fold the register type into the key so
+// vector, scalar, and accumulator registers of the same index never collide.
+static inline int regDepKey(RegType type, uint32_t idx) {
+    return (static_cast<int>(type) << 20) | static_cast<int>(idx & 0xFFFFF);
+}
+
+// Scheduling rule (2): simulate producer completion over [blockBegin, regionStart) —
+// outstanding data-ready latencies decrease by each instruction's issueCycles; each
+// producer overwrites its dest VGPRs with that op's latencyCycles. Remaining counts seed
+// regDataReadyCounters so the first WMMA/consumer in a region sees preloop / in-BB
+// producers the register DAG may not edge to (double-buffer: WMMA on X0 while in-loop ds
+// fills X1). Generalized from ds_load-only to all producers, with the same
+// latencyCycles > issueCycles self-clear skip used at issue time; short-latency ops
+// decay away across the prefix, only long ones (ds_load) persist. Caller: onInitRegion.
 //
-// crossBBResiduals: DS latency residuals from predecessor BBs (merged in onInit).
-// They decay through the prefix alongside within-BB DS loads so cross-BB ds_loads
-// properly gate WMMA issue.
+// crossBBResiduals: data-ready residuals from predecessor BBs (merged in onInit).
+// They decay through the prefix alongside within-BB producers so cross-BB loads
+// properly gate consumers.
 static void seedWmmaDsLatencyFromPrefix(IRList::iterator blockBegin, IRList::iterator regionStart,
-                                        std::map<int, int>& wmmaRegisterLatencyCounters,
+                                        std::map<int, int>& regDataReadyCounters,
                                         const std::map<int, int>& crossBBResiduals) {
-    wmmaRegisterLatencyCounters.clear();
+    regDataReadyCounters.clear();
     std::map<int, int> pending(crossBBResiduals);
 
     for (IRList::iterator it = blockBegin; it != regionStart; ++it) {
@@ -87,17 +99,16 @@ static void seedWmmaDsLatencyFromPrefix(IRList::iterator blockBegin, IRList::ite
                 ++pit;
         }
 
-        if (isDSRead(inst)) {
-            for (const StinkyRegister& dstReg : inst.getDestRegs()) {
-                if (!dstReg.isRegister()) continue;
-                for (unsigned off = 0; off < dstReg.reg.num; ++off)
-                    pending[dstReg.reg.idx + off] = inst.latencyCycles;
-            }
+        if (inst.latencyCycles <= inst.issueCycles) continue;
+        for (const StinkyRegister& dstReg : inst.getDestRegs()) {
+            if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
+            for (unsigned off = 0; off < dstReg.reg.num; ++off)
+                pending[regDepKey(dstReg.reg.type, dstReg.reg.idx + off)] = inst.latencyCycles;
         }
     }
 
     for (const auto& [regIdx, rem] : pending) {
-        if (rem > 0) wmmaRegisterLatencyCounters[regIdx] = rem;
+        if (rem > 0) regDataReadyCounters[regIdx] = rem;
     }
 }
 
@@ -287,8 +298,19 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
 
-    // Per VGPR index: remaining modeled latency until ds_load result is safe for WMMA src.
-    std::map<int, int> wmmaRegisterLatencyCounters;
+    // (A) RAW data-ready gate. Per reg index: remaining modeled latency until a
+    // producer's result is safe to consume (e.g. ds_load LDS->VGPR, 56 cyc). Any
+    // long-latency producer stamps it; a consumer whose src is still in flight is not
+    // "free". Decays in advanceTime. Crosses BBs via BBScheduleState.dsResiduals.
+    std::map<int, int> regDataReadyCounters;
+
+    // (B) elapse-time ordering. Timeline (advanceTime clock) at which each reg was last
+    // touched by any operand (dst or src) of an issued instruction. Used to order
+    // already-free nodes within a bucket: prefer the node whose operands were touched
+    // longest ago, so a register-overwrite (e.g. a VALU reusing a just-read ds_load
+    // address) is naturally deferred behind other work. Per-region; reset each region.
+    std::map<int, int> regLastTouch_;
+    int clock_ = 0;
 
     WMMAIssueConfig wmmaIssueConfig;
 
@@ -322,11 +344,18 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void advanceTime(int cycles);
     int computeValuAdvanceCycles(int issueCycles) const;
     void updateWMMAStatus(DAGNode* node);
-    int getMaxDsLatency(DAGNode* node);
+    void stampDataReady(const StinkyInstruction& inst);
+    void touchOperands(const StinkyInstruction& inst);
+    int getMaxSrcDataWait(DAGNode* node) const;
+    bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
+    int nodeElapseKey(DAGNode* node) const;
+    DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
+                          bool allowHiddenStall = false) const;
     std::pair<DAGNode*, int> findMostReadyWMMA();
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
-    bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
-    bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
+    bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut,
+                                     int* outWait = nullptr) const;
+
     bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
     DAGNode* extractForcedBarrier();
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> computeBarrierAfterThresholds(
@@ -354,15 +383,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void onFinishBB() override;
 };
 
-// Advance the co-issue timeline and decay DS latency counters by \p cycles.
+// Advance the co-issue timeline and the elapse-time clock, and decay the RAW
+// data-ready counters by \p cycles.
 void CDNA5ReadyQueue::advanceTime(int cycles) {
     coIssueCyclePos_ += cycles;
+    clock_ += cycles;
     globalReadInflight_.advance(cycles);
     dsReadInflight_.advance(cycles);
-    for (auto it = wmmaRegisterLatencyCounters.begin(); it != wmmaRegisterLatencyCounters.end();) {
+    for (auto it = regDataReadyCounters.begin(); it != regDataReadyCounters.end();) {
         it->second -= cycles;
         if (it->second <= 0)
-            it = wmmaRegisterLatencyCounters.erase(it);
+            it = regDataReadyCounters.erase(it);
         else
             ++it;
     }
@@ -417,11 +448,6 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
-        for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
-            if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
-            for (unsigned off = 0; off < dstReg.reg.num; ++off)
-                wmmaRegisterLatencyCounters[dstReg.reg.idx + off] = node->inst->latencyCycles;
-        }
         dsReadInflight_.push(dsReadDrainLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
@@ -430,32 +456,138 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         assert(pickKind == kValu);
         valuQueue.erase(node);
     }
+    // (A) RAW: stamp this producer's dest data-ready latency (e.g. ds_load).
+    // (B) elapse: record the timeline touch for all operands (dst + src).
+    touchOperands(*node->inst);
     updateWMMAStatus(node);
+    stampDataReady(*node->inst);
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     return node;
 }
 
-// Scheduling rule (2): compute the maximum outstanding DS latency for a WMMA's src VGPRs.
-// Returns 0 if all src data is ready (latency-free), >0 if hardware would stall.
-int CDNA5ReadyQueue::getMaxDsLatency(DAGNode* node) {
+// (A) RAW stamp: record each dest reg's data-ready latency. Skip when
+// latencyCycles <= issueCycles: after a pick, updateWMMAStatus -> advanceTime(issueCycles)
+// runs before the next pickOne and would immediately decay such a stamp to 0, so it can
+// never gate a consumer. Skipping it makes the dominant gfx1250 case (VALU/SALU
+// latency == issue == 1) a no-op with no map churn; only ds_load (56) and rare latency-2
+// ops persist.
+void CDNA5ReadyQueue::stampDataReady(const StinkyInstruction& inst) {
+    if (inst.latencyCycles <= inst.issueCycles) return;
+    for (const StinkyRegister& dst : inst.getDestRegs()) {
+        if (!dst.isRegister() || isPseudoReg(dst)) continue;
+        for (unsigned off = 0; off < dst.reg.num; ++off)
+            regDataReadyCounters[regDepKey(dst.reg.type, dst.reg.idx + off)] =
+                inst.latencyCycles - inst.issueCycles;
+    }
+}
+
+// (B) elapse touch: record the current timeline clock for every operand reg (dst + src)
+// of an issued instruction, so a later node reusing a just-touched reg can be deferred.
+void CDNA5ReadyQueue::touchOperands(const StinkyInstruction& inst) {
+    for (const StinkyRegister& dst : inst.getDestRegs()) {
+        if (!dst.isRegister() || isPseudoReg(dst)) continue;
+        for (unsigned off = 0; off < dst.reg.num; ++off)
+            regLastTouch_[regDepKey(dst.reg.type, dst.reg.idx + off)] = clock_;
+    }
+    for (const StinkyRegister& src : inst.getSrcRegs()) {
+        if (!src.isRegister() || isPseudoReg(src)) continue;
+        for (unsigned off = 0; off < src.reg.num; ++off)
+            regLastTouch_[regDepKey(src.reg.type, src.reg.idx + off)] = clock_;
+    }
+}
+
+// (A) RAW data-ready gate: max outstanding data-ready latency over a node's src VGPRs.
+// Returns 0 if all src data is ready (safe to consume), >0 if hardware would stall.
+int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
     int maxLat = 0;
     for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
         if (!srcReg.isRegister()) continue;
         for (unsigned off = 0; off < srcReg.reg.num; ++off) {
-            auto it = wmmaRegisterLatencyCounters.find(srcReg.reg.idx + off);
-            if (it != wmmaRegisterLatencyCounters.end() && it->second > maxLat) maxLat = it->second;
+            auto it = regDataReadyCounters.find(regDepKey(srcReg.reg.type, srcReg.reg.idx + off));
+            if (it != regDataReadyCounters.end() && it->second > maxLat) maxLat = it->second;
         }
     }
     return maxLat;
 }
 
-// Find the WMMA in wmmaQueue with the smallest max DS latency (most ready).
+// True if issuing \p node now would risk a co-execution hazard: while the WMMA that
+// opened the current latency window is still in flight, \p node's dest VGPRs overlap
+// that WMMA's src VGPRs, so the write could clobber a source the WMMA is still reading.
+bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
+    if (node == nullptr || activeWmmaNode_ == nullptr) return false;
+    if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
+    for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
+        if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
+        for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
+            if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
+            if (dstReg.isOverlap(srcReg)) return true;
+        }
+    }
+    return false;
+}
+
+// (B) elapse key: min over the node's operand regs (dst + src) of (clock_ - lastTouch).
+// The most-recently-touched operand binds (smallest elapse), so a node reusing a
+// just-touched reg ranks low and is deferred. Regs never touched => INT_MAX (very old).
+int CDNA5ReadyQueue::nodeElapseKey(DAGNode* node) const {
+    int minElapse = INT_MAX;
+    auto consider = [&](const StinkyRegister& r) {
+        if (!r.isRegister() || isPseudoReg(r)) return;
+        for (unsigned off = 0; off < r.reg.num; ++off) {
+            auto it = regLastTouch_.find(regDepKey(r.reg.type, r.reg.idx + off));
+            const int elapse = (it == regLastTouch_.end()) ? INT_MAX : (clock_ - it->second);
+            if (elapse < minElapse) minElapse = elapse;
+        }
+    };
+    for (const StinkyRegister& dst : node->inst->getDestRegs()) consider(dst);
+    for (const StinkyRegister& src : node->inst->getSrcRegs()) consider(src);
+    return minElapse;
+}
+
+// Best issuable node in \p queue: RAW-free nodes are preferred; when none is free
+// and \p allowHiddenStall is set, a node whose remaining src RAW wait still fits
+// under the active WMMA's latency shadow is also eligible (the wait is hidden by
+// the in-flight WMMA, so it is free to co-issue). Within the same free/hazard tier
+// the operand touched longest ago wins (largest elapse), tie broken by DAG id.
+// \p outWait (optional) receives the cycles the caller must advanceTime() before
+// issuing the returned node (0 for a RAW-free pick). Returns nullptr if none is
+// eligible.
+DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWait,
+                                       bool allowHiddenStall) const {
+    const int coIssueSpace = activeWmmaLatency_ - coIssueCyclePos_;
+    DAGNode* best = nullptr;
+    int bestElapse = INT_MIN;
+    int bestWait = 0;
+    for (DAGNode* n : queue) {  // iterates smallest-id first, so ties keep the oldest id
+        const int wait = getMaxSrcDataWait(n);
+        // Tolerate a src RAW hazard only if its wait fits the WMMA latency shadow
+        // and the dest does not clobber a live WMMA src (then the stall is free).
+        if (wait > 0 && (!allowHiddenStall || coIssueSpace <= 0 || wait > coIssueSpace ||
+                         destOverlapsActiveWmmaSrc(n)))
+            continue;
+        const int elapse = nodeElapseKey(n);
+        // Free nodes rank above hidden-stall ones; within a tier, largest elapse wins.
+        const bool nHazard = wait > 0;
+        const bool curHazard = bestWait > 0;
+        const bool better = (best == nullptr) || (!nHazard && curHazard) ||
+                            (nHazard == curHazard && elapse > bestElapse);
+        if (better) {
+            best = n;
+            bestElapse = elapse;
+            bestWait = wait;
+        }
+    }
+    if (best && outWait) *outWait = bestWait;
+    return best;
+}
+
+// Find the WMMA in wmmaQueue with the smallest max data-ready latency (most ready).
 // Returns the node and its latency. Ties broken by DAG id (program order).
 std::pair<DAGNode*, int> CDNA5ReadyQueue::findMostReadyWMMA() {
     DAGNode* best = nullptr;
     int bestLatency = INT_MAX;
     for (DAGNode* n : wmmaQueue) {
-        int lat = getMaxDsLatency(n);
+        int lat = getMaxSrcDataWait(n);
         if (lat < bestLatency || (lat == bestLatency && (!best || n->id < best->id))) {
             best = n;
             bestLatency = lat;
@@ -496,71 +628,79 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     maxDsPerWmmaWindow_ = dsReadPerWmma();
 
     globalReadCounter = 0;
+    // (A) RAW: stamp the WMMA's dest (accumulator) data-ready latency.
+    // (B) elapse: record the timeline touch for all its operands.
+    stampDataReady(*node->inst);
+    touchOperands(*node->inst);
     return node;
 }
 
-// True if issuing \p node now would risk a hazard: while the WMMA that opened the current
-// latency window is still in flight, \p node's dest VGPRs overlap that WMMA's src VGPRs, so
-// the write could clobber a source the WMMA is still reading. Applies to any writer whose
-// dest could alias the active WMMA's srcs (e.g. a ds_load dest or a VALU dest).
-bool CDNA5ReadyQueue::destOverlapsActiveWmmaSrc(DAGNode* node) const {
-    if (node == nullptr || activeWmmaNode_ == nullptr) return false;
-    // Only relevant while the WMMA latency window is still active.
-    if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
-
-    for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
-        if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
-        for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
-            if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
-            // isOverlap already requires the same register class before checking indices.
-            if (dstReg.isOverlap(srcReg)) return true;
-        }
-    }
-    return false;
-}
-
-// Pick minimum DAG id among ready non-WMMA nodes.
+// Pick among ready non-WMMA nodes, preferring genuinely RAW-free work.
 // Queues: globalReadQueue (throttled), localReadQueue, valuQueue (co-issue gated), otherQueue.
+// SALU/other and VALU picks go through pickFreeBest (elapse ordering — defers a
+// reg-overwrite behind other work). SALU/other may additionally be co-issued with a
+// hidden stall when its src RAW wait fits under the active WMMA's latency shadow; that
+// wait is returned via \p outWait so the caller advances the timeline before issuing.
+// A hidden-stall candidate never outranks a genuinely free one. When nothing qualifies,
+// these queues contribute nothing and Phase G falls back to the oldest.
 // kind: 0=global, 1=local, 2=other, 3=valu.
 bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode,
-                                                  int* kindOut) const {
+                                                  int* kindOut, int* outWait) const {
     *outNode = nullptr;
     *kindOut = -1;
+    if (outWait) *outWait = 0;
     DAGNode* best = nullptr;
     int kind = -1;
+    int bestWait = 0;
 
-    bool dsWindowOk = pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_ &&
-                      !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
+    // Free work beats a hidden-stall candidate; within a tier, smallest DAG id.
+    auto consider = [&](DAGNode* cand, int candKind, int candWait) {
+        if (!cand) return;
+        const bool candHazard = candWait > 0;
+        const bool curHazard = bestWait > 0;
+        bool take;
+        if (best == nullptr)
+            take = true;
+        else if (candHazard != curHazard)
+            take = !candHazard;
+        else
+            take = cand->id < best->id;
+        if (take) {
+            best = cand;
+            kind = candKind;
+            bestWait = candWait;
+        }
+    };
+
+    // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
+    // co-issue window; it is meaningless when no WMMA is available to issue, so it
+    // is applied only while a WMMA is pending. Otherwise ds_loads drain freely,
+    // bounded only by the real hardware limiter dsReadQueueFull().
+    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= maxDsPerWmmaWindow_;
+    bool dsWindowOk =
+        pickedDS && !dsCapReached && !dsReadQueueFull() && !destOverlapsActiveWmmaSrc(pickedDS);
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
-        best = globalReadQueue.top();
-        kind = kGlobalRead;
+        consider(globalReadQueue.top(), kGlobalRead, 0);
     }
-    if (dsWindowOk) {
-        if (!best || pickedDS->id < best->id) {
-            best = pickedDS;
-            kind = kLocalRead;
-        }
+    if (dsWindowOk) consider(pickedDS, kLocalRead, 0);
+
+    // SALU/other allows hidden stalls (see pickFreeBest); VALU stays RAW-free-only.
+    int otherWait = 0;
+    if (DAGNode* t = pickFreeBest(otherQueue, &otherWait, /*allowHiddenStall=*/true)) {
+        consider(t, kOther, otherWait);
     }
-    if (!otherQueue.empty()) {
-        DAGNode* t = otherQueue.top();
-        if (!best || t->id < best->id) {
-            best = t;
-            kind = kOther;
-        }
-    }
-    if (!valuQueue.empty() && isValuPickable() && !destOverlapsActiveWmmaSrc(valuQueue.top())) {
-        DAGNode* t = valuQueue.top();
-        if (!dsWindowOk && (!best || t->id < best->id)) {
-            best = t;
-            kind = kValu;
+    if (isValuPickable() || best == nullptr) {
+        if (DAGNode* t = pickFreeBest(valuQueue)) {
+            if (!dsWindowOk && !destOverlapsActiveWmmaSrc(t)) consider(t, kValu, 0);
         }
     }
 
     if (!best) return false;
     *outNode = best;
     *kindOut = kind;
+    if (outWait) *outWait = bestWait;
     return true;
 }
 
@@ -1060,10 +1200,13 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     if (coIssueCyclePos_ < activeWmmaLatency_) {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
-        if (smallestPickable != nullptr) {
+        int pickWait = 0;
+        if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
-                                 << smallestPickable->id << " kind=" << pickKind << "\n");
+                                 << smallestPickable->id << " kind=" << pickKind
+                                 << " wait=" << pickWait << "\n");
+            // Pay any hidden stall (hidden under the WMMA latency) before issuing.
+            if (pickWait > 0) advanceTime(pickWait);
             return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
 
@@ -1074,8 +1217,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     {
         DAGNode* smallestPickable = nullptr;
         int pickKind = -1;
-        findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind);
-        if (smallestPickable != nullptr) {
+        int pickWait = 0;
+        if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
+            // No latency shadow here, so pickWait is 0; advance kept for safety.
+            if (pickWait > 0) advanceTime(pickWait);
             return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
     }
@@ -1234,9 +1379,8 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
 
 void CDNA5ReadyQueue::onFinishBB() {
     if (!currentBB_ || !getAnalysisCache()) return;
-    getAnalysisCache()->store(currentBB_,
-                              {0, wmmaRegisterLatencyCounters, globalReadInflight_.size(),
-                               globalReadInflight_.maxResidual()});
+    getAnalysisCache()->store(currentBB_, {0, regDataReadyCounters, globalReadInflight_.size(),
+                                           globalReadInflight_.maxResidual()});
 }
 
 // Per scheduling region. Rule (4): per-WMMA-window DS cap (computed in pickOneFromWMMA).
@@ -1247,6 +1391,12 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     wmmaIssuedCountThisRegion_ = 0;
     dsInsertedSinceLastWmma_ = 0;
     lastPickedNode_ = nullptr;
+    // (B) elapse ordering state is per-region: reset the touch map and clock so a new
+    // region starts with all regs "very old" (no spurious deferrals from a prior region).
+    regLastTouch_.clear();
+    clock_ = 0;
+    // Clear per-region node ptr; it dangles into the previous region's freed DAGNodeList.
+    activeWmmaNode_ = nullptr;
     if (getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false) return;
 
     const Loop* loop = getLoop();
@@ -1254,8 +1404,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                   loop->headerBB == blockBegin->getParent() &&
                                   regionStart != blockBegin;
 
-    seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, wmmaRegisterLatencyCounters,
-                                crossBBDsResiduals_);
+    seedWmmaDsLatencyFromPrefix(blockBegin, regionStart, regDataReadyCounters, crossBBDsResiduals_);
 
     wmmaIssueConfig.issuedCount = 0;
     hasWMMAInRegion_ = false;
