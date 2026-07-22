@@ -443,7 +443,7 @@ def _make_max_vgpr_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, s
             "MaxWavesPerSimd": 8 if arch_acc_unified else 10,
             "DeviceLDS": 163840,
         },
-        regCaps={"MaxVgpr": 256, "PhysicalMaxSgpr": 800},
+        regCaps={"MaxVgpr": 256, "PhysicalMaxVgpr": 512, "PhysicalMaxSgpr": 800},
         doubleVgpr=arch_acc_unified,
     )
     kw.vgprPool = _MockPool(vgpr_size)
