@@ -247,7 +247,6 @@ public:
         return set_mean(std::move(mean)).set_inv_variance(std::move(invVariance));
     }
 
-public:
     /**
      * @brief Custom equality hook for layer-norm-backward-specific attributes
      *

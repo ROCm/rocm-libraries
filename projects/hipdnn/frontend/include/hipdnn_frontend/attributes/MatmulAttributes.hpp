@@ -113,12 +113,12 @@ public:
     {
         return setOutput(OutputNames::C, std::move(value));
     }
-    // NOLINTNEXTLINE(readability-identifier-naming)
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     bool logicallyEqualsImpl([[maybe_unused]] const MatmulAttributes& other) const
     {
         return true;
     }
-    // NOLINTNEXTLINE(readability-identifier-naming)
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     bool strictEqualsImpl([[maybe_unused]] const MatmulAttributes& other) const
     {
         return true;
