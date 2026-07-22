@@ -40,7 +40,13 @@ void expectGraphNotSupported(fe::graph::Graph& graph)
 // Mirrors samples/cudnn_shim/ConvFprop.cpp.
 TEST(TestCudnnShimGraphNodes, ConvFpropValidGraphValidates)
 {
-    const int64_t n = 16, c = 128, h = 64, w = 64, k = 256, r = 1, s = 1;
+    const int64_t n = 16;
+    const int64_t c = 128;
+    const int64_t h = 64;
+    const int64_t w = 64;
+    const int64_t k = 256;
+    const int64_t r = 1;
+    const int64_t s = 1;
 
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
@@ -70,7 +76,10 @@ TEST(TestCudnnShimGraphNodes, ConvFpropValidGraphValidates)
 // Mirrors samples/cudnn_shim/Matmul.cpp.
 TEST(TestCudnnShimGraphNodes, MatmulValidGraphValidates)
 {
-    const int64_t b = 4, m = 64, n = 32, k = 128;
+    const int64_t b = 4;
+    const int64_t m = 64;
+    const int64_t n = 32;
+    const int64_t k = 128;
 
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
@@ -96,7 +105,9 @@ TEST(TestCudnnShimGraphNodes, MatmulValidGraphValidates)
 // Mirrors samples/cudnn_shim/Layernorm.cpp (a norm node).
 TEST(TestCudnnShimGraphNodes, LayernormValidGraphValidates)
 {
-    const int64_t b = 4, s = 1024, d = 128;
+    const int64_t b = 4;
+    const int64_t s = 1024;
+    const int64_t d = 128;
 
     fe::graph::Graph graph;
     graph.set_io_data_type(fe::DataType_t::BFLOAT16)
