@@ -8,7 +8,9 @@
 #include <vector>
 
 #include "common.hpp"
+#include "origami/nn/features/gemm_embedding_similarity.hpp"
 #include "origami/nn/features/gemm_tilewright.hpp"
+#include "origami/nn/esrec/loaded_model.hpp"
 #include "origami/nn/filter.hpp"
 #include "origami/nn/nn.hpp"
 #include "origami/origami.hpp"
@@ -262,6 +264,123 @@ TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
   REQUIRE_FALSE(routed_results.empty());
   REQUIRE_FALSE(forced_results.empty());
   REQUIRE(std::isfinite(forced_results.front().latency));
+}
+
+TEST_CASE("NN: load ESREC embedding manifest", "[nn][embedding_similarity]") {
+#ifndef ORIGAMI_TEST_ES_WEIGHTS_DIR
+#  define ORIGAMI_TEST_ES_WEIGHTS_DIR ""
+#endif
+#ifndef ORIGAMI_TEST_ES_MANIFEST
+#  define ORIGAMI_TEST_ES_MANIFEST ""
+#endif
+
+  const std::string weights_dir = ORIGAMI_TEST_ES_WEIGHTS_DIR;
+  const std::string manifest    = ORIGAMI_TEST_ES_MANIFEST;
+  if (weights_dir.empty() || manifest.empty()) {
+    SUCCEED("embedding weights paths not configured; skipping.");
+    return;
+  }
+
+  const std::string manifest_path = weights_dir + "/" + manifest;
+  const origami::nn::model_handle_t handle = origami::nn::load_model(manifest_path);
+  REQUIRE(handle >= 0);
+
+  const origami::nn::model_info_t* info = origami::nn::model_info(handle);
+  REQUIRE(info != nullptr);
+  REQUIRE(info->backend == origami::nn::backend_id_t::embedding_similarity_v1);
+  REQUIRE(info->arch == "gfx950");
+  REQUIRE(info->features.query_dim == 141);
+  REQUIRE(info->features.item_dim == 128);
+}
+
+TEST_CASE("NN: gemm_embedding_similarity feature dimensions", "[nn][embedding_similarity]") {
+#ifndef ORIGAMI_TEST_ES_WEIGHTS_DIR
+#  define ORIGAMI_TEST_ES_WEIGHTS_DIR ""
+#endif
+#ifndef ORIGAMI_TEST_ES_MANIFEST
+#  define ORIGAMI_TEST_ES_MANIFEST ""
+#endif
+
+  const std::string weights_dir = ORIGAMI_TEST_ES_WEIGHTS_DIR;
+  const std::string manifest    = ORIGAMI_TEST_ES_MANIFEST;
+  if (weights_dir.empty() || manifest.empty()) {
+    SUCCEED("embedding weights paths not configured; skipping.");
+    return;
+  }
+
+  const origami::nn::model_handle_t handle =
+      origami::nn::load_model(weights_dir + "/" + manifest);
+  REQUIRE(handle >= 0);
+  const origami::nn::model_info_t* info = origami::nn::model_info(handle);
+  REQUIRE(info != nullptr);
+
+  const auto hardware = make_hardware(950);
+  auto problem =
+      make_problem(1024, 2048, 4096, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::BFloat16;
+
+  origami::nn::esrec::detail::HardwareConstants hw;
+  hw.dtype_size = 2.0f;
+
+  std::vector<float> features(info->features.query_dim);
+  origami::nn::features::gemm_embedding_similarity::build_query(
+      problem, hw, false, features.data(), features.size());
+  for (float v : features) {
+    REQUIRE(std::isfinite(v));
+  }
+}
+
+TEST_CASE("NN: rank_configs inference=nn ranks with loaded ES model", "[nn][embedding_similarity]") {
+#ifndef ORIGAMI_TEST_ES_WEIGHTS_DIR
+#  define ORIGAMI_TEST_ES_WEIGHTS_DIR ""
+#endif
+#ifndef ORIGAMI_TEST_ES_MANIFEST
+#  define ORIGAMI_TEST_ES_MANIFEST ""
+#endif
+
+  const std::string weights_dir = ORIGAMI_TEST_ES_WEIGHTS_DIR;
+  const std::string manifest    = ORIGAMI_TEST_ES_MANIFEST;
+  if (weights_dir.empty() || manifest.empty()) {
+    SUCCEED("embedding weights paths not configured; skipping.");
+    return;
+  }
+
+  const origami::nn::model_handle_t handle =
+      origami::nn::load_model(weights_dir + "/" + manifest);
+  REQUIRE(handle >= 0);
+
+  origami::nn::library_models_t models;
+  models.embedding_similarity = handle;
+
+  const auto hardware = make_hardware(950);
+  auto problem =
+      make_problem(1024, 2048, 4096, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::BFloat16;
+  problem.c_dtype = origami::data_type_t::BFloat16;
+  problem.d_dtype = origami::data_type_t::BFloat16;
+  problem.mi_dtype = origami::data_type_t::BFloat16;
+
+  origami::config_t cfg0 = make_config(128, 128, 32);
+  cfg0.index             = 0;
+  origami::config_t cfg1 = make_config(256, 256, 64);
+  cfg1.index             = 1;
+  std::vector<origami::config_t> configs = {cfg0, cfg1};
+
+  origami::rank_options_t options;
+  options.inference      = origami::inference_mode_t::nn;
+  options.nn_backend     = origami::nn_backend_t::embedding_similarity;
+  options.library_models = &models;
+
+  const auto results = origami::rank_configs(problem, hardware, configs, options);
+  REQUIRE_FALSE(results.empty());
+
+  bool any_scored = false;
+  for (const auto& r : results) {
+    if (std::isfinite(r.latency)) any_scored = true;
+  }
+  REQUIRE(any_scored);
 }
 
 #else

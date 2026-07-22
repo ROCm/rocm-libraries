@@ -96,6 +96,7 @@ if(ORIGAMI_ENABLE_NN)
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/filter.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_embedding_similarity.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_tilewright.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/nn.hpp"
     )
@@ -128,10 +129,15 @@ if(ORIGAMI_ENABLE_NN)
     target_sources(
         origami
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/filter.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_embedding_similarity.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_tilewright.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/types.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/encoder.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/esrec_loader.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/fallback.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/esrec/rank.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/b64_decode.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/load_validate.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/twrec_loader.cpp"

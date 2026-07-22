@@ -4,6 +4,7 @@
 #include "origami/nn/detail/recommender.hpp"
 
 #include "origami/nn/detail/model_store.hpp"
+#include "origami/nn/esrec/rank.hpp"
 #include "origami/nn/nn.hpp"
 #include "origami/nn/twrec/rank.hpp"
 
@@ -30,6 +31,32 @@ bool any_scored(const std::vector<prediction_result_t>& results) {
   return false;
 }
 
+std::vector<prediction_result_t> tw_results_to_predictions(
+    const std::vector<twrec::rank_entry_t>& tw_results,
+    const std::vector<config_t>& configs) {
+  const double kNaN = std::numeric_limits<double>::quiet_NaN();
+  std::vector<prediction_result_t> results;
+  results.reserve(tw_results.size());
+  for (const twrec::rank_entry_t& r : tw_results) {
+    const double latency = r.scored ? -r.score : kNaN;
+    results.push_back(prediction_result_t{latency, configs[r.config_index]});
+  }
+  return results;
+}
+
+std::vector<prediction_result_t> es_results_to_predictions(
+    const std::vector<esrec::rank_entry_t>& es_results,
+    const std::vector<config_t>& configs) {
+  const double kNaN = std::numeric_limits<double>::quiet_NaN();
+  std::vector<prediction_result_t> results;
+  results.reserve(es_results.size());
+  for (const esrec::rank_entry_t& r : es_results) {
+    const double latency = r.scored ? -r.score : kNaN;
+    results.push_back(prediction_result_t{latency, configs[r.config_index]});
+  }
+  return results;
+}
+
 class TilewrightRecommender final : public IRecommender {
  public:
   explicit TilewrightRecommender(model_handle_t handle) : handle_(handle) {}
@@ -47,20 +74,37 @@ class TilewrightRecommender final : public IRecommender {
                                         const hardware_t& hardware,
                                         const std::vector<config_t>& configs,
                                         const inference_options_t& options) override {
-    const twrec::detail::LoadedModel* model = model_payload(handle_);
+    const twrec::detail::LoadedModel* model = twrec_model_payload(handle_);
     if (model == nullptr) return {};
+    return tw_results_to_predictions(
+        twrec::rank_configs(*model, problem, hardware, configs, options), configs);
+  }
 
-    const std::vector<twrec::rank_entry_t> tw_results =
-        twrec::rank_configs(*model, problem, hardware, configs, options);
+ private:
+  model_handle_t handle_;
+};
 
-    const double kNaN = std::numeric_limits<double>::quiet_NaN();
-    std::vector<prediction_result_t> results;
-    results.reserve(tw_results.size());
-    for (const twrec::rank_entry_t& r : tw_results) {
-      const double latency = r.scored ? -r.score : kNaN;
-      results.push_back(prediction_result_t{latency, configs[r.config_index]});
+class EmbeddingSimilarityRecommender final : public IRecommender {
+ public:
+  explicit EmbeddingSimilarityRecommender(model_handle_t handle) : handle_(handle) {}
+
+  model_info_t info() const override {
+    if (const model_info_t* registered = nn::model_info(handle_)) {
+      return *registered;
     }
-    return results;
+    model_info_t fallback;
+    fallback.backend = backend_id_t::embedding_similarity_v1;
+    return fallback;
+  }
+
+  std::vector<prediction_result_t> rank(const problem_t& problem,
+                                        const hardware_t& hardware,
+                                        const std::vector<config_t>& configs,
+                                        const inference_options_t& options) override {
+    const esrec::detail::LoadedModel* model = esrec_model_payload(handle_);
+    if (model == nullptr) return {};
+    return es_results_to_predictions(
+        esrec::rank_configs(*model, problem, hardware, configs, options), configs);
   }
 
  private:
@@ -78,14 +122,23 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
   if (handle < 0) return std::nullopt;
 
   const model_info_t* info = nn::model_info(handle);
-  if (info == nullptr || info->backend != backend_id_t::tilewright_v1) {
-    return std::nullopt;
+  if (info == nullptr) return std::nullopt;
+
+  if (info->backend == backend_id_t::tilewright_v1) {
+    TilewrightRecommender recommender(handle);
+    auto results = recommender.rank(problem, hardware, configs, options);
+    if (!any_scored(results)) return std::nullopt;
+    return results;
   }
 
-  TilewrightRecommender recommender(handle);
-  auto results = recommender.rank(problem, hardware, configs, options);
-  if (!any_scored(results)) return std::nullopt;
-  return results;
+  if (info->backend == backend_id_t::embedding_similarity_v1) {
+    EmbeddingSimilarityRecommender recommender(handle);
+    auto results = recommender.rank(problem, hardware, configs, options);
+    if (!any_scored(results)) return std::nullopt;
+    return results;
+  }
+
+  return std::nullopt;
 }
 
 model_handle_t resolve_model_handle(const rank_options_t& options) {

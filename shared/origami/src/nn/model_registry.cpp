@@ -4,7 +4,9 @@
 #include "origami/nn/nn.hpp"
 
 #include "origami/nn/detail/model_store.hpp"
+#include "origami/nn/features/gemm_embedding_similarity.hpp"
 #include "origami/nn/features/gemm_tilewright.hpp"
+#include "origami/nn/esrec/esrec_loader.hpp"
 #include "origami/nn/twrec/twrec_loader.hpp"
 
 #include <cstdio>
@@ -20,8 +22,14 @@
 namespace origami::nn {
 namespace {
 
+struct StoredModel {
+  backend_id_t backend = backend_id_t::tilewright_v1;
+  std::unique_ptr<twrec::detail::LoadedModel> twrec;
+  std::unique_ptr<esrec::detail::LoadedModel> esrec;
+};
+
 std::mutex g_mutex;
-std::vector<std::unique_ptr<twrec::detail::LoadedModel>> g_models;
+std::vector<StoredModel> g_models;
 std::unordered_map<std::string, model_handle_t> g_path_to_handle;
 std::unordered_map<model_handle_t, model_info_t> g_infos;
 model_handle_t g_default_tilewright = invalid_handle;
@@ -34,7 +42,13 @@ bool ends_with(const std::string& value, const std::string& suffix) {
          value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-bool is_yaml_manifest(const std::string& path) { return ends_with(path, ".tilewright.yaml"); }
+bool is_tilewright_manifest(const std::string& path) {
+  return ends_with(path, ".tilewright.yaml");
+}
+
+bool is_esrec_manifest(const std::string& path) {
+  return ends_with(path, ".embedding.yaml");
+}
 
 const char* backend_name(backend_id_t backend) {
   switch (backend) {
@@ -70,29 +84,46 @@ model_info_t make_tilewright_info(const twrec::detail::LoadedModel& model) {
   return info;
 }
 
-void print_load_diag(model_handle_t handle,
-                     const std::string& path,
-                     const twrec::detail::LoadedModel& model) {
-  if (std::getenv("ORIGAMI_NN_DIAG") == nullptr) {
-    return;
+model_info_t make_esrec_info(const esrec::detail::LoadedModel& model) {
+  model_info_t info;
+  info.backend                     = backend_id_t::embedding_similarity_v1;
+  info.arch                        = model.arch;
+  info.features.catalog_id         = features::gemm_embedding_similarity::catalog_id;
+  info.features.feature_names_hash = features::gemm_embedding_similarity::feature_names_hash;
+  info.features.query_dim          = model.input_dim;
+  info.features.item_dim           = model.embed_dim;
+  info.features.interaction_dim    = 0;
+  info.n_cells                     = static_cast<std::uint32_t>(model.centroids.size());
+  info.n_splits                    = 0;
+  return info;
+}
+
+model_handle_t register_model(backend_id_t backend,
+                              const std::string& path,
+                              std::unique_ptr<twrec::detail::LoadedModel> twrec,
+                              std::unique_ptr<esrec::detail::LoadedModel> esrec) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const auto it = g_path_to_handle.find(path);
+  if (it != g_path_to_handle.end()) return it->second;
+
+  const model_handle_t handle = static_cast<model_handle_t>(g_models.size());
+  StoredModel entry;
+  entry.backend = backend;
+  entry.twrec   = std::move(twrec);
+  entry.esrec   = std::move(esrec);
+  g_models.push_back(std::move(entry));
+  g_path_to_handle[path] = handle;
+
+  if (backend == backend_id_t::tilewright_v1) {
+    g_infos[handle] = make_tilewright_info(*g_models[static_cast<std::size_t>(handle)].twrec);
+  } else {
+    g_infos[handle] = make_esrec_info(*g_models[static_cast<std::size_t>(handle)].esrec);
   }
-  std::fprintf(stderr,
-               "[ORIGAMI_NN_DIAG] handle=%d path=%s arch=%s qhash=%s qdim=%u idim=%u xdim=%u "
-               "n_cells=%zu n_splits=%zu\n",
-               handle,
-               path.c_str(),
-               model.arch.c_str(),
-               model.feature_names_hash.c_str(),
-               model.q_dim,
-               model.i_dim,
-               model.x_dim,
-               model.cells.size(),
-               model.splits.size());
-  std::fflush(stderr);
+  return handle;
 }
 
 model_handle_t load_tilewright_manifest(const std::string& path) {
-  if (!is_yaml_manifest(path)) return invalid_handle;
+  if (!is_tilewright_manifest(path)) return invalid_handle;
 
   {
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -102,18 +133,21 @@ model_handle_t load_tilewright_manifest(const std::string& path) {
 
   auto model = std::make_unique<twrec::detail::LoadedModel>();
   if (!twrec::load_twrec_yaml(path, model.get())) return invalid_handle;
+  return register_model(backend_id_t::tilewright_v1, path, std::move(model), nullptr);
+}
 
-  std::lock_guard<std::mutex> lock(g_mutex);
-  const auto it = g_path_to_handle.find(path);
-  if (it != g_path_to_handle.end()) return it->second;
+model_handle_t load_esrec_manifest(const std::string& path) {
+  if (!is_esrec_manifest(path)) return invalid_handle;
 
-  const model_handle_t handle = static_cast<model_handle_t>(g_models.size());
-  g_models.push_back(std::move(model));
-  g_path_to_handle[path] = handle;
-  const model_info_t info = make_tilewright_info(*g_models[static_cast<std::size_t>(handle)]);
-  g_infos[handle]         = info;
-  print_load_diag(handle, path, *g_models[static_cast<std::size_t>(handle)]);
-  return handle;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto it = g_path_to_handle.find(path);
+    if (it != g_path_to_handle.end()) return it->second;
+  }
+
+  auto model = std::make_unique<esrec::detail::LoadedModel>();
+  if (!esrec::load_esrec_yaml(path, model.get())) return invalid_handle;
+  return register_model(backend_id_t::embedding_similarity_v1, path, nullptr, std::move(model));
 }
 
 model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
@@ -144,7 +178,7 @@ model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
     if (backend == backend_id_t::tilewright_v1) {
       return load_tilewright_manifest(dir + "/" + weights_file);
     }
-    return invalid_handle;
+    return load_esrec_manifest(dir + "/" + weights_file);
   }
 
   return invalid_handle;
@@ -154,8 +188,10 @@ model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
 
 model_handle_t load_model(const std::string& path) {
   if (const char* override_path = std::getenv("ORIGAMI_NN_WEIGHTS")) {
+    if (is_esrec_manifest(override_path)) return load_esrec_manifest(override_path);
     return load_tilewright_manifest(override_path);
   }
+  if (is_esrec_manifest(path)) return load_esrec_manifest(path);
   return load_tilewright_manifest(path);
 }
 
@@ -170,6 +206,8 @@ library_models_t load_models_for_logic(const std::string& logic_stem,
   library_models_t models;
   models.tilewright =
       load_from_origami_nn_index(logic_stem, backend_id_t::tilewright_v1, hint_dir);
+  models.embedding_similarity =
+      load_from_origami_nn_index(logic_stem, backend_id_t::embedding_similarity_v1, hint_dir);
   return models;
 }
 
@@ -187,7 +225,8 @@ void unload_model(model_handle_t handle) {
   }
 
   if (idx < g_models.size()) {
-    g_models[idx].reset();
+    g_models[idx].twrec.reset();
+    g_models[idx].esrec.reset();
   }
 
   g_infos.erase(handle);
@@ -228,12 +267,24 @@ model_handle_t default_model(backend_id_t backend) {
 
 namespace detail {
 
-const twrec::detail::LoadedModel* model_payload(model_handle_t handle) {
+const twrec::detail::LoadedModel* twrec_model_payload(model_handle_t handle) {
   if (handle < 0) return nullptr;
   std::lock_guard<std::mutex> lock(g_mutex);
   const auto idx = static_cast<std::size_t>(handle);
-  if (idx >= g_models.size() || g_models[idx] == nullptr) return nullptr;
-  return g_models[idx].get();
+  if (idx >= g_models.size() || g_models[idx].twrec == nullptr) return nullptr;
+  return g_models[idx].twrec.get();
+}
+
+const esrec::detail::LoadedModel* esrec_model_payload(model_handle_t handle) {
+  if (handle < 0) return nullptr;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const auto idx = static_cast<std::size_t>(handle);
+  if (idx >= g_models.size() || g_models[idx].esrec == nullptr) return nullptr;
+  return g_models[idx].esrec.get();
+}
+
+const twrec::detail::LoadedModel* model_payload(model_handle_t handle) {
+  return twrec_model_payload(handle);
 }
 
 }  // namespace detail
