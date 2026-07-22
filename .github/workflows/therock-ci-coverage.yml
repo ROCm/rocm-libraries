@@ -109,6 +109,7 @@ jobs:
             -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
             -D${{ inputs.project_name }}_ENABLE_COVERAGE=ON
             -DLLVM_TOOLS_SEARCH_PREFIX=${{ github.workspace }}/TheRock/build-coverage/dist/rocm/lib/llvm
+            -DCOMPILER_RT_BUILD_PROFILE_ROCM=ON
             ${{ inputs.cmake_options }}
           BUILD_DIR: build-coverage
         run: |
