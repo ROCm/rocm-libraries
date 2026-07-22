@@ -10,7 +10,6 @@
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
-#include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 namespace test_matmul_common
 {
@@ -112,104 +111,6 @@ inline std::vector<int64_t> generateInputStrideOrder(const std::vector<int64_t>&
         strides[rank - 2] = 1;
     }
     return strides;
-}
-
-inline std::vector<MatmulTestCase> getMatmulTestCases()
-{
-    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
-
-    return {
-        // Basic
-        {{16, 32}, {32, 128}, false, false, seed},
-        // Transpose A matrix
-        {{16, 32}, {32, 128}, true, false, seed},
-        // Transpose B matrix
-        {{16, 32}, {32, 128}, false, true, seed},
-        // Transpose both matrices
-        {{16, 32}, {32, 128}, true, true, seed},
-
-        // Basic
-        {{1, 16, 32}, {1, 32, 128}, false, false, seed},
-        // Not unit batch
-        {{3, 16, 32}, {3, 32, 128}, false, false, seed},
-        // Broadcasted A batch
-        {{1, 16, 32}, {3, 32, 128}, false, false, seed},
-        // Broadcasted B batch
-        {{3, 16, 32}, {1, 32, 128}, false, false, seed},
-        // Transpose A matrix (matching batch)
-        {{3, 16, 32}, {3, 32, 128}, true, false, seed},
-        // Broadcasted A batch
-        {{1, 16, 32}, {3, 32, 128}, true, false, seed},
-        // Broadcasted B batch
-        {{3, 16, 32}, {1, 32, 128}, true, false, seed},
-        // Transpose B matrix (matching batch)
-        {{3, 16, 32}, {3, 32, 128}, false, true, seed},
-        // Broadcasted A batch
-        {{1, 16, 32}, {3, 32, 128}, false, true, seed},
-        // Broadcasted B batch
-        {{3, 16, 32}, {1, 32, 128}, false, true, seed},
-        // Transpose both matrices (matching batch)
-        {{3, 16, 32}, {3, 32, 128}, true, true, seed},
-        // Broadcasted A batch
-        {{1, 16, 32}, {3, 32, 128}, true, true, seed},
-        // Broadcasted B batch
-        {{3, 16, 32}, {1, 32, 128}, true, true, seed},
-
-        // Basic single batch
-        {{1, 1, 16, 32}, {1, 1, 32, 128}, false, false, seed},
-        // Matching batch
-        {{2, 3, 16, 32}, {2, 3, 32, 128}, false, false, seed},
-        // Broadcasted A batch
-        {{1, 1, 16, 32}, {2, 3, 32, 128}, false, false, seed},
-        // Broadcasted B batch
-        {{2, 3, 16, 32}, {1, 1, 32, 128}, false, false, seed},
-        // Transpose A matrix (matching batch)
-        {{2, 3, 16, 32}, {2, 3, 32, 128}, true, false, seed},
-        // Broadcasted A batch
-        {{1, 1, 16, 32}, {2, 3, 32, 128}, true, false, seed},
-        // Broadcasted B batch
-        {{2, 3, 16, 32}, {1, 1, 32, 128}, true, false, seed},
-        // Transpose B matrix (matching batch)
-        {{2, 3, 16, 32}, {2, 3, 32, 128}, false, true, seed},
-        // Broadcasted A batch
-        {{1, 1, 16, 32}, {2, 3, 32, 128}, false, true, seed},
-        // Broadcasted B batch
-        {{2, 3, 16, 32}, {1, 1, 32, 128}, false, true, seed},
-        // Transpose both matrices (matching batch)
-        {{2, 3, 16, 32}, {2, 3, 32, 128}, true, true, seed},
-        // Broadcasted A batch
-        {{1, 1, 16, 32}, {2, 3, 32, 128}, true, true, seed},
-        // Broadcasted B batch
-        {{2, 3, 16, 32}, {1, 1, 32, 128}, true, true, seed},
-    };
-}
-
-inline std::vector<MatmulTestCase> getMatmulBiasActivTestCases()
-{
-    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
-
-    return {
-        // Not unit batch
-        {{3, 16, 32}, {3, 32, 128}, false, false, seed},
-        // Transpose A matrix (matching batch)
-        {{3, 16, 32}, {3, 32, 128}, true, false, seed},
-        // Transpose B matrix (matching batch)
-        {{3, 16, 32}, {3, 32, 128}, false, true, seed},
-        // Transpose both matrices (matching batch)
-        {{3, 16, 32}, {3, 32, 128}, true, true, seed},
-
-        // Broadcasted A batch
-        {{1, 1, 16, 32}, {2, 3, 32, 128}, false, false, seed},
-        // Broadcasted B batch
-        {{2, 3, 16, 32}, {1, 1, 32, 128}, false, false, seed},
-
-        // Transpose A matrix (matching batch) + Broadcasted A batch
-        {{1, 1, 16, 32}, {2, 3, 32, 128}, true, false, seed},
-        // Transpose B matrix (matching batch) + Broadcasted A batch
-        {{1, 1, 16, 32}, {2, 3, 32, 128}, false, true, seed},
-        // Transpose both matrices (matching batch) + Broadcasted B batch
-        {{2, 3, 16, 32}, {1, 1, 32, 128}, true, true, seed},
-    };
 }
 
 } // namespace test_matmul_common

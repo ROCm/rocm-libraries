@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -261,9 +261,12 @@ namespace
                 throw std::runtime_error("failed to create random valid flags");
             return tmp;
         }
-        while(flags_are_valid_for_hipfftw(tmp))
-            tmp = flags_rng(get_pseudo_rng());
-        return tmp;
+        else
+        {
+            while(flags_are_valid_for_hipfftw(tmp))
+                tmp = flags_rng(get_pseudo_rng());
+            return tmp;
+        }
     }
 
     size_t get_random_idx(size_t upper_bound)

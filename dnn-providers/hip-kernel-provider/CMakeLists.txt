@@ -15,6 +15,12 @@ dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
+# shared/ctest is only present in a full rocm-libraries checkout; guard the check at the
+# point of use so standalone / sparse checkouts that lack shared/ctest still build.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -148,11 +154,7 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
-    # Defer the Python rocKE CI tests (import smoke + golden): their test-artifact
-    # packaging (rocke package + scripts + golden JSON) is not yet wired into
-    # TheRock's hipkernelprovider artifact includes, so staging them here would
-    # fail CI. The C++ smoke tests stay enabled; re-enable once packaging lands.
-    set(ROCKE_INSTALL_PYTHON_TESTS OFF)
+
     # Route rocke-client test targets into hip-kernel-provider's test bucket so
     # they appear in install_provider_ctest_files("hip_kernel_provider") output.
     # Without this, _add_test_target_internal uses rocke-client's own PROJECT_NAME

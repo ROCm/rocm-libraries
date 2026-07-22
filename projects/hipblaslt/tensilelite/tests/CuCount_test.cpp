@@ -532,6 +532,10 @@ TEST_P(StreamK5AutoOrigamiTest, ResolvesViaOrigamiAndHostPack)
     StreamK5AnalyticalEnv env;
     auto                  problem = makeGemmProblem(param.m, param.n, 64);
     problem.setParams().setStreamKTileSchedulingMode(2);
+    // A non-zero smCountTarget signals a cotenant sharing the device, which is
+    // required for the tiles-per-cu heuristic to engage (see the cotenant gate
+    // in origami::streamk::select_hybrid_mode).
+    problem.setParams().setSmCountTarget(128);
 
     EXPECT_EQ(env.solution.streamK5EffectiveDynamic(problem, env.device), param.expectDynamic)
         << "StreamK=5 AUTO " << param.suffix;
@@ -546,8 +550,8 @@ INSTANTIATE_TEST_SUITE_P(
     StreamK5HybridModeTest,
     StreamK5AutoOrigamiTest,
     ::testing::Values(
-        StreamK5AutoOrigamiParam{2560, 2560, false, "LowTilesPerCu"},
-        StreamK5AutoOrigamiParam{4096, 4096, true, "HighTilesPerCu"}),
+        StreamK5AutoOrigamiParam{2560, 2560, false, "BelowMinTilesGate"},
+        StreamK5AutoOrigamiParam{4096, 4096, true, "AboveMinTilesGate"}),
     [](::testing::TestParamInfo<StreamK5AutoOrigamiParam> const& info) {
         return info.param.suffix;
     });
@@ -588,6 +592,72 @@ TEST(StreamK5HybridModeTest, OffWithSmCountTargetEngagesHeuristic)
 }
 
 // smCountTarget heuristic threshold behavior is covered by origami/tests/test_streamk.cpp.
+
+// Guards the smCountTarget() -> origami_problem.num_cus wiring through the
+// ContractionSolution path, on both outputs it feeds: getSKReduction (reduction
+// strategy) and getSKGrid (grid size).
+TEST(StreamKSmCountTargetTest, SmCountTargetChangesReductionAndGrid)
+{
+    // streamK=3 on the gfx950 analytical device (256 CUs), k_split_aware selector.
+    StreamK5AnalyticalEnv env;
+    env.solution.sizeMapping.streamK = 3;
+    env.device.skDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+
+    // Make smCountTarget the sole grid budget source (AMDGPU defaults, explicit).
+    env.device.skFixedGrid      = 0;
+    env.device.skMaxCUs         = 0;
+    env.device.skGridMultiplier = 1;
+
+    // Scenario 1 - reduction: select_reduction picks parallel when tiles <=
+    // cu_count/4. 512x512 => 16 tiles fits at 256 CUs (16<=64) but not at 32
+    // (16>8), so the strategy flips parallel -> tree.
+    {
+        auto problem = makeGemmProblem(512, 512, 8192);
+
+        problem.setParams().setSmCountTarget(0);  // use all device CUs (256)
+        const auto reductionAllCUs = env.solution.getSKReduction(problem, env.device);
+
+        problem.setParams().setSmCountTarget(32);  // tight CU budget
+        const auto reductionCapped = env.solution.getSKReduction(problem, env.device);
+
+        EXPECT_EQ(reductionAllCUs, origami::reduction_t::parallel)
+            << "[reduction] With all 256 CUs, 16 tiles fit the parallel-reduction window";
+        EXPECT_EQ(reductionCapped, origami::reduction_t::tree)
+            << "[reduction] With smCountTarget=32, 16 tiles exceed cu_count/4, so tree";
+        EXPECT_NE(reductionAllCUs, reductionCapped)
+            << "[reduction] smCountTarget() must flow through to change the predicted reduction";
+    }
+
+    // Scenario 2 - grid size: getSKGrid folds smCountTarget into num_cus and
+    // select_grid_size (k_split_aware) sizes the grid to the usable CU count.
+    // 4096x4096 => 1024 tiles > CUs, so grid ~= cu_count: 256 at all CUs, 64 at
+    // smCountTarget=64.
+    {
+        auto problem = makeGemmProblem(4096, 4096, 8192);
+
+        const size_t tiles = problem.getNumTiles(env.solution.sizeMapping, 1);
+        ASSERT_EQ(tiles, 1024u) << "[grid] 128x128 tiles over 4096x4096 => 32*32 = 1024";
+
+        problem.setParams().setSmCountTarget(0); // use all device CUs (256)
+        const auto   reductionAllCUs = env.solution.getSKReduction(problem, env.device);
+        const size_t gridAllCUs
+            = env.solution.getSKGrid(problem, env.device, tiles, reductionAllCUs);
+
+        problem.setParams().setSmCountTarget(64); // tight CU budget
+        const auto   reductionCapped = env.solution.getSKReduction(problem, env.device);
+        const size_t gridCapped
+            = env.solution.getSKGrid(problem, env.device, tiles, reductionCapped);
+
+        EXPECT_EQ(gridAllCUs, 256u)
+            << "[grid] With all 256 CUs, k_split_aware distributes 1024 tiles onto 256 CUs";
+        EXPECT_EQ(gridCapped, 64u)
+            << "[grid] smCountTarget=64 folds into num_cus and caps the grid at 64";
+        EXPECT_LT(gridCapped, gridAllCUs)
+            << "[grid] A tighter CU budget must shrink the predicted grid";
+        EXPECT_NE(gridAllCUs, gridCapped)
+            << "[grid] smCountTarget() must flow through to change the predicted StreamK grid";
+    }
+}
 
 // ===========================================================================
 // SK5 workspace sizing regression tests

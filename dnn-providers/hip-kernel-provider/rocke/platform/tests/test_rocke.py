@@ -20,6 +20,7 @@ IR/lowering pipeline only. End-to-end runtime tests live in
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch, Mock
 
 import pytest
 
@@ -82,13 +83,6 @@ from rocke.instances import (
 # A handful of tests below exercise torch-facing features (the torch.fx
 # fusion planner, torch-eager validation baselines) and are skipped when
 # torch is absent — torch-full CI lanes still run them.
-#
-# A separate handful drive the lowerer all the way through
-# ``hipModuleLoadData``, which blocks indefinitely on a host with no ROCm
-# GPU (no ``/dev/kfd`` or ``/dev/dxg``). Those are skipped when no GPU device
-# node is present. The probe is deliberately torch-free (the point of this
-# suite is torch-independence) and avoids issuing any HIP call that could
-# itself hang.
 
 try:  # torch is optional; gate torch-facing tests on its presence.
     import torch as _torch  # noqa: F401
@@ -97,19 +91,7 @@ try:  # torch is optional; gate torch-facing tests on its presence.
 except Exception:  # pragma: no cover - depends on the environment
     _HAVE_TORCH = False
 
-import os as _os
-
-# A ROCm GPU exposes a device node the runtime can open: /dev/kfd on native
-# Linux, or /dev/dxg under WSL, where ROCm reaches the GPU through the DXG
-# bridge. Absence of both means launches/module loads cannot succeed and would
-# hang; skip then.
-_HAVE_GPU = _os.path.exists("/dev/kfd") or _os.path.exists("/dev/dxg")
-
 _requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
-_requires_gpu = unittest.skipUnless(
-    _HAVE_GPU, "requires a ROCm GPU (no /dev/kfd or /dev/dxg device node present)"
-)
-
 
 # ---------------------------------------------------------------------
 # Core IR
@@ -3083,13 +3065,46 @@ class TestExpandedPatternMatchers(unittest.TestCase):
 
 
 class TestLoweringRegistryBuild(unittest.TestCase):
-    """End-to-end ``can_lower`` + ``candidates`` + ``build`` smoke tests.
+    """Lowerer tests: candidate generation phase (GPU-agnostic).
 
-    These tests cover the path from a normalized fusion graph all the
-    way through HSACO build for each concrete lowerer. They do NOT
-    launch the kernels (no GPU); the goal is to confirm the lowerers
-    wire up a real launcher object on every supported region kind.
+    Tests that validate lowerers can recognize regions and generate
+    spec configurations without requiring GPU hardware. Architecture
+    is mocked to gfx950 so that tests can still run without a GPU.
     """
+
+    @classmethod
+    def setUpClass(cls):
+        """Mock HIP runtime dependencies for in-process testing without GPU.
+
+        These tests do not launch kernels or require a physical GPU. To achieve this, we mock:
+
+        - ``get_device_arch``: Returns a fixed architecture string (gfx950)
+          so the compiler targets a known ISA without querying the actual
+          device via ``hipGetDeviceProperties``.
+
+        - ``Runtime.load_module``: Bypasses ``hipModuleLoadData``. The
+          mock allows tests to validate that lowerers produce a well-formed
+          launcher object without requiring a GPU driver.
+
+        Individual tests can override these mocks (via nested ``patch``
+        context managers) to exercise error paths or architecture-specific
+        behavior.
+        """
+        cls.arch_patcher = patch(
+            "rocke.runtime.hip_module.get_device_arch", return_value="gfx950"
+        )
+
+        cls.load_module_patcher = patch(
+            "rocke.runtime.hip_module.Runtime.load_module", return_value=Mock()
+        )
+        cls.arch_patcher.start()
+        cls.load_module_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up HIP runtime mocks after all tests complete."""
+        cls.arch_patcher.stop()
+        cls.load_module_patcher.stop()
 
     def _toy_gemm_graph(self, with_epilogue=True):
         from rocke.helpers import FusionOp, FusionTensor, build_graph
@@ -3133,7 +3148,33 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         for cfg in cfgs:
             self.assertTrue(hasattr(cfg.spec, "_fused_epilogue"))
 
-    @_requires_gpu
+    def test_gemm_epilogue_candidates_errors_on_invalid_arch(self):
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        # Override the original class mock to test the error case when get_device_arch returns None
+        with patch("rocke.runtime.hip_module.get_device_arch", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                lowerer.candidates(graph, region)
+            self.assertIn("Could not detect", str(ctx.exception))
+
+    def test_gemm_epilogue_build_errors_on_invalid_arch(self):
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        cfgs = lowerer.candidates(graph, region)
+        # Override the original class mock to test the error case when get_device_arch returns None
+        with patch("rocke.runtime.hip_module.get_device_arch", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                lowerer.build(cfgs[0])
+            self.assertIn("Could not detect", str(ctx.exception))
+
     def test_gemm_epilogue_build_emits_kernel_launcher(self):
         from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
 
@@ -3149,7 +3190,6 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertGreater(built.block_size, 0)
         self.assertEqual(built.extra.get("bias"), "bias")
 
-    @_requires_gpu
     def test_elementwise_lowerer_round_trips(self):
         from rocke.helpers import (
             ElementwiseLowerer,
@@ -3184,7 +3224,6 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertEqual(built.spec.op, "relu")
         self.assertEqual(built.spec.dtype, "f16")
 
-    @_requires_gpu
     def test_reduction_lowerer_round_trips(self):
         from rocke.helpers import (
             FusionOp,
@@ -4913,6 +4952,81 @@ class TestPackArgsKernargABI(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             pack_args([{"name": "x", "type": "f16"}], {"x": 1})
+
+    def test_as_ptr_accepts_devicemem_ptr_method(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        # DeviceMem exposes its raw device pointer via a ptr() method; the
+        # torch-free numpy path passes it straight into a launcher's values.
+        class _FakeDeviceMem:
+            def ptr(self):
+                return 0xDEAD
+
+        packed = pack_args(
+            [{"name": "p", "type": "ptr<f16,global>"}], {"p": _FakeDeviceMem()}
+        )
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xDEAD)
+
+    def test_as_ptr_prefers_data_ptr_over_ptr(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        # A torch tensor exposes data_ptr(); if some object exposed both, the
+        # data_ptr() branch must win (it precedes the DeviceMem ptr() branch).
+        class _Both:
+            def data_ptr(self):
+                return 0xAAAA
+
+            def ptr(self):
+                return 0xBBBB
+
+        packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": _Both()})
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0xAAAA)
+
+    def test_as_ptr_none_encodes_null(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        packed = pack_args([{"name": "p", "type": "ptr<f16,global>"}], {"p": None})
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0)
+
+    def test_as_ptr_rejects_unconvertible(self):
+        from rocke.runtime.packing import pack_args
+
+        # A non-callable ptr attribute is not a device pointer -- the callable()
+        # guard must fall through to the TypeError, not silently use the attr.
+        class _NonCallablePtr:
+            ptr = 0x1234
+
+        with self.assertRaises(TypeError):
+            pack_args(
+                [{"name": "p", "type": "ptr<f16,global>"}], {"p": _NonCallablePtr()}
+            )
+        with self.assertRaises(TypeError):
+            pack_args(
+                [{"name": "p", "type": "ptr<f16,global>"}], {"p": "not a pointer"}
+            )
+
+
+class TestHostBufferReExportShim(unittest.TestCase):
+    """The manifest_runner.utils re-export shim over rocke.runtime.host_buffers.
+
+    The three host byte helpers moved to ``rocke.runtime.host_buffers``; the old
+    ``instances.common.manifest_runner.utils`` path re-exports them so existing
+    importers keep working. Pin the identity so a severed shim fails loudly.
+    """
+
+    def test_utils_reexports_host_buffer_helpers(self):
+        from rocke.instances.common.manifest_runner import utils
+        from rocke.runtime import host_buffers
+
+        self.assertIs(utils.as_u8_buffer, host_buffers.as_u8_buffer)
+        self.assertIs(utils.nbytes, host_buffers.nbytes)
+        self.assertIs(utils.require_numpy, host_buffers.require_numpy)
 
 
 class TestLibDiscoveryOrder(unittest.TestCase):
