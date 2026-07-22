@@ -16,6 +16,11 @@ torch into the process (they import only ``ctypes`` + ``numpy`` on demand).
 copy. Callers that build fresh arrays (``np.zeros(...)`` /
 ``rng.standard_normal(...).astype(...)``) already satisfy this; pass
 ``np.ascontiguousarray(a)`` first only when the source may be non-contiguous.
+
+The array must also carry a native numpy dtype (a real ``itemsize``): stock
+numpy has no ``bfloat16``, so a bf16 host encoding needs a hand-rolled dtype --
+``ml_dtypes`` is deliberately *not* a dependency of this path. Torch-free
+harnesses that need bf16 must encode it themselves rather than reach for it.
 """
 
 from __future__ import annotations

@@ -193,7 +193,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
 
   if "MatrixInstM" in state:
-    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{state["MatrixInstM"]}x{state["MatrixInstN"]}x{state["MatrixInstB"]}')
+    # Use the physical opcode dims (MIBlock) for the name, not the possibly-swapped
+    # effective MatrixInstM/N, so the kernel identity matches the user-specified MI.
+    _miName = state.get("MIBlock", [state["MatrixInstM"], state["MatrixInstN"]])
+    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{_miName[0]}x{_miName[1]}x{state["MatrixInstB"]}')
     requiredParametersTemp.add("MIWaveTile")
   else:
     requiredParametersTemp.add("ThreadTile")
