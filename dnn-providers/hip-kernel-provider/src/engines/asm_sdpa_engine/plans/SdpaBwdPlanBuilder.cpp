@@ -905,14 +905,32 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto statsStrideHead = static_cast<unsigned int>(statsStrides->Get(1));
 
     // -------------------------------------------------------------------------
-    // 3. Attention scale
+    // 3. Attention scale — resolve as ScalarOperand (RFC 0016)
     // -------------------------------------------------------------------------
-    // Default to 1/sqrt(D_qk) if not provided
-    float attnScale = 1.0f / std::sqrt(static_cast<float>(headDimQk));
-    auto scaleValue = sdpaAttrs.attn_scale_value();
-    if(scaleValue.has_value())
+    // Three cases:
+    //  1. scale_tensor_uid present → use makeScalarOperand (handles both
+    //     compile-time-constant and runtime user-supplied).
+    //  2. attn_scale_value present → bake the attribute value as a constant.
+    //  3. Neither → default to 1/sqrt(D_qk).
+    hipdnn_plugin_sdk::ScalarOperand attnScale{};
+    if(sdpaAttrs.scale_tensor_uid().has_value())
     {
-        attnScale = scaleValue.value();
+        attnScale = hipdnn_plugin_sdk::makeScalarOperand(
+            tensorMap, sdpaAttrs.scale_tensor_uid().value(), "attn_scale");
+    }
+    else
+    {
+        float scaleVal = 1.0f / std::sqrt(static_cast<float>(headDimQk));
+        auto scaleValue = sdpaAttrs.attn_scale_value();
+        if(scaleValue.has_value())
+        {
+            scaleVal = scaleValue.value();
+        }
+        attnScale = hipdnn_plugin_sdk::ScalarOperand{
+            0,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            false,
+            hipdnn_plugin_sdk::ScalarValue{scaleVal}};
     }
 
     // -------------------------------------------------------------------------
