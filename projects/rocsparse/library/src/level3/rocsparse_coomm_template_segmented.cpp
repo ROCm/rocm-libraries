@@ -45,13 +45,30 @@ namespace rocsparse
     // sizing the temporary buffer and when launching), so buffer sizing and the
     // kernel launch always agree on the block dimension. Numerics are unchanged:
     // the segmented / block reduction is exact for any power-of-two block size.
-    static constexpr int64_t coomm_segmented_wave32_nnz_threshold = 262144;
-
+    //
+    // Performance portability:
+    //  - the tuned segmented block is expressed in WAVEFRONTS (4 * wavefront_size
+    //    == 128 threads / 4 wavefronts on wave32);
+    //  - the crossover is scaled by the device's resident-thread capacity
+    //    (multiProcessorCount * maxThreadsPerMultiProcessor) rather than a fixed
+    //    nnz magic number, so it tracks wave32 GPUs of different sizes. The
+    //    ~4.5x-capacity knee reproduces the value measured on gfx1201 (RX 9070;
+    //    capacity 57344 -> ~262k nnz);
+    //  - it stays gated to wave32 (wave64 keeps the historical 256-thread
+    //    segmented block unconditionally, so an untuned architecture is not
+    //    perturbed).
     static inline uint32_t coomm_segmented_block_dim(rocsparse_handle handle, int64_t nnz)
     {
-        if(handle->wavefront_size == 32 && nnz >= coomm_segmented_wave32_nnz_threshold)
+        if(handle->wavefront_size == 32)
         {
-            return 128;
+            const int64_t device_capacity
+                = static_cast<int64_t>(handle->properties.multiProcessorCount)
+                  * static_cast<int64_t>(handle->properties.maxThreadsPerMultiProcessor);
+            // 4.5 x resident-thread capacity (~262k nnz on gfx1201).
+            if(device_capacity > 0 && nnz >= (9 * device_capacity) / 2)
+            {
+                return 4u * static_cast<uint32_t>(handle->wavefront_size);
+            }
         }
         return 256;
     }
