@@ -325,3 +325,5 @@ if(BUILD_CODE_COVERAGE)
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
+
+# Test comment for multi-arch CI testing - Wed Jul 22 16:15:41 PDT 2026
