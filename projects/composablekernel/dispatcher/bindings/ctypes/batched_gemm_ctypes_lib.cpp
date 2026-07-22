@@ -34,6 +34,8 @@
 #include <hip/hip_runtime.h>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "ck_tile/core.hpp"
@@ -60,6 +62,16 @@ namespace {
 // is kept for ABI symmetry with the single-problem GEMM library so the Python
 // runner can call initialize() uniformly.
 bool g_initialized = false;
+
+// Log a failing HIP call (with hipGetErrorString) before the caller returns an
+// error status: a bare -1 with no diagnostic makes a real GPU sweep failure
+// impossible to triage. Returns -1 so call sites read `return fail_hip(...)`.
+inline int fail_hip(const char* what, hipError_t err)
+{
+    std::cerr << "dispatcher_run_batched: " << what << " failed: " << hipGetErrorString(err)
+              << std::endl;
+    return -1;
+}
 
 // Default (contiguous) stride for a row/col-major operand, matching
 // ck_tile::get_default_stride used by the Tile Engine profiler: a value of 0
@@ -224,36 +236,58 @@ int dispatcher_run_batched(const void* A,
             (void)hipFree(C_dev);
     };
 
-    if(hipMalloc(&A_dev, a_elems * sizeof(ADataType)) != hipSuccess)
+    // ck_tile::index_t is 32-bit: reject any dimension / stride / batch value
+    // that would not fit before the static_casts into BatchedGemmHostArgs below,
+    // so an out-of-range problem fails loudly instead of silently truncating.
     {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&B_dev, b_elems * sizeof(BDataType)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
-    }
-    if(hipMalloc(&C_dev, c_elems * sizeof(CDataType)) != hipSuccess)
-    {
-        cleanup();
-        return -1;
+        auto fits_i32 = [](std::int64_t v) { return v <= static_cast<std::int64_t>(INT32_MAX); };
+        if(!fits_i32(M) || !fits_i32(N) || !fits_i32(K) || !fits_i32(sa) || !fits_i32(sb) ||
+           !fits_i32(sc) || !fits_i32(bsa) || !fits_i32(bsb) || !fits_i32(bsc) ||
+           !fits_i32(batch_count) || !fits_i32(kbatch))
+        {
+            std::cerr << "dispatcher_run_batched: a dimension/stride/batch value exceeds the "
+                         "32-bit index range\n";
+            if(time_ms)
+            {
+                *time_ms = -1.0f;
+            }
+            return -1;
+        }
     }
 
-    if(hipMemcpy(A_dev, A_host, a_elems * sizeof(ADataType), hipMemcpyHostToDevice) != hipSuccess)
+    hipError_t err;
+    if((err = hipMalloc(&A_dev, a_elems * sizeof(ADataType))) != hipSuccess)
     {
         cleanup();
-        return -1;
+        return fail_hip("hipMalloc(A)", err);
     }
-    if(hipMemcpy(B_dev, B_host, b_elems * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
+    if((err = hipMalloc(&B_dev, b_elems * sizeof(BDataType))) != hipSuccess)
     {
         cleanup();
-        return -1;
+        return fail_hip("hipMalloc(B)", err);
     }
-    if(hipMemset(C_dev, 0, c_elems * sizeof(CDataType)) != hipSuccess)
+    if((err = hipMalloc(&C_dev, c_elems * sizeof(CDataType))) != hipSuccess)
     {
         cleanup();
-        return -1;
+        return fail_hip("hipMalloc(C)", err);
+    }
+
+    if((err = hipMemcpy(A_dev, A_host, a_elems * sizeof(ADataType), hipMemcpyHostToDevice)) !=
+       hipSuccess)
+    {
+        cleanup();
+        return fail_hip("hipMemcpy(A H2D)", err);
+    }
+    if((err = hipMemcpy(B_dev, B_host, b_elems * sizeof(BDataType), hipMemcpyHostToDevice)) !=
+       hipSuccess)
+    {
+        cleanup();
+        return fail_hip("hipMemcpy(B H2D)", err);
+    }
+    if((err = hipMemset(C_dev, 0, c_elems * sizeof(CDataType))) != hipSuccess)
+    {
+        cleanup();
+        return fail_hip("hipMemset(C)", err);
     }
 
     float exec_time = -1.0f;
@@ -300,16 +334,33 @@ int dispatcher_run_batched(const void* A,
                                             /*rotating_count=*/n_rotating};
         exec_time = SelectedKernel::launch(args, stream);
     }
+    catch(const std::exception& e)
+    {
+        std::cerr << "dispatcher_run_batched: kernel launch failed: " << e.what() << std::endl;
+        cleanup();
+        if(time_ms)
+        {
+            *time_ms = -1.0f;
+        }
+        return -2;
+    }
     catch(...)
     {
+        std::cerr << "dispatcher_run_batched: kernel launch failed (unknown exception)"
+                  << std::endl;
         cleanup();
-        return -1;
+        if(time_ms)
+        {
+            *time_ms = -1.0f;
+        }
+        return -2;
     }
 
-    if(hipMemcpy(C_host, C_dev, c_elems * sizeof(CDataType), hipMemcpyDeviceToHost) != hipSuccess)
+    if((err = hipMemcpy(C_host, C_dev, c_elems * sizeof(CDataType), hipMemcpyDeviceToHost)) !=
+       hipSuccess)
     {
         cleanup();
-        return -1;
+        return fail_hip("hipMemcpy(C D2H)", err);
     }
 
     if(time_ms)

@@ -18,19 +18,28 @@ configs/*.json). No GPU, hipcc, or dispatcher build is required.
 Run: python3 -m pytest tests/test_batched_bridge.py -v
 """
 
+import ctypes
 import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import numpy as np
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 REPO_ROOT = DISPATCHER_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
+import batched_gemm_utils  # noqa: E402
 from batched_gemm_utils import (  # noqa: E402
+    BatchedGemmDispatcherLib,
     BatchedGemmKernelConfig,
     BatchedGemmProblem,
+    _get_arch,
+    _resolve_arch,
+    expand_sweep,
 )
 from gemm_utils import (  # noqa: E402
     GemmKernelConfig,
@@ -156,6 +165,122 @@ class TestBatchedShippedConfigs(unittest.TestCase):
                 tr = data["trait_config"]
                 for key in ("pipeline", "scheduler", "epilogue"):
                     self.assertIn(key, tr, f"{path.name} missing {key}")
+
+
+class TestBatchedArchResolution(unittest.TestCase):
+    """`_get_arch` / `_resolve_arch`: detect + validate, never a silent default.
+
+    `_get_arch` shells out to `rocminfo`; these tests mock
+    `subprocess.check_output` so they run GPU-free, covering the three outcomes
+    the arch feedback demanded: valid detect, undetectable -> RuntimeError,
+    unsupported -> ValueError.
+    """
+
+    _ROCMINFO = "Agent 1\n  Name:      AMD EPYC\nAgent 2\n  Name:      gfx942\n"
+
+    def test_get_arch_detects_supported(self):
+        with mock.patch("subprocess.check_output", return_value=self._ROCMINFO):
+            self.assertEqual(_get_arch(), "gfx942")
+
+    def test_get_arch_undetectable_raises_runtimeerror(self):
+        # rocminfo missing / no gfx line -> refuse to guess.
+        with mock.patch("subprocess.check_output", side_effect=FileNotFoundError()):
+            with self.assertRaises(RuntimeError):
+                _get_arch()
+
+    def test_get_arch_unsupported_raises_valueerror(self):
+        out = "Agent 1\n  Name:      gfx1030\n"
+        with mock.patch("subprocess.check_output", return_value=out):
+            with self.assertRaises(ValueError):
+                _get_arch()
+
+    def test_resolve_arch_explicit_valid_passthrough(self):
+        # An explicit, supported arch must not touch rocminfo at all.
+        with mock.patch("subprocess.check_output", side_effect=AssertionError("called")):
+            self.assertEqual(_resolve_arch("gfx950"), "gfx950")
+
+    def test_resolve_arch_explicit_invalid_raises(self):
+        with self.assertRaises(ValueError):
+            _resolve_arch("gfx942x")
+
+    def test_resolve_arch_none_autodetects(self):
+        with mock.patch("subprocess.check_output", return_value=self._ROCMINFO):
+            self.assertEqual(_resolve_arch(None), "gfx942")
+
+
+class TestBatchedAbiMarshalling(unittest.TestCase):
+    """GPU-free tests of the C-ABI surface in ``BatchedGemmDispatcherLib``.
+
+    The ``.so`` is mocked (``ctypes.CDLL`` patched), so no generated kernel or
+    GPU is needed. Locks the declared ABI (19 args + time_ms) and the positional
+    order/values ``run()`` forwards -- the surface most likely to drift silently
+    against the C entry point ``dispatcher_run_batched``.
+    """
+
+    def _make_lib(self, status=0):
+        fake = mock.MagicMock()
+        fake.dispatcher_run_batched.return_value = status
+        with mock.patch("ctypes.CDLL", return_value=fake):
+            lib = BatchedGemmDispatcherLib(Path("/nonexistent/batched.so"))
+        return lib, fake
+
+    def test_run_abi_argtypes(self):
+        _, fake = self._make_lib()
+        argt = fake.dispatcher_run_batched.argtypes
+        # 18 scalar/pointer args + the time_ms out-pointer.
+        self.assertEqual(len(argt), 19)
+        for i in range(3):  # A/B/C host pointers
+            self.assertEqual(argt[i], ctypes.c_void_p)
+        for i in range(3, 18):  # M..rotating_count are all int64
+            self.assertEqual(argt[i], ctypes.c_int64)
+        self.assertEqual(argt[-1], ctypes.POINTER(ctypes.c_float))
+        self.assertEqual(fake.dispatcher_run_batched.restype, ctypes.c_int)
+
+    def test_run_marshals_positional_order(self):
+        lib, fake = self._make_lib(status=0)
+        A = np.zeros((2, 2, 2), np.float16)
+        B = np.zeros((2, 2, 2), np.float16)
+        C = np.zeros((2, 2, 2), np.float16)
+        status, _ = lib.run(
+            A, B, C, M=2, N=2, K=2, batch_count=2, k_batch=1,
+            stride_A=2, stride_B=2, stride_C=2,
+            batch_stride_A=4, batch_stride_B=4, batch_stride_C=4,
+            warmup=50, repeat=100, flush_cache=True, rotating_count=1000,
+        )
+        self.assertEqual(status, 0)
+        args = fake.dispatcher_run_batched.call_args[0]
+        self.assertEqual(len(args), 19)
+        # M/N/K/batch_count/k_batch occupy positions 3..7.
+        self.assertEqual((args[3], args[4], args[5]), (2, 2, 2))
+        self.assertEqual((args[6], args[7]), (2, 1))
+        # flush_cache marshals to the int 1 (position 16), not the bool True.
+        self.assertEqual(args[16], 1)
+
+    def test_run_forwards_nonzero_status(self):
+        # A thin shim must surface the C error code verbatim (e.g. -2 launch).
+        lib, fake = self._make_lib(status=-2)
+        A = np.zeros((1, 1, 1), np.float16)
+        status, _ = lib.run(A, A, A, M=1, N=1, K=1, batch_count=1)
+        self.assertEqual(status, -2)
+
+
+class TestBatchedDtypeLayoutGate(unittest.TestCase):
+    """`expand_sweep` must reject anything outside Old-TE's fp16/rcr set.
+
+    Old-TE ``batched_gemm_instance_builder`` declares ``--datatype
+    choices=['fp16']`` / ``--layout choices=['rcr']``; the bridge must match that
+    EXACTLY rather than silently building a signature Old-TE never validated. An
+    explicit (supported) arch is passed so the gate fires before rocminfo/config
+    I/O is touched.
+    """
+
+    def test_rejects_non_fp16_dtype(self):
+        with self.assertRaises(ValueError):
+            expand_sweep("/nonexistent/config.json", arch="gfx942", dtype="bf16")
+
+    def test_rejects_non_rcr_layout(self):
+        with self.assertRaises(ValueError):
+            expand_sweep("/nonexistent/config.json", arch="gfx942", layout="rrr")
 
 
 if __name__ == "__main__":

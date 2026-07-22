@@ -694,6 +694,24 @@ def expand_sweep(
     validated against the supported set otherwise -- never a silent gfx942
     default."""
     arch = _resolve_arch(arch)
+    # Match Old-TE's validated set EXACTLY: the batched_gemm instance builder
+    # (tile_engine/ops/gemm/batched_gemm/batched_gemm_instance_builder.py)
+    # declares --datatype choices=["fp16"] and --layout choices=["rcr"], so
+    # anything else would codegen/compile/launch a kernel Old-TE never validated
+    # (claimed parity != exercised parity). Reject it up front with a clear error
+    # rather than silently building an untested signature.
+    if dtype != "fp16":
+        raise ValueError(
+            f"batched_gemm bridge supports only dtype 'fp16' (Old-TE "
+            f"batched_gemm_instance_builder declares --datatype choices=['fp16']); "
+            f"got {dtype!r}"
+        )
+    if layout != "rcr":
+        raise ValueError(
+            f"batched_gemm bridge supports only layout 'rcr' (Old-TE "
+            f"batched_gemm_instance_builder declares --layout choices=['rcr']); "
+            f"got {layout!r}"
+        )
     base_configs = _gu.expand_sweep(config_path, arch, dtype=dtype, layout=layout)
     out: List[BatchedGemmKernelConfig] = []
     seen: set = set()
