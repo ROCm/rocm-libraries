@@ -61,7 +61,7 @@ constexpr int kCdna5GlobalReadPerWmma = 1;
 // own issue/latency cycles — a producer->consumer edge gap). Data-driven so a new
 // hazard pair is a new table row, not new code. Consumer-side correctness (the gate in
 // CDNA5ReadyQueue::hazardGates_) is unconditional regardless of scheduling order;
-// producer-side hoisting (CDNA5ReadyQueue::decidePromote(), via DAGNode::hazardAnchor)
+// producer-side hoisting (CDNA5ReadyQueue::decidePromote(), via DAGNode::hazardDeadline)
 // is a throughput heuristic layered on top, never required for correctness.
 // -------------------------------------------------------------------------
 struct HazardRule {
@@ -352,9 +352,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // just wrote is not gated by the SaluSgprToMemAddr lane. Decays in advanceTime.
     std::array<std::map<int, int>, kNumCdna5HazardRules> hazardGates_;
 
-    // Ready, flagged (non-empty hazardFlags), not-yet-issued hazard producers with a
-    // computed hazardAnchor, tracked so decidePromote() doesn't need to scan every
-    // queue each pick. Populated in push(), erased once the node is picked (popNonWmma).
+    // Ready, flagged (non-empty hazardFlags), not-yet-issued hazard producers, tracked
+    // so decidePromote() doesn't need to scan every queue each pick to find the ones
+    // whose hazardDeadline might have arrived. Populated in push(), erased once the
+    // node is picked (popNonWmma).
     struct HazardHoistCandidate {
         DAGNode* node;
         int kind;  // NonWmmaKind: which queue this producer sits in (kOther or kValu).
@@ -433,9 +434,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // entry point), never a second dedicated path. A new forcing rule is a new case in
     // decidePromote(), not a new phase. Two promotions: a barrier whose per-barrier
     // WMMA-issued threshold is met (formerly the forced-barrier phase), and a
-    // hazard-hoist producer whose anchor (DAGNode::hazardAnchor) has just become ready
-    // (forces the producer to issue first, through its own NonWmmaFill phase, so the
-    // anchor's fill window lands after it instead of before).
+    // hazard-hoist producer whose live clock_ has reached its hazardDeadline (forces
+    // the producer to issue now, through its own NonWmmaFill phase, so it lands before
+    // its hazarded consumer needs the gap instead of after).
     void decidePromote();
     bool isPromote(PromotePhase phase) const {
         return promotedPhase_ == PromotePhase::None || promotedPhase_ == phase;
@@ -878,10 +879,10 @@ bool CDNA5ReadyQueue::findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** out
 // must fire now and the exact node it will issue, without mutating any queue. Two
 // rules: (1) a barrier whose WMMA-issued threshold is met (this is what the dedicated
 // forced-barrier phase used to do ahead of WMMA); (2) a hazard-hoist producer whose
-// anchor has just become ready (see DAGNode::hazardAnchor) — forces the producer to
-// issue now, through its own NonWmmaFill phase, so the anchor's fill window lands
-// after it instead of before. Add further forcing rules here as new PromotePhase
-// cases (or new decisions within an existing phase, as below).
+// live clock_ has reached its hazardDeadline -- forces the producer to issue now,
+// through its own NonWmmaFill phase, so it lands before its hazarded consumer needs
+// the gap instead of after. Add further forcing rules here as new PromotePhase cases
+// (or new decisions within an existing phase, as below).
 void CDNA5ReadyQueue::decidePromote() {
     promotedPhase_ = PromotePhase::None;
     promotedNode_ = nullptr;
@@ -899,16 +900,20 @@ void CDNA5ReadyQueue::decidePromote() {
         }
     }
 
-    // Hazard hoist: only fires once the anchor is about to be eligible for its own
-    // pick (inDegree == 0, not yet issued) — before that, deferring the producer costs
-    // nothing, since the anchor's fill window isn't at risk yet. Also requires the
-    // producer to be genuinely free to issue right now (no outstanding RAW/hazard wait
-    // of its own, and no WMMA-src overlap) — this is a throughput heuristic layered on
-    // an unconditionally-correct consumer-side gate, so it must never force an
-    // otherwise-unsafe issue; missing the anchor just costs a later explicit stall.
+    // Hazard hoist: fires once the live elapse clock reaches this producer's
+    // hazardDeadline. Deliberately clock_-based, not a proxy node's readiness: clock_
+    // only advances via cycles actually issued (advanceTime, called on every real
+    // pick), so it can't run ahead of the true schedule the way "some node's inDegree
+    // hit 0" can when that node is structurally unblocked long before it is actually
+    // picked. Before the deadline, the producer competes as ordinary work -- no
+    // special priority -- so it never crowds out ds/wmma while it still has slack.
+    // Also requires the producer to be genuinely free to issue right now (no
+    // outstanding RAW/hazard wait of its own, and no WMMA-src overlap) -- this is a
+    // throughput heuristic layered on an unconditionally-correct consumer-side gate,
+    // so it must never force an otherwise-unsafe issue; missing the deadline just
+    // costs a later explicit stall via that gate.
     for (const HazardHoistCandidate& hc : hazardHoistCandidates_) {
-        DAGNode* anchor = hc.node->hazardAnchor;
-        if (anchor->inDegree != 0 || anchor->issued) continue;
+        if (clock_ < hc.node->hazardDeadline) continue;
         if (getMaxSrcDataWait(hc.node) > 0 || getHazardWait(hc.node) > 0) continue;
         if (destOverlapsActiveWmmaSrc(hc.node)) continue;
         promotedPhase_ = PromotePhase::NonWmmaFill;
@@ -1381,15 +1386,15 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     // Phase C+D — NonWmmaFill: fill with non-WMMA work (inside then outside the window).
     if (isPromote(PromotePhase::NonWmmaFill)) {
         // Hazard-hoist promotion: decidePromote() found a flagged producer whose
-        // anchor is about to become ready and confirmed it's genuinely free to issue
-        // now. Issue it directly through this, its own existing phase — no separate
-        // entry point — bypassing the normal findSmallestPickableNonWmma selection
-        // (which would otherwise rank it as ordinary work and might not pick it this
-        // cycle, missing the anchor).
+        // hazardDeadline the live clock_ has reached, and confirmed it's genuinely
+        // free to issue now. Issue it directly through this, its own existing phase —
+        // no separate entry point — bypassing the normal findSmallestPickableNonWmma
+        // selection (which would otherwise rank it as ordinary work and might not pick
+        // it this cycle, missing the deadline).
         if (promotedPhase_ == PromotePhase::NonWmmaFill && promotedNode_) {
             PASS_DEBUG(std::cerr << "[CDNA5 pickOne] hazard-hoist promoted dagId="
-                                 << promotedNode_->id << " kind=" << promotedKind_
-                                 << " anchor=" << promotedNode_->hazardAnchor->id << "\n");
+                                 << promotedNode_->id << " kind=" << promotedKind_ << " deadline="
+                                 << promotedNode_->hazardDeadline << " clock=" << clock_ << "\n");
             return rememberPick(popNonWmma(promotedNode_, promotedKind_));
         }
 
@@ -1489,8 +1494,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
 
     if (isVectorALU(*node->inst) || isTranscendental(*node->inst)) {
         valuQueue.push(node);
-        if (!node->hazardFlags.empty() && node->hazardAnchor)
-            hazardHoistCandidates_.push_back({node, kValu});
+        if (!node->hazardFlags.empty()) hazardHoistCandidates_.push_back({node, kValu});
         return;
     }
 
@@ -1500,8 +1504,7 @@ void CDNA5ReadyQueue::push(DAGNode* node) {
     }
 
     otherQueue.push(node);
-    if (!node->hazardFlags.empty() && node->hazardAnchor)
-        hazardHoistCandidates_.push_back({node, kOther});
+    if (!node->hazardFlags.empty()) hazardHoistCandidates_.push_back({node, kOther});
 }
 
 bool CDNA5ReadyQueue::empty() const {

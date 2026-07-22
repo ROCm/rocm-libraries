@@ -289,6 +289,19 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
+    // Prefix sum over the region in original program order: cumCycles[k] = the
+    // estimated absolute cycle at which dagNodes[k] would start, if the unmodified
+    // program order were followed exactly (WMMA -> latencyCycles, its full co-issue
+    // window; otherwise issueCycles). Used below to turn "producer must precede its
+    // consumer by N cycles" into a plain deadline number instead of a node to hop
+    // before — see DAGNode::hazardDeadline.
+    std::vector<int> cumCycles(regionSize + 1, 0);
+    for (unsigned k = 0; k < regionSize; ++k) {
+        StinkyInstruction* inst = dagNodes[k].inst;
+        cumCycles[k + 1] =
+            cumCycles[k] + (isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+    }
+
     // Pre-scan: flag producers feeding a hazarded consumer, per kCdna5HazardRules (a
     // data-driven table of fixed producer->consumer cycle gaps keyed by register
     // file — e.g. SALU sgpr -> SMEM/tensor_load/VMEM address, VALU vgpr -> VMEM
@@ -298,26 +311,21 @@ static void scheduleRegionWithMovableSideEffects(
     // (CDNA5ReadyQueue::hazardGates_) and is unconditionally correct regardless of
     // scheduling order.
     //
-    // Also computes each flagged producer's hazardAnchor: a throughput heuristic, not
-    // a correctness requirement. Walk backward from the (first-found) consumer's id
-    // across the whole region — skipping the producer's own id, not just the
-    // [producer, consumer) interval, since the producer may need to be reordered
-    // earlier than its own original position to reach real filler work (e.g. hop
-    // ahead of a WMMA that already precedes it in program order) — accumulating each
-    // node's natural fill contribution (a matrix instruction's latencyCycles, a
-    // fixed-latency co-issue window; otherwise issueCycles) until the sum reaches the
-    // rule's required cycle count. The anchor is the earliest node absorbed: forcing
-    // the producer to issue before the anchor becomes ready (see
-    // CDNA5ReadyQueue::decidePromote()) means the anchor's own fill window lands
-    // between the producer and its consumer instead of being spent before the
-    // producer is even considered. Approximate (original program order is a proxy for
-    // available filler, not the true post-reorder critical path) — an imprecise
-    // anchor costs an explicit stall via the gate, never correctness, since the gate
-    // does not depend on the anchor being right.
+    // Also computes each flagged producer's hazardDeadline: a throughput heuristic,
+    // not a correctness requirement. Let X = cumCycles[consumerId], the hazarded
+    // consumer's estimated absolute cycle (per rule; a producer feeding several
+    // consumers, or matching several rules, takes the earliest/tightest X - cycles
+    // over all of them). CDNA5ReadyQueue::decidePromote() forces the producer once its
+    // *live* clock_ reaches this deadline, not once some proxy node happens to become
+    // structurally ready — clock_ only advances via cycles actually issued, so an
+    // unrelated node becoming ready early can't trigger an early force the way a
+    // node-based trigger could. Approximate (X is computed from original program
+    // order, which real scheduling may depart from) — an inaccurate deadline shifts
+    // when the mandatory force kicks in, never affects correctness, since the
+    // consumer-side gate does not depend on this deadline being right.
     for (unsigned i = 0; i < regionSize; ++i) {
         StinkyInstruction* prod = dagNodes[i].inst;
-        int anchorCycles = 0;
-        unsigned consumerId = UINT_MAX;
+        int bestDeadline = INT_MAX;
 
         for (int ruleIdx = 0; ruleIdx < kNumCdna5HazardRules; ++ruleIdx) {
             const HazardRule& rule = kCdna5HazardRules[ruleIdx];
@@ -332,6 +340,7 @@ static void scheduleRegionWithMovableSideEffects(
             if (defKey.empty()) continue;
 
             std::unordered_set<int> hazardKeys;
+            unsigned ruleConsumerId = UINT_MAX;
             std::vector<StinkyInstruction*> q(prod->getUsers().begin(), prod->getUsers().end());
             std::unordered_set<StinkyInstruction*> seen;
             while (!q.empty()) {
@@ -356,26 +365,17 @@ static void scheduleRegionWithMovableSideEffects(
                 }
                 if (matchedHere) {
                     auto idIt = instToId.find(u);
-                    if (idIt != instToId.end()) consumerId = std::min(consumerId, idIt->second);
+                    if (idIt != instToId.end())
+                        ruleConsumerId = std::min(ruleConsumerId, idIt->second);
                 }
             }
+            if (hazardKeys.empty()) continue;
             for (int key : hazardKeys) dagNodes[i].hazardFlags.push_back({ruleIdx, key});
-            if (!hazardKeys.empty() && rule.cycles > anchorCycles) anchorCycles = rule.cycles;
+            if (ruleConsumerId != UINT_MAX)
+                bestDeadline = std::min(bestDeadline, cumCycles[ruleConsumerId] - rule.cycles);
         }
 
-        if (anchorCycles == 0 || consumerId == UINT_MAX) continue;
-
-        int accumulated = 0;
-        unsigned anchorId = UINT_MAX;
-        for (unsigned cid = consumerId; cid-- > 0;) {
-            if (cid == i) continue;  // skip the producer itself
-            StinkyInstruction* mid = dagNodes[cid].inst;
-            accumulated += isMatrixInstruction(*mid) ? mid->latencyCycles : mid->issueCycles;
-            anchorId = cid;
-            if (accumulated >= anchorCycles) break;
-        }
-        if (anchorId != UINT_MAX && accumulated >= anchorCycles)
-            dagNodes[i].hazardAnchor = &dagNodes[anchorId];
+        if (!dagNodes[i].hazardFlags.empty()) dagNodes[i].hazardDeadline = bestDeadline;
     }
 
     PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
@@ -399,10 +399,6 @@ static void scheduleRegionWithMovableSideEffects(
         // Pop the last instruction from the ready queue.
         DAGNode* currentNode = readyQueue.pickOne();
         ++orderInRegion;
-        // Marks this node as no longer a valid hazard-hoist anchor (see
-        // CDNA5ReadyQueue::decidePromote()): once issued, forcing a producer ahead of
-        // it can no longer bank its latency/issue window as filler.
-        currentNode->issued = true;
 
         if (isBarrier(*currentNode->inst)) {
             PASS_DEBUG(std::cerr << "[DAG schedule] bb=\"" << regionBbLabel << "\" orderInRegion="

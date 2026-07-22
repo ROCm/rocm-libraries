@@ -61,24 +61,24 @@ struct DAGNode {
     // gap keyed by register file). Filled by the pre-scan via the def-use user walk.
     // Non-empty means this node's issue must stamp the corresponding hazard gate(s)
     // (see CDNA5ReadyQueue::hazardGates_) so the consumer waits the gap out — that
-    // half is unconditionally correct regardless of scheduling order. hazardAnchor
+    // half is unconditionally correct regardless of scheduling order. hazardDeadline
     // below drives a *throughput* heuristic on top of that guarantee.
     std::vector<HazardFlag> hazardFlags;
     // Set by the pre-scan (see scheduleRegionWithMovableSideEffects) only when this
-    // node has hazardFlags: the node this producer should be forced to precede, so
-    // enough natural fill work (that node's own latency/issue window) ends up between
-    // this producer and its hazarded consumer instead of being spent before this
-    // producer is even considered. nullptr when no such anchor was found (or none is
-    // needed) — the consumer-side gate alone still guarantees correctness, just
-    // possibly via an explicit stall rather than hidden fill. Approximate: derived
-    // from original program order as a proxy for available filler, not a true
-    // post-reorder critical-path computation.
-    DAGNode* hazardAnchor = nullptr;
-    // Set true by the shared Kahn's-algorithm loop (scheduleRegionWithMovableSideEffects)
-    // right after this node is picked. Lets CDNA5ReadyQueue's hazard-hoist promotion
-    // tell "anchor is ready to be picked" (inDegree == 0 && !issued) apart from
-    // "anchor already issued" (too late to hoist ahead of it).
-    bool issued = false;
+    // node has hazardFlags: the latest CDNA5ReadyQueue::clock_ value at which this
+    // producer may still be deferred. Computed as X - rule.cycles, where X is the
+    // hazarded consumer's estimated absolute cycle position (a forward prefix sum
+    // over the region in original program order) — i.e. "insert this producer before
+    // t = X - cycles", the tightest (minimum) such deadline over every rule/consumer
+    // this node feeds. INT_MAX (the default) means no deadline applies. Compared
+    // against the live clock_ in CDNA5ReadyQueue::decidePromote(): unlike a
+    // readiness check, clock_ only advances via cycles actually issued, so this
+    // can't fire early just because some unrelated node happens to be structurally
+    // ready sooner than it is actually scheduled. Still an estimate (X is computed
+    // from original order, which real scheduling may depart from) — an inaccurate
+    // deadline shifts when the mandatory force kicks in, but the consumer-side gate
+    // remains correct regardless.
+    int hazardDeadline = INT_MAX;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };
