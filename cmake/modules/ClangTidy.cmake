@@ -61,8 +61,13 @@ function(add_clang_tidy_custom_target)
 
         if(ROCM_LIBS_SUPERBUILD)
             set(_TIDY_TARGET ${PROJECT_NAME}_tidy)
+            # In superbuild the compile database is shared across components; restrict
+            # this target to the including project's own sources.
+            file(RELATIVE_PATH _tidy_rel "${CMAKE_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}")
+            set(_TIDY_SCOPE_ARG "${_tidy_rel}/")
         else()
             set(_TIDY_TARGET tidy)
+            set(_TIDY_SCOPE_ARG "")
         endif()
 
         add_custom_target(
@@ -72,7 +77,7 @@ function(add_clang_tidy_custom_target)
                 -config-file=${CLANG_TIDY_CONFIG_FILE}
                 -source-filter "${CLANG_TIDY_SOURCE_FILTER}"
                 -quiet -j ${CLANG_TIDY_JOBS}
-                ${CLANG_TIDY_EXTRA_ARGS}
+                ${CLANG_TIDY_EXTRA_ARGS} ${_TIDY_SCOPE_ARG}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             COMMENT
                 "Running clang-tidy on ${PROJECT_NAME} (${CLANG_TIDY_JOBS} parallel jobs)..."
@@ -94,7 +99,7 @@ endfunction()
 # Enable per-compilation clang-tidy checking on a CMake target.
 function(clang_tidy_check TARGET)
     setclangtidyvars()
-    if(ENABLE_CLANG_TIDY)
+    if(ENABLE_CLANG_TIDY AND CLANG_TIDY_EXE)
         set_target_properties(${TARGET} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
         set_target_properties(${TARGET} PROPERTIES C_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
     endif()

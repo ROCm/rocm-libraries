@@ -167,6 +167,7 @@ TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 
     touchFile(dir.path() / "bundle.json");
     touchFile(dir.path() / "meta.json");
+    touchFile(dir.path() / "bundle.meta.json"); // compound .meta.json extension
 
     auto results = scanBundleJsonFiles(dir.path());
     ASSERT_EQ(results.size(), 1u);
@@ -196,14 +197,23 @@ TEST(TestLoadGraphAndTensors, Valid)
 {
     SKIP_IF_NO_DEVICES();
 
-    const std::filesystem::path filepath
-        = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+    const std::filesystem::path filepath = getCurrentExecutableDirectory()
+                                           / "../lib/integration_test_bundles/quick/"
+                                             "BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
         HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
+        GTEST_SKIP();
+    }
+
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
         GTEST_SKIP();
     }
 
@@ -239,14 +249,23 @@ TEST(TestLoadGraphAndTensors, Valid)
 
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
-    const std::filesystem::path filepath
-        = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+    const std::filesystem::path filepath = getCurrentExecutableDirectory()
+                                           / "../lib/integration_test_bundles/quick/"
+                                             "BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
         HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
+        GTEST_SKIP();
+    }
+
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
         GTEST_SKIP();
     }
 

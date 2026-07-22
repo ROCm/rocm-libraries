@@ -68,8 +68,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: 0
-  TransposeB: 0
+  TransposeA: False
+  TransposeB: False
   UseBeta: true
   UseBias: 0
   UseE: false
@@ -17877,7 +17877,7 @@
     BufferStore: true
     CUCount: null
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugStreamK: 0

@@ -78,8 +78,8 @@ namespace rocisa
         std::optional<InstructionInput>    acc2;
         int                                acc2_imm=0;
         bool                               neg;
-        bool                               reuseA;
-        bool                               reuseB;
+        bool                               reuseA = false;
+        bool                               reuseB = false;
 
         MFMAInstruction(InstType                                  instType,
                         InstType                                  accType,
@@ -90,9 +90,9 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& b,
                         const std::optional<InstructionInput>&    acc2    = std::nullopt,
                         bool                                      neg     = false,
+                        const std::string&                        comment = "",
                         bool                                      reuseA  = false,
-                        bool                                      reuseB  = false,
-                        const std::string&                        comment = "")
+                        bool                                      reuseB  = false)
             : Instruction(instType, comment)
             , accType(accType)
             , variant(variant)
@@ -103,6 +103,8 @@ namespace rocisa
             , acc2(acc2.has_value() ? acc2.value() : InstructionInput(acc))
             , acc2_imm(0)
             , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -115,9 +117,9 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& b,
                         int                                       acc2_imm,
                         bool                                      neg     = false,
+                        const std::string&                        comment = "",
                         bool                                      reuseA  = false,
-                        bool                                      reuseB  = false,
-                        const std::string&                        comment = "")
+                        bool                                      reuseB  = false)
             : Instruction(instType, comment)
             , accType(accType)
             , variant(variant)
@@ -281,9 +283,6 @@ namespace rocisa
             size_t      f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
-            // Conditions for reuseA(B)Str setting
-            std::string reuseAStr       = typeConvert(instType) == "f8f6f4" || !getAsmCaps()["HasWMMA_V3"]? "": (!reuseA ? "" : " matrix_a_reuse");
-            std::string reuseBStr       = typeConvert(instType) == "f8f6f4" || !getAsmCaps()["HasWMMA_V3"]? "": (!reuseB ? "" : " matrix_b_reuse");
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
             if(getAsmCaps()["HasMFMA_f8f6f4"])
@@ -509,9 +508,15 @@ namespace rocisa
                     scaleStr = ", 0, 0";
                 }
             }
+            // Matrix-reuse hints: cache the A/B source from the previous identical WMMA.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                    + (!acc2.has_value() ? std::to_string(acc2_imm) : InstructionInputToString(acc2.value()))
-                   + scaleStr + negStr + inputPermuteStr + reuseAStr + reuseBStr;
+                   + scaleStr + negStr + inputPermuteStr + reuseStr;
         }
 
         std::string toString() const override
@@ -547,8 +552,16 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> mxsb;
         std::optional<VOP3PModifiers>      vop3;
         int                                block;
-        bool                               reuseA;
-        bool                               reuseB;
+        // gfx1250 WMMA matrix-reuse hints (see MFMAInstruction).
+        bool                               reuseA = false;
+        bool                               reuseB = false;
+        // gfx1250 MX scale-select (matrix_a_scale:N / matrix_b_scale:N). Selects which MX
+        // scale slot the WMMA reads: 0 = default (lower half-wave), 1 = partner (upper
+        // half-wave). Used by the MXS TileSpan optimization to read the partner block's
+        // scale directly from a single wave-split ds_load. 0 is emitted implicitly (no
+        // modifier).
+        int                                mxScaleASel = 0;
+        int                                mxScaleBSel = 0;
 
         MXMFMAInstruction(InstType                                  instType,
                           InstType                                  accType,
@@ -563,9 +576,11 @@ namespace rocisa
                           InstType                                  mxScaleAType = InstType::INST_F32,
                           InstType                                  mxScaleBType = InstType::INST_F32,
                           int                                       block        = 0,
+                          const std::string&                        comment      = "",
                           bool                                      reuseA       = false,
                           bool                                      reuseB       = false,
-                          const std::string&                        comment      = "")
+                          int                                       mxScaleASel  = 0,
+                          int                                       mxScaleBSel  = 0)
             : Instruction(instType, comment)
             , accType(accType)
             , mxScaleAType(mxScaleAType)
@@ -580,6 +595,10 @@ namespace rocisa
             , mxsb(mxsb)
             , vop3(vop3)
             , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+            , mxScaleASel(mxScaleASel)
+            , mxScaleBSel(mxScaleBSel)
         {
         }
 
@@ -596,9 +615,11 @@ namespace rocisa
                           InstType                                  mxScaleAType = InstType::INST_F32,
                           InstType                                  mxScaleBType = InstType::INST_F32,
                           int                                       block        = 0,
+                          const std::string&                        comment      = "",
                           bool                                      reuseA       = false,
                           bool                                      reuseB       = false,
-                          const std::string&                        comment      = "")
+                          int                                       mxScaleASel  = 0,
+                          int                                       mxScaleBSel  = 0)
             : Instruction(instType, comment)
             , accType(accType)
             , mxScaleAType(mxScaleAType)
@@ -615,6 +636,8 @@ namespace rocisa
             , block(block)
             , reuseA(reuseA)
             , reuseB(reuseB)
+            , mxScaleASel(mxScaleASel)
+            , mxScaleBSel(mxScaleBSel)
         {
         }
 
@@ -634,6 +657,8 @@ namespace rocisa
             , block(other.block)
             , reuseA(other.reuseA)
             , reuseB(other.reuseB)
+            , mxScaleASel(other.mxScaleASel)
+            , mxScaleBSel(other.mxScaleBSel)
         {
         }
 
@@ -735,11 +760,6 @@ namespace rocisa
         std::string wmmaInputPermuteStr() const
         {
             constexpr size_t f4_t = 32;
-            // Conditions for reuseA(B)Str setting (typeConvert() is member: "f4" vs "f8f6f4")
-            std::string reuseAStr       = typeConvert() == "f4" || !getAsmCaps()["HasWMMA_V3"] ? ""
-                                                                                              : (!reuseA ? "" : " matrix_a_reuse");
-            std::string reuseBStr       = typeConvert() == "f4" || !getAsmCaps()["HasWMMA_V3"] ? ""
-                                                                                              : (!reuseB ? "" : " matrix_b_reuse");
             std::string inputPermuteStr = "";
             switch(instType)
             {
@@ -874,6 +894,15 @@ namespace rocisa
                 break;
             }
 
+            // MX scale-select (gfx1250): matrix_{a,b}_scale must be emitted BEFORE the
+            // matrix_{a,b}_scale_fmt modifiers. The assembler enforces the modifier order
+            // matrix_*_fmt -> matrix_*_scale -> matrix_*_scale_fmt and rejects any other
+            // ordering with "not a valid operand". 0 is the default (no modifier emitted).
+            if(mxScaleASel)
+                inputPermuteStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
+            if(mxScaleBSel)
+                inputPermuteStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
+
             switch(mxScaleAType)
             {
             case InstType::INST_E5M3:
@@ -898,11 +927,24 @@ namespace rocisa
                 break;
             }
 
-            return inputPermuteStr + reuseAStr + reuseBStr;
+            return inputPermuteStr;
         }
 
         std::string getArgStr() const
         {
+            // Matrix-reuse hints (gfx1250): trailing assembler keyword modifiers.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
+            // MX scale-select (gfx1250): pick the partner scale slot from a single wave-split
+            // ds_load. 0 is the default and emitted implicitly (no modifier).
+            std::string scaleSelStr = "";
+            if(mxScaleASel)
+                scaleSelStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
+            if(mxScaleBSel)
+                scaleSelStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
             if(getAsmCaps()["HasMFMA"])
             {
                 std::string mxsaStr = mxsa ? mxsa->toString() : "";
@@ -916,13 +958,19 @@ namespace rocisa
                     result += vop3->toString();
                 }
                 result += mfmaInputPermuteStr();
+                result += scaleSelStr;
+                result += reuseStr;
                 return result;
             }
             else
             {
+                // Note: scale-select (matrix_{a,b}_scale) is emitted inside
+                // wmmaInputPermuteStr() so it precedes matrix_{a,b}_scale_fmt as the
+                // assembler requires; do not append scaleSelStr here again.
                 return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                        + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
-                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr();
+                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr()
+                       + reuseStr;
             }
         }
 

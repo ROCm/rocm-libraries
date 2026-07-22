@@ -502,6 +502,8 @@ namespace hipsparse
         // case HIPSPARSE_CSRMV_ALG2:
         case HIPSPARSE_SPMV_CSR_ALG2:
             return rocsparse_spmv_alg_csr_rowsplit;
+        case HIPSPARSE_SPMV_CSR_ALG3:
+            return rocsparse_spmv_alg_csr_nnzsplit;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return rocsparse_spmv_alg_sell;
 #ifdef HIPSPARSE_WITH_SPMV_BSR
@@ -538,6 +540,8 @@ namespace hipsparse
             return rocsparse_spmm_alg_csr;
         case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
             return rocsparse_spmm_alg_bell;
+        case HIPSPARSE_SPMM_BSR_ALG1:
+            return rocsparse_spmm_alg_bsr;
         default:
             throw "Non existent hipsparseSpMMAlg_t";
         }

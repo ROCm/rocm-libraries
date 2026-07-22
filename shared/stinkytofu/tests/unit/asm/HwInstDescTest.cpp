@@ -23,6 +23,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -260,6 +262,29 @@ TEST_F(HwInstDescTest, WMMA_F32_16x16x16_F16) {
 }
 
 // ---------------------------------------------------------------------------
+// VOP3P packed math: v_pk_*_f32 — must carry IF_VALU from the VOP3P format
+// default. These instructions set no per-instruction IF_VALU (only
+// IF_Commutative), so the flag comes solely from the format. InsertWaitAluPass
+// relies on IF_VALU (isVectorALU/classifyEvent) to stamp packed-math VGPR
+// writes on the va_vdst scoreboard; without it the following VMEM consumer
+// would get no s_wait_alu.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, VOP3P_VPkMulF32_IsVALU) {
+    auto* desc = getDescByMnemonic("v_pk_mul_f32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3P);
+    EXPECT_EQ(desc->unit, ExecUnit::VALU);
+    EXPECT_TRUE(desc->has(IF_VALU));
+}
+
+TEST_F(HwInstDescTest, VOP3P_VPkAddF32_IsVALU) {
+    auto* desc = getDescByMnemonic("v_pk_add_f32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3P);
+    EXPECT_TRUE(desc->has(IF_VALU));
+}
+
+// ---------------------------------------------------------------------------
 // SOPP_BRANCH: s_branch — branch unit, label operand
 // ---------------------------------------------------------------------------
 TEST_F(HwInstDescTest, SOPP_SBranch) {
@@ -273,6 +298,18 @@ TEST_F(HwInstDescTest, SOPP_SBranch) {
     ASSERT_EQ(fields.size(), 1u);
     EXPECT_EQ(fields[0].encodeField, EncodeField::simm16);
     EXPECT_EQ(fields[0].fieldType, FieldType::label);
+}
+
+// S_SWAPPC_B64: call site (LLVM-style IF_Call), not IF_Branch / IF_IndirectBranch.
+TEST_F(HwInstDescTest, SOP1_SSwappcB64) {
+    auto* desc = getDescByMnemonic("s_swappc_b64");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP1);
+    EXPECT_EQ(desc->unit, ExecUnit::SALU);
+    EXPECT_TRUE(desc->has(IF_Call));
+    EXPECT_TRUE(desc->has(IF_HasSideEffect));
+    EXPECT_FALSE(desc->has(IF_Branch));
+    EXPECT_FALSE(desc->has(IF_IndirectBranch));
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +390,63 @@ TEST_F(HwInstDescTest, Trans64_VRcpF64) {
     ASSERT_NE(desc, nullptr);
     EXPECT_TRUE(desc->has(IF_Transcendental));
     EXPECT_TRUE(desc->has(IF_Trans64));
+    // f64 transcendentals classify as TRANS (not DPMACC): TRANS is matched
+    // before DPMACC, so they never reach the DPMACC branch.
+    EXPECT_FALSE(desc->has(IF_DPMACC));
+}
+
+// ---------------------------------------------------------------------------
+// DPMACC: double-precision MACC VALU carries IF_DPMACC.
+// f64 arithmetic, f64-reading conversions, and f64 compares.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, DPMACC_F64Arithmetic) {
+    for (const char* mn : {"v_add_f64", "v_mul_f64", "v_fma_f64", "v_max_f64", "v_min_f64"}) {
+        auto* desc = getDescByMnemonic(mn);
+        ASSERT_NE(desc, nullptr) << mn;
+        EXPECT_TRUE(desc->has(IF_VALU)) << mn;
+        EXPECT_TRUE(desc->has(IF_DPMACC)) << mn;
+        EXPECT_FALSE(desc->has(IF_Transcendental)) << mn;
+    }
+}
+
+TEST_F(HwInstDescTest, DPMACC_F64Convert) {
+    // v_cvt_u32_f64 reads f64 -> DPMACC; v_cvt_f64_u32 produces f64 -> not DPMACC.
+    auto* toU32 = getDescByMnemonic("v_cvt_u32_f64");
+    ASSERT_NE(toU32, nullptr);
+    EXPECT_TRUE(toU32->has(IF_DPMACC));
+
+    auto* toF64 = getDescByMnemonic("v_cvt_f64_u32");
+    ASSERT_NE(toF64, nullptr);
+    EXPECT_FALSE(toF64->has(IF_DPMACC));
+}
+
+TEST_F(HwInstDescTest, DPMACC_F64Compare) {
+    auto* cmp = getDescByMnemonic("v_cmp_lt_f64");
+    ASSERT_NE(cmp, nullptr);
+    EXPECT_TRUE(cmp->has(IF_DPMACC));
+
+    auto* cmpx = getDescByMnemonic("v_cmpx_eq_f64");
+    ASSERT_NE(cmpx, nullptr);
+    EXPECT_TRUE(cmpx->has(IF_DPMACC));
+
+    // class compares are DPMACC too: they run on the double-precision pipe like
+    // the relational f64 compares.
+    auto* cmpClass = getDescByMnemonic("v_cmp_class_f64");
+    ASSERT_NE(cmpClass, nullptr);
+    EXPECT_TRUE(cmpClass->has(IF_DPMACC));
+
+    auto* cmpxClass = getDescByMnemonic("v_cmpx_class_f64");
+    ASSERT_NE(cmpxClass, nullptr);
+    EXPECT_TRUE(cmpxClass->has(IF_DPMACC));
+}
+
+TEST_F(HwInstDescTest, DPMACC_F32NotMarked) {
+    // 32-bit arithmetic must not carry DPMACC.
+    for (const char* mn : {"v_add_f32", "v_mul_f32", "v_cmp_lt_f32"}) {
+        auto* desc = getDescByMnemonic(mn);
+        ASSERT_NE(desc, nullptr) << mn;
+        EXPECT_FALSE(desc->has(IF_DPMACC)) << mn;
+    }
 }
 
 // ---------------------------------------------------------------------------

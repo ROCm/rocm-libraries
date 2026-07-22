@@ -45,11 +45,11 @@ namespace rocsparse
                const I* __restrict__ csr_row_ptr,
                const J* __restrict__ csr_col_ind,
                const T* __restrict__ csr_val,
-               T* __restrict__ B,
+               T*      B,
                int64_t ldb,
                int* __restrict__ done_array,
                const J* __restrict__ map,
-               J* __restrict__ zero_pivot,
+               J*                   zero_pivot,
                rocsparse_index_base idx_base,
                rocsparse_fill_mode  fill_mode,
                rocsparse_diag_type  diag_type,
@@ -138,7 +138,8 @@ namespace rocsparse
         }
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
         const rocsparse::trm_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
 
@@ -563,8 +564,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
 
         if((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column))
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
         }
         else
         {

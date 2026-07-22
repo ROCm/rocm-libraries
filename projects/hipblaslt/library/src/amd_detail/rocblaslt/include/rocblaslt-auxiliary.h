@@ -79,6 +79,41 @@ rocblaslt_status rocblaslt_create(rocblaslt_handle* handle);
 rocblaslt_status rocblaslt_destroy(const rocblaslt_handle handle);
 
 /*! \ingroup aux_module
+ *  \brief Set the handle-level SM-count-target override.
+ *
+ *  \details
+ *  Mirrors the semantics of cuBLAS's \c cublasSetSmCountTarget on the
+ *  hipBLASLt handle. ``0`` (the default) means "no override". Negative
+ *  values are rejected with \c rocblaslt_status_invalid_value.
+ *
+ *  @param[in]
+ *  handle           the handle to the rocBLASLt library context.
+ *  @param[in]
+ *  sm_count_target  target compute-unit count, ``0`` for "use all CUs".
+ *
+ *  \retval rocblaslt_status_success            value stored.
+ *  \retval rocblaslt_status_invalid_handle     \p handle is invalid.
+ *  \retval rocblaslt_status_invalid_value      \p sm_count_target is negative.
+ */
+rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
+                                               int32_t          sm_count_target);
+
+/*! \ingroup aux_module
+ *  \brief Return the handle-level SM-count-target override.
+ *
+ *  @param[in]
+ *  handle           the handle to the rocBLASLt library context.
+ *  @param[out]
+ *  sm_count_target  receives the previously stored value (``0`` if never set).
+ *
+ *  \retval rocblaslt_status_success            value returned.
+ *  \retval rocblaslt_status_invalid_handle     \p handle is invalid.
+ *  \retval rocblaslt_status_invalid_value      \p sm_count_target is null.
+ */
+rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
+                                               int32_t*         sm_count_target);
+
+/*! \ingroup aux_module
  *  \brief Create a descriptor for matrix
  *  \details
  *  \p rocblaslt_matrix_layout_create creates a matrix descriptor It initializes
@@ -382,11 +417,16 @@ rocblaslt_status rocblaslt_is_algo_supported_cpp(rocblaslt_handle              h
                                                  const rocblaslt::RocTuningV2* tuning,
                                                  size_t& workspaceSizeInBytes);
 
+void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
+                                    rocblaslt::RocGemmType gemmType,
+                                    int32_t                mode);
+
 rocblaslt_status
     rocblaslt_algo_get_heuristic_cpp(rocblaslt_handle       handle,
                                      rocblaslt::RocGemmType gemmType,
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
+                                     const int32_t          streamKTileSchedulingMode,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results);
 
@@ -401,16 +441,24 @@ bool rocblaslt_internal_test_path(const std::string&);
 // Gets the absolute path of the so/dll/exe containing this function.
 std::string rocblaslt_internal_get_so_path();
 
-// Finds a path relative to the hipblaslt "library" directory, and returns the full path
-// if it exists.
-// Without `default_lib_dir` specified, this will first attempt to locate a plausible
-// library directory relative to the hosting shared library. On Windows, this will
-// search the containing "bin" directory and its sibling "lib" directory. Searching
-// the "bin" directory is for backwards compatibility with the original Windows
-// build system and should be considered deprecated in favor of the standard Posix
-// layout.
-// If `default_lib_dir` is given, then no shared library relative search heuristic
-// is used and the given directory is taken verbatim.
+// Resolve a path inside the hipblaslt "library" directory.
+//
+// Semantics are strict:
+//   - When `relpath` is supplied, the returned path is the absolute file path
+//     (library_root / relpath) IF AND ONLY IF that file exists. The function
+//     never returns a bare library_root when the requested file is missing —
+//     that mode silently masked file-not-found and caused callers to append a
+//     filename to the wrong root.
+//   - When `relpath` is not supplied, the function returns the first library
+//     root directory that exists (or nullopt if none do).
+//
+// Without `default_lib_dir` specified, the function locates the library
+// directory relative to the hosting shared library. On Windows the containing
+// "bin" directory and its sibling "lib" directory are searched; the "bin"
+// search is retained for backwards compatibility with the original Windows
+// build system and should be considered deprecated in favor of the standard
+// Posix layout. If `default_lib_dir` is given, no shared-library-relative
+// search heuristic is used and the given directory is taken verbatim.
 std::optional<std::filesystem::path>
     rocblaslt_find_library_relative_path(const std::optional<std::filesystem::path>& relpath,
                                          const std::optional<std::filesystem::path>& default_lib_dir

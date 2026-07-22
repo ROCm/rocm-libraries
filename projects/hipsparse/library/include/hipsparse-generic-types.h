@@ -308,7 +308,8 @@ typedef enum
     HIPSPARSE_SPMV_CSR_ALG1    = 2,
     HIPSPARSE_SPMV_CSR_ALG2    = 3,
     HIPSPARSE_SPMV_COO_ALG2    = 4,
-    HIPSPARSE_SPMV_SELL_ALG1   = 5
+    HIPSPARSE_SPMV_SELL_ALG1   = 5,
+    HIPSPARSE_SPMV_CSR_ALG3    = 7
 #ifdef HIPSPARSE_WITH_SPMV_BSR
     ,
     HIPSPARSE_SPMV_BSR_ALG1 = 6
@@ -395,10 +396,25 @@ typedef enum
     HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
     HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
     HIPSPARSE_SPMM_CSR_ALG3         = 12, /**< CSR algorithm 3 */
-    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13 /**< Blocked ELL algorithm 1 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13, /**< Blocked ELL algorithm 1 */
+    HIPSPARSE_SPMM_BSR_ALG1         = 14 /**< BSR algorithm 1 */
 } hipsparseSpMMAlg_t;
 #else
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12051)
+typedef enum
+{
+    HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */
+    HIPSPARSE_SPMM_COO_ALG1         = 1, /**< COO algorithm 1 */
+    HIPSPARSE_SPMM_COO_ALG2         = 2, /**< COO algorithm 2 */
+    HIPSPARSE_SPMM_COO_ALG3         = 3, /**< COO algorithm 3 */
+    HIPSPARSE_SPMM_COO_ALG4         = 5, /**< COO algorithm 4 */
+    HIPSPARSE_SPMM_CSR_ALG1         = 4, /**< CSR algorithm 1 */
+    HIPSPARSE_SPMM_CSR_ALG2         = 6, /**< CSR algorithm 2 */
+    HIPSPARSE_SPMM_CSR_ALG3         = 12, /**< CSR algorithm 3 */
+    HIPSPARSE_SPMM_BLOCKED_ELL_ALG1 = 13, /**< Blocked ELL algorithm 1 */
+    HIPSPARSE_SPMM_BSR_ALG1         = 14 /**< BSR algorithm 1 */
+} hipsparseSpMMAlg_t;
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12051)
 typedef enum
 {
     HIPSPARSE_SPMM_ALG_DEFAULT      = 0, /**< Default algorithm */

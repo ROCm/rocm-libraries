@@ -20,14 +20,40 @@ GEMM_AXES = [
     "persistent",
 ]
 
-CATEGORICAL_AXES = {
+GEMM_STREAMK_AXES = GEMM_AXES + ["reduction_strategy"]
+
+GEMM_ABQUANT_AXES = [
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_k",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
     "pipeline",
     "epilogue",
     "scheduler",
     "pad_m",
     "pad_n",
     "pad_k",
+    "a_preshuffle_quant",
+    "b_preshuffle_quant",
+    "group_size_n",
+]
+
+CATEGORICAL_AXES = {
+    "pipeline",
+    "epilogue",
+    "scheduler",
+    "reduction_strategy",
+    "pad_m",
+    "pad_n",
+    "pad_k",
     "persistent",
+    "a_preshuffle_quant",
+    "b_preshuffle_quant",
 }
 
 

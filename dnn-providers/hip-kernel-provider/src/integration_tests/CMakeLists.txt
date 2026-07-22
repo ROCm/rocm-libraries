@@ -15,17 +15,6 @@ endif()
 add_executable(
     hip_kernel_provider_integration_tests
     main.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-    Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
-    Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
-    Batchnorm/IntegrationGpuBatchnormBackward.cpp
-    Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
-    RMSnorm/IntegrationGpuRMSnormForward.cpp
-    RMSnorm/IntegrationGpuRMSnormBackward.cpp
-    Layernorm/IntegrationGpuLayernormForward.cpp
 )
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -72,6 +61,11 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
+if(ENABLE_HIP_MLOPS_ENGINE)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        hip_mlops_engine/IntegrationGpuPassByValue.cpp
+    )
+endif()
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
