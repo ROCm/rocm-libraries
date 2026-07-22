@@ -27,6 +27,7 @@
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
 #include <queue>
+#include <vector>
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -47,6 +48,14 @@ struct DAGNode {
     // Assigned by the pre-scan in scheduleRegionWithMovableSideEffects
     // based on DsReadOrder config and WMMA consumer analysis.
     unsigned dsReadPriority = UINT_MAX;
+    // Hardware hazard: the exact register keys (regDepKey) this node writes that a
+    // tensor_load reads as source(s), which the hardware requires be separated by a
+    // fixed number of cycles (SALU sgpr-dest -> tensor_load sgpr-src). Filled by the
+    // pre-scan. Non-empty drives the producer-side hoist (this node drifts earlier so
+    // intervening work absorbs the gap); the keys are stamped into the hazard gate when
+    // the node issues so the tensor_load waits the remainder out. Register type is
+    // encoded in the key, so this extends to other producer->consumer hazards.
+    std::vector<int> tensorLoadHazardKeys;
 
     DAGNode(StinkyInstruction* inst, unsigned id) : inst(inst), inDegree(0), id(id) {}
 };

@@ -283,6 +283,48 @@ static void scheduleRegionWithMovableSideEffects(
         }
     }
 
+    // Pre-scan: flag SGPR producers feeding a tensor_load. The hardware requires a fixed
+    // gap between a SALU writing an SGPR and a tensor_load reading that SGPR as a source
+    // (a producer->consumer edge hazard, not either op's own latency). Detection: BFS the
+    // node's users (skipping PHIs); if a tensor_load user reads an SGPR this node writes,
+    // flag it. Drives the consumer-side gate (tensor_load waits the hazard out) and the
+    // producer-side hoist (the flagged producer may issue earlier so intervening work
+    // absorbs the gap). Only SGPR (RegType::S) dest/src overlap counts.
+    for (unsigned i = 0; i < regionSize; ++i) {
+        StinkyInstruction* prod = dagNodes[i].inst;
+        // Map this node's SGPR destination indices -> their regDepKey.
+        std::unordered_map<uint32_t, int> sgprDefKey;
+        for (const StinkyRegister& d : prod->getDestRegs()) {
+            if (!d.isRegister() || isPseudoReg(d) || d.reg.type != RegType::S) continue;
+            for (uint32_t off = 0; off < d.reg.num; ++off)
+                sgprDefKey[d.reg.idx + off] = regDepKey(d.reg.type, d.reg.idx + off);
+        }
+        if (sgprDefKey.empty()) continue;
+
+        std::unordered_set<int> hazardKeys;
+        std::vector<StinkyInstruction*> q(prod->getUsers().begin(), prod->getUsers().end());
+        std::unordered_set<StinkyInstruction*> seen;
+        while (!q.empty()) {
+            StinkyInstruction* u = q.back();
+            q.pop_back();
+            if (!seen.insert(u).second) continue;
+            if (u->getUnifiedOpcode() == GFX::PHI) {
+                for (auto* pu : u->getUsers()) q.push_back(pu);
+                continue;
+            }
+            if (!isTensorLoad(*u)) continue;
+            // Record exactly the SGPRs this node writes that the tensor_load reads.
+            for (const StinkyRegister& s : u->getSrcRegs()) {
+                if (!s.isRegister() || isPseudoReg(s) || s.reg.type != RegType::S) continue;
+                for (uint32_t off = 0; off < s.reg.num; ++off) {
+                    auto it = sgprDefKey.find(s.reg.idx + off);
+                    if (it != sgprDefKey.end()) hazardKeys.insert(it->second);
+                }
+            }
+        }
+        dagNodes[i].tensorLoadHazardKeys.assign(hazardKeys.begin(), hazardKeys.end());
+    }
+
     PASS_DEBUG(dumpDAGGraph(dagGraph, dagNodes));
 
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin);

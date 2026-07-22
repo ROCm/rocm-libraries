@@ -53,6 +53,10 @@ constexpr int kCdna5DsReadQueueDepth = 16;
 constexpr int kCdna5DsReadDrainLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
 constexpr int kCdna5GlobalReadPerWmma = 1;
+// Hardware hazard: cycles required between a SALU writing an SGPR and a tensor_load
+// reading that SGPR as a source. Not either op's issue/latency cycles — a fixed
+// producer->consumer edge gap. Gates the tensor_load and drives the producer hoist.
+constexpr int kCdna5SgprToTensorLoadHazard = 8;
 
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
@@ -309,6 +313,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // "free". Decays in advanceTime. Crosses BBs via BBScheduleState.dsResiduals.
     std::map<int, int> regDataReadyCounters;
 
+    // SGPR->tensor_load hazard gate. Per SGPR reg key: remaining cycles until a
+    // tensor_load may read it (stamped kCdna5SgprToTensorLoadHazard when a flagged
+    // producer issues). Kept SEPARATE from regDataReadyCounters because the hazard is
+    // tensor_load-specific: only the global-read pick consults it, so a VALU/SALU that
+    // reads the same SGPR is not wrongly gated. Decays in advanceTime.
+    std::map<int, int> sgprTensorLoadHazard_;
+
     // (B) elapse-time ordering. Timeline (advanceTime clock) at which each reg was last
     // touched by any operand (dst or src) of an issued instruction. Used to order
     // already-free nodes within a bucket: prefer the node whose operands were touched
@@ -357,6 +368,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     void stampDataReady(const StinkyInstruction& inst);
     void touchOperands(const StinkyInstruction& inst);
     int getMaxSrcDataWait(DAGNode* node) const;
+    int getTensorLoadSgprWait(DAGNode* node) const;
     bool destOverlapsActiveWmmaSrc(DAGNode* node) const;
     int nodeElapseKey(DAGNode* node) const;
     DAGNode* pickFreeBest(const ReadySetByDAGid& queue, int* outWait = nullptr,
@@ -418,6 +430,13 @@ void CDNA5ReadyQueue::advanceTime(int cycles) {
         it->second -= cycles;
         if (it->second <= 0)
             it = regDataReadyCounters.erase(it);
+        else
+            ++it;
+    }
+    for (auto it = sgprTensorLoadHazard_.begin(); it != sgprTensorLoadHazard_.end();) {
+        it->second -= cycles;
+        if (it->second <= 0)
+            it = sgprTensorLoadHazard_.erase(it);
         else
             ++it;
     }
@@ -485,6 +504,12 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     touchOperands(*node->inst);
     updateWMMAStatus(node);
     stampDataReady(*node->inst);
+    // SGPR->tensor_load hazard: stamp exactly the register keys the pre-scan found a
+    // tensor_load reads from this producer, so the tensor_load pick waits the fixed
+    // hazard out. Dedicated map (not regDataReadyCounters) so only the tensor_load pick
+    // sees it — a VALU/SALU reading the same SGPR is not gated.
+    for (int key : node->tensorLoadHazardKeys)
+        sgprTensorLoadHazard_[key] = kCdna5SgprToTensorLoadHazard;
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
     return node;
 }
@@ -529,6 +554,22 @@ int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
         for (unsigned off = 0; off < srcReg.reg.num; ++off) {
             auto it = regDataReadyCounters.find(regDepKey(srcReg.reg.type, srcReg.reg.idx + off));
             if (it != regDataReadyCounters.end() && it->second > maxLat) maxLat = it->second;
+        }
+    }
+    return maxLat;
+}
+
+// SGPR->tensor_load hazard gate: max remaining hazard cycles over \p node's SGPR
+// sources. Returns 0 when the tensor_load may issue now, >0 when it must still wait for
+// a flagged producer's SGPR write to clear the hardware gap. Consulted only for the
+// tensor_load pick (see the global-read branch in findSmallestPickableNonWmma).
+int CDNA5ReadyQueue::getTensorLoadSgprWait(DAGNode* node) const {
+    int maxLat = 0;
+    for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
+        if (!srcReg.isRegister() || isPseudoReg(srcReg) || srcReg.reg.type != RegType::S) continue;
+        for (unsigned off = 0; off < srcReg.reg.num; ++off) {
+            auto it = sgprTensorLoadHazard_.find(regDepKey(srcReg.reg.type, srcReg.reg.idx + off));
+            if (it != sgprTensorLoadHazard_.end() && it->second > maxLat) maxLat = it->second;
         }
     }
     return maxLat;
@@ -590,11 +631,18 @@ DAGNode* CDNA5ReadyQueue::pickFreeBest(const ReadySetByDAGid& queue, int* outWai
                          destOverlapsActiveWmmaSrc(n)))
             continue;
         const int elapse = nodeElapseKey(n);
-        // Free nodes rank above hidden-stall ones; within a tier, largest elapse wins.
+        // Ordering, highest key first: an SGPR producer feeding a tensor_load is hoisted
+        // (so it surfaces as this queue's representative); then free nodes rank above
+        // hidden-stall ones; within a tier, largest elapse wins.
         const bool nHazard = wait > 0;
         const bool curHazard = bestWait > 0;
-        const bool better = (best == nullptr) || (!nHazard && curHazard) ||
-                            (nHazard == curHazard && elapse > bestElapse);
+        bool better;
+        if (best == nullptr)
+            better = true;
+        else if (n->tensorLoadHazardKeys.empty() != best->tensorLoadHazardKeys.empty())
+            better = !n->tensorLoadHazardKeys.empty();
+        else
+            better = (!nHazard && curHazard) || (nHazard == curHazard && elapse > bestElapse);
         if (better) {
             best = n;
             bestElapse = elapse;
@@ -677,7 +725,9 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int kind = -1;
     int bestWait = 0;
 
-    // Free work beats a hidden-stall candidate; within a tier, smallest DAG id.
+    // Ordering, highest key first: (1) an SGPR producer feeding a tensor_load is
+    // hoisted so its hardware hazard starts draining sooner (intervening work then
+    // absorbs the gap); (2) free work beats a hidden-stall candidate; (3) smallest id.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
         const bool candHazard = candWait > 0;
@@ -685,6 +735,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         bool take;
         if (best == nullptr)
             take = true;
+        else if (cand->tensorLoadHazardKeys.empty() != best->tensorLoadHazardKeys.empty())
+            take = !cand->tensorLoadHazardKeys.empty();
         else if (candHazard != curHazard)
             take = !candHazard;
         else
@@ -706,7 +758,12 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
-        consider(globalReadQueue.top(), kGlobalRead, 0);
+        // A tensor_load whose SGPR source is still inside the producer->tensor_load
+        // hazard window carries that wait, so it ranks as a hidden-stall candidate and
+        // defers behind free work (the flagged producer / ds fill the gap). It is still
+        // eligible when nothing else can go, paying the remaining wait before issue.
+        DAGNode* gr = globalReadQueue.top();
+        consider(gr, kGlobalRead, getTensorLoadSgprWait(gr));
     }
     if (dsWindowOk) consider(pickedDS, kLocalRead, 0);
 
