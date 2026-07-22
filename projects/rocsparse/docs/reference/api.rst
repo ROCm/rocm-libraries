@@ -626,6 +626,10 @@ documentation for details about the supported data types and compute types.
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spgeam()`                       |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_spscale_buffer_size()`          |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spscale()`                      |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_sddmm_buffer_size()`            |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sddmm_preprocess()`             |
