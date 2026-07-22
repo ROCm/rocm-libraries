@@ -2311,6 +2311,39 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
+  def clusterPadEarlyExit(self, kernel):
+    # Exit padded work-groups from a grid rounded up to a ClusterDim multiple
+    # (see ContractionSolution::generateSingleCall), before any TDM load,
+    # multicast, or cluster barrier. WorkGroup1 carries the GSU factor, so its
+    # bound is NumWorkGroups1 * GSU. Emitted on both prologue WG-decode paths
+    # (ArgType-routed deepcopy(moduleWg) and normal moduleWg); getNameInc keeps
+    # the labels unique across the two copies.
+    module = Module("ClusterPadEarlyExit")
+    if not clusterEnabled(kernel["ClusterDim"]):
+      return module
+    module.addComment1("Early stop padded cluster work-groups (grid rounded up to ClusterDim)")
+    padExitLabel   = Label(self.labels.getNameInc("ClusterPad_EarlyStop"), "")
+    padNoExitLabel = Label(self.labels.getNameInc("ClusterPad_NoEarlyStop"), "")
+    module.add(SCmpGeU32(src0=sgpr("WorkGroup0"), src1=sgpr("NumWorkGroups0"),
+                         comment="padded if WorkGroup0 >= tilesM"))
+    module.add(SCBranchSCC1(labelName=padExitLabel.getLabelName()))
+    with self.allocTmpSgpr(1, tag="clusterPad_tmpSgpr") as padTmp:
+      boundN = "NumWorkGroups1"
+      if kernel["GlobalSplitU"] != 0:
+        module.add(SAndB32(dst=sgpr(padTmp.idx), src0=sgpr("GSU"),
+                           src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+        module.add(SMulI32(dst=sgpr(padTmp.idx), src0=sgpr("NumWorkGroups1"),
+                           src1=sgpr(padTmp.idx), comment="tilesN * GSU"))
+        boundN = padTmp.idx
+      module.add(SCmpGeU32(src0=sgpr("WorkGroup1"), src1=sgpr(boundN),
+                           comment="padded if WorkGroup1 >= tilesN*GSU"))
+      module.add(SCBranchSCC1(labelName=padExitLabel.getLabelName()))
+      module.add(SBranch(labelName=padNoExitLabel.getLabelName()))
+      module.add(padExitLabel)
+      module.add(SEndpgm(comment="padded cluster work-group: exit before any load/barrier"))
+      module.add(padNoExitLabel)
+    return module
+
   def remapWgSerial(self, kernel, earlyStop=True):
     module = Module("RemapWgSerial")
     ########
@@ -2807,8 +2840,9 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprPool.checkIn(sgprArgType)
       sgprArgType = None # Cannot be used after this point
       module.add(SCBranchSCC0(labelName=labelMultiGemm.getLabelName()))
-      module.add(ArgType3_Routed_To_ArgType0)      
+      module.add(ArgType3_Routed_To_ArgType0)
       module.add(deepcopy(moduleWg))
+      module.add(self.clusterPadEarlyExit(kernel))
       if kernel["StreamK"] == 0:
         if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))
@@ -3019,6 +3053,8 @@ class KernelWriterAssembly(KernelWriter):
       earlyReturnModule.add(SEndpgm())
       earlyReturnModule.add(noEarlyReturnLabel)
       module.add(earlyReturnModule)
+
+      module.add(self.clusterPadEarlyExit(kernel))
       if kernel["StreamK"] == 0:
         if clusterEnabled(kernel["ClusterDim"]):
           module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName(), comment="Already using 3D WorkGroups, skip remap"))

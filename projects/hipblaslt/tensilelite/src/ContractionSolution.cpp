@@ -1895,6 +1895,15 @@ namespace TensileLite
 
         rv.clusterDim = sizeMapping.clusterDim;
 
+        // The HIP driver rejects a cluster launch whose grid is not divisible by
+        // clusterDim, so round up. The extra padded WGs early-exit in the kernel
+        // prologue; their WAVEDONE decrements the barrier's live member count.
+        if(enableCluster)
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
+        }
+
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;

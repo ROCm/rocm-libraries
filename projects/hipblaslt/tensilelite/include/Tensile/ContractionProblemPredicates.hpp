@@ -3140,42 +3140,20 @@ namespace TensileLite
                 }
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
-                    gsu     = gsu > 1 ? gsu : 1;
-                    int numWG_x = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                                  );
-                    int numWG_y = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
-                                  ) * gsu;
-
-                    bool divisible_x = (numWG_x % value[3]) == 0;
-                    bool divisible_y = (numWG_y % value[4]) == 0;
-
-                    return (divisible_x and divisible_y);
+                    // The grid is padded to a multiple of ClusterDim and padded
+                    // work-groups early-exit in the kernel prologue, so non-multiple
+                    // WG counts are supported and never need rejecting here.
+                    return true;
                 }
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    int gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : value[2];
-                    gsu     = gsu > 1 ? gsu : 1;
-                    int numWG_x = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
-                                  );
-                    int numWG_y = static_cast<int>(
-                                  std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
-                                  ) * gsu;
-
-                    std::vector<int> numWG = {numWG_x, numWG_y};
-                    std::vector<int> clusterDim = {value[3], value[4]};
-
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "prob's workgroup number [x, y]",
-                                        numWG,
-                                        "%",
-                                        "cluster dimension [x, y]",
-                                        clusterDim);
+                    bool rv = (*this)(problem);
+                    stream << *this << ": " << rv
+                           << " (grid padded to a multiple of ClusterDim; padded work-groups"
+                              " early-exit, so non-multiple sizes are always accepted)"
+                           << std::endl;
+                    return rv;
                 }
             };
         } // namespace Contraction
