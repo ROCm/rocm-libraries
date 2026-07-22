@@ -51,7 +51,7 @@
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
-#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
+#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
@@ -71,6 +71,7 @@
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -242,12 +243,16 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createStinkyWaitCntInsertionPass(), nullptr);
     EXPECT_NE(createBuildUseDefChainPass(true, false), nullptr);
     EXPECT_NE(createCFGBuilderPass(), nullptr);
-    EXPECT_NE(createDumpStinkyFunctionPass({}), nullptr);
+    EXPECT_NE(createDumpStinkyModulePass({}), nullptr);
     EXPECT_NE(createPeepholeOptimizationPass(), nullptr);
     EXPECT_NE(createDeadCodeEliminationPass(), nullptr);
     EXPECT_NE(createRedundantMovEliminationPass(), nullptr);
     EXPECT_NE(createStinkyIRVerifierPass(), nullptr);
     EXPECT_NE(createRemoveDelayAluPass(), nullptr);
+    EXPECT_EQ(createRemoveInstructionPass(), nullptr);
+    EXPECT_NE(createRemoveInstructionPass(std::vector<std::string>{"s_nop", "tensor_load_to_lds"}),
+              nullptr);
+    EXPECT_NE(createRemoveInstructionPass("tensor_load_to_lds,s_nop"), nullptr);
     EXPECT_NE(createInsertDelayAluPass(), nullptr);
     EXPECT_NE(createLoopRegionRemarkPass(), nullptr);
     EXPECT_NE(createMemTokenConsistencyCheckPass(), nullptr);

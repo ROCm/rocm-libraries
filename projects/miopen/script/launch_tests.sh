@@ -23,8 +23,8 @@ python3 "$SCRIPT_DIR/dependency-parser/main.py" parse "$BUILD_NINJA_FILE" --work
 # Get the directory containing build.ninja
 BUILD_DIR=$(dirname "$BUILD_NINJA_FILE")
 
-# Path to enhanced_dependency_mapping.json in the same directory
-JSON_FILE="$BUILD_DIR/enhanced_dependency_mapping.json"
+# Path to dapper_mapping.json in the same directory
+JSON_FILE="$BUILD_DIR/miopen_dapper_mapping.json"
 
 # Check if the JSON file exists
 if [ ! -f "$JSON_FILE" ]; then
@@ -37,8 +37,8 @@ branch=$(git rev-parse --abbrev-ref HEAD)
 # Run the command
 python3 "$SCRIPT_DIR/dependency-parser/main.py" select "$JSON_FILE" origin/develop $branch --folder ../
 
-# Path to tests_to_run.json in the same directory
-TEST_FILE="tests_to_run.json"
+# Path to miopen_dapper_tests.json in the same directory
+TEST_FILE="miopen_dapper_tests.json"
 
 command=$(python3 -c "
 import json

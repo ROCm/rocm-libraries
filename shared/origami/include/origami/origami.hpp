@@ -88,7 +88,9 @@ ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
  * @param configs List of candidate configurations to rank
  * @param model Model type to use for ranking (gemm or attention)
  * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
- * (best first)
+ * (best first). If every candidate is rejected, returns a ranking of the rejected configs
+ * (max latency) instead of throwing.
+ * @throws std::runtime_error if @p configs is empty.
  */
 ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,

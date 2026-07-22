@@ -13,6 +13,7 @@ target_sources(stinkytofu_objs PRIVATE
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
     LegalizationUtils.cpp
+    ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
@@ -21,15 +22,19 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyRemoveWaitCntPass.cpp
     StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
+    RegionClonePass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp
     InsertClusterBarrierPass.cpp
     RaiseVgprMsbPass.cpp
     RemoveDelayAluPass.cpp
+    RemoveInstructionPass.cpp
     InsertDelayAluPass.cpp
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
     InsertWaitAluPass.cpp
     RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
+    StinkyWmmaVgprReorderPass.cpp
+    FlattenCalleesPass.cpp
 )
