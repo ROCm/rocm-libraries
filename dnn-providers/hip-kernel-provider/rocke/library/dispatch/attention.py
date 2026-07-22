@@ -150,6 +150,11 @@ class AttentionSpec:
     num_query_heads: int
     num_kv_heads: int
     name: str = "rocke_attention_unified"
+    # Optional pinned codegen knobs a specialized candidate wants the builder to
+    # apply (sorted (key, value) pairs; empty for generic candidates). See
+    # ``attention_unified._d256_gfx950_spec_overrides``; the builder consumes them
+    # via ``_tiled_spec_from_problem(problem, overrides=...)``.
+    tiled_overrides: Tuple[Tuple[str, object], ...] = ()
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -301,6 +306,85 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
 ATTENTION_REGISTRY.register(_make_gfx942_dense_pipe_candidate())
 
 
+def _make_gfx950_d256_candidate() -> KernelCandidate:
+    """Fast gfx950 bf16 head_size-256 prefill kernel — 32x32 transposed stack
+    with FA3-style softmax<->MFMA interleave (mode2/g4) + slab-padded K_lds.
+
+    Registered at priority 5 so it outranks the generic unified_2d candidate
+    (priority 10) for the gfx950 bf16 D256 prefill cohort. The registry sorts
+    ascending (lower = higher precedence); gfx950-only, so it never competes
+    with the gfx942 dense_pipe candidate. Callers can also force this path
+    explicitly via algorithm="d256_gfx950".
+
+    The cohort is the single source of truth
+    ``kernels.common.attention_unified._d256_gfx950_cohort`` — the same predicate
+    the orchestrator's ``_d256_gfx950_fast`` override uses — so dispatch selection
+    and the built spec cannot drift. Only the arch gate differs (request arch
+    here vs resolved device arch there).
+    """
+    spec_id = "gfx950_d256"
+    name = "attention_gfx950_d256"
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, AttentionRequest)
+        if req.arch != "gfx950":
+            return False, f"d256_gfx950 requires gfx950 (got {req.arch!r})"
+        if req.dtype != "bf16":
+            return False, f"d256_gfx950 is bf16-only (got {req.dtype!r})"
+        ok, why = _selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        problem = _problem(req)
+        ok, why = supports_native_unified_attention(problem)
+        if not ok:
+            return False, why
+        if problem.select_path() != "2d":
+            return False, "problem routes to 3D, not 2D"
+        from kernels.common.attention_unified import _d256_gfx950_cohort
+
+        if not _d256_gfx950_cohort(problem):
+            return False, "not the gfx950 bf16 D256 prefill fast-path cohort"
+        return True, "ok"
+
+    def select(req: OperatorRequest) -> AttentionSpec:
+        ok, why = support(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, AttentionRequest)
+        problem = _problem(req)
+        from kernels.common.attention_unified import _d256_gfx950_spec_overrides
+
+        return AttentionSpec(
+            path="2d",
+            head_size=problem.head_size,
+            block_size=problem.block_size,
+            dtype=problem.dtype,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            name="rocke_attention_gfx950_d256",
+            tiled_overrides=tuple(sorted(_d256_gfx950_spec_overrides().items())),
+        )
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="d256_gfx950",
+        spec_id=spec_id,
+        abi_version=ATTENTION_ABI_VERSION,
+        priority=5,
+        supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=lambda spec, req: (0, 0, 0),
+        block=lambda spec: (0, 0, 0),
+        sweep_space=lambda req: (select(req),) if support(req)[0] else (),
+    )
+    return candidate
+
+
 def _make_d256_decode_candidate() -> KernelCandidate:
     """D256 bf16 decode candidate for gfx950 and gfx942 — 3D split-KV path.
 
@@ -370,6 +454,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     return candidate
 
 
+ATTENTION_REGISTRY.register(_make_gfx950_d256_candidate())
 ATTENTION_REGISTRY.register(_make_d256_decode_candidate())
 
 
