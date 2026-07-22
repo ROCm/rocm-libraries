@@ -168,11 +168,14 @@ rocblaslt_status getAllSolutions(std::shared_ptr<void>                          
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                  size_t                                          maxWorkSpaceBytes);
 
+// If resolvedSolutionName is requested, exactly one solution index must be
+// supplied. The name is returned from the same library lookup as the algo.
 rocblaslt_status
     getSolutionsFromIndex(rocblaslt_handle                                handle,
                           std::vector<int>&                               solutionIndex,
                           std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                          size_t                                          maxWorkSpaceBytes);
+                          size_t                                          maxWorkSpaceBytes,
+                          std::string* resolvedSolutionName = nullptr);
 
 rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      RocblasltContractionProblem& prob,

@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "UserDrivenTuningTypes.hpp"
 #include "auxiliary.hpp"
 #include "tensile_host.hpp"
 #include <Tensile/DataTypes.hpp>
@@ -59,12 +60,12 @@ public:
     // behavior even though every thread would compute the same value.
     // call_once guarantees exactly one thread runs the computation and that
     // its result is visible to every caller that returns from call_once
-    // afterward. Entries that carry a stable solution name are
-    // validated/healed directly against the live solution library and never
-    // consult this; it exists only so legacy entries (parsed before the
-    // solution_name column existed, so they cannot be validated that way)
-    // keep the old fail-safe behavior of falling back to default selection
-    // instead of trusting a possibly-stale index - see
+    // afterward. Entries that carry a solution name are validated directly
+    // against the live solution library and never consult this; it exists
+    // only so legacy entries (parsed before the solution_name column existed,
+    // so they cannot be validated that way) keep the old fail-safe behavior
+    // of falling back to default selection instead of trusting a
+    // possibly-stale index - see
     // problem_override_from_file[_cpp]() in rocblaslt_auxiliary.cpp.
     bool isBuildVersionCurrent();
 
@@ -108,19 +109,6 @@ namespace TensileLite
         solution_index,
         solution_name,
         count
-    };
-
-    // A tuning-cache entry: the solution index found during offline tuning,
-    // plus (when available) the stable Tensile solution name it referred to
-    // at tuning time. `index` is only a fast-path hint - it can go stale
-    // after a rebuild reorders the solution library. `name` is what lets a
-    // stale index be healed instead of silently used or the whole override
-    // file being discarded. `name` is empty for legacy (pre solution_name
-    // column) override files, which keeps them working exactly as before.
-    struct TunedSolution
-    {
-        int         index = -1;
-        std::string name;
     };
 
     class ProblemOverride
@@ -233,7 +221,53 @@ namespace TensileLite
 
     class OverrideMap
     {
+        using Map = std::multimap<ProblemOverride, TunedSolution>;
+
     public:
+        // A zero-copy view over one problem's entries. The shared lock stays
+        // alive for the view's lifetime, so iterators never escape their
+        // synchronization scope and concurrent readers remain lock-shared.
+        class CandidateRange
+        {
+        public:
+            using const_iterator = Map::const_iterator;
+
+            CandidateRange(std::shared_timed_mutex& mutex,
+                           const Map&               overrideMap,
+                           const ProblemOverride&   probKey)
+                : m_lock(mutex)
+            {
+                auto range = overrideMap.equal_range(probKey);
+                m_begin    = range.first;
+                m_end      = range.second;
+            }
+
+            CandidateRange(const CandidateRange&)            = delete;
+            CandidateRange& operator=(const CandidateRange&) = delete;
+            CandidateRange(CandidateRange&&)                 = default;
+            CandidateRange& operator=(CandidateRange&&)      = default;
+
+            const_iterator begin() const
+            {
+                return m_begin;
+            }
+
+            const_iterator end() const
+            {
+                return m_end;
+            }
+
+            bool empty() const
+            {
+                return m_begin == m_end;
+            }
+
+        private:
+            std::shared_lock<std::shared_timed_mutex> m_lock;
+            const_iterator                            m_begin;
+            const_iterator                            m_end;
+        };
+
         static OverrideMap& getMap()
         {
             static OverrideMap gInstance;
@@ -254,53 +288,24 @@ namespace TensileLite
             return size;
         }
 
-        // Returns a snapshot (copy) of every TunedSolution stored for prob_key.
-        // Deliberately NOT a pair of live iterators: callers used to hold onto
-        // iterators returned from equal_range() after this function's lock was
-        // released, then read `iterator->second` unsynchronized - which raced
-        // with update()/erase() running concurrently on another thread (e.g.
-        // one thread healing an entry while another thread reads it mid-
-        // assignment). A snapshot has no such lifetime/synchronization
-        // dependency on the map: once returned, it is exclusively owned by the
-        // caller.
-        std::vector<TunedSolution> find(const ProblemOverride& prob_key)
+        CandidateRange find(const ProblemOverride& prob_key)
         {
-            std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      range = m_override.equal_range(prob_key);
-            std::vector<TunedSolution>                result;
-            result.reserve(std::distance(range.first, range.second));
-            for(auto it = range.first; it != range.second; ++it)
-                result.push_back(it->second);
-            return result;
+            return CandidateRange(m_mutex, m_override, prob_key);
         }
 
-        void add(const std::pair<ProblemOverride, TunedSolution>& problemSolution)
+        // Add one entry unless this problem already carries the same index.
+        // Duplicate filtering and insertion happen under one exclusive lock.
+        bool add(const std::pair<ProblemOverride, TunedSolution>& problemSolution)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            m_override.insert(problemSolution);
-        }
-
-        // Heals a cache entry in place after its solution has been relocated
-        // to a new index by a rebuild, so subsequent find() calls in this
-        // process return the healed index directly. Re-locates the specific
-        // entry to update under its own lock (matched by prob_key and the
-        // pre-heal index recorded in `original`) rather than trusting a
-        // previously-returned iterator/reference, so this can never race with
-        // a concurrent find() the way updating via a stale iterator would.
-        void update(const ProblemOverride& prob_key,
-                    const TunedSolution&   original,
-                    const TunedSolution&   healed)
-        {
-            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            auto                                      range = m_override.equal_range(prob_key);
+            auto range = m_override.equal_range(problemSolution.first);
             for(auto it = range.first; it != range.second; ++it)
             {
-                if(it->second.index == original.index && it->second.name == original.name)
-                {
-                    it->second = healed;
-                    break;
-                }
+                if(it->second.index == problemSolution.second.index)
+                    return false;
             }
+            m_override.insert(problemSolution);
+            return true;
         }
 
         std::mutex& getLock()
@@ -309,10 +314,14 @@ namespace TensileLite
         }
 
     private:
-        std::multimap<ProblemOverride, TunedSolution> m_override;
-        std::mutex                                     m_guard;
-        std::shared_timed_mutex                        m_mutex;
+        Map                     m_override;
+        std::mutex              m_guard;
+        std::shared_timed_mutex m_mutex;
     };
+
+    // Parse path into the supplied map. This overload keeps parser tests and
+    // other isolated consumers independent of the process-global map.
+    void loadContractionProblemsFromFile(const std::string& path, OverrideMap& overrideMap);
 } // namespace Tensile
 
 namespace std

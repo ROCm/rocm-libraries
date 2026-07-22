@@ -44,10 +44,7 @@ bool OverrideSingleton::isBuildVersionCurrent()
         std::ifstream file_read(file_path);
         std::getline(file_read, firstLine);
 
-        const std::string header = "Git Version: ";
-        size_t            pos    = firstLine.find(header);
-        m_versionCurrent         = (pos != std::string::npos)
-                           && (firstLine.substr(pos + header.length()) == currentVersion);
+        m_versionCurrent = TensileLite::isTuningFileVersionCurrent(firstLine, currentVersion);
     });
     return m_versionCurrent;
 }
@@ -88,77 +85,59 @@ namespace TensileLite
         }
     }
 
-    void getContractionProblemsFromFile(const std::string& path)
+    void loadContractionProblemsFromFile(const std::string& path, OverrideMap& overrideMap)
     {
-        OverrideMap&                m_override = OverrideMap::getMap();
-        std::mutex&                 map_guard  = m_override.getLock();
-        std::lock_guard<std::mutex> lock(map_guard);
+        std::ifstream file_read(path);
+        std::string   header_line, header;
+        std::string   value_line, value;
+        const auto    delim = ',';
 
-        if(m_override.size() == 0)
+        while(std::getline(file_read, header_line))
         {
+            // Ignore lines without delimiter
+            header_line.erase(0, header_line.find_first_not_of(" \t\n\r\f\v"));
+            HeaderFields current_field = HeaderFields::transA;
 
-            std::ifstream file_read(path);
-            std::string   header_line, header;
-            std::string   value_line, value;
-            const auto    delim = ',';
-
-            while(std::getline(file_read, header_line))
+            if(header_line.find(HeaderFieldToString(current_field)) != std::string::npos)
             {
-                // Ignore lines without delimiter
-                header_line.erase(0, header_line.find_first_not_of(" \t\n\r\f\v"));
-                HeaderFields current_field = HeaderFields::transA;
-
-                if(header_line.find(HeaderFieldToString(current_field)) != std::string::npos)
+                if(std::getline(file_read, value_line))
                 {
+                    value_line.erase(0, value_line.find_first_not_of(" \t\n\r\f\v"));
+                    std::vector<std::string> entries{};
+                    entries.reserve(static_cast<size_t>(HeaderFields::count));
+                    std::stringstream header_split(header_line);
+                    std::stringstream value_split(value_line);
 
-                    if(std::getline(file_read, value_line))
+                    while(std::getline(header_split, header, delim)
+                          && std::getline(value_split, value, delim))
                     {
-                        value_line.erase(0, value_line.find_first_not_of(" \t\n\r\f\v"));
-                        std::vector<std::string> entries{};
-                        entries.reserve(
-                            static_cast<size_t>(static_cast<size_t>(HeaderFields::count)));
-                        std::stringstream header_split(header_line);
-                        std::stringstream value_split(value_line);
-
-                        while(std::getline(header_split, header, delim)
-                              && std::getline(value_split, value, delim))
+                        if(header == HeaderFieldToString(current_field))
                         {
-                            if(header == HeaderFieldToString(current_field))
-                            {
-                                entries.push_back(value);
-                                current_field = static_cast<HeaderFields>(
-                                    static_cast<int>(current_field) + 1);
-                            }
-
-                            if(current_field == HeaderFields::count)
-                                break;
+                            entries.push_back(value);
+                            current_field
+                                = static_cast<HeaderFields>(static_cast<int>(current_field) + 1);
                         }
 
-                        auto problemSolution = problemFromEntries(entries);
-
-                        if(problemSolution.second.index > 0)
-                        {
-                            auto existing       = m_override.find(problemSolution.first);
-                            bool duplicate_find = false;
-
-                            for(const auto& tuned : existing)
-                            {
-                                if(tuned.index == problemSolution.second.index)
-                                {
-                                    duplicate_find = true;
-                                    break;
-                                }
-                            }
-
-                            if(!duplicate_find)
-                            {
-                                m_override.add(problemSolution);
-                            }
-                        }
+                        if(current_field == HeaderFields::count)
+                            break;
                     }
+
+                    auto problemSolution = problemFromEntries(entries);
+                    if(problemSolution.second.index > 0)
+                        overrideMap.add(problemSolution);
                 }
             }
         }
+    }
+
+    void getContractionProblemsFromFile(const std::string& path)
+    {
+        OverrideMap&                overrideMap = OverrideMap::getMap();
+        std::mutex&                 mapGuard    = overrideMap.getLock();
+        std::lock_guard<std::mutex> lock(mapGuard);
+
+        if(overrideMap.size() == 0)
+            loadContractionProblemsFromFile(path, overrideMap);
     }
 
     std::pair<ProblemOverride, TunedSolution>
@@ -167,9 +146,8 @@ namespace TensileLite
         // Full rows include the trailing solution_name column (new format);
         // legacy rows stop one field earlier, at solution_index, and are
         // still accepted for backward compatibility - they just come back
-        // with an empty TunedSolution::name, so they get index-only
-        // treatment (no healing) at resolution time, matching pre-existing
-        // behavior for old tuning files.
+        // with an empty TunedSolution::name, so runtime replay can apply the
+        // legacy build-version safety check instead of name validation.
         constexpr size_t fullFieldCount   = static_cast<size_t>(HeaderFields::count);
         constexpr size_t legacyFieldCount = fullFieldCount - 1;
 
@@ -179,7 +157,8 @@ namespace TensileLite
             return std::make_pair(ProblemOverride{}, TunedSolution{});
         }
 
-        //Expected format: transA,transB,batch_count,M,N,K,input_type,output_type,compute_type,solution_index[,solution_name]
+        // Expected format: transA,transB,batch_count,m,n,k,a_type,b_type,c_type,
+        // compute_type,solution_index[,solution_name]
         bool transA = (entries[static_cast<size_t>(HeaderFields::transA)] != "N");
         bool transB = (entries[static_cast<size_t>(HeaderFields::transB)] != "N");
 

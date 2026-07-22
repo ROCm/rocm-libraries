@@ -53,17 +53,14 @@ void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
 // " (Custom tuning: GSU: x, WGM: y)" suffix to the base Tensile solution name
 // when ext-API GemmTuning overrides differ from the solution's own values.
 // That suffix is useful for console/debug display but must never reach the
-// tuning-cache's persisted solution_name column: matching a tuned entry back
-// to a live kernel (see UserDrivenTuningParser.hpp / rocblaslt_auxiliary.cpp)
-// always resolves candidate names via the plain index->name path
-// (getSolutionNameFromAlgoIndex), which never includes this suffix, so a
-// decorated name could never be found again on a subsequent run and every
-// such entry would silently and permanently fall back to default selection -
-// including on the very first use, not just after a rebuild.
+// tuning file's persisted solution_name column. Runtime validation resolves
+// names through the plain index->name path (getSolutionNameFromAlgoIndex),
+// which never includes this suffix, so a decorated name could never match
+// even on the first replay.
 inline std::string hipblaslt_strip_custom_tuning_suffix(const std::string& name)
 {
     static const std::string marker = " (Custom tuning: ";
-    size_t                    pos   = name.find(marker);
+    size_t                   pos    = name.find(marker);
     return pos == std::string::npos ? name : name.substr(0, pos);
 }
 
@@ -331,14 +328,10 @@ public:
             auto delim = ",";
             name_list << delim << "solution_index";
             value_list << delim << solution_index;
-            // solution_name is the stable Tensile solution identifier for the
-            // winning kernel (see UserDrivenTuningParser.hpp). Recording it
-            // alongside solution_index lets HIPBLASLT_TUNING_OVERRIDE_FILE
-            // re-associate this entry with its kernel's new index after a
-            // rebuild reorders the solution library, instead of the whole
-            // tuning file becoming unusable. Strip any ext-API "(Custom
-            // tuning: ...)" display suffix before persisting it - see
-            // hipblaslt_strip_custom_tuning_suffix() above.
+            // Record the Tensile solution name alongside the index so replay
+            // can verify that the index still identifies the tuned kernel.
+            // Strip any ext-API "(Custom tuning: ...)" display suffix before
+            // persisting it; validation uses the undecorated name.
             name_list << delim << "solution_name";
             value_list << delim << hipblaslt_strip_custom_tuning_suffix(solution_name);
 

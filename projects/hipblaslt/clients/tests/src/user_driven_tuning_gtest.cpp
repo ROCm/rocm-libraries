@@ -24,23 +24,18 @@
  *
  *******************************************************************************/
 
-// Unit tests for the AIHPBLAS-3751 tuning-cache self-healing feature: the
-// solution_name column added to HIPBLASLT_TUNING_FILE / HIPBLASLT_TUNING_OVERRIDE_FILE
-// entries (UserDrivenTuningParser.hpp/.cpp). solution_name is a stable identifier for
-// the tuned kernel that survives a rebuild reordering solution_index, which is what
-// lets a tuning-cache entry be healed instead of silently going stale or the whole
-// override file being discarded (see rocblaslt_auxiliary.cpp's
-// problem_override_from_file[_cpp]() for the runtime healing logic this data feeds).
+// Unit tests for AIHPBLAS-3751 Phase 1 safe tuning-file replay. New rows persist
+// solution_name alongside solution_index so runtime lookup can verify that an
+// index still identifies the tuned kernel. A mismatch is rejected and falls
+// back to default selection; the library does not relocate kernels by name.
 //
 // This file is split into two parts by build requirement:
 //
-// 1. hipblaslt_strip_custom_tuning_suffix() coverage (always built/run). That helper
-//    lives in argument_model.hpp, a normal public client header, so this part needs
-//    nothing special and runs in the same "smoke" CI lane as the rest of this binary
-//    (test/therock/test_hipblaslt.py, see caching_library_gtest.cpp for the
-//    `smoke_` naming convention this file follows).
+// 1. Identity-validation and persisted-name normalization coverage (always
+//    built/run). Their lightweight headers are available to the normal client
+//    target, so these tests run in the default "smoke" CI lane.
 //
-// 2. Everything else (problemFromEntries()/OverrideMap coverage), gated behind
+// 2. Parser and OverrideMap coverage, gated behind
 //    CODE_COVERAGE like auxiliary_gtest.cpp's other rocBLASLt-internal-header tests
 //    (e.g. testing_aux_tensile_host_func in testing_auxiliary.hpp). UserDrivenTuningParser.hpp
 //    is a private rocBLASLt header whose transitive includes (tensile_host.hpp ->
@@ -54,36 +49,22 @@
 //    include path (to reach it from this one file) would risk silently resolving some
 //    other translation unit's `#include "utility.hpp"` to the wrong one. That risk -
 //    not merely convenience - is why this part stays behind the existing convention
-//    rather than forcing it into the default build. It was instead verified with a
-//    standalone harness compiled directly against UserDrivenTuningParser.cpp and run
-//    against real hardware (see the AIHPBLAS-3751 plan's implementation notes).
+//    rather than forcing it into the default build.
 //
-// Why part 2 is unit tests of the parser, not YAML-driven matmul_gtest cases:
-// TensileLite::OverrideMap and OverrideSingleton (UserDrivenTuningParser.hpp) are
-// process-wide singletons that load HIPBLASLT_TUNING_OVERRIDE_FILE at most once per
-// process - getContractionProblemsFromFile() is a no-op once the map is non-empty, and
-// OverrideSingleton reads the env var once at first construction. That makes per-case
-// override-file scenarios driven through the shared hipblaslt-test binary fundamentally
-// order-dependent: only the first case in the whole process to touch the mechanism
-// actually exercises it, regardless of whether that's done via YAML or C++. This is a
-// pre-existing property of the singleton design, not something introduced here.
-// problemFromEntries() has no such issue - it is a pure function - so it carries the
-// bulk of this coverage. The OverrideMap-level tests below are deliberately the only
-// tests in this binary that call getContractionProblemsFromFile(), so they are not
-// racing any other case for the singleton's one-shot load. The runtime healing search
-// itself (healTunedSolutionByName[Cpp](), rocblaslt_auxiliary.cpp) requires a live
-// Tensile solution library and is intentionally file-local (static); it was verified
-// manually against real hardware rather than unit tested here.
+// Parser file tests load into a local OverrideMap through
+// loadContractionProblemsFromFile(), avoiding process-global singleton state.
+// End-to-end replay still requires a live Tensile solution library and belongs
+// in hardware/integration coverage.
 
 #include <gtest/gtest.h>
 
+#include "UserDrivenTuningTypes.hpp"
 #include "argument_model.hpp"
 
 // getSolutionNameFromData() (tensile_host.cpp), used by the ext API's
 // GemmInstance::getSolutionName(), can append a " (Custom tuning: GSU: x, WGM: y)"
-// display suffix. If that decorated string were ever persisted as solution_name,
-// healing/validation (which always compares against the plain index->name path -
-// see rocblaslt_auxiliary.cpp) could never match it again, so
+// display suffix. If that decorated string were persisted as solution_name,
+// validation against the plain index->name path could never match it, so
 // hipblaslt_strip_custom_tuning_suffix() must remove it before the value reaches
 // HIPBLASLT_TUNING_FILE. Always built/run - see file header comment part 1.
 TEST(UserDrivenTuningParser, smoke_StripsCustomTuningSuffixFromPersistedName)
@@ -100,14 +81,48 @@ TEST(UserDrivenTuningParser, smoke_StripsCustomTuningSuffixFromPersistedName)
     EXPECT_EQ(hipblaslt_strip_custom_tuning_suffix(""), "");
 }
 
+// Named entries are accepted only when the stored index resolves and its current
+// name exactly matches the recorded name. Build identity is irrelevant when a
+// name is available.
+TEST(UserDrivenTuningParser, smoke_ValidatesNamedSolutionIdentity)
+{
+    const TensileLite::TunedSolution tuned{333, "ExpectedKernel"};
+
+    EXPECT_TRUE(TensileLite::isTunedSolutionIdentityValid(tuned, true, "ExpectedKernel", false));
+    EXPECT_TRUE(TensileLite::isTunedSolutionIdentityValid(tuned, true, "ExpectedKernel", true));
+    EXPECT_FALSE(TensileLite::isTunedSolutionIdentityValid(tuned, true, "DifferentKernel", true));
+    EXPECT_FALSE(TensileLite::isTunedSolutionIdentityValid(tuned, false, "ExpectedKernel", true));
+}
+
+// Legacy rows have no name to authorize an index, so both a resolvable index and
+// a matching build identity are required.
+TEST(UserDrivenTuningParser, smoke_ValidatesLegacySolutionIdentity)
+{
+    const TensileLite::TunedSolution legacy{333, ""};
+
+    EXPECT_TRUE(TensileLite::isTunedSolutionIdentityValid(legacy, true, "IgnoredKernel", true));
+    EXPECT_FALSE(TensileLite::isTunedSolutionIdentityValid(legacy, true, "IgnoredKernel", false));
+    EXPECT_FALSE(TensileLite::isTunedSolutionIdentityValid(legacy, false, "IgnoredKernel", true));
+}
+
+TEST(UserDrivenTuningParser, smoke_ValidatesTuningFileVersionHeader)
+{
+    EXPECT_TRUE(TensileLite::isTuningFileVersionCurrent("Git Version: abc123", "abc123"));
+    EXPECT_FALSE(TensileLite::isTuningFileVersionCurrent("Git Version: old", "abc123"));
+    EXPECT_FALSE(TensileLite::isTuningFileVersionCurrent("Git Version: abc123-extra", "abc123"));
+    EXPECT_FALSE(TensileLite::isTuningFileVersionCurrent("Version: abc123", "abc123"));
+    EXPECT_FALSE(TensileLite::isTuningFileVersionCurrent("", "abc123"));
+}
+
 // See file header comment part 2 for why this part is CODE_COVERAGE-only.
 #ifdef CODE_COVERAGE
 #include "UserDrivenTuningParser.hpp"
 
-#include <cstdio>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -134,9 +149,8 @@ namespace
     }
 } // namespace
 
-// Legacy (pre solution_name) rows must keep parsing exactly as before: a valid index
-// and an empty name (no identifier to heal by, but still usable as an index-only
-// fast-path hint).
+// Legacy rows keep their index and an empty name. Runtime replay applies the
+// build-version check because these rows cannot be validated by name.
 TEST(UserDrivenTuningParser, smoke_ParsesLegacyRowWithoutSolutionName)
 {
     auto result = problemFromEntries(legacyEntries("56537"));
@@ -154,9 +168,7 @@ TEST(UserDrivenTuningParser, smoke_ParsesRowWithSolutionName)
     EXPECT_EQ(result.second.name, "Cijk_Alik_Bljk_HHS_BH_MT128x128x16");
 }
 
-// A row with an explicit but empty solution_name column (trailing comma, no text)
-// degrades to the same "index-only, no healing" treatment as a legacy row, rather
-// than e.g. being rejected.
+// An explicit empty solution_name receives the same legacy safety treatment.
 TEST(UserDrivenTuningParser, smoke_ParsesRowWithEmptySolutionNameAsLegacy)
 {
     auto result = problemFromEntries(namedEntries("56537", ""));
@@ -198,6 +210,43 @@ TEST(UserDrivenTuningParser, smoke_RejectsNonNumericSolutionIndex)
     EXPECT_LE(result.second.index, 0);
 }
 
+TEST(UserDrivenTuningParser, smoke_RejectsOutOfRangeSolutionIndex)
+{
+    auto result = problemFromEntries(legacyEntries("999999999999999999999999999"));
+
+    EXPECT_LE(result.second.index, 0);
+}
+
+TEST(UserDrivenTuningParser, smoke_RejectsNonNumericProblemDimension)
+{
+    auto entries                                  = legacyEntries("56537");
+    entries[static_cast<size_t>(HeaderFields::m)] = "not_a_dimension";
+
+    auto result = problemFromEntries(entries);
+
+    EXPECT_LE(result.second.index, 0);
+}
+
+TEST(UserDrivenTuningParser, smoke_ParsesTransposeAndShapeFields)
+{
+    auto entries                                            = namedEntries("56537", "SomeKernel");
+    entries[static_cast<size_t>(HeaderFields::transA)]      = "T";
+    entries[static_cast<size_t>(HeaderFields::transB)]      = "C";
+    entries[static_cast<size_t>(HeaderFields::batch_count)] = "3";
+    entries[static_cast<size_t>(HeaderFields::m)]           = "2048";
+    entries[static_cast<size_t>(HeaderFields::n)]           = "256";
+    entries[static_cast<size_t>(HeaderFields::k)]           = "4096";
+
+    auto result = problemFromEntries(entries);
+
+    EXPECT_TRUE(result.first.transA());
+    EXPECT_TRUE(result.first.transB());
+    EXPECT_EQ(result.first.batchSize(), 3);
+    EXPECT_EQ(result.first.m(), 2048);
+    EXPECT_EQ(result.first.n(), 256);
+    EXPECT_EQ(result.first.k(), 4096);
+}
+
 // Note: an "unrecognized datatype string" case is deliberately not covered here.
 // hipDataType_to_tensile_type() (tensile_host.hpp), which problemFromEntries() calls
 // for a_type/b_type/c_type/compute_type, reaches an assert(!"...") on an unmapped
@@ -207,8 +256,7 @@ TEST(UserDrivenTuningParser, smoke_RejectsNonNumericSolutionIndex)
 // touch, so it is out of scope to test (or fix) here.
 
 // Two problems that differ only by M must produce distinct ProblemOverride keys -
-// sanity check that problemFromEntries actually threads shape fields through, since
-// OverrideMap's healing/fast-path logic depends on keys being shape-specific.
+// sanity check that problemFromEntries actually threads shape fields through.
 TEST(UserDrivenTuningParser, smoke_DistinctShapesProduceDistinctKeys)
 {
     auto problemA = problemFromEntries(legacyEntries("1", "1024")).first;
@@ -217,15 +265,73 @@ TEST(UserDrivenTuningParser, smoke_DistinctShapesProduceDistinctKeys)
     EXPECT_NE(problemA, problemB);
 }
 
-// End-to-end OverrideMap population via getContractionProblemsFromFile(): the only
-// test in this binary allowed to call it (see file header comment - OverrideMap loads
-// a given process's override file at most once). Exercises header/value line matching,
-// mixed legacy + new-format rows in the same file, and per-shape lookup.
+TEST(UserDrivenTuningParser, smoke_OverrideMapDeduplicatesIndexesAndReturnsLockedRange)
+{
+    OverrideMap     map;
+    ProblemOverride key = problemFromEntries(legacyEntries("0", "4096")).first;
+
+    EXPECT_TRUE(map.add({key, TunedSolution{333, "KernelA"}}));
+    EXPECT_FALSE(map.add({key, TunedSolution{333, "ConflictingName"}}));
+    EXPECT_TRUE(map.add({key, TunedSolution{444, "KernelB"}}));
+
+    auto matches = map.find(key);
+    ASSERT_FALSE(matches.empty());
+
+    int count = 0;
+    for(const auto& match : matches)
+    {
+        if(count == 0)
+        {
+            EXPECT_EQ(match.second.index, 333);
+            EXPECT_EQ(match.second.name, "KernelA");
+        }
+        else if(count == 1)
+        {
+            EXPECT_EQ(match.second.index, 444);
+            EXPECT_EQ(match.second.name, "KernelB");
+        }
+        ++count;
+    }
+    EXPECT_EQ(count, 2);
+}
+
+TEST(UserDrivenTuningParser, smoke_OverrideMapSupportsConcurrentReaders)
+{
+    OverrideMap     map;
+    ProblemOverride key = problemFromEntries(legacyEntries("0", "8192")).first;
+    ASSERT_TRUE(map.add({key, TunedSolution{777, "ConcurrentKernel"}}));
+
+    std::atomic<bool>        valid{true};
+    std::vector<std::thread> readers;
+    for(int thread = 0; thread < 8; ++thread)
+    {
+        readers.emplace_back([&]() {
+            for(int iteration = 0; iteration < 100; ++iteration)
+            {
+                auto matches = map.find(key);
+                if(matches.empty() || matches.begin()->second.index != 777
+                   || matches.begin()->second.name != "ConcurrentKernel")
+                {
+                    valid = false;
+                    return;
+                }
+            }
+        });
+    }
+
+    for(auto& reader : readers)
+        reader.join();
+
+    EXPECT_TRUE(valid);
+}
+
+// End-to-end parser population into an isolated OverrideMap. Exercises
+// header/value matching, mixed legacy/new rows, and per-shape lookup.
 TEST(UserDrivenTuningParser, smoke_LoadsMixedFormatFileIntoOverrideMap)
 {
-    auto path = std::filesystem::temp_directory_path()
-               / ("hipblaslt_tuning_gtest_" + std::to_string(static_cast<long long>(getpid()))
-                  + ".csv");
+    auto path
+        = std::filesystem::temp_directory_path()
+          / ("hipblaslt_tuning_gtest_" + std::to_string(static_cast<long long>(getpid())) + ".csv");
 
     {
         std::ofstream file(path);
@@ -240,62 +346,28 @@ TEST(UserDrivenTuningParser, smoke_LoadsMixedFormatFileIntoOverrideMap)
         file << "N,N,1,2048,512,1024,f16_r,f16_r,f16_r,f32_r,222,gfx942,304\n";
     }
 
-    getContractionProblemsFromFile(path.string());
+    OverrideMap map;
+    loadContractionProblemsFromFile(path.string(), map);
     std::error_code ec;
     std::filesystem::remove(path, ec);
 
-    OverrideMap& map = OverrideMap::getMap();
     ASSERT_GE(map.size(), 2);
 
-    ProblemOverride keyA     = problemFromEntries(legacyEntries("0", "1024")).first;
-    auto            matchesA = map.find(keyA);
-    ASSERT_FALSE(matchesA.empty()) << "Shape M=1024 (new-format row) not found";
-    EXPECT_EQ(matchesA[0].index, 111);
-    EXPECT_EQ(matchesA[0].name, "KernelAAA");
-
-    ProblemOverride keyB     = problemFromEntries(legacyEntries("0", "2048")).first;
-    auto            matchesB = map.find(keyB);
-    ASSERT_FALSE(matchesB.empty()) << "Shape M=2048 (legacy-format row) not found";
-    EXPECT_EQ(matchesB[0].index, 222);
-    EXPECT_TRUE(matchesB[0].name.empty());
-}
-
-// Heals an entry: update() must be locatable by (prob_key, original value) even
-// though find() now returns snapshots rather than live iterators (the fix for a data
-// race where a caller could read a TunedSolution concurrently with another thread
-// healing/updating it via a stale iterator). This is the same call pattern
-// rocblaslt_auxiliary.cpp's problem_override_from_file[_cpp]() use after a successful
-// heal.
-TEST(UserDrivenTuningParser, smoke_UpdateHealsSnapshotEntryInPlace)
-{
-    auto path = std::filesystem::temp_directory_path()
-               / ("hipblaslt_tuning_gtest_update_"
-                  + std::to_string(static_cast<long long>(getpid())) + ".csv");
-
+    ProblemOverride keyA = problemFromEntries(legacyEntries("0", "1024")).first;
     {
-        std::ofstream file(path);
-        file << "transA,transB,batch_count,m,n,k,a_type,b_type,c_type,compute_type,"
-                "solution_index,solution_name\n";
-        file << "N,N,1,4096,512,1024,f16_r,f16_r,f16_r,f32_r,333,KernelToHeal\n";
+        auto matchesA = map.find(keyA);
+        ASSERT_FALSE(matchesA.empty()) << "Shape M=1024 (new-format row) not found";
+        EXPECT_EQ(matchesA.begin()->second.index, 111);
+        EXPECT_EQ(matchesA.begin()->second.name, "KernelAAA");
     }
 
-    getContractionProblemsFromFile(path.string());
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-
-    OverrideMap&    map = OverrideMap::getMap();
-    ProblemOverride key = problemFromEntries(legacyEntries("0", "4096")).first;
-
-    auto before = map.find(key);
-    ASSERT_FALSE(before.empty());
-    EXPECT_EQ(before[0].index, 333);
-
-    map.update(key, before[0], TunedSolution{444, "KernelToHeal"});
-
-    auto after = map.find(key);
-    ASSERT_FALSE(after.empty());
-    EXPECT_EQ(after[0].index, 444);
-    EXPECT_EQ(after[0].name, "KernelToHeal");
+    ProblemOverride keyB = problemFromEntries(legacyEntries("0", "2048")).first;
+    {
+        auto matchesB = map.find(keyB);
+        ASSERT_FALSE(matchesB.empty()) << "Shape M=2048 (legacy-format row) not found";
+        EXPECT_EQ(matchesB.begin()->second.index, 222);
+        EXPECT_TRUE(matchesB.begin()->second.name.empty());
+    }
 }
 
 #endif // CODE_COVERAGE

@@ -171,89 +171,6 @@ inline bool
     return (index == -1) ? false : true;
 }
 
-// Cap on how many default-selection candidates we scan when healing a
-// tuning-cache entry whose stored index no longer resolves to the kernel
-// that was actually tuned (e.g. after a rebuild reordered the solution
-// library). This mirrors the bounded candidate set the default heuristic
-// path already narrows down to (hundreds, not the full solution library -
-// see origami/ML-based filtering), so healing never triggers a full-library
-// scan or forces eager loading of lazily-loaded shards.
-//
-// KNOWN LIMITATION (confirmed on real hardware, not just theoretical): this
-// bound is not a reliable dial for healing success. HIPBLASLT_TUNING_FILE's
-// exhaustive-benchmark mode (--requested_solution -1) can win with a kernel
-// that the default matching/ranking library (findTopSolutions et al.) never
-// surfaces in its own output at any request size - raising this constant
-// from 256 to 8192 made no difference for such a kernel in practice. In that
-// situation healing cannot find the kernel by construction, regardless of
-// this bound, and correctly falls back to default selection instead of
-// using the wrong kernel - which matches the epic's explicit Non-Goal
-// ("at least as good as default selection", not "always optimal after an
-// upgrade"), but it does mean self-healing is not guaranteed to recover
-// every tuned entry, only those whose kernel the default matching library
-// would also have ranked among its own candidates. Reliably recovering pure
-// exhaustive-search outliers would need a different mechanism (e.g. a
-// dedicated name->index index, built lazily, or scanning already-loaded
-// shards directly) - deferred; see the plan's Implementation summary.
-static constexpr int kTuningHealCandidateCount = 256;
-
-// Given a tuning-cache entry whose stored index no longer names the solution
-// that was actually tuned (`targetName`), search the same bounded candidate
-// set the default heuristic path would already consider for `problem` for a
-// solution with that name. Returns its current index, or -1 if the tuned
-// kernel is no longer among those candidates - in which case the caller
-// should fall back to default selection for this shape rather than keep
-// using a stale index that now points at an unrelated kernel.
-static int healTunedSolutionByName(rocblaslt_handle&            handle,
-                                   RocblasltContractionProblem& problem,
-                                   std::shared_ptr<void>        gemmData,
-                                   const std::string&           targetName,
-                                   size_t                       max_workspace_bytes)
-{
-    if(targetName.empty())
-        return -1;
-
-    auto candidates = getBestRawSolutions(
-        problem, handle, gemmData, kTuningHealCandidateCount, max_workspace_bytes);
-
-    for(const auto& sol : candidates)
-    {
-        if(sol && sol->solutionName == targetName)
-            return sol->index;
-    }
-
-    return -1;
-}
-
-// C++ extension API counterpart of healTunedSolutionByName(): the ext API
-// path only exposes candidates as heuristic results (algo blobs), not raw
-// ContractionSolution objects, so each candidate's name is resolved via the
-// same getSolutionNameFromAlgoIndex() used elsewhere for algo -> name
-// queries, rather than duplicating that lookup.
-static int healTunedSolutionByNameCpp(rocblaslt_handle&      handle,
-                                      rocblaslt::RocGemmType gemmType,
-                                      std::shared_ptr<void>  gemmData,
-                                      const std::string&     targetName,
-                                      size_t                 max_workspace_bytes)
-{
-    if(targetName.empty())
-        return -1;
-
-    std::vector<rocblaslt_matmul_heuristic_result> candidates;
-    if(rocblaslt_status_success
-       != getBestSolutions(
-           handle, gemmType, gemmData, max_workspace_bytes, kTuningHealCandidateCount, candidates))
-        return -1;
-
-    for(auto& cand : candidates)
-    {
-        if(getSolutionNameFromAlgoIndex(handle, cand.algo) == targetName)
-            return *reinterpret_cast<int*>(cand.algo.data);
-    }
-
-    return -1;
-}
-
 // Preload problem/solution mappings
 bool problem_override_from_file(rocblaslt_handle&                 handle,
                                 RocblasltContractionProblem&      problem,
@@ -281,65 +198,36 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         for(auto candidate = candidates.begin(); !success && candidate != candidates.end();
             ++candidate)
         {
-            const TensileLite::TunedSolution& tuned = *candidate;
+            const TensileLite::TunedSolution& tuned = candidate->second;
             solutionIndex[0]                        = tuned.index;
             overrideResults.clear();
 
-            bool indexResolved = (rocblaslt_status_success
-                                 == getSolutionsFromIndex(
-                                     handle, solutionIndex, overrideResults, max_workspace_bytes));
+            std::string resolvedName;
+            bool        indexResolved
+                = (rocblaslt_status_success
+                   == getSolutionsFromIndex(handle,
+                                            solutionIndex,
+                                            overrideResults,
+                                            max_workspace_bytes,
+                                            tuned.name.empty() ? nullptr : &resolvedName));
 
-            // Self-healing: the stored index is only a fast-path hint, and can go
-            // stale - or simply stop existing - after a rebuild reorders or shrinks
-            // the solution library. Validate identity by stable name before trusting
-            // it, regardless of whether the index still resolves to *some* solution;
-            // if it doesn't check out, look the tuned kernel up by name instead of
-            // silently using whatever kernel now occupies that index, or discarding
-            // the whole override file (see OverrideSingleton / override_path_compare_
-            // git_version, which used to be the only safety net here).
-            if(!tuned.name.empty())
+            // The index is only a fast lookup hint. A named entry is authorized
+            // only when that index resolves to the same solution name in the
+            // current library. Do not relocate by name: a mismatch is a cache miss
+            // for this shape and must fall back to default selection.
+            const bool buildVersionCurrent
+                = !tuned.name.empty() || OverrideSingleton::getInstance().isBuildVersionCurrent();
+            if(!TensileLite::isTunedSolutionIdentityValid(
+                   tuned, indexResolved, resolvedName, buildVersionCurrent))
             {
-                bool nameMatches
-                    = indexResolved
-                      && getSolutionNameFromAlgoIndex(handle, overrideResults[0].algo) == tuned.name;
-
-                if(!nameMatches)
-                {
-                    int healedIndex = healTunedSolutionByName(
-                        handle, problem, matmul_desc->m_data, tuned.name, max_workspace_bytes);
-
-                    if(healedIndex < 0)
-                    {
-                        log_info(__func__,
-                                 "Tuned solution '" + tuned.name
-                                     + "' no longer available; falling back to default "
-                                       "selection for this shape.");
-                        continue;
-                    }
-
-                    solutionIndex[0] = healedIndex;
-                    overrideResults.clear();
-                    indexResolved = (rocblaslt_status_success
-                                    == getSolutionsFromIndex(
-                                        handle, solutionIndex, overrideResults, max_workspace_bytes));
-                    if(!indexResolved)
-                        continue; // shouldn't happen: healedIndex just came from a live candidate
-
-                    m_override.update(
-                        prob_key, tuned, TensileLite::TunedSolution{healedIndex, tuned.name});
-                }
-            }
-            else if(!indexResolved || !OverrideSingleton::getInstance().isBuildVersionCurrent())
-            {
-                // Legacy entry (predates the solution_name column): we have no
-                // stable identifier to validate the stored index against. Trust
-                // it only when it still resolves AND the build is unchanged
-                // since tuning - matching this entry's original (pre-healing)
-                // safety guarantee - otherwise fall back to default selection
-                // for this shape rather than risk an unrelated kernel.
-                log_info(__func__,
-                         "Legacy tuning entry (no solution_name) skipped after a rebuild; "
-                         "falling back to default selection for this shape.");
+                if(tuned.name.empty())
+                    log_info(__func__,
+                             "Legacy tuning entry (no solution_name) failed index/build "
+                             "validation; falling back to default selection for this shape.");
+                else
+                    log_info(__func__,
+                             "Tuning entry failed index/name validation; falling back to "
+                             "default selection for this shape.");
                 continue;
             }
 
@@ -426,53 +314,35 @@ bool problem_override_from_file_cpp(
         for(auto candidate = candidates.begin(); !success && candidate != candidates.end();
             ++candidate)
         {
-            const TensileLite::TunedSolution& tuned = *candidate;
+            const TensileLite::TunedSolution& tuned = candidate->second;
             solutionIndex[0]                        = tuned.index;
             overrideResults.clear();
 
-            bool indexResolved = (rocblaslt_status_success
-                                 == getSolutionsFromIndex(
-                                     handle, solutionIndex, overrideResults, max_workspace_bytes));
+            std::string resolvedName;
+            bool        indexResolved
+                = (rocblaslt_status_success
+                   == getSolutionsFromIndex(handle,
+                                            solutionIndex,
+                                            overrideResults,
+                                            max_workspace_bytes,
+                                            tuned.name.empty() ? nullptr : &resolvedName));
 
-            // Self-healing counterpart of problem_override_from_file()'s -
-            // see the comment there for the rationale.
-            if(!tuned.name.empty())
+            // Match the C API path above: the index is trusted only when the
+            // recorded name authorizes it. A mismatch falls back; it is never
+            // relocated by searching for the name.
+            const bool buildVersionCurrent
+                = !tuned.name.empty() || OverrideSingleton::getInstance().isBuildVersionCurrent();
+            if(!TensileLite::isTunedSolutionIdentityValid(
+                   tuned, indexResolved, resolvedName, buildVersionCurrent))
             {
-                bool nameMatches
-                    = indexResolved
-                      && getSolutionNameFromAlgoIndex(handle, overrideResults[0].algo) == tuned.name;
-
-                if(!nameMatches)
-                {
-                    int healedIndex = healTunedSolutionByNameCpp(
-                        handle, gemmType, gemmData, tuned.name, max_workspace_bytes);
-
-                    if(healedIndex < 0)
-                    {
-                        log_info(__func__,
-                                 "Tuned solution '" + tuned.name
-                                     + "' no longer available; falling back to default "
-                                       "selection for this shape.");
-                        continue;
-                    }
-
-                    solutionIndex[0] = healedIndex;
-                    overrideResults.clear();
-                    indexResolved = (rocblaslt_status_success
-                                    == getSolutionsFromIndex(
-                                        handle, solutionIndex, overrideResults, max_workspace_bytes));
-                    if(!indexResolved)
-                        continue; // shouldn't happen: healedIndex just came from a live candidate
-
-                    m_override.update(
-                        prob_key, tuned, TensileLite::TunedSolution{healedIndex, tuned.name});
-                }
-            }
-            else if(!indexResolved || !OverrideSingleton::getInstance().isBuildVersionCurrent())
-            {
-                log_info(__func__,
-                         "Legacy tuning entry (no solution_name) skipped after a rebuild; "
-                         "falling back to default selection for this shape.");
+                if(tuned.name.empty())
+                    log_info(__func__,
+                             "Legacy tuning entry (no solution_name) failed index/build "
+                             "validation; falling back to default selection for this shape.");
+                else
+                    log_info(__func__,
+                             "Tuning entry failed index/name validation; falling back to "
+                             "default selection for this shape.");
                 continue;
             }
 
@@ -496,13 +366,12 @@ bool problem_override_from_file_cpp(
                 {
                     problem->setF32XdlMathOp(rocisa::DataType::Float);
                     if(rocblaslt_status_success
-                       == isSolutionSupported(
-                           handle,
-                           static_cast<const rocblaslt::RocGemmType>(gemmType),
-                           gemmData,
-                           overrideResults[0].algo,
-                           tuning,
-                           required_workspace_size))
+                       == isSolutionSupported(handle,
+                                              static_cast<const rocblaslt::RocGemmType>(gemmType),
+                                              gemmData,
+                                              overrideResults[0].algo,
+                                              tuning,
+                                              required_workspace_size))
                     {
                         success = true;
                         log_info(__func__, "Use the fallback fp32 solution");

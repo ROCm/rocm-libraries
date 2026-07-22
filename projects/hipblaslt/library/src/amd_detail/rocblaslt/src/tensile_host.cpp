@@ -4635,8 +4635,16 @@ rocblaslt_status
     getSolutionsFromIndex(rocblaslt_handle                                handle,
                           std::vector<int>&                               solutionIndex,
                           std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                          size_t                                          maxWorkSpaceBytes)
+                          size_t                                          maxWorkSpaceBytes,
+                          std::string*                                    resolvedSolutionName)
 {
+    if(resolvedSolutionName)
+    {
+        resolvedSolutionName->clear();
+        if(solutionIndex.size() != 1)
+            return rocblaslt_status_invalid_value;
+    }
+
     GemmMasterLibraryPtr                   library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
@@ -4653,7 +4661,6 @@ rocblaslt_status
         return st;
 
     bool isOutOfBound = false;
-    int  i            = 0;
     for(auto index : solutionIndex)
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -4661,6 +4668,8 @@ rocblaslt_status
         {
             isOutOfBound = false;
             getRocRollerSolutionsFromIndex(handle, index, heuristicResults, maxWorkSpaceBytes);
+            if(resolvedSolutionName)
+                *resolvedSolutionName = rocRollerShortKernelNameFromEncodedSolutionIndex(index);
             continue;
         }
 
@@ -4680,7 +4689,8 @@ rocblaslt_status
         result.algo.fallback            = false;
         result.state                    = rocblaslt_status_success;
         result.workspaceSize            = 0;
-        i++;
+        if(resolvedSolutionName)
+            *resolvedSolutionName = solution->solutionName;
         heuristicResults.push_back(result);
     }
     if(isOutOfBound)
@@ -5196,7 +5206,16 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
     }
     if(solutionIndex == -1)
         return "";
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+    if(solutionIndex < 0)
+        return rocRollerShortKernelNameFromEncodedSolutionIndex(solutionIndex);
+#endif
+
     auto        solution       = library->getSolutionByIndex(*hardware, solutionIndex);
+    if(!solution)
+        return "";
+
     std::string modifiedString = "";
     if(gsu != solution->sizeMapping.globalSplitU && gsu != 0)
     {

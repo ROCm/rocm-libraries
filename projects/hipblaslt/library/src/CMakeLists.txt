@@ -8,6 +8,7 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/auxiliary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/exceptions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/hipblaslt_ostream.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/UserDrivenTuningTypes.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt_internal.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt-ext-op-internal.hpp"
 

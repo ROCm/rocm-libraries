@@ -45,14 +45,9 @@
 #define TO_STR(x) TO_STR2(x)
 
 // Reports whether the override file's "Git Version: " header matches the
-// running build. This used to be the *only* safety net for stale tuning
-// files: on a mismatch, the caller disabled `override.env_mode` outright,
-// discarding every cached shape for the rest of the process even though most
-// of them likely still name a kernel that exists at some (possibly
-// different) index. Real safety now comes from the per-entry stable-name
-// validation/healing in problem_override_from_file[_cpp]() (see
-// UserDrivenTuningParser.hpp / rocblaslt_auxiliary.cpp), so a mismatch here
-// is informational only - it no longer disables the override file.
+// running build. A mismatch used to disable the entire override file. It is
+// now informational: named entries are validated independently, and legacy
+// entries consult the build version before their index is trusted.
 bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHandle_t& handle)
 {
     char git_version[128];
@@ -503,8 +498,8 @@ try
         else
             log_info(__func__,
                      "The hipBLASLt git version and the override file git version are not the "
-                     "same; tuned shapes will be validated (and healed by name if needed) "
-                     "individually instead of trusting stored indexes outright.");
+                     "same; tuning entries will be validated individually and invalid entries "
+                     "will fall back to default selection.");
     }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(

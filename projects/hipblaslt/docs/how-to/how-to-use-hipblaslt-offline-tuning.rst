@@ -12,14 +12,13 @@ Using hipBLASLt offline tuning
 and provide the best solution index for a given problem size.
 This index can be used directly in future GEMM calls through the User Offline Tuning mechanism.
 
-Solution indices are not portable across library releases or device architectures on their own -
-the index is just a position in the solution library, and that position shifts whenever kernels are
-added, removed, or reordered. To avoid losing tuning work on every rebuild or ROCm upgrade, tuning
-files also record each winning kernel's stable solution name alongside its index (see
-:ref:`self-healing-tuning-cache` below). When the recorded index no longer points at the tuned
-kernel, hipBLASLt looks it up by name instead of silently using whichever kernel now occupies that
-index, and falls back to the default kernel selection for that specific problem size if the tuned
-kernel is no longer available at all - without disabling the rest of the tuning file.
+Solution indices are not portable across library releases or device architectures on their own.
+An index is only a position in the solution library, and that position can shift whenever kernels
+are added, removed, or reordered. Current tuning files therefore record the winning kernel's
+``solution_name`` alongside its index (see :ref:`validated-tuning-entries`). On replay, hipBLASLt
+uses the entry only when the recorded index still resolves to the recorded name. Otherwise, that
+problem falls back safely to default kernel selection instead of silently running a different
+kernel.
 
 Use the command line interface to access this functionality. See :ref:`clients` for more details.
 
@@ -102,42 +101,35 @@ To find and use the best GEMM kernel for a problem, follow these steps:
       [0]:
       N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,37575.2,205.047,28.5758,56537
 
-.. _self-healing-tuning-cache:
+.. _validated-tuning-entries:
 
-Tuning files survive rebuilds automatically
-============================================
+Tuning entries are validated before use
+=======================================
 
-Tuning files written by a current ``hipblaslt-bench`` include a ``solution_name`` column
-in addition to ``solution_index``. ``solution_name`` is a stable identifier for the tuned kernel
-that stays the same as long as that kernel (with the same tuning parameters) still exists in the
-library, even if a rebuild changes its numeric index.
+Tuning files written by a current ``hipblaslt-bench`` include ``solution_name`` next to
+``solution_index``:
 
-When ``HIPBLASLT_TUNING_OVERRIDE_FILE`` is loaded, hipBLASLt uses the stored index as a fast-path
-guess, then confirms it still names the tuned kernel before trusting it. If the index has shifted,
-hipBLASLt looks the kernel up by ``solution_name`` among the kernels the default heuristic would
-already consider for that problem size, and transparently uses its new index. If the tuned kernel
-is no longer present in the library at all, that specific problem size falls back to the default
-kernel selection - other entries in the same tuning file are unaffected.
+.. code-block:: text
 
-In practice this means you do not need to regenerate your tuning file after every hipBLASLt build or
-ROCm upgrade: entries whose tuned kernel is still selectable by the default kernel-selection logic
-keep working (healed automatically if their index moved), and only entries whose tuned kernel is no
-longer selectable at all lose their tuning and fall back to the default choice, which you can address
-by re-tuning just that shape if desired.
+   ...,solution_index,solution_name
+   ...,56537,Cijk_Alik_Bljk_HHS_BH_MT128x128x16
 
-Healing looks the tuned kernel up among the same candidates the default kernel selection would
-already consider for that problem size - it does not scan the full solution library. This keeps
-healing cheap, but it means a kernel that offline tuning found only through its exhaustive benchmark
-sweep (rather than one the default selection logic would also have proposed on its own) may not be
-found by healing after that kernel's index changes, even though the tuning file still records the
-right identifier. When that happens, hipBLASLt falls back to the default kernel choice for that shape
-rather than an incorrect one - the same safety guarantee as for kernels that can be healed - but you
-will need to re-tune that specific shape to recover its previous performance.
+When ``HIPBLASLT_TUNING_OVERRIDE_FILE`` is loaded, the index is treated as a lookup hint and the
+name as its check. hipBLASLt resolves the recorded index in the current solution library and
+compares the resolved name with the recorded name:
 
-Tuning files written by older hipBLASLt releases (without the ``solution_name`` column) continue to
-be accepted, but their entries have no stable identifier to heal by: they are trusted only when the
-running build's git version still matches the version recorded when the file was written. As soon as
-that version differs - i.e. after any rebuild or ROCm upgrade - every entry without a
-``solution_name`` falls back to the default kernel selection, the same fail-safe behavior these files
-had before self-healing existed. Recreating the tuning file with a current ``hipblaslt-bench`` is
-recommended so that its entries get ``solution_name`` and gain per-entry self-healing instead.
+* If the names match and the solution supports the current problem, hipBLASLt uses the tuned
+  solution.
+* If the index is missing, the names differ, or the solution is unsupported, hipBLASLt ignores
+  that entry and uses default kernel selection for that problem. Other entries remain eligible.
+
+Phase 1 does not search for the recorded name at a different index and does not retune
+automatically. Therefore, an entry can fall back after a rebuild or ROCm upgrade even when a
+similarly named kernel still exists elsewhere in the library. This is intentional: fallback is
+safe, although it can be slower than the previously tuned result. To recover tuned performance,
+run ``hipblaslt-bench`` again and replace the affected tuning entry.
+
+Older tuning files without ``solution_name`` remain accepted for compatibility. Because those
+entries cannot validate kernel identity, hipBLASLt trusts them only when the file's recorded git
+version matches the running build and the index still resolves. On a build-version mismatch,
+legacy entries fall back to default selection.

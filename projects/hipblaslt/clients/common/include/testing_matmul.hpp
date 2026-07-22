@@ -6150,12 +6150,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.print_solution_found)
             {
-                // Resolve the winning solution's stable name whenever a tuning run is
-                // capturing results (HIPBLASLT_TUNING_FILE), not only when the user also
-                // asked for human-readable --print_kernel_info output - the persisted
-                // tuning file needs solution_name to self-heal across rebuilds regardless
-                // of whether kernel info was requested on the console (see
-                // UserDrivenTuningParser.hpp / how-to-use-hipblaslt-offline-tuning.rst).
+                // Resolve the winning solution name whenever a tuning run is
+                // capturing results, not only for --print_kernel_info output.
+                // Runtime replay uses the persisted name to validate the index.
                 if(arg.print_kernel_info || tuningEnv)
                 {
                     if(arg.use_ext && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
