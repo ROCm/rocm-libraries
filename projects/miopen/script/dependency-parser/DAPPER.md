@@ -31,6 +31,14 @@ Selected with the CMake cache variable `MIOPEN_DAPPER_MODE`:
 
 ## Core concepts
 
+> [!IMPORTANT]
+> **Dapper analyzes _committed_ changes only.** The impact set comes from
+> `git diff <base>..HEAD`, so **uncommitted working-tree edits are invisible to dapper** —
+> including changes staged with `git apply` or a patch. **Commit your changes before running
+> a dapper test**, otherwise dapper will not attribute (or select) the tests you just
+> modified. (In native `validate` mode the full category still runs, so a broken test would
+> fail there anyway; but dapper's *selection/compliance* only sees committed changes.)
+
 - **user / category filter** — the fixtures the caller asked for. In TheRock these
   come from a *category* in `test_categories.yaml` (e.g. `standard`), selected at
   test launch.
