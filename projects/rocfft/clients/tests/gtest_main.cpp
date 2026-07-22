@@ -326,7 +326,9 @@ int main(int argc, char* argv[])
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
 
-    const auto opt_nrand = app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
+    const auto opt_nrand
+        = app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")
+              ->default_val(0);
     app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
         ->default_val(system_memory::singleton().get_total_gbytes());
     app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
