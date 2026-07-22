@@ -306,6 +306,12 @@ def main():
     )
     args = parser.parse_args()
 
+    # --batch-size is the step of range(0, len(built_kernels), args.batch_size);
+    # a zero step raises ValueError and a negative one silently yields no batches,
+    # so reject non-positive values up front with a clear message.
+    if args.batch_size <= 0:
+        parser.error("--batch-size must be a positive integer (kernels per subprocess)")
+
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)
 

@@ -779,7 +779,13 @@ using CLayout = {ns_name}::CLayout;
                 static_cast<std::size_t>(args.batch_count) * sizeof(CDataType);
             ave_time = launch_kernel(stream,
                 [=](const stream_config& sc) {{
-                    (void)hipMemsetAsync(args.e_ptr, 0, c_bytes, sc.stream_id_);
+                    // Check the return: a failed reset would let the split-K
+                    // atomic-add epilogue accumulate into a non-zero C and
+                    // silently produce wrong results (mirrors the stream-K path).
+                    if(hipMemsetAsync(args.e_ptr, 0, c_bytes, sc.stream_id_) != hipSuccess) {{
+                        throw std::runtime_error(
+                            "batched split-K: hipMemsetAsync failed to reset C between iterations");
+                    }}
                 }},
                 make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
         }} else {{
