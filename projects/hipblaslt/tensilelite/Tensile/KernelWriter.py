@@ -9342,7 +9342,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("AddressMXSB", numSgprAddressMXSB)
     if kernel["ProblemType"]["Sparse"]:
       self.defineSgpr("AddressMetadata", numSgprAddressMetadata)
-    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
+    # AddressWS/AddressFlags are the StreamK workspace + synchronizer-flag kernarg
+    # pointers. Under StreamKForceDPOnly (SK3 DP-first, gfx1250) the reduction is
+    # always the single-kernel tree path and the workspace partials/fixup path is
+    # never reached, so both are dead (every runtime reader is constant-folded or
+    # removed, see StreamK.py / KernelWriterAssembly.py). Drop them from the kernarg
+    # SGPR define to shrink the persistent kernarg footprint (peak .amdhsa_next_free_sgpr
+    # -4 SGPRs). The .kd metadata (Components/Signature.py) and the host kernarg builder
+    # (ContractionSolution.cpp singleCallArgs) are gated identically so the positional
+    # layout stays consistent host<->device.
+    if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
       self.defineSgpr("AddressWS", numSgprAddressWS)
       self.defineSgpr("AddressFlags", numSgprAddressFlags)
       self.states.numSgprStreamK += numSgprAddressWS + numSgprAddressFlags
@@ -9517,11 +9526,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # the tc=='WS' workspace store are never emitted, and the epilogue SrdWS
       # borrow is guarded by "SrdWS" in self.sgprs. So skip these 4 aligned
       # SGPRs (plus any alignment padding) for DP-only kernels. AddressWS and
-      # AddressFlags are intentionally NOT skipped: they are kernarg-loaded with
-      # a fixed host layout (ContractionSolution.cpp appends ws/Flags for every
-      # streamK>0 && atomic==0 kernel regardless of DP-only), and AddressFlags
-      # still has live runtime readers under DP-only (globalWriteElements GSU
-      # branch, prefetchAcrossPersistent).
+      # AddressFlags are likewise dropped for DP-only (see the kernarg define
+      # above): all their runtime readers are constant-folded/removed, and the
+      # .kd metadata + host kernarg builder are gated to match.
       if kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
         requiredAligned4SgprVar.append("SrdWS")
 
