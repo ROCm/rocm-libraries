@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -115,7 +115,6 @@ else()
 endif()
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
-add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 
 if( NOT ROCFFT_ENABLE_C_API_COMPILE_TEST )
   target_compile_definitions( rocfft-test PRIVATE SKIP_ROCFFT_C_TEST )
@@ -329,7 +328,7 @@ target_include_directories( rocfft-test
   )
 
 if( NOT BUILD_SHARED_LIBS )
-  list(APPEND rocfft-test_link_libs ${ROCFFT_CLIENTS_HOST_LINK_LIBS} ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS})
+  list(APPEND rocfft-test_link_libs hip::host hip::device)
 endif()
 
 if( NOT ROCFFT_BUILD_SCOPE )
@@ -376,17 +375,9 @@ endif()
 include( ../../cmake/std-filesystem.cmake )
 target_link_std_experimental_filesystem( rocfft-test )
 
-if( USE_CUDA )
-  target_include_directories( rocfft-test
-    PRIVATE
-    $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-    )
-  target_compile_definitions( rocfft-test PRIVATE __HIP_PLATFORM_NVCC__ )
-endif( )
 target_link_libraries( rocfft-test PRIVATE
-   ${ROCFFT_CLIENTS_HOST_LINK_LIBS}
-   ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS} )
+   hip::host
+   hip::device )
 
 include( ../../cmake/sqlite.cmake )
 target_link_libraries( rocfft-test PUBLIC ${ROCFFT_SQLITE_LIB} )
@@ -415,13 +406,8 @@ set_target_properties(rocfft-test
                       PROPERTIES 
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
-set_target_properties(rtc_helper_crash
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
-                      ${TESTS_OUT_DIR})
 
-
-rocm_install(TARGETS rocfft-test rtc_helper_crash COMPONENT tests)
+rocm_install(TARGETS rocfft-test COMPONENT tests)
 
 #Ctest based Test Filter Standardization using test_categories.yaml
 
