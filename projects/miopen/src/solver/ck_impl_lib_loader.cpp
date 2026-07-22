@@ -486,7 +486,25 @@ bool CkImplLibLoader::IsApplicable(CKSolverType solver,
     bool result = false;
     auto status =
         solver_fns_[ToSolverIndex(solver)].is_applicable(&problem, dtype, use_tf32, &result);
-    CheckStatus(status, "is_applicable");
+    // An applicability probe must be non-fatal: a CK-side error (e.g. "invalid
+    // device function" when the grouped-conv kernels in this build don't match
+    // the running device, as on RDNA) means this solver simply cannot serve the
+    // problem here. Treat any non-success status as "not applicable" and let the
+    // solver walk fall through to the next candidate, rather than throwing and
+    // aborting the whole convolution.
+    if(status != CK_IMPL_STATUS_SUCCESS)
+    {
+        const char* error_msg = "";
+        if(get_last_error_string_fn_ != nullptr)
+            get_last_error_string_fn_(&error_msg);
+        MIOPEN_LOG_I2("CK grouped conv is_applicable returned "
+                      << toString(status) << "(" << std::to_string(status) << ")"
+                      << (error_msg != nullptr && *error_msg != '\0'
+                              ? std::string(", Error: ") + error_msg
+                              : std::string())
+                      << "; treating as not applicable");
+        return false;
+    }
     return result;
 }
 
@@ -501,7 +519,22 @@ bool CkImplLibLoader::IsArgsSupported(CKSolverType solver,
     bool result = false;
     auto status = solver_fns_[ToSolverIndex(solver)].is_args_supported(
         &problem, kernel_id.c_str(), dtype, use_tf32, &result);
-    CheckStatus(status, "is_args_supported");
+    // Same non-fatal contract as IsApplicable: a CK-side error probing whether a
+    // specific kernel supports these args means "no" for this device, not a fatal
+    // failure. Return false so selection skips this kernel instead of aborting.
+    if(status != CK_IMPL_STATUS_SUCCESS)
+    {
+        const char* error_msg = "";
+        if(get_last_error_string_fn_ != nullptr)
+            get_last_error_string_fn_(&error_msg);
+        MIOPEN_LOG_I2("CK grouped conv is_args_supported returned "
+                      << toString(status) << "(" << std::to_string(status) << ")"
+                      << (error_msg != nullptr && *error_msg != '\0'
+                              ? std::string(", Error: ") + error_msg
+                              : std::string())
+                      << "; treating as unsupported");
+        return false;
+    }
     return result;
 }
 
