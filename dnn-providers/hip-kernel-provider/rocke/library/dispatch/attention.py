@@ -39,6 +39,7 @@ left to the instance builder at launch time.
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
@@ -77,7 +78,7 @@ class AttentionRequest(OperatorRequest):
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
-    num_sms: int = 120
+    num_sms: int = 0  # 0 => auto-resolve to the device CU count at dispatch (_resolve_num_sms)
     op: str = "attention"
     dtype: str = "fp16"
     algorithm: str = "auto"
@@ -109,6 +110,76 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
+# gfx942 (MI300X) fallback CU count, used only when the live gfx942 query is
+# unavailable (torch-less lowering / no visible GPU). Matches the StreamK
+# ``num_cus`` convention. Other archs are intentionally NOT resolved yet
+# (Future Scope) -- they keep the legacy 120 default.
+_GFX942_NUM_CUS = 304
+
+
+def _device_num_cus() -> "int | None":
+    """Live device multiprocessor (CU) count, or None if unqueryable.
+
+    Uses torch, present on the Python dispatch / benchmark path. NOTE: this
+    resolver covers the Python dispatch path only -- the C++ C-ABI engine keeps
+    its own num_sms default (attention_unified_entry.cpp) and requires the mirror
+    resolver there for production (AICK-1722 companion change).
+    """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            dev = torch.cuda.current_device()
+            return int(torch.cuda.get_device_properties(dev).multi_processor_count)
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_num_sms(req: AttentionRequest) -> int:
+    """Resolve the split-KV device-subscription target (``num_sms``).
+
+    ``num_sms`` is the dispatcher's "how many CUs does this device have" knob; it
+    drives 2D<->3D routing (``select_path``) and the 3D segment count. It defaulted
+    to a stale ``120``, under-subscribing gfx942 (MI300X = 304 CUs). Resolution:
+      1. ``ROCKE_NUM_SMS`` env pin (deterministic across CI boxes),
+      2. an explicit caller value (benchmarks pass a real count),
+      3. **gfx942 only** -- the live device CU count (guarded so a gfx942 *request*
+         on a non-gfx942 *box* falls back to the constant instead of that box's
+         count; correctly yields 228 on MI300A / 304 on MI300X),
+      4. gfx942 fallback constant.
+    Other archs keep the legacy ``120`` (Future Scope -- not validated yet).
+    NOTE: because this feeds the 3D ``num_segments`` (a compiled-kernel constant),
+    the resolved value is device-dependent within gfx942 (228 MI300A / 304 MI300X).
+    Kernel goldens are safe (they pin ``num_segments`` directly), but any NEW perf
+    snapshot captured on the resolved path must pin ``ROCKE_NUM_SMS`` to stay
+    reproducible across CI boxes.
+    """
+    env = os.environ.get("ROCKE_NUM_SMS")
+    if env:
+        try:
+            v = int(env)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    n = int(req.num_sms)
+    if n > 0:
+        return n
+    if req.arch.lower() == "gfx942":
+        try:
+            from rocke.runtime.hip_module import get_device_arch
+
+            if get_device_arch() == "gfx942":
+                cus = _device_num_cus()
+                if cus and cus > 0:
+                    return cus
+        except Exception:
+            pass
+        return _GFX942_NUM_CUS
+    return 120
+
+
 def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
@@ -123,7 +194,7 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         dtype=req.dtype.lower(),
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
-        num_sms=int(req.num_sms),
+        num_sms=_resolve_num_sms(req),
     )
 
 
