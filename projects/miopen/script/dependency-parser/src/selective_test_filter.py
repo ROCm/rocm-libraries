@@ -35,6 +35,30 @@ import subprocess
 import xml.etree.ElementTree as ET
 
 
+def _miopen_repo_prefix():
+    """Repo-root-relative path of the MIOpen project (e.g. 'projects/miopen/'), used to
+    discard changed files outside MIOpen.
+
+    Derived from this script's own location, NOT from the git cwd: `git diff --name-only`
+    is always repo-root-relative, but git runs in different places per build layout (MICI:
+    the build dir; TheRock: the source dir), so the cwd can't tell us the project prefix.
+    The script always lives at <miopen>/script/dependency-parser/src/, so parents[3] is the
+    MIOpen source dir in both layouts (src=0, dependency-parser=1, script=2, miopen=3).
+    Returns '' if MIOpen is itself the repo root (nothing to discard), or the literal
+    fallback if git can't be queried.
+    """
+    try:
+        miopen_dir = Path(__file__).resolve().parents[3]
+        return subprocess.run(
+            ["git", "-C", str(miopen_dir), "rev-parse", "--show-prefix"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()  # e.g. "projects/miopen/", or "" at the repo root
+    except Exception:
+        return "projects/miopen/"
+
+
 def get_changed_files(ref1, ref2, path_to_folder, source_dir="."):
     """Return the set of files changed between two git refs, or None if the refs or
     the diff cannot be resolved.
@@ -69,11 +93,24 @@ def get_changed_files(ref1, ref2, path_to_folder, source_dir="."):
         args += ["--", path_to_folder]
     try:
         result = subprocess.run(args, capture_output=True, text=True, check=True)
-        files = set(
-            str(Path(*Path(line).parts[2:])).strip()
-            for line in result.stdout.splitlines()
-            if line.strip()
-        )
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        # Discard changed files outside MIOpen: git diff spans the whole rocm-libraries
+        # monorepo, but only MIOpen sources/tests can map to MIOpen fixtures. Dropping the
+        # rest keeps cross-project changes (composablekernel, hiptensor, ...) from feeding
+        # select/classify_fallback and spuriously forcing entire_category.
+        prefix = _miopen_repo_prefix()
+        if prefix:
+            kept = [ln for ln in lines if ln.startswith(prefix)]
+            dropped = len(lines) - len(kept)
+            if dropped:
+                print(
+                    f"DAPPER: discarded {dropped} non-MIOpen changed file(s) "
+                    f"outside {prefix}"
+                )
+            lines = kept
+        # parts[2:] drops the 'projects/miopen/' prefix -> project-relative paths that match
+        # the mapping keys (consistent with the prefix filtered above).
+        files = set(str(Path(*Path(line).parts[2:])).strip() for line in lines)
         return files
     except subprocess.CalledProcessError as e:
         print(f"Error running git diff: {e}")
