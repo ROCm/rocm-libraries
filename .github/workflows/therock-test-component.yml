@@ -105,6 +105,36 @@ jobs:
           FETCH_ARTIFACT_ARGS: ${{ fromJSON(inputs.component).fetch_artifact_args }}
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
+      - name: Download instrumented coverage library (swap-in)
+        if: ${{ inputs.coverage_enabled }}
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-instrumented-lib-${{ inputs.amdgpu_families }}
+          path: ./coverage-instr-lib
+
+      - name: Swap in instrumented coverage library
+        if: ${{ inputs.coverage_enabled }}
+        shell: bash
+        run: |
+          # TheRock currently ships a non-instrumented rand_lib artifact, so the lib
+          # downloaded into ./build/lib has no coverage. Overwrite the real .so with the
+          # instrumented copy uploaded by the coverage build so ctest emits profraw.
+          # The .so/.so.1 symlinks are left as-is (they point at the versioned real file).
+          set +e
+          proj="$(echo '${{ fromJSON(inputs.component).job_name }}' | tr '[:upper:]' '[:lower:]')"
+          src="$(find ./coverage-instr-lib -name "lib${proj}.so*" -type f 2>/dev/null | head -1)"
+          dst="$(readlink -f "${GITHUB_WORKSPACE}/build/lib/lib${proj}.so" 2>/dev/null || echo "${GITHUB_WORKSPACE}/build/lib/lib${proj}.so.1.1")"
+          echo "instrumented src: ${src:-<none>}"
+          echo "target dst:       ${dst:-<none>}"
+          if [ -n "${src}" ] && [ -e "${dst}" ]; then
+            cp -fv "${src}" "${dst}"
+            nm="$(find "${GITHUB_WORKSPACE}/build" -type f -name llvm-nm -path '*/llvm/bin/*' 2>/dev/null | head -1)"
+            [ -n "${nm}" ] && echo "swapped-in __llvm_profile symbols: $("${nm}" "${dst}" 2>/dev/null | grep -c __llvm_profile)"
+          else
+            echo "::warning::instrumented lib or target not found; leaving downloaded lib in place"
+          fi
+
       - name: Driver / GPU sanity check
         timeout-minutes: 3
         run: |

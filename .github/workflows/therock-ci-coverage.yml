@@ -147,6 +147,19 @@ jobs:
           done
           echo "===== end self-check ====="
 
+      - name: Upload instrumented coverage library (swap-in for tests)
+        # Workaround for the TheRock artifact layer shipping a non-instrumented
+        # rand_lib: publish the instrumented lib from the coverage dist so the test
+        # job can swap it in over the (non-instrumented) downloaded artifact.
+        # hipRAND-only scope, so the path targets libhiprand.so*.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-instrumented-lib-${{ inputs.amdgpu_families }}
+          path: TheRock/build-coverage/dist/rocm/lib/libhiprand.so*
+          if-no-files-found: warn
+          retention-days: 1
+
       - name: Report
         if: ${{ !cancelled() }}
         run: |
