@@ -293,13 +293,37 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-            // RDNA4 (wave32) launch tuning: the segmented COO (AOS) matvec uses a
-            // 256-thread block by default. On wave32 (gfx12), a 128-thread block
-            // improves throughput for large problems, while small problems keep 256.
-            // Gate on TOTAL nnz (not nnz/row). The crossover was measured on gfx1201
-            // (RX 9070): 128 regresses below ~2M nnz but wins (+1..+5%) at and above
-            // ~2.2M across low/medium/high nnz-per-row shapes, so gate at 2.2M.
-            if(handle->wavefront_size == 32 && nnz >= 2200000)
+            // Launch tuning: the segmented COO (AOS) matvec uses a 256-thread
+            // block by default. On wave32 (RDNA, e.g. gfx1201) a smaller block
+            // improves throughput for large problems, while small problems keep
+            // 256. The crossover is driven by TOTAL nnz (problem size), not
+            // nnz/row.
+            //
+            // Performance portability:
+            //  - the tuned size is expressed in WAVEFRONTS (4 * wavefront_size ==
+            //    128 threads / 4 wavefronts on wave32);
+            //  - the crossover is scaled by the device's resident-thread capacity
+            //    (multiProcessorCount * maxThreadsPerMultiProcessor) rather than a
+            //    fixed nnz magic number, so it tracks wave32 GPUs of different
+            //    sizes. The ~38x-capacity knee reproduces the value measured on
+            //    gfx1201 (RX 9070; capacity 57344 -> ~2.2M nnz), where 128
+            //    regresses below and wins (+1..+5%) at and above the knee;
+            //  - it stays gated to wave32 (wave64 keeps the historical 256-thread
+            //    block unconditionally, so an untuned architecture is not
+            //    perturbed).
+            uint32_t coomvn_aos_dim = 256;
+            if(handle->wavefront_size == 32)
+            {
+                const int64_t device_capacity
+                    = static_cast<int64_t>(handle->properties.multiProcessorCount)
+                      * static_cast<int64_t>(handle->properties.maxThreadsPerMultiProcessor);
+                if(device_capacity > 0 && nnz >= 38 * device_capacity)
+                {
+                    coomvn_aos_dim = 4u * static_cast<uint32_t>(handle->wavefront_size);
+                }
+            }
+
+            if(coomvn_aos_dim == 128)
             {
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_aos_segmented_launch<128>(
                     handle, nnz, alpha_device_host, coo_val, coo_ind, x, y, descr->base)));
