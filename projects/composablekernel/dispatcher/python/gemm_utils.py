@@ -1249,7 +1249,15 @@ class GpuMultiABDRunner:
             # tail == [aNA, bNB, dND, Aop, Bop, CDEop]
             if len(tail) >= 6:
                 return tail[3], tail[4], tail[5]
-        return "PassThrough", "PassThrough", "PassThrough"
+        # Raise rather than silently defaulting to PassThrough (which would yield
+        # a wrong numeric reference): the config is the source of truth and the
+        # name is deterministic from it, so an unparseable name is a real error.
+        # Mirrors _parse_layout4, which also raises.
+        raise ValueError(
+            f"cannot parse multi_abd element-wise ops from kernel name "
+            f"{self._kernel_name!r}; expected a "
+            f"'..._multiabd_a<NA>_b<NB>_d<ND>_<Aop>_<Bop>_<CDEop>' suffix"
+        )
 
     def run(
         self,

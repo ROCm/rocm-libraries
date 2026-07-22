@@ -222,10 +222,16 @@ int dispatcher_run_multi_abd(const void** as_hosts,
         }
     }
 
-    const size_t a_bytes = static_cast<size_t>(M) * K * elem_a;
-    const size_t b_bytes = static_cast<size_t>(K) * N * elem_b;
-    const size_t d_bytes = static_cast<size_t>(M) * N * elem_d;
-    const size_t e_bytes = static_cast<size_t>(M) * N * elem_e;
+    // Cast every factor to size_t so the products are computed in 64-bit
+    // unsigned arithmetic (no reliance on operand-promotion order).
+    const size_t a_bytes =
+        static_cast<size_t>(M) * static_cast<size_t>(K) * static_cast<size_t>(elem_a);
+    const size_t b_bytes =
+        static_cast<size_t>(K) * static_cast<size_t>(N) * static_cast<size_t>(elem_b);
+    const size_t d_bytes =
+        static_cast<size_t>(M) * static_cast<size_t>(N) * static_cast<size_t>(elem_d);
+    const size_t e_bytes =
+        static_cast<size_t>(M) * static_cast<size_t>(N) * static_cast<size_t>(elem_e);
 
     std::vector<void*> a_dev(kNumA, nullptr), b_dev(kNumB, nullptr), d_dev(kNumD, nullptr);
     void* e_dev = nullptr;
@@ -304,7 +310,42 @@ int dispatcher_run_multi_abd(const void** as_hosts,
     std::array<ck_tile::index_t, kNumB> str_bs{};
     std::array<ck_tile::index_t, kNumD> str_ds{};
 
-    // Strides validated non-null and strictly positive above, so pack directly.
+    // ck_tile::index_t is 32-bit: reject any dimension or stride that would not
+    // fit before the static_casts below, so an out-of-range value fails loudly
+    // instead of silently truncating.
+    {
+        auto fits_i32 = [](int64_t v) { return v <= static_cast<int64_t>(INT32_MAX); };
+        if(!fits_i32(M) || !fits_i32(N) || !fits_i32(K) || !fits_i32(stride_e))
+        {
+            std::cerr << "dispatcher_run_multi_abd: M/N/K or stride_e exceeds the 32-bit "
+                         "index range\n";
+            return -1;
+        }
+        for(ck_tile::index_t i = 0; i < kNumA; ++i)
+            if(!fits_i32(stride_as[i]))
+            {
+                std::cerr << "dispatcher_run_multi_abd: stride_as exceeds the 32-bit index "
+                             "range\n";
+                return -1;
+            }
+        for(ck_tile::index_t i = 0; i < kNumB; ++i)
+            if(!fits_i32(stride_bs[i]))
+            {
+                std::cerr << "dispatcher_run_multi_abd: stride_bs exceeds the 32-bit index "
+                             "range\n";
+                return -1;
+            }
+        for(ck_tile::index_t i = 0; i < kNumD; ++i)
+            if(!fits_i32(stride_ds[i]))
+            {
+                std::cerr << "dispatcher_run_multi_abd: stride_ds exceeds the 32-bit index "
+                             "range\n";
+                return -1;
+            }
+    }
+
+    // Strides validated non-null, strictly positive, and 32-bit-safe above, so
+    // pack directly.
     for(ck_tile::index_t i = 0; i < kNumA; ++i)
     {
         as[i]     = a_dev[i];
