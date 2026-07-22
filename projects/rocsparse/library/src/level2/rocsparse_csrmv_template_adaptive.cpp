@@ -408,7 +408,9 @@ rocsparse_status
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         // Choose the general-path workgroup size from avg nnz/row; wg_ids must be
         // built with the same value the kernel is later launched with.
-        const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, (int64_t)(hptr[m] - hptr[0]));
+        // Use nnz (not hptr[m] - hptr[0]) so the workgroup size baked into wg_ids
+        // here matches the value the kernel is launched with, which cannot diverge.
+        const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
 
         // Determine row blocks array size
         ComputeRowBlocks<I, J>((I*)NULL,
