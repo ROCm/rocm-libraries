@@ -30,8 +30,12 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
+import sys
+from pathlib import Path
 
 from rocm_docs import ROCmDocs
+
+sys.path.insert(0, str(Path(__file__).parent / "extension"))
 
 with open("../CMakeLists.txt", encoding="utf-8") as f:
     match = re.search(r".*\bset\s*\(\s*VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+", f.read())
@@ -60,4 +64,11 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
 
 exclude_patterns = globals().get("exclude_patterns", []) + [".venv"]
 
-extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+extensions = globals().get("extensions", []) + [
+    "sphinxcontrib.datatemplates",
+    "rocm_docs_custom.selector",
+]
+
+templates_path = globals().get("templates_path", []) + [
+    "extension/rocm_docs_custom/selector/templates"
+]
