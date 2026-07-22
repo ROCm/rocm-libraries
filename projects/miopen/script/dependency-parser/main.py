@@ -122,8 +122,43 @@ def get_git_origin_url(repo_path="."):
     return None
 
 
+def resolve_base_sha(source_dir, base_ref):
+    """Determine the base commit for the impact diff, robust to CI checkouts.
+
+    CI frequently builds a MERGE of the PR into its target branch -- e.g. TheRock checks
+    out the PR merged into develop -- and the base_ref (origin/develop) is often NOT a
+    fetched ref there, so `git merge-base HEAD origin/develop` fails and dapper can't tell
+    what changed. When HEAD is such a merge commit, use the merge-base of its two parents
+    (the fork point). That is order-independent -- CI may merge in either direction, so we
+    must NOT assume which parent is develop -- and it is fail-safe: diff base..HEAD is
+    guaranteed to contain all of the PR's changes (dapper must never under-select). With a
+    rebased PR the fork point is recent, so the extra develop delta is small.
+
+    Otherwise (a normal branch tip, e.g. native MIOpen-CI) use merge-base(HEAD, base_ref)
+    when base_ref resolves. Returns None if nothing works, so the caller fails open to
+    entire_category rather than crashing.
+    """
+    g = ["git", "-C", source_dir]
+    parents = get_git_sha(g + ["rev-list", "--parents", "-n", "1", "HEAD"])
+    if parents and len(parents.split()) >= 3:  # HEAD + 2+ parents => merge commit
+        toks = parents.split()
+        base = get_git_sha(g + ["merge-base", toks[1], toks[2]])
+        if base:
+            print(f"    base: HEAD is a merge; merge-base of parents = {base[:12]}")
+            return base
+    if get_git_sha(g + ["rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}"]):
+        base = get_git_sha(g + ["merge-base", "HEAD", base_ref])
+        if base:
+            print(f"    base: merge-base(HEAD, {base_ref}) = {base[:12]}")
+            return base
+    print(
+        f"    base: unresolved (base_ref '{base_ref}' absent and HEAD is not a merge)"
+    )
+    return None
+
+
 def write_shas_file(context, shas_file, base_ref="origin/develop", source_dir="."):
-    """Write base (merge-base with base_ref) and feature (HEAD) SHAs.
+    """Write base and feature (HEAD) SHAs.
 
     source_dir points at the project's git worktree. For an in-source build (CI)
     this is the default '.'; for an out-of-source build (TheRock) the build dir is
@@ -132,7 +167,7 @@ def write_shas_file(context, shas_file, base_ref="origin/develop", source_dir=".
     origin = get_git_origin_url(source_dir)
     print(f"{context}: origin={origin} base_ref={base_ref} source_dir={source_dir}")
     feature_sha = get_git_sha(["git", "-C", source_dir, "rev-parse", "HEAD"])
-    base_sha = get_git_sha(["git", "-C", source_dir, "merge-base", "HEAD", base_ref])
+    base_sha = resolve_base_sha(source_dir, base_ref)
     with open(shas_file, "w") as file:
         file.write(f"{base_sha}\n")
         file.write(f"{feature_sha}\n")
