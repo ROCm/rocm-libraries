@@ -111,7 +111,12 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
                                         static_cast<ck_tile::index_t>(N),
                                         stride_b,
                                         ck_tile::bool_constant<kBRowMajor>{}));
-    std::copy(b_host, b_host + (K * N), b_k_n.begin());
+    // b_host is a raw byte buffer from Python/ctypes (e.g. fp8/bf8 handed as
+    // numpy uint8) reinterpreted as T. A typed element copy (std::copy) performs
+    // typed reads through that pointer -- strict-aliasing / object-lifetime UB for
+    // the raw bytes. memcpy the exact byte span into the tensor's flat storage
+    // instead: byte-identical, with no typed reads from the caller's buffer.
+    std::memcpy(b_k_n.data(), b_host, static_cast<size_t>(K) * static_cast<size_t>(N) * sizeof(T));
     if constexpr(BridgePreshuffleConfig::permuteN)
     {
         return ck_tile::shuffle_b_permuteN<BridgePreshuffleConfig>(b_k_n);
@@ -672,6 +677,13 @@ void dispatcher_cleanup()
 {
     g_dispatcher.reset();
     g_initialized = false;
+#ifdef GEMM_KEY_PRESHUFFLE
+    // Release the process-lifetime shuffled-B cache so an embedding library that
+    // calls dispatcher_cleanup() frees the held HostTensor instead of leaking it
+    // until process exit (the benchmark process never calls cleanup, but a
+    // library consumer should get its memory back).
+    g_shuffled_b_cache = ShuffledBCache{};
+#endif
 }
 
 } // extern "C"

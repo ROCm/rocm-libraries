@@ -1135,6 +1135,22 @@ def setup_multiple_gemm_dispatchers(
     if n == 0:
         return results
 
+    # Hard-fail rather than build a runnable but WRONG kernel: a preshuffle config
+    # with permute_n=True would compile a "_permuteN" kernel whose device pipeline
+    # is not yet bridged (it mis-shuffles B -> wrong results; see BRIDGE_PERMUTE_N).
+    # expand_sweep never yields such a config (it pins permute_n to BRIDGE_PERMUTE_N),
+    # so this only catches a hand-constructed / misused config before it becomes a
+    # .so that could silently produce incorrect output.
+    if not BRIDGE_PERMUTE_N:
+        for c in configs:
+            if getattr(c, "variant", "") == "preshuffle" and getattr(c, "permute_n", False):
+                raise ValueError(
+                    "permute_n=True is not supported by the bridge yet "
+                    "(BRIDGE_PERMUTE_N=False): refusing to build a permuteN kernel "
+                    f"that would mis-shuffle B ({c.name}). Flip BRIDGE_PERMUTE_N once "
+                    "the permuteN pipeline is emitted in unified_gemm_codegen."
+                )
+
     max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
 
     # Dedupe identical configs by name; compile once, share the path.

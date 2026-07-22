@@ -32,6 +32,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 from gemm_utils import (  # noqa: E402
     GemmKernelConfig,
+    setup_multiple_gemm_dispatchers,
     _output_dtype,
     _dtype_from_kernel_name,
     _layout_from_kernel_name,
@@ -93,6 +94,14 @@ class TestPreshuffleName(unittest.TestCase):
         self.assertFalse(base.name.endswith("_permuteN"))
         self.assertTrue(permuted.name.endswith("_preshuffle_permuteN"), permuted.name)
         self.assertNotEqual(base.name, permuted.name)
+
+    def test_permute_n_build_hard_fails(self):
+        # A permute_n=True config must be rejected at build time (the permuteN
+        # pipeline is not bridged yet), before any codegen/compile happens.
+        from gemm_utils import setup_multiple_gemm_dispatchers
+        cfg = _make_config(permute_n=True)
+        with self.assertRaises(ValueError):
+            setup_multiple_gemm_dispatchers([cfg])
 
     def test_dtype_and_layout_recover_from_name(self):
         for dtype in ("fp16", "bf16"):
