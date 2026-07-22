@@ -64,7 +64,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [False]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [4]
         - SourceSwap: [False]

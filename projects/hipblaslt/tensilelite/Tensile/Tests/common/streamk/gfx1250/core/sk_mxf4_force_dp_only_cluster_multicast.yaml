@@ -58,7 +58,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
         - LDSTrInst: [False]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [4]
         - SourceSwap: [False]
