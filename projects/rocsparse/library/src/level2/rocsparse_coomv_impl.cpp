@@ -510,13 +510,30 @@ namespace rocsparse
             // overhead of the smaller workgroup slightly hurt, so 256 is kept
             // there. The crossover is driven by total non-zeros (problem size),
             // not by nnz/row density: matrices with the same density but larger
-            // nnz benefit while smaller ones do not. The threshold below was
-            // measured on gfx1201 (RX 9070), where the switch is a consistent
-            // win from a few million non-zeros upward and a small loss below it.
+            // nnz benefit while smaller ones do not.
+            //
+            // Performance portability:
+            //  - the tuned size is expressed in WAVEFRONTS (4 * wavefront_size ==
+            //    128 threads / 4 wavefronts on wave32) rather than a fixed thread
+            //    count;
+            //  - the crossover is scaled by the device's resident-thread capacity
+            //    (multiProcessorCount * maxThreadsPerMultiProcessor) instead of a
+            //    fixed nnz magic number, so it tracks wave32 GPUs of different
+            //    sizes. The ~52x-capacity knee reproduces the value measured on
+            //    gfx1201 (RX 9070; capacity 57344 -> ~3M nnz);
+            //  - it stays gated to wave32 because the crossover was only
+            //    characterized there, so wave64 keeps the historical 256-thread
+            //    workgroup unconditionally (no risk on an untuned architecture).
             uint32_t coomvn_dim = 256;
-            if(handle->wavefront_size == 32 && nnz >= 3000000)
+            if(handle->wavefront_size == 32)
             {
-                coomvn_dim = 128;
+                const int64_t device_capacity
+                    = static_cast<int64_t>(handle->properties.multiProcessorCount)
+                      * static_cast<int64_t>(handle->properties.maxThreadsPerMultiProcessor);
+                if(device_capacity > 0 && nnz >= 52 * device_capacity)
+                {
+                    coomvn_dim = 4u * static_cast<uint32_t>(handle->wavefront_size);
+                }
             }
 
             if(coomvn_dim == 128)
