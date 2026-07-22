@@ -639,11 +639,18 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
                                                    std::map<std::string, int>& archCaps)
 {
     std::map<std::string, int> rv;
-    // 1024 vgpr
+    // Max. addressable VGPRs per wave
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
     // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
     rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
-    rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
+    // Per-SIMD physical VGPR file in wave32 mode. wave64 has half the registers.
+    if(isaVersion[0] == 12 && isaVersion[1] == 5)
+        rv["PhysicalMaxVgpr"] = 1024;
+    else if(isaVersion[0] == 11)
+        rv["PhysicalMaxVgpr"]
+            = checkInList(isaVersion, {{11, 0, 0}, {11, 0, 1}, {11, 5, 1}}) ? 1536 : 1024;
+    else
+        rv["PhysicalMaxVgpr"] = 512;
     // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it never binds.
     // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
     rv["PhysicalMaxSgpr"]   = isaVersion[0] == 11 ? 1696 : 800;
