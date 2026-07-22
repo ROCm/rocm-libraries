@@ -120,8 +120,8 @@ constexpr int32_t kSwPrefetchPcRelSlengthImm = 31;
 ///        **`nextMovLocal`** when stacking redirects **before**
 ///        **`s_getpc_b64`** (includes bytes of prior mov+prefetch pairs already
 ///        placed at that anchor).
-/// \param walkTotalBytes  Incremented by **`movB + pfB`** so a live forward
-/// walk stays aligned;
+/// \param walkTotalBytes  Incremented by **`movB + xcntB + pfB`** so a live
+/// forward walk stays aligned;
 ///        pass a stack **`dummyWalk`** (e.g. **`0`**) when the caller will
 ///        rewind **`totalBytes`** and re-walk and only needs the **return**
 ///        value.
@@ -157,6 +157,18 @@ int64_t insertSwPrefetchInstPcRelBefore(
                      getLiteralExtraBytes(*movInst, labelOff, gMov, asmSetSymbols);
     curLocal += movB;
 
+    const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId);
+    StinkyInstruction* xcntInst = nullptr;
+    if (xcntMc != nullptr) {
+        xcntInst = builder.create(xcntMc);
+        xcntInst->addSrcReg(StinkyRegister(0));  // xcnt=0
+        const int64_t gXcnt = blockGlobalByteOffset + curLocal;
+        const int xcntB = getEffectiveBaseSizeInBytes(*xcntInst) +
+                          getLiteralExtraBytes(*xcntInst, labelOff, gXcnt, asmSetSymbols);
+        curLocal += xcntB;
+        walkTotalBytes += xcntB;
+    }
+
     const int64_t gPf = blockGlobalByteOffset + curLocal;
     const int pfB = getEffectiveBaseSizeInBytes(*prefetchInst) +
                     getLiteralExtraBytes(*prefetchInst, labelOff, gPf, asmSetSymbols);
@@ -165,8 +177,9 @@ int64_t insertSwPrefetchInstPcRelBefore(
     walkTotalBytes += pfB;
 
     bb.insertIR(anchorIt, movInst);
+    if (xcntInst != nullptr) bb.insertIR(anchorIt, xcntInst);
     bb.insertIR(anchorIt, prefetchInst);
-    return static_cast<int64_t>(movB) + static_cast<int64_t>(pfB);
+    return curLocal - blockLocalByteOffsetWhereMovStarts + static_cast<int64_t>(pfB);
 }
 
 /// One mov+prefetch pair before \p anchorIt (`s_getpc_b64`), chaining \p
@@ -226,12 +239,24 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, unsigned scratc
                      getLiteralExtraBytes(*movInst, labelOff, gMov, asmSetSymbols);
     totalBytes += movB;
 
+    const HwInstDesc* xcntMc = getMCIDByUOp(GFX::s_wait_xcnt, archId);
+    StinkyInstruction* xcntInst = nullptr;
+    if (xcntMc != nullptr) {
+        xcntInst = builder.create(xcntMc);
+        xcntInst->addSrcReg(StinkyRegister(0));  // xcnt=0
+        const int64_t gXcnt = blockGlobalByteOffset + totalBytes;
+        const int xcntB = getEffectiveBaseSizeInBytes(*xcntInst) +
+                          getLiteralExtraBytes(*xcntInst, labelOff, gXcnt, asmSetSymbols);
+        totalBytes += xcntB;
+    }
+
     const int64_t gPf = blockGlobalByteOffset + totalBytes;
     const int pfB = getEffectiveBaseSizeInBytes(*prefetchInst) +
                     getLiteralExtraBytes(*prefetchInst, labelOff, gPf, asmSetSymbols);
     totalBytes += pfB;
 
     bb.appendIR(movInst);
+    if (xcntInst != nullptr) bb.appendIR(xcntInst);
     bb.appendIR(prefetchInst);
 }
 
