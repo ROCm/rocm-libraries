@@ -121,11 +121,16 @@ def generate_reports(
     profdata: Path,
     coverage_dir: Path,
     project: str,
+    path_equivalence: str | None = None,
 ):
     object_args: list[str] = []
     for obj in objects:
         object_args += ["-object", str(obj)]
     ignore_args = [f"-ignore-filename-regex={ignore_regex}"] if ignore_regex else []
+    # Map the build-node source prefix to the local checkout so llvm-cov can find
+    # sources for annotation (the build stages rocm-libraries at the workspace root;
+    # the test node checks it out under <workspace>/rocm-libraries).
+    patheq_args = [f"-path-equivalence={path_equivalence}"] if path_equivalence else []
 
     text_report = coverage_dir / f"code_cov_{project}.report"
     logging.info("Generating text report -> %s", text_report)
@@ -137,6 +142,7 @@ def generate_reports(
                 *object_args,
                 f"-instr-profile={profdata}",
                 *ignore_args,
+                *patheq_args,
             ],
             stdout=f,
             check=True,
@@ -150,6 +156,7 @@ def generate_reports(
         *object_args,
         f"-instr-profile={profdata}",
         *ignore_args,
+        *patheq_args,
         "--format=html",
         f"--output-dir={coverage_dir}",
     ]
@@ -167,6 +174,7 @@ def generate_reports(
                 *object_args,
                 f"-instr-profile={profdata}",
                 *ignore_args,
+                *patheq_args,
                 "--format=lcov",
             ],
             stdout=f,
@@ -207,6 +215,13 @@ def main():
         "--skip-tests",
         action="store_true",
         help="Do not run tests; merge existing profraw files",
+    )
+    parser.add_argument(
+        "--path-equivalence",
+        type=str,
+        default=None,
+        help="Passed to llvm-cov as -path-equivalence=<from>,<to> so it can locate "
+        "sources when the build-time path differs from the local checkout",
     )
     args = parser.parse_args()
 
@@ -270,6 +285,7 @@ def main():
         profdata,
         args.coverage_dir,
         project,
+        path_equivalence=args.path_equivalence,
     )
     logging.info("Coverage generation complete.")
 

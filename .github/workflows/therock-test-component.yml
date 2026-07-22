@@ -194,6 +194,7 @@ jobs:
             python rocm-libraries/.github/scripts/coverage_runner.py \
               --build-dir ./build --metadata ./coverage_metadata.json \
               --coverage-dir "${GITHUB_WORKSPACE}/coverage-report" \
+              --path-equivalence "${GITHUB_WORKSPACE},${GITHUB_WORKSPACE}/rocm-libraries" \
               --test-dir "${TDIR}" 2>&1 | tee ./test_logs/test_output.log
           else
             # Run test and capture output (still display to console)
