@@ -901,7 +901,7 @@ class KernelWriterConversion(KernelWriterBase):
 
 
   @staticmethod
-  def kernelName(solution, num_elements_load, btype=None):
+  def kernelName(solution, num_elements_load, btype=None, gateType=None):
     state = solution._state if hasattr(solution, "_state") else solution.state
     indexChars = INDEX_CHARS
     # C dimensions
@@ -939,7 +939,8 @@ class KernelWriterConversion(KernelWriterBase):
         name += "_Aux%s"%state["ProblemType"]["DataTypeE"].toChar()
 
     if state["ProblemType"]["UseGateResidual"]:
-      name += "_Gate%s"%state["ProblemType"]["GateResidualDataTypeList"][0].toChar()
+      gt = gateType if gateType is not None else state["ProblemType"]["GateResidualDataTypeList"][0]
+      name += "_Gate%s"%gt.toChar()
 
     if ((state["ProblemType"]["ActivationType"] != 'none') and state["ActivationFused"]):
       if state["ProblemType"]["ActivationType"] == 'all':
