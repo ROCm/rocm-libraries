@@ -478,6 +478,15 @@ def test_instruction_vmax_f16_true16():
     ri.setKernel(isa, 32)
     assert ri.getArchCaps()["NoSDWA"], "expected NoSDWA cap for gfx11"
 
+    # How this test works: rocisa instruction objects render their assembly text
+    # through __str__, so we construct the instruction under test, stringify it,
+    # and assert on the emitted form. vgpr(name, ...) builds a VGPR operand
+    # container (symbolic names like "Output"/"Value+0" mirror what the AMax
+    # generator passes; isAbs=True wraps it in abs()). EMaxF16 is the true16-aware
+    # max helper under test. Nothing is assembled or run on a device.
+    # TODO(#9720): decouple this from the toolchain/env init above; a
+    # string-rendering test should not need a resolved assembler path.
+
     # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
     inst = EMaxF16(vgpr("Output"), vgpr("Output"), vgpr("Value+0", isAbs=True))
     s = str(inst)
