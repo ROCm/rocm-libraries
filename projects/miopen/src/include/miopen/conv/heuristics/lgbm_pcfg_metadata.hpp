@@ -23,7 +23,7 @@ namespace pcfg {
 // not need the vocab at all: it copies these straight into the feature row tail.
 struct Candidate
 {
-    std::string desc;       // "" means "use the solver default config" (abstain)
+    std::string desc; // "" means "use the solver default config" (abstain)
     std::vector<double> args;
 };
 

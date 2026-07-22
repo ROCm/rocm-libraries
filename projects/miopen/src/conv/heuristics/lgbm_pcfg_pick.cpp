@@ -34,8 +34,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG)
 extern "C" {
 // LgbmEntry is declared at global scope in lgbm_predict.hpp (inside its own
 // extern "C"). Reference it unqualified here (we are at global scope too).
-#define MIOPEN_LGBM_PCFG_DECL(slug) \
-    void lgbm_pcfg_##slug##_predict(LgbmEntry*, int, double*);
+#define MIOPEN_LGBM_PCFG_DECL(slug) void lgbm_pcfg_##slug##_predict(LgbmEntry*, int, double*);
 
 MIOPEN_LGBM_PCFG_DECL(ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
 MIOPEN_LGBM_PCFG_DECL(ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC)
@@ -64,7 +63,10 @@ using PredictFn = void (*)(LgbmEntry*, int, double*);
 // solver name -> its renamed predict symbol.
 const std::unordered_map<std::string, PredictFn>& PredictTable()
 {
-#define MIOPEN_LGBM_PCFG_ENTRY(slug) {#slug, &lgbm_pcfg_##slug##_predict}
+#define MIOPEN_LGBM_PCFG_ENTRY(slug)       \
+    {                                      \
+        #slug, &lgbm_pcfg_##slug##_predict \
+    }
     static const std::unordered_map<std::string, PredictFn> table = {
         MIOPEN_LGBM_PCFG_ENTRY(ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC),
         MIOPEN_LGBM_PCFG_ENTRY(ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC),
@@ -165,24 +167,24 @@ void FillProblemPrefix(std::vector<double>& prefix,
                        const std::string& gfx_id,
                        bool with_gfx_code)
 {
-    const double channels   = static_cast<double>(p.GetInChannels());
-    const double height     = static_cast<double>(p.GetInHeight());
-    const double width      = static_cast<double>(p.GetInWidth());
-    const double out_ch     = static_cast<double>(p.GetOutChannels());
-    const double fil_y      = static_cast<double>(p.GetWeightsHeight());
-    const double fil_x      = static_cast<double>(p.GetWeightsWidth());
-    const double pad_h      = static_cast<double>(p.GetPadH());
-    const double pad_w      = static_cast<double>(p.GetPadW());
-    const double stride_h   = static_cast<double>(p.GetKernelStrideH());
-    const double stride_w   = static_cast<double>(p.GetKernelStrideW());
-    const double dil_h      = static_cast<double>(p.GetDilationH());
-    const double dil_w      = static_cast<double>(p.GetDilationW());
-    const double groups     = static_cast<double>(p.GetGroupCount());
-    const double batch      = static_cast<double>(p.GetBatchSize());
+    const double channels = static_cast<double>(p.GetInChannels());
+    const double height   = static_cast<double>(p.GetInHeight());
+    const double width    = static_cast<double>(p.GetInWidth());
+    const double out_ch   = static_cast<double>(p.GetOutChannels());
+    const double fil_y    = static_cast<double>(p.GetWeightsHeight());
+    const double fil_x    = static_cast<double>(p.GetWeightsWidth());
+    const double pad_h    = static_cast<double>(p.GetPadH());
+    const double pad_w    = static_cast<double>(p.GetPadW());
+    const double stride_h = static_cast<double>(p.GetKernelStrideH());
+    const double stride_w = static_cast<double>(p.GetKernelStrideW());
+    const double dil_h    = static_cast<double>(p.GetDilationH());
+    const double dil_w    = static_cast<double>(p.GetDilationW());
+    const double groups   = static_cast<double>(p.GetGroupCount());
+    const double batch    = static_cast<double>(p.GetBatchSize());
 
-    const double g   = groups < 1.0 ? 1.0 : groups;
-    const double cpg = channels / g;
-    const double opg = out_ch / g;
+    const double g       = groups < 1.0 ? 1.0 : groups;
+    const double cpg     = channels / g;
+    const double opg     = out_ch / g;
     const double farea   = fil_y * fil_x;
     const double spatial = height * width;
     const double bxs     = batch * height * width;
@@ -310,10 +312,9 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 
     auto ranked = RankBucket(pit->second, *model, prefix, bit->second);
     if(!ranked.empty())
-        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " ranked " << ranked.size()
-                                    << " configs, top=\""
-                                    << (ranked.front().empty() ? "<default>" : ranked.front())
-                                    << "\"");
+        MIOPEN_LOG_I2("lgbm_pcfg: "
+                      << solver_name << " ranked " << ranked.size() << " configs, top=\""
+                      << (ranked.front().empty() ? "<default>" : ranked.front()) << "\"");
     return ranked;
 }
 

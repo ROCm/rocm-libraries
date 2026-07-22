@@ -70,13 +70,13 @@ constexpr int kIdxBandwidthGbps  = 27;
 constexpr int kIdxTnBlockBegin = 28;
 constexpr int kNumTnFeatures   = 13;
 // Derived tile-alignment features (41..47).
-constexpr int kIdxAlC64    = 41;
-constexpr int kIdxAlC32    = 42;
-constexpr int kIdxAlOc64   = 43;
-constexpr int kIdxAlOc32   = 44;
-constexpr int kIdxAlN8     = 45;
-constexpr int kIdxAlCRem64 = 46;
-constexpr int kIdxAlOcRem64= 47;
+constexpr int kIdxAlC64     = 41;
+constexpr int kIdxAlC32     = 42;
+constexpr int kIdxAlOc64    = 43;
+constexpr int kIdxAlOc32    = 44;
+constexpr int kIdxAlN8      = 45;
+constexpr int kIdxAlCRem64  = 46;
+constexpr int kIdxAlOcRem64 = 47;
 // Categorical problem features (48..52).
 constexpr int kIdxDataType  = 48;
 constexpr int kIdxDirection = 49;
@@ -90,8 +90,8 @@ constexpr int kIdxLdsSizePerWorkgroupKb = 55;
 constexpr int kIdxL2CacheTotalKb        = 56;
 constexpr int kIdxBoostClockMhz         = 57;
 constexpr int kIdxVramBytes             = 58;
-constexpr int kIdxGfxId      = 59;
-constexpr int kIdxSolverName = 60;
+constexpr int kIdxGfxId                 = 59;
+constexpr int kIdxSolverName            = 60;
 
 // Treelite missing-marker. Generated header sets missing = -1 to indicate
 // "present"; we mirror that in our LgbmEntry union.
@@ -168,34 +168,34 @@ void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
     const double nan_v = std::numeric_limits<double>::quiet_NaN();
 
     SetNumeric(row[kIdxNMiniBatchSize], static_cast<double>(p.GetBatchSize()));
-    SetNumeric(row[kIdxChannels],       static_cast<double>(p.GetInChannels()));
-    SetNumeric(row[kIdxDepth],          static_cast<double>(p.GetInDepth()));
-    SetNumeric(row[kIdxHeight],         static_cast<double>(p.GetInHeight()));
-    SetNumeric(row[kIdxWidth],          static_cast<double>(p.GetInWidth()));
+    SetNumeric(row[kIdxChannels], static_cast<double>(p.GetInChannels()));
+    SetNumeric(row[kIdxDepth], static_cast<double>(p.GetInDepth()));
+    SetNumeric(row[kIdxHeight], static_cast<double>(p.GetInHeight()));
+    SetNumeric(row[kIdxWidth], static_cast<double>(p.GetInWidth()));
     SetNumeric(row[kIdxOutputChannels], static_cast<double>(p.GetOutChannels()));
-    SetNumeric(row[kIdxDepthOutput],    static_cast<double>(p.GetOutDepth()));
-    SetNumeric(row[kIdxSpatialDim],     static_cast<double>(p.GetSpatialDims()));
-    SetNumeric(row[kIdxNumDimensions],  static_cast<double>(p.GetSpatialDims()) + 2.0);
-    SetNumeric(row[kIdxFilterHeightY],  static_cast<double>(p.GetWeightsHeight()));
-    SetNumeric(row[kIdxFilterWidthX],   static_cast<double>(p.GetWeightsWidth()));
-    SetNumeric(row[kIdxFilterDepthZ],   static_cast<double>(p.GetWeightsDepth()));
-    SetNumeric(row[kIdxPadHeight],      static_cast<double>(p.GetPadH()));
-    SetNumeric(row[kIdxPadWidth],       static_cast<double>(p.GetPadW()));
-    SetNumeric(row[kIdxPadDepth],       static_cast<double>(p.GetPadD()));
-    SetNumeric(row[kIdxStrideHeight],   static_cast<double>(p.GetKernelStrideH()));
-    SetNumeric(row[kIdxStrideWidth],    static_cast<double>(p.GetKernelStrideW()));
-    SetNumeric(row[kIdxStrideDepth],    static_cast<double>(p.GetKernelStrideD()));
+    SetNumeric(row[kIdxDepthOutput], static_cast<double>(p.GetOutDepth()));
+    SetNumeric(row[kIdxSpatialDim], static_cast<double>(p.GetSpatialDims()));
+    SetNumeric(row[kIdxNumDimensions], static_cast<double>(p.GetSpatialDims()) + 2.0);
+    SetNumeric(row[kIdxFilterHeightY], static_cast<double>(p.GetWeightsHeight()));
+    SetNumeric(row[kIdxFilterWidthX], static_cast<double>(p.GetWeightsWidth()));
+    SetNumeric(row[kIdxFilterDepthZ], static_cast<double>(p.GetWeightsDepth()));
+    SetNumeric(row[kIdxPadHeight], static_cast<double>(p.GetPadH()));
+    SetNumeric(row[kIdxPadWidth], static_cast<double>(p.GetPadW()));
+    SetNumeric(row[kIdxPadDepth], static_cast<double>(p.GetPadD()));
+    SetNumeric(row[kIdxStrideHeight], static_cast<double>(p.GetKernelStrideH()));
+    SetNumeric(row[kIdxStrideWidth], static_cast<double>(p.GetKernelStrideW()));
+    SetNumeric(row[kIdxStrideDepth], static_cast<double>(p.GetKernelStrideD()));
     SetNumeric(row[kIdxDilationHeight], static_cast<double>(p.GetDilationH()));
-    SetNumeric(row[kIdxDilationWidth],  static_cast<double>(p.GetDilationW()));
-    SetNumeric(row[kIdxDilationDepth],  static_cast<double>(p.GetDilationD()));
-    SetNumeric(row[kIdxGroups],         static_cast<double>(p.GetGroupCount()));
+    SetNumeric(row[kIdxDilationWidth], static_cast<double>(p.GetDilationW()));
+    SetNumeric(row[kIdxDilationDepth], static_cast<double>(p.GetDilationD()));
+    SetNumeric(row[kIdxGroups], static_cast<double>(p.GetGroupCount()));
 
-    SetNumeric(row[kIdxFlopCnt],        nan_v);
-    SetNumeric(row[kIdxBytesRead],      nan_v);
-    SetNumeric(row[kIdxBytesWritten],   nan_v);
+    SetNumeric(row[kIdxFlopCnt], nan_v);
+    SetNumeric(row[kIdxBytesRead], nan_v);
+    SetNumeric(row[kIdxBytesWritten], nan_v);
     SetNumeric(row[kIdxBytesProcessed], nan_v);
-    SetNumeric(row[kIdxGflops],         nan_v);
-    SetNumeric(row[kIdxBandwidthGbps],  nan_v);
+    SetNumeric(row[kIdxGflops], nan_v);
+    SetNumeric(row[kIdxBandwidthGbps], nan_v);
 }
 
 // Fill the 13 tn_* TunaNet GEMM-geometry features (28..40) by reusing MIOpen's
@@ -205,9 +205,7 @@ void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
 // output descriptor (exact, incl. transpose/asym). 2D geometry is used for all
 // convs (matches the model's training); 3D extent is carried by the base
 // depth/spatial features.
-void FillTunaNetFeatures(LgbmEntry* row,
-                         const conv::ProblemDescription& p,
-                         std::size_t num_cu)
+void FillTunaNetFeatures(LgbmEntry* row, const conv::ProblemDescription& p, std::size_t num_cu)
 {
     const auto feats = common::EngineeredConvFeatures(p.GetBatchSize(),
                                                       p.GetInChannels(),
@@ -236,13 +234,13 @@ void FillAlignFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
     const std::size_t c_out = p.GetOutChannels();
     const std::size_t n     = p.GetBatchSize();
 
-    SetNumeric(row[kIdxAlC64],  (c_in % 64 == 0) ? 1.0 : 0.0);
-    SetNumeric(row[kIdxAlC32],  (c_in % 32 == 0) ? 1.0 : 0.0);
+    SetNumeric(row[kIdxAlC64], (c_in % 64 == 0) ? 1.0 : 0.0);
+    SetNumeric(row[kIdxAlC32], (c_in % 32 == 0) ? 1.0 : 0.0);
     SetNumeric(row[kIdxAlOc64], (c_out % 64 == 0) ? 1.0 : 0.0);
     SetNumeric(row[kIdxAlOc32], (c_out % 32 == 0) ? 1.0 : 0.0);
-    SetNumeric(row[kIdxAlN8],   (n % 8 == 0) ? 1.0 : 0.0);
+    SetNumeric(row[kIdxAlN8], (n % 8 == 0) ? 1.0 : 0.0);
     // Last-64-tile under-fill fraction ((-x) mod 64)/64, unsigned-safe form.
-    SetNumeric(row[kIdxAlCRem64],  static_cast<double>((64 - (c_in % 64)) % 64) / 64.0);
+    SetNumeric(row[kIdxAlCRem64], static_cast<double>((64 - (c_in % 64)) % 64) / 64.0);
     SetNumeric(row[kIdxAlOcRem64], static_cast<double>((64 - (c_out % 64)) % 64) / 64.0);
 }
 
@@ -253,10 +251,10 @@ void FillProblemCategoricals(LgbmEntry* row,
 {
     SetCategorical(row[kIdxDataType],
                    meta.CategoricalCode("data_type", DataTypeName(p.GetInDataType())));
-    SetCategorical(row[kIdxDirection],
-                   meta.CategoricalCode("direction",
-                                        std::to_string(DirectionPerfDbCode(p.GetDirection()))));
-    SetCategorical(row[kIdxInLayout],  meta.CategoricalCode("in_layout", p.GetInLayout()));
+    SetCategorical(
+        row[kIdxDirection],
+        meta.CategoricalCode("direction", std::to_string(DirectionPerfDbCode(p.GetDirection()))));
+    SetCategorical(row[kIdxInLayout], meta.CategoricalCode("in_layout", p.GetInLayout()));
     SetCategorical(row[kIdxFilLayout], meta.CategoricalCode("fil_layout", p.GetWeightsLayout()));
     SetCategorical(row[kIdxOutLayout], meta.CategoricalCode("out_layout", p.GetOutLayout()));
 }
@@ -267,14 +265,12 @@ void FillGpuFeatures(LgbmEntry* row,
                      const std::string& gfx_id,
                      const LgbmMetadata& meta)
 {
-    SetNumeric(row[kIdxCuCount],   static_cast<double>(handle.GetMaxComputeUnits()));
-    SetNumeric(row[kIdxWaveSize],  static_cast<double>(handle.GetWavefrontWidth()));
+    SetNumeric(row[kIdxCuCount], static_cast<double>(handle.GetMaxComputeUnits()));
+    SetNumeric(row[kIdxWaveSize], static_cast<double>(handle.GetWavefrontWidth()));
     SetNumeric(row[kIdxLdsSizePerWorkgroupKb],
                static_cast<double>(handle.GetLocalMemorySize()) / 1024.0);
-    SetNumeric(row[kIdxL2CacheTotalKb],
-               static_cast<double>(handle.GetL2CacheSize()) / 1024.0);
-    SetNumeric(row[kIdxBoostClockMhz],
-               static_cast<double>(handle.GetClockRateKhz()) / 1000.0);
+    SetNumeric(row[kIdxL2CacheTotalKb], static_cast<double>(handle.GetL2CacheSize()) / 1024.0);
+    SetNumeric(row[kIdxBoostClockMhz], static_cast<double>(handle.GetClockRateKhz()) / 1000.0);
     SetNumeric(row[kIdxVramBytes], static_cast<double>(handle.GetGlobalMemorySize()));
 
     SetCategorical(row[kIdxGfxId], meta.CategoricalCode("gfx_id", gfx_id));
@@ -296,8 +292,8 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // GetDeviceName() already returns the normalized gfx_id (no
     // :sramecc+:xnack- suffix). Architecture gating: only run on gfx_ids the
     // model was trained on; otherwise fall through to TunaNet.
-    const std::string gfx_id       = handle.GetDeviceName();
-    const int gfx_code             = meta.CategoricalCode("gfx_id", gfx_id);
+    const std::string gfx_id = handle.GetDeviceName();
+    const int gfx_code       = meta.CategoricalCode("gfx_id", gfx_id);
     MIOPEN_LOG_I2("lgbm: engaged for gfx_id=\"" << gfx_id << "\" (vocab code " << gfx_code
                                                 << "), groups=" << problem.GetGroupCount());
     if(gfx_code < 0)
@@ -371,8 +367,8 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // result -> caller falls through to TunaNet/WTI, looking like an abstain)
     // from a healthy ranked list. The demote flag is arch-independent, so a
     // per-arch difference here points at solver-vocab drift, not the model.
-    MIOPEN_LOG_I2("lgbm: scored " << scored.size() << " solvers, "
-                                  << ranked.size() << " valid in this build, " << dropped
+    MIOPEN_LOG_I2("lgbm: scored " << scored.size() << " solvers, " << ranked.size()
+                                  << " valid in this build, " << dropped
                                   << " dropped (unknown name), guard_naive=" << guard_naive);
     if(ranked.empty())
         MIOPEN_LOG_I2("lgbm: abstain (no scored solver is known to this MIOpen build)");

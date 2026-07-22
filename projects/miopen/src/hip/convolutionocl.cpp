@@ -970,7 +970,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
             const auto ai_time = [](const int& idx) {
                 return 10.0f * static_cast<float>(idx); // Assume idx == 1 (best solver) is 10 ms.
             };
-            int idx        = 1;
+            int idx                  = 1;
             std::size_t inapplicable = 0;
             for(const auto kinder : solvers)
             {

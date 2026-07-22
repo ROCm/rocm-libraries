@@ -36,11 +36,11 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
         auto meta = ai::common::LoadJSON(meta_path);
         for(auto it = meta.begin(); it != meta.end(); ++it)
         {
-            const auto& block          = it.value();
-            const std::size_t n_feat   = block.at("feat_order").size();
-            const auto& prob_cols      = block.at("prob_feat_cols");
-            const std::size_t n_prob   = prob_cols.size();
-            const std::size_t n_arg    = block.at("arg_cols").size();
+            const auto& block        = it.value();
+            const std::size_t n_feat = block.at("feat_order").size();
+            const auto& prob_cols    = block.at("prob_feat_cols");
+            const std::size_t n_prob = prob_cols.size();
+            const std::size_t n_arg  = block.at("arg_cols").size();
 
             // The prefix is the base set, optionally with a trailing gfx_code
             // categorical (PCFG_GFXID solvers). Detect it from the last column so
@@ -53,9 +53,9 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
             const bool base_ok = n_prob == static_cast<std::size_t>(kNumBaseProbFeatures);
             if(!(base_ok || has_gfx_code) || n_feat != n_prob + n_arg)
             {
-                MIOPEN_LOG_W("lgbm_pcfg: skipping " << it.key() << " (feat schema mismatch: prob="
-                                                    << n_prob << " arg=" << n_arg
-                                                    << " feat=" << n_feat << ")");
+                MIOPEN_LOG_W("lgbm_pcfg: skipping "
+                             << it.key() << " (feat schema mismatch: prob=" << n_prob
+                             << " arg=" << n_arg << " feat=" << n_feat << ")");
                 continue;
             }
 
@@ -74,8 +74,8 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
             const auto mit = models.find(it.key());
             if(mit == models.end())
                 continue; // catalog entry without a matching model block
-            SolverModel& m            = mit->second;
-            const auto& buckets       = it.value().at("buckets");
+            SolverModel& m      = mit->second;
+            const auto& buckets = it.value().at("buckets");
             for(auto bit = buckets.begin(); bit != buckets.end(); ++bit)
             {
                 auto& dst = m.buckets[bit.key()];
@@ -104,9 +104,8 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
                         // Treelite predict() treats a missing feature via the
                         // Entry.missing flag; the picker sets that for NaN, so map
                         // null -> NaN here.
-                        cand.args.push_back(a.is_null()
-                                                ? std::numeric_limits<double>::quiet_NaN()
-                                                : a.get<double>());
+                        cand.args.push_back(a.is_null() ? std::numeric_limits<double>::quiet_NaN()
+                                                        : a.get<double>());
                     }
                     dst.push_back(std::move(cand));
                 }

@@ -889,7 +889,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             // no lgbm log lines even though lgbm may have produced the cached
             // entry on an earlier call for this problem+device.
             MIOPEN_LOG_I2("AI predict: cache hit for " << device << " (" << cached_result.size()
-                                                        << " solvers); lgbm/TunaNet not re-run");
+                                                       << " solvers); lgbm/TunaNet not re-run");
             return cached_result;
         }
     }

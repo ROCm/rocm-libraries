@@ -195,8 +195,7 @@ auto FindSolutionImpl(rank<1>,
         {
             const auto ranked =
                 ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
-            using PerformanceConfig =
-                decltype(s.GetDefaultPerformanceConfig(context, problem));
+            using PerformanceConfig = decltype(s.GetDefaultPerformanceConfig(context, problem));
             for(const auto& desc : ranked)
             {
                 if(desc.empty())
@@ -216,8 +215,8 @@ auto FindSolutionImpl(rank<1>,
                 }
             }
             if(!ranked.empty())
-                MIOPEN_LOG_I2("lgbm_pcfg: no valid config in ranked walk for " << s.SolverDbId()
-                                                                              << "; using default");
+                MIOPEN_LOG_I2("lgbm_pcfg: no valid config in ranked walk for "
+                              << s.SolverDbId() << "; using default");
         }
     }
 #endif
