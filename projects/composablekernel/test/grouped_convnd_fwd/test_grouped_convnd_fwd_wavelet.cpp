@@ -73,8 +73,7 @@ using namespace ck::tensor_layout::convolution;
 
 // Wavelet XDL conv3d fwd instances use NDHWGC layout (NSpatialGC),
 // which maps to Wave32Force16MNPerXDL=true on gfx11, so they are valid on gfx9 and gfx11.
-using KernelTypes3d = ::testing::Types<
-    std::tuple<F16, F16, F16, F16, F16, NDHWGC, GKZYXC, NDHWGK>>;
+using KernelTypes3d = ::testing::Types<std::tuple<F16, F16, F16, F16, F16, NDHWGC, GKZYXC, NDHWGK>>;
 
 template <typename Tuple>
 class TestGroupedConvndFwdWavelet3d : public TestGroupedConvndFwdWavelet<Tuple>
