@@ -160,7 +160,7 @@ Results stored in `workloads/<name>/`:
 
 - `ck-docker`: Container management
 - `rocprof-compute`: AMD GPU profiler v2
-- `ck_smi_*` / `smi_cli.py`: GPU system monitoring (uses `rocm-smi` on ROCm < 10, `amd-smi` on ROCm >= 10)
+- `ck_smi_*` / `smi_cli.py`: System monitoring
 
 ## License
 
