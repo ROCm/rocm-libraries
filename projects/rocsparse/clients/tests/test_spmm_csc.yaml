@@ -46,6 +46,17 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
+# Default-algorithm auto-selection (CSC). Drives the full buffer_size ->
+# preprocess -> compute pipeline on an extremely column-skewed and an extremely
+# uniform matrix and checks the default result against the analytic product and
+# both explicit load-balanced kernels. The test builds its own matrices, so it
+# ignores the index/precision below.
+- name: spmm_csc_extra
+  category: quick
+  function: spmm_csc_extra
+  indextype: *i32
+  precision: *double_only_precisions
+
 # ##############################
 # # Quick
 # ##############################

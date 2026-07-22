@@ -7,7 +7,7 @@
 
 TEST(TestRockeClientContext, DefaultConstructsEmptyContext)
 {
-    rocke_client::RockeClientContext context;
+    const rocke_client::RockeClientContext context;
 
     EXPECT_FALSE(context.hasValidPlan());
 }

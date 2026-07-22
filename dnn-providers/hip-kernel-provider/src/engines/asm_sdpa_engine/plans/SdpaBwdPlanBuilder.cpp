@@ -189,21 +189,6 @@ std::optional<fmha_v3_bwdConfig> findConfig(const CFG& registry,
     return std::nullopt;
 }
 
-// Query the HIP device string for the stream, logging `logPrefix` on failure.
-// Returns std::nullopt when the HIP runtime throws.
-std::optional<std::string> tryGetDeviceString(hipStream_t stream, const char* logPrefix)
-{
-    try
-    {
-        return hip_kernel_provider_common::getDeviceString(stream);
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR(logPrefix << e.what());
-        return std::nullopt;
-    }
-}
-
 // Backward kernels live in a flat layout under
 //   asm_kernels/<arch>/fmha_v3_bwd/<co_name>
 // The codegen-emitted co_name already includes the "<arch>/fmha_v3_bwd/"
@@ -454,10 +439,16 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
 
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the family serves fixed prebuilt shapes, so decline
+    // rather than risk a mismatch (RFC 0008 §4.6).
+    HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
+                               "Graph has override shapes enabled");
+
     auto& nodeWrappers = opGraph.nodeWrappers();
 
     auto deviceStringOpt
-        = tryGetDeviceString(handle.getStream(), "Could not query device string: ");
+        = plan_utils::tryGetDeviceString(handle.getStream(), "Could not query device string: ");
     if(!deviceStringOpt)
     {
         return false;
@@ -789,8 +780,8 @@ void SdpaBwdPlanBuilder::buildPlan(
     const AccumulatorType accType
         = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
 
-    auto deviceStringOpt
-        = tryGetDeviceString(handle.getStream(), "Failed to query device properties with error: ");
+    auto deviceStringOpt = plan_utils::tryGetDeviceString(
+        handle.getStream(), "Failed to query device properties with error: ");
     if(!deviceStringOpt)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(

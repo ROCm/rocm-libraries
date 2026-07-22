@@ -129,7 +129,10 @@ class ConvProblem:
        A: NDHWC, shape ``[N, Di, Hi, Wi, C]``
        B: KZYXC, shape ``[K, Z, Y, X, C]``
        D: NDHWK, shape ``[N, Do, Ho, Wo, K]``
-       M = N*Do*Ho*Wo,  N_gemm = K,  K_gemm = Z*Y*X*C
+       M = N*Do*Ho*Wo,  N_gemm = K/groups,  K_gemm = Z*Y*X*(C/groups)
+
+    ``C`` and ``K`` are always the *total* channel counts across all groups.
+    Use ``cpg`` / ``kpg`` for per-group counts.
     """
 
     N: int
@@ -145,6 +148,7 @@ class ConvProblem:
     pW: int = 0
     dH: int = 1
     dW: int = 1
+    groups: int = 1
     # 3-D-only fields; leave as None for 2-D convolutions.
     Di: Optional[int] = None
     Z: Optional[int] = None
@@ -160,6 +164,12 @@ class ConvProblem:
             raise ValueError(
                 "3-D ConvProblem requires Di, Z, sD, pD, dD (set all or leave all as None)"
             )
+        if self.groups < 1:
+            raise ValueError(f"groups must be >= 1, got {self.groups}")
+        if self.C % self.groups != 0:
+            raise ValueError(f"C={self.C} is not divisible by groups={self.groups}")
+        if self.K % self.groups != 0:
+            raise ValueError(f"K={self.K} is not divisible by groups={self.groups}")
 
     @property
     def is_3d(self) -> bool:
@@ -186,25 +196,36 @@ class ConvProblem:
         return base * self.Do if self.is_3d else base
 
     @property
+    def cpg(self) -> int:
+        """Input channels per group (C / groups)."""
+        return self.C // self.groups
+
+    @property
+    def kpg(self) -> int:
+        """Output channels per group (K / groups)."""
+        return self.K // self.groups
+
+    @property
     def N_gemm(self) -> int:
-        return self.K
+        return self.kpg
 
     @property
     def K_gemm(self) -> int:
         z = self.Z if self.is_3d else 1
-        return z * self.Y * self.X * self.C
+        return z * self.Y * self.X * self.cpg
 
     @property
     def flops(self) -> int:
-        return 2 * self.M * self.N_gemm * self.K_gemm
+        return 2 * self.M * self.N_gemm * self.K_gemm * self.groups
 
     def short(self) -> str:
+        g = f"G{self.groups}" if self.groups > 1 else ""
         if self.is_3d:
             return (
                 f"N{self.N}D{self.Di}H{self.Hi}W{self.Wi}C{self.C}"
-                f"_K{self.K}Z{self.Z}Y{self.Y}X{self.X}"
+                f"_K{self.K}Z{self.Z}Y{self.Y}X{self.X}{g}"
             )
-        return f"N{self.N}H{self.Hi}W{self.Wi}C{self.C}_K{self.K}Y{self.Y}X{self.X}"
+        return f"N{self.N}H{self.Hi}W{self.Wi}C{self.C}_K{self.K}Y{self.Y}X{self.X}{g}"
 
 
 @dataclass(frozen=True)
@@ -456,6 +477,21 @@ class ImplicitGemmConvSpec:
 # ---------------------------------------------------------------------
 
 
+def is_valid_spec_for_problem(
+    spec: ImplicitGemmConvSpec, problem: ConvProblem, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for ``spec`` paired with a specific ``problem`` on ``arch``.
+
+    Extends :func:`is_valid_spec` with problem-aware checks — e.g. tile
+    divisibility against the actual M / N_gemm / K_gemm dimensions,
+    minimum occupancy constraints, or problem-specific LDS pressure.
+
+    Currently delegates entirely to :func:`is_valid_spec`; problem-aware
+    filters will be added here as they are identified.
+    """
+    return is_valid_spec(spec, arch)
+
+
 def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``.
 
@@ -485,6 +521,17 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         return False, (
             f"block_size {spec.block_size} > {target.max_threads_per_block} "
             f"(hardware cap) on {arch}"
+        )
+
+    # Check global store vector size and disable default epilogue for
+    # vec_size_c > 1
+    if (
+        spec.vector_size_c is not None
+        and spec.vector_size_c > 1
+        and spec.epilogue == "default"
+    ):
+        return False, (
+            f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
         )
 
     # The MMA *family* is selected from the target's wave size: CDNA (wave64)
