@@ -286,74 +286,80 @@ namespace rocsparse
         {
             if(sell_slice_size <= 128)
             {
-                // RDNA4/wave32 tuning: the original code fixed THREADS_PER_ROW=8
-                // (a wave64-era 8-rows/warp geometry). On wave32 hardware, short
-                // rows leave most of the 8 cooperating threads idle and pay for a
-                // full 3-step shared-memory reduction. Pick THREADS_PER_ROW from
-                // the average nnz-per-row so sparse rows use a shallower reduction
-                // while dense rows keep the original width (no regression there).
-                const int64_t avg_nnz_per_row = (m > 0) ? (static_cast<int64_t>(nnz) / m) : 0;
+                // Launch geometry tuning for the non-transposed small-slice
+                // kernel. THREADS_PER_ROW (threads cooperating on one row, i.e.
+                // the reduction depth) is a launch-only knob: numerics are
+                // unchanged.
+                //
+                // wave64 / non-wave32 parts keep the historical fixed
+                // THREADS_PER_ROW=8 (an 8-rows/warp geometry). This was never
+                // re-tuned on those parts, so we must not silently halve/quarter
+                // their reduction width and occupancy. Only wave32 hardware
+                // (RDNA, e.g. gfx1201) selects a shallower reduction: on 32-wide
+                // parts short rows leave most of the 8 cooperating threads idle
+                // while still paying a full 3-step shared-memory reduction.
+                uint32_t threads_per_row = 8;
+                if(handle->wavefront_size == 32)
+                {
+                    const int64_t avg_nnz_per_row = (m > 0) ? (static_cast<int64_t>(nnz) / m) : 0;
 
-                if(avg_nnz_per_row <= 4)
-                {
-                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<2>(handle,
-                                                                            stream,
-                                                                            blocks_x,
-                                                                            blocks_y,
-                                                                            m,
-                                                                            n,
-                                                                            nnz,
-                                                                            sell_slice_size,
-                                                                            sell_colval_size,
-                                                                            alpha_device_host,
-                                                                            sell_slice_offsets,
-                                                                            sell_col_ind,
-                                                                            sell_val,
-                                                                            x,
-                                                                            beta_device_host,
-                                                                            y,
-                                                                            descr->base)));
+                    // Skew guard: SELL pads every row of a slice out to that
+                    // slice's longest row, so sell_colval_size (total padded
+                    // storage) reflects the real per-row work, and
+                    // sell_colval_size >> nnz signals strong row-length skew.
+                    // On skewed matrices the average nnz/row understates the
+                    // widest slices' work, so we avoid the shallowest reduction
+                    // (same philosophy as the csrmv nnzsplit skew guard, but
+                    // from an O(1) signal already available here).
+                    const bool skewed
+                        = (nnz > 0
+                           && static_cast<int64_t>(sell_colval_size) > 2 * static_cast<int64_t>(nnz));
+
+                    if(avg_nnz_per_row <= 4)
+                    {
+                        threads_per_row = skewed ? 4 : 2;
+                    }
+                    else if(avg_nnz_per_row <= 12)
+                    {
+                        threads_per_row = skewed ? 8 : 4;
+                    }
+                    else
+                    {
+                        threads_per_row = 8;
+                    }
                 }
-                else if(avg_nnz_per_row <= 12)
+
+#define LAUNCH_SELLMVN(TPR)                                             \
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<TPR>(handle,   \
+                                                             stream,    \
+                                                             blocks_x,  \
+                                                             blocks_y,  \
+                                                             m,         \
+                                                             n,         \
+                                                             nnz,       \
+                                                             sell_slice_size,    \
+                                                             sell_colval_size,   \
+                                                             alpha_device_host,  \
+                                                             sell_slice_offsets, \
+                                                             sell_col_ind,       \
+                                                             sell_val,           \
+                                                             x,                  \
+                                                             beta_device_host,   \
+                                                             y,                  \
+                                                             descr->base)))
+                switch(threads_per_row)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<4>(handle,
-                                                                            stream,
-                                                                            blocks_x,
-                                                                            blocks_y,
-                                                                            m,
-                                                                            n,
-                                                                            nnz,
-                                                                            sell_slice_size,
-                                                                            sell_colval_size,
-                                                                            alpha_device_host,
-                                                                            sell_slice_offsets,
-                                                                            sell_col_ind,
-                                                                            sell_val,
-                                                                            x,
-                                                                            beta_device_host,
-                                                                            y,
-                                                                            descr->base)));
+                case 2:
+                    LAUNCH_SELLMVN(2);
+                    break;
+                case 4:
+                    LAUNCH_SELLMVN(4);
+                    break;
+                default:
+                    LAUNCH_SELLMVN(8);
+                    break;
                 }
-                else
-                {
-                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<8>(handle,
-                                                                            stream,
-                                                                            blocks_x,
-                                                                            blocks_y,
-                                                                            m,
-                                                                            n,
-                                                                            nnz,
-                                                                            sell_slice_size,
-                                                                            sell_colval_size,
-                                                                            alpha_device_host,
-                                                                            sell_slice_offsets,
-                                                                            sell_col_ind,
-                                                                            sell_val,
-                                                                            x,
-                                                                            beta_device_host,
-                                                                            y,
-                                                                            descr->base)));
-                }
+#undef LAUNCH_SELLMVN
             }
             else
             {
