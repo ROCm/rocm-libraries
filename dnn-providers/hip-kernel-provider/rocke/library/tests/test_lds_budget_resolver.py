@@ -39,6 +39,17 @@ def _d256_bf16_long_prefill(block_size: int = 64, max_seqlen: int = 4096):
 
 
 class TestLdsBudgetResolver(unittest.TestCase):
+    def setUp(self):
+        # The production D256 gfx950 fast route (``_d256_gfx950_fast``) targets
+        # this exact cohort (D256 / gfx950 / bf16 prefill) and overrides
+        # ``use_register_pv=False``, which would bypass the resolver under test.
+        # Disable it here so these unit tests exercise the register-PV LDS-shrink
+        # path directly, decoupled from the production routing decision -- which
+        # is covered separately by ``TestD256ProductionRouting`` below.
+        _p = mock.patch.object(au, "_d256_gfx950_fast", return_value=False)
+        _p.start()
+        self.addCleanup(_p.stop)
+
     def test_d256_gfx950_bf16_prefill_shrinks_to_fit(self):
         """D256 bf16 register-PV overflows at the default geometry; the resolver
         must single-buffer K so the resolved spec fits the gfx950 160 KB cap."""
@@ -139,6 +150,33 @@ class TestLdsBudgetResolver(unittest.TestCase):
         msg = str(ctx.exception)
         self.assertIn("single-K", msg)
         self.assertIn("T=64", msg)
+
+
+class TestD256ProductionRouting(unittest.TestCase):
+    """Production routing (``_d256_gfx950_fast`` live, not mocked): the
+    D256 / gfx950 / bf16 prefill cohort is served by the 32x32 transposed fast
+    path, NOT the register-PV LDS-shrink resolver. This is the routing the PR
+    introduces; the resolver becomes a no-op for it (register-PV disabled)."""
+
+    def test_d256_gfx950_prefill_routes_to_fast_path(self):
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            problem = _d256_bf16_long_prefill()
+            # The cohort matches the fast-route predicate ...
+            self.assertTrue(au._d256_gfx950_fast(problem))
+            spec = au._tiled_spec_from_problem(problem)
+            # ... so the built spec is the 32x32 interleave fast path, not
+            # register-PV: register-PV is off and the 32x32 stack is on.
+            self.assertFalse(spec.use_register_pv)
+            self.assertTrue(spec.use_mfma_32x32)
+            self.assertTrue(spec.use_transposed_qk_32x32)
+            self.assertTrue(spec.use_softmax_mfma_interleave)
+            self.assertEqual(spec.softmax_interleave_mode, 2)
+            self.assertEqual(spec.softmax_interleave_groups, 4)
+            # The fast route single-buffers K itself, so the spec fits the cap
+            # and the resolver is a strict no-op (register-PV off -> same object).
+            self.assertTrue(spec.use_k_single_buffer)
+            self.assertIs(au._resolve_lds_budget(spec), spec)
+            self.assertLessEqual(au._lds_bytes_regpv(spec), au._lds_capacity_bytes())
 
 
 if __name__ == "__main__":
