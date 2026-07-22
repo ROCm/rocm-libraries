@@ -26,7 +26,7 @@
 # pairs whose nWG0 is not a multiple of the cluster C are simply rejected.
 #
 # Codegen coverage is broad: the MatrixInstruction list spans macro-tile-M in
-# {32,64,128,256}, crossed with LDSTrInst {True,False}, at PrefetchGlobalRead 1.
+# {32,64,128,256}, crossed with LDSTrInst {True,False}, PrefetchGlobalRead {1,2}.
 # ScheduleIterAlg is pinned to 4 (the StinkyTofu-scheduled gfx1250 path) -- SIA3 is
 # intentionally excluded so the tests exercise the real gfx1250 scheduler. The small
 # sizes exercise the compact tiles at
@@ -101,7 +101,7 @@ BenchmarkProblems:
         - LDSTrInst: [True, False]
         - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [False]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [4]
         - SourceSwap: [False]

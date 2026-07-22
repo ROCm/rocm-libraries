@@ -277,13 +277,6 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
            "StreamKMulticast is not supported with StreamKAtomic")
     return False
 
-  # The DP cooperative multicast path currently supports single-buffered global
-  # prefetch only.
-  if state["PrefetchGlobalRead"] > 1:
-    reject(state, printRejectionReason,
-           "StreamKMulticast requires PrefetchGlobalRead <= 1")
-    return False
-
   # StreamKXCCMapping remap is bypassed under clustering and XCC=3 overflows the
   # SGPR budget alongside the cluster coords; require the default (no remap).
   if state["StreamKXCCMapping"] != 0:

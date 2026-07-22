@@ -2603,6 +2603,43 @@ class StreamKTwoTileDPFirst(StreamK):
         writer.sgprPool.checkIn(elect)
         return module
 
+    def streamKMulticastProloguePrefetchHandshake(self, writer, kernel):
+        """Bracket the prologue double-buffer prefetch multicast load with a
+        cluster-scope handshake.
+
+        The double-buffer ("LDS1") prefetch load in the PrefetchGlobalRead >= 2
+        prologue is emitted inside the single-iteration guard branch, so the
+        generic per-load bracketing does not reach it (the guard branch is a
+        segment boundary that the backward anchor scan stops at). On the
+        StreamKMulticast path every cooperative-multicast tensor_load_to_lds
+        must be immediately preceded by a cluster-scope arrive/wait handshake;
+        emit a self-contained one here (one wave arrives, all waves wait) so the
+        prefetch load is synchronized and the cluster-scope signal/wait counts
+        stay balanced.
+
+        The guard branches on LoopCounterL, which is uniform across the
+        co-located cluster peers (they process M-adjacent tiles sharing the same
+        K), so all peers execute this handshake in lockstep. Only the wave-0
+        election gates the arrive, matching the existing prologue-signal idiom.
+        Inert unless StreamKMulticast.
+        """
+        module = Module("StreamK multicast prologue prefetch cluster handshake")
+        if not kernel.get("StreamKMulticast", 0):
+            return module
+        assert writer.states.asmCaps.get("HasClusterBarrier", False), \
+            "StreamKMulticast requires the HasClusterBarrier asm capability"
+        module.addComment0("StreamKMulticast: bracket prologue double-buffer prefetch load with cluster handshake")
+        skipSignal = Label(label=writer.labels.getNameInc("SKMC_SkipPrefetchSignal"), comment="")
+        elect = writer.sgprPool.checkOut(1, "SKMulticastPrefetchElect")
+        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
+        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
+        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
+        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
+        module.add(skipSignal)
+        module.add(SBarrier(True, True, True, comment="cluster_barrier wait"))
+        writer.sgprPool.checkIn(elect)
+        return module
+
     def streamKMulticastZeroIterClusterWait(self, writer, kernel):
         """Consume the prologue cluster arrive on the zero-iteration skip path.
 

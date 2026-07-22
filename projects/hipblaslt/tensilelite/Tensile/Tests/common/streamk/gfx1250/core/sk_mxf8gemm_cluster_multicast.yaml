@@ -20,6 +20,12 @@
 # up to a multiple of C so every launched cluster is full. Every size below keeps
 # nWG0 % C == 0 for the C it dispatches (a violation is a HARD REJECT via
 # ClusterDimCheck at selection time, not a silent fallback).
+#
+# Codegen coverage crosses macro-tile-M in {32,64,128} with PrefetchGlobalRead
+# {1,2}. ScheduleIterAlg is pinned to 4 (the gfx1250 scheduler path). With
+# PrefetchGlobalRead=2 the prologue double-buffers the first main-loop prefetch,
+# so the sizes with K > DepthU (DepthU=256; e.g. K=512 and the K=1920 tail case)
+# ensure that double-buffered prologue prefetch path is actually exercised.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
@@ -82,7 +88,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
         - LDSTrInst: [False]
-        - PrefetchGlobalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [4]
         - SourceSwap: [False]
