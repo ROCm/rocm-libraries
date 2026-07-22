@@ -9,6 +9,28 @@ import itertools
 import logging
 
 
+def _cshuffle_store_ok(m_repeat, n_repeat, warp_tile_m, warp_tile_n):
+    """Return False for the one CShuffle-store combination that is numerically
+    incorrect (issue #9684).
+
+    The CShuffle epilogue stores the accumulator back through LDS. For an ODD
+    per-wave repeat (>1) -- tile / (warp * warp_tile) -- paired with a 32-wide
+    warp tile in that dimension, the store is mis-raked and the kernel produces
+    WRONG results at runtime even though it compiles and passes the epilogue's
+    divisibility static_asserts. GPU-verified on gfx942: e.g. tile_m=192 /
+    warp_m=2 / warp_tile_m=32 (MRepeat = 192/(2*32) = 3) fails the op's built-in
+    CPU validation, while every other non-power-of-two repeat is correct --
+    including MRepeat=3 with warp_tile_m=16 (192/(4*16)) and even repeats such
+    as 6 and 12. Only relevant for the cshuffle epilogue; the default epilogue
+    stores directly and is unaffected.
+    """
+
+    def _dim_bad(repeat, warp_tile):
+        return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
+    return not (_dim_bad(m_repeat, warp_tile_m) or _dim_bad(n_repeat, warp_tile_n))
+
+
 def _import_validation_utils():
     """Import validation utilities from commons directory."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -172,6 +194,22 @@ class GemmKernelBuilder:
                     tile_config["warp_tile_n"],
                     tile_config["warp_tile_k"],
                     pipeline,
+                ):
+                    continue
+
+                # CShuffle-store correctness gate (issue #9684): skip the tile /
+                # warp combinations the CShuffle epilogue mis-stores (odd per-wave
+                # repeat > 1 with a 32-wide warp tile), which compile but return
+                # numerically WRONG results. GPU-verified on gfx942 (e.g.
+                # tile_m=192 / warp_m=2 / warp_tile_m=32, MRepeat=3). The default
+                # epilogue is exempt.
+                if epilogue == "cshuffle" and not _cshuffle_store_ok(
+                    tile_config["tile_m"]
+                    // (tile_config["warp_m"] * tile_config["warp_tile_m"]),
+                    tile_config["tile_n"]
+                    // (tile_config["warp_n"] * tile_config["warp_tile_n"]),
+                    tile_config["warp_tile_m"],
+                    tile_config["warp_tile_n"],
                 ):
                     continue
 
