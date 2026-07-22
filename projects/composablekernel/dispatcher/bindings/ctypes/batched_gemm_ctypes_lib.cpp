@@ -158,7 +158,8 @@ int dispatcher_get_kernel_count() { return 1; }
  * caller lay out A/B/C as [batch_count, rows, cols] tensors; a stride argument
  * of 0 falls back to the packed/default stride.
  *
- * Returns: 0 on success, -1 on any HIP/launch error.
+ * Returns: 0 on success; -1 on a HIP error or bad/guarded arguments (incl. an
+ * out-of-range 32-bit index); -2 if the kernel launch throws.
  */
 int dispatcher_run_batched(const void* A,
                            const void* B,

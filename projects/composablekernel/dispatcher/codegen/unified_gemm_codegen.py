@@ -1149,7 +1149,15 @@ using CLayout = {ns_name}::CLayout;
     def _epilogue_code(self, config: KernelConfig) -> str:
         """Generate epilogue code"""
         if config.variant == GemmVariant.BATCHED:
-            return """
+            # Respect the requested epilogue: the batched sweep space includes
+            # BOTH "cshuffle" and "default" (see the shipped default_config.json
+            # trait_config.epilogue). Emitting CShuffle unconditionally would
+            # silently build a cshuffle kernel under a "_epi_default" name and
+            # skip the cshuffle-store correctness gate (_cshuffle_repeat_ok) for
+            # configs that requested "default" -- a name/impl mismatch that also
+            # breaks the config->codegen->runtime byte-parity invariant.
+            if config.trait.epilogue == "cshuffle":
+                return """
         using EpilogueProblem = CShuffleEpilogueProblem<
             ADataType, BDataType, tuple<>, AccDataType, CDataType,
             tuple<>, CLayout, element_wise::PassThrough,
@@ -1157,6 +1165,13 @@ using CLayout = {ns_name}::CLayout;
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
             UniversalGemmProblem::TransposeC>;
         using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
+            return """
+        using EpilogueProblem = DefaultGemm2DEpilogueProblem<
+            ADataType, BDataType, tuple<>, AccDataType, CDataType,
+            tuple<>, CLayout, element_wise::PassThrough,
+            TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
+            kPadM, kPadN, WarpTileM, WarpTileN, WarpTileK, TransposeC>;
+        using GemmEpilogue = DefaultGemm2DEpilogue<EpilogueProblem>;"""
         if config.variant == GemmVariant.MULTI_D:
             return """
         using EpilogueProblem = CShuffleEpilogueProblem<
