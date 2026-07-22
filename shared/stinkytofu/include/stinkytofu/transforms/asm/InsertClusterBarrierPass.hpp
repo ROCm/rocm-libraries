@@ -29,8 +29,7 @@
 namespace stinkytofu {
 class Pass;
 
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(bool isKernelScope = true,
-                                                                       int pgrValue = 1,
-                                                                       int plrValue = 1);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
+    bool isKernelScope = true, int pgrValue = 1, int plrValue = 1, bool streamKMulticast = false);
 
 }  // namespace stinkytofu
