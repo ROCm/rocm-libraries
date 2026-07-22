@@ -115,7 +115,7 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *
 *  \note The descriptor \p rocsparse_sptrsv_descr needs to be configured with \ref rocsparse_sptrsv_set_input.
 *  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, and \ref rocsparse_format_csc.
 *
 *  \note
 *  the \ref rocsparse_sptrsv_stage_compute stage is non-blocking

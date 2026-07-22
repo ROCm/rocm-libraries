@@ -13,6 +13,7 @@ Run on a gfx950 ROCm runner:
 
 from __future__ import annotations
 
+import importlib.resources
 import importlib.util
 import os
 import json
@@ -26,7 +27,9 @@ from rocke.runtime.hip_module import get_device_arch, get_device_name
 
 _ROCKE = Path(__file__).resolve().parents[2]  # instances -> tests -> rocKE
 _PY_ROOT = _ROCKE / "python"
-_DEFAULT_BASELINE = _ROCKE / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
+_DEFAULT_BASELINE = (
+    importlib.resources.files("rocke.golden") / "rocke_gfx950_smoke_perf.json"
+)
 _DEFAULT_REPORT = Path("/tmp/rocke_gfx950_smoke_perf_current.json")
 
 
@@ -51,9 +54,9 @@ class TestRockeGfx950Smoke(unittest.TestCase):
     maxDiff = 4000
     current_perf: dict[str, dict] = {}
     baseline = json.loads(
-        Path(
-            os.environ.get("ROCKE_GFX950_PERF_BASELINE", _DEFAULT_BASELINE)
-        ).read_text()
+        Path(os.environ["ROCKE_GFX950_PERF_BASELINE"]).read_text()
+        if "ROCKE_GFX950_PERF_BASELINE" in os.environ
+        else _DEFAULT_BASELINE.read_text()
     )
 
     @classmethod
@@ -64,8 +67,8 @@ class TestRockeGfx950Smoke(unittest.TestCase):
         report_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema": "ck.dsl.gfx950_smoke_perf.current/v1",
-            "baseline": str(
-                Path(os.environ.get("ROCKE_GFX950_PERF_BASELINE", _DEFAULT_BASELINE))
+            "baseline": os.environ.get(
+                "ROCKE_GFX950_PERF_BASELINE", str(_DEFAULT_BASELINE)
             ),
             "device_arch": GPU_ARCH,
             "device": GPU_NAME,

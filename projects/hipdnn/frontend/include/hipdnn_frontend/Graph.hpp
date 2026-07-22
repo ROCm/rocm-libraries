@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -851,6 +852,7 @@ private:
         // toHipdnnDataType() and are skipped by assembleGraphDescriptor().
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
+
         std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())
         {
@@ -5500,6 +5502,11 @@ public:
         {
             attributes.set_name("SdpaFwd_" + std::to_string(_sub_nodes.size()));
         }
+        if(attributes.unfuse_fma_hint)
+        {
+            HIPDNN_FE_LOG_WARN("Ignoring SDPA unfuse-FMA hint on node '"
+                               << attributes.get_name() << "'; hipDNN selects fusion internally");
+        }
         if(q->get_name().empty())
         {
             q->set_name(attributes.get_name() + "::Q");
@@ -5982,6 +5989,19 @@ public:
         auto newTensor = std::make_shared<TensorAttributes>(tensor);
 
         return newTensor;
+    }
+
+    /**
+     * @brief Create a pass-by-value scalar tensor with an explicit mode
+     * @tparam T Scalar type
+     * @param scalar The scalar value
+     * @param type RUNTIME_PARAM => runtime-with-default; COMPILE_TIME_CONST => compile-time constant
+     * @return Shared pointer to the created tensor attributes
+     */
+    template <typename T>
+    static std::shared_ptr<TensorAttributes> tensor(const T& scalar, ScalarType type)
+    {
+        return tensor(TensorAttributes(scalar, type));
     }
 };
 
