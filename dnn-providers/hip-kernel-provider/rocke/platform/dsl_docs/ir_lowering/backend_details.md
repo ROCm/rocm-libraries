@@ -4,7 +4,7 @@ This page collects backend-specific facts that matter when extending the DSL, de
 
 ## Two Lowering Engines
 
-There are two interchangeable lowering engines that emit byte-identical AMDGPU LLVM IR for the same kernel: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (under `Cpp/`, reached through the `rocke_engine` Python extension). The active engine is chosen by `core/backend.py::resolve_backend()` — precedence is the explicit `backend=` argument, then the `ROCKE_BACKEND` environment variable (`python` / `cpp` / `both`), then the package default, which is now **`cpp`**. The `cpp` path falls back to the native Python lowerer automatically if the `rocke_engine` extension is not built, and `both` runs both engines and asserts they agree (the differential gate). The Python lowerer remains the differential oracle. The descriptions of LLVM lowering below apply to both engines; this page documents the lowering contract, not a single implementation.
+There are two interchangeable lowering engines that emit byte-identical AMDGPU LLVM IR for the same kernel: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (under `cpp/`, reached through the `rocke_engine` Python extension). The active engine is chosen by `core/backend.py::resolve_backend()` — precedence is the explicit `backend=` argument, then the `ROCKE_BACKEND` environment variable (`python` / `cpp` / `both`), then the package default, which is now **`cpp`**. The `cpp` path falls back to the native Python lowerer automatically if the `rocke_engine` extension is not built, and `both` runs both engines and asserts they agree (the differential gate). The Python lowerer remains the differential oracle. The descriptions of LLVM lowering below apply to both engines; this page documents the lowering contract, not a single implementation.
 
 ## LLVM Backend Is Canonical
 
@@ -176,7 +176,7 @@ A new primitive should be added in layers:
 
 1. Define the IR operation and builder method in `core/ir.py`. Decide if it is pure (CSE-able, DCE-able) or side-effecting (loads, stores, barriers, MFMA, atomics).
 2. Add printer support in `core/ir_print.py` if the op should appear cleanly in textual IR.
-3. Add LLVM lowering and any new intrinsic declaration in `core/lower_llvm.py`, and port the same lowering into the C++ engine (`Cpp/`) so both engines stay byte-identical (the differential gate flags any divergence).
+3. Add LLVM lowering and any new intrinsic declaration in `core/lower_llvm.py`, and port the same lowering into the C++ engine (`cpp/`) so both engines stay byte-identical (the differential gate flags any divergence).
 4. Add HIP debug lowering if source-level inspection is valuable.
 5. Add a helper wrapper in `helpers/` if multiple kernels will use the primitive.
 6. Add analysis hooks (`analysis/ir.py`, `analysis/isa.py`) if the primitive should be counted in generated IR / ISA.

@@ -611,7 +611,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     // 1024 vgpr
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
     // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
-    rv["MaxSgpr"] = 102;
+    rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
@@ -634,7 +634,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
         else if(isaVersion[2] == 2)
             rv["PhysicalMaxVgprCU"] = 1024 * 32;
         else
-            rv["PhysicalMaxVgprCU"] = 1536 * 32;
+            rv["PhysicalMaxVgprCU"] = 2 * 1536 * 32;
     else if(isaVersion[0] == 12)
         rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 1536 * 32;
     else if(isaVersion[0] == 9)

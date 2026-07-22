@@ -11,6 +11,22 @@
 
 namespace origami {
 
+// Resolve the number of CUs to model against.
+//   requested_num_cus: caller's CU budget. Signed so non-positive values are
+//                      handled without a caller-side clamp: 0 means "use all
+//                      CUs" and a negative (invalid) value is treated the same.
+//                      A positive value caps the budget.
+//   hardware_num_cus:  physical CU count (hardware_t::N_CU), the upper bound.
+// Returns the requested budget when it is positive and below the physical
+// count; otherwise the full physical count.
+std::size_t resolve_num_cus(std::int64_t requested_num_cus, std::size_t hardware_num_cus) {
+  if (requested_num_cus > 0
+      && static_cast<std::size_t>(requested_num_cus) < hardware_num_cus) {
+    return static_cast<std::size_t>(requested_num_cus);
+  }
+  return hardware_num_cus;
+}
+
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
@@ -90,6 +106,7 @@ size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
     case hardware_t::architecture_t::gfx1151:
     case hardware_t::architecture_t::gfx1152:
     case hardware_t::architecture_t::gfx1153:
+    case hardware_t::architecture_t::gfx1200:  // RDNA4
     case hardware_t::architecture_t::gfx1201:  // RDNA4
       return 2;
     default:
@@ -179,6 +196,7 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
     case architecture_t::gfx90a:  return 1;
     case architecture_t::gfx942:  return 8;
     case architecture_t::gfx950:  return 8;
+    case architecture_t::gfx1200: return 1;
     case architecture_t::gfx1201: return 1;
     case architecture_t::gfx1100: return 1;
     case architecture_t::gfx1150: return 1;
@@ -249,6 +267,7 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx90a:
     case architecture_t::gfx942:
     case architecture_t::gfx950:
+    case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1151:
@@ -269,6 +288,7 @@ bool hardware_t::has_native_TF32() const {
       return true;
     case architecture_t::gfx90a:
     case architecture_t::gfx950:
+    case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1150:

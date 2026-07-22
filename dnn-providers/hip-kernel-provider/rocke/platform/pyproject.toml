@@ -1,10 +1,10 @@
 # rocKE - rocke Python authoring frontend for the rocKE C++ kernel engine.
 #
-# This declares the pure-Python package `rocke` (rooted at Python/rocke) so it
-# can be installed/editable-installed:  pip install -e .   (run from rocKE/)
-# The bare workflow still works too:    PYTHONPATH=<rocKE>/Python  ->  import rocke
+# This declares the pure-Python package `rocke` (rooted at python/rocke) so it
+# can be installed/editable-installed:  pip install -e .   (run from rocke/platform/)
+# The bare workflow still works too:    PYTHONPATH=<rocke/platform>/python  ->  import rocke
 #
-# The C++ engine (Cpp/ -> librocke_core.a) and its `rocke_engine` pybind binding are
+# The C++ engine (cpp/ -> librocke_core.a) and its `rocke_engine` pybind binding are
 # built via CMake, not pip (see BUILD.md); they are intentionally NOT part of
 # this wheel.
 
@@ -37,8 +37,11 @@ dev = [
 ]
 
 [tool.setuptools]
-package-dir = { "" = "Python" }
+package-dir = { "" = "python" }
 
 [tool.setuptools.packages.find]
-where = ["Python"]
+where = ["python"]
 include = ["rocke*"]
+
+[tool.setuptools.package-data]
+rocke = ["**/*.json"]

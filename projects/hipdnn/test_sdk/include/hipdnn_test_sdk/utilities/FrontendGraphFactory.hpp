@@ -153,6 +153,7 @@ public:
 
         const std::vector<int64_t> dyDims = {1, 16, 16, 16};
         const std::vector<int64_t> wDims = {16, 16, 3, 3};
+        const std::vector<int64_t> dxDims = {1, 16, 16, 16};
         auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
         auto wStrides = hipdnn_data_sdk::utilities::generateStrides(wDims);
 
@@ -167,6 +168,7 @@ public:
             {1, 1});
 
         auto dxAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
+        dxAttr->set_dim(dxDims);
         dxAttr->set_output(true);
 
         return graphObj;
@@ -183,6 +185,7 @@ public:
 
         const std::vector<int64_t> xDims = {1, 16, 16, 16};
         const std::vector<int64_t> dyDims = {1, 16, 16, 16};
+        const std::vector<int64_t> wDims = {16, 16, 3, 3};
         auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
         auto dyStrides = hipdnn_data_sdk::utilities::generateStrides(dyDims);
 
@@ -197,6 +200,7 @@ public:
             {1, 1});
 
         auto dwAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
+        dwAttr->set_dim(wDims);
         dwAttr->set_output(true);
 
         return graphObj;
@@ -268,7 +272,7 @@ public:
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::BatchnormAttributes bnAttrs;
         bnAttrs.set_epsilon(epsilonTensorAttr);
@@ -356,7 +360,7 @@ public:
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         const graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
         auto yAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
@@ -455,7 +459,7 @@ public:
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::LayernormAttributes lnAttrs;
         lnAttrs.set_epsilon(epsilonTensorAttr);
@@ -498,7 +502,7 @@ public:
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::RMSNormAttributes rmsAttrs;
         rmsAttrs.set_epsilon(epsilonTensorAttr);
