@@ -199,7 +199,13 @@ void rocsparse::bsrxmvn_general(rocsparse_handle     handle,
     // the 1..4 range removes those idle wave slots and raises effective occupancy on wave32,
     // without changing the computed result. The >=8 buckets are already fully packed and are
     // left untouched so the bandwidth-bound cases never regress.
-    if(block_dim <= 2)
+    //
+    // Performance portability: the tight-fit buckets are gated on wavefront_size == 32.
+    // Wide-wavefront (wave64) parts, which have their own specialized small-block paths and
+    // were never tuned for this reshaping, fall through to the original block_dim<=8 ->
+    // WFSIZE=8 bucket unchanged. The tighter WFSIZE is a logical row-owner group (not the
+    // hardware wave), so results are identical on every architecture regardless of the gate.
+    if(block_dim <= 2 && handle->wavefront_size == 32)
     {
         THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrxmvn_general_kernel<4, 2>),
@@ -222,7 +228,7 @@ void rocsparse::bsrxmvn_general(rocsparse_handle     handle,
             base,
             handle->pointer_mode == rocsparse_pointer_mode_host);
     }
-    else if(block_dim <= 4)
+    else if(block_dim <= 4 && handle->wavefront_size == 32)
     {
         THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrxmvn_general_kernel<16, 4>),
