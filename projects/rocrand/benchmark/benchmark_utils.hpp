@@ -69,6 +69,7 @@ using rand_discrete_distribution_t = rocrand_discrete_distribution;
 using rand_direction_vector_set_t  = rocrand_direction_vector_set;
 using direction_vectors32_t        = const unsigned int;
 using direction_vectors64_t        = const unsigned long long;
+using gpu_func_attributes_t        = hipFuncAttributes;
 #elif defined(__CUDACC__)
 using stream_t                     = cudaStream_t;
 using rng_type_t                   = curandRngType;
@@ -79,6 +80,7 @@ using rand_discrete_distribution_t = curandDiscreteDistribution_t;
 using rand_direction_vector_set_t  = curandDirectionVectorSet_t;
 using direction_vectors32_t        = curandDirectionVectors32_t;
 using direction_vectors64_t        = curandDirectionVectors64_t;
+using gpu_func_attributes_t        = cudaFuncAttributes;
 #endif
 
 #ifdef __HIP__
@@ -257,6 +259,11 @@ inline auto gpu_get_mp_count(int* mp_count, int device_id)
         mp_count,
         DISPATCH(hipDeviceAttributeMultiprocessorCount, cudaDevAttrMultiProcessorCount),
         device_id);
+}
+
+inline auto gpu_get_attributes(gpu_func_attributes_t* attr, const void* f)
+{
+    return DISPATCH(hipFuncGetAttributes, cudaFuncGetAttributes)(attr, f);
 }
 
 /// This exposes the C-style device API through template parameters.

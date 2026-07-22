@@ -128,23 +128,28 @@ struct config
         PRIMBENCH_CHECK(gpu_get_device(&dev_id));
         PRIMBENCH_CHECK(gpu_get_mp_count(&mp_count, dev_id));
 
+        gpu_func_attributes_t attr;
+        PRIMBENCH_CHECK(gpu_get_attributes(&attr, (const void*)kernel));
+        int kernel_max_threads    = attr.maxThreadsPerBlock;
+        int actual_max_block_size = std::min(max_block_size, kernel_max_threads);
+
         if(req_block_size > 0)
         {
             // If a block size is requested, use that.
+            int safe_req_block_size = std::min(req_block_size, kernel_max_threads);
+
             int  occupancy = 0;
             auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
                                                                 (const void*)kernel,
-                                                                req_block_size);
+                                                                safe_req_block_size);
 
-            result.block_size = req_block_size;
+            result.block_size = safe_req_block_size;
             result.occupancy  = (error == 0) ? occupancy : 1;
         }
         else
         {
             // Otherwise, sweep options to find the best occupancy configuration
-            const std::vector<int> block_sizes = {64, 128, 256, 512, 1024};
-
-            for(int block_size : block_sizes)
+            for(int block_size = 32; block_size <= actual_max_block_size; block_size *= 2)
             {
                 if(block_size > max_block_size)
                 {
