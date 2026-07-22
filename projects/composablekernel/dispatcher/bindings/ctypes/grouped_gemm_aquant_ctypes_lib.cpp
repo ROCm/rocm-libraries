@@ -173,10 +173,9 @@ int dispatcher_run_aquant_gemm(const void* A,
             (M + static_cast<int64_t>(QuantGroupSize::kM) - 1) / QuantGroupSize::kM;
         if(QK_A != expected_QK_A || QM_A != expected_QM_A)
         {
-            std::cerr << "dispatcher_run_aquant_gemm: QK_A/QM_A mismatch. "
-                      << "Got (" << QK_A << ", " << QM_A << "), "
-                      << "expected (" << expected_QK_A << ", " << expected_QM_A << ") "
-                      << "for K=" << K << " M=" << M
+            std::cerr << "dispatcher_run_aquant_gemm: QK_A/QM_A mismatch. " << "Got (" << QK_A
+                      << ", " << QM_A << "), " << "expected (" << expected_QK_A << ", "
+                      << expected_QM_A << ") " << "for K=" << K << " M=" << M
                       << " with QuantGroupSize kK=" << QuantGroupSize::kK
                       << " kM=" << QuantGroupSize::kM << "\n";
             return -1;
@@ -189,9 +188,8 @@ int dispatcher_run_aquant_gemm(const void* A,
     {
         std::cerr << "dispatcher_run_aquant_gemm: non-packed strides are not supported. "
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_AQ=" << QK_A
-                  << " stride_C=" << N << ", got stride_A=" << stride_A
-                  << " stride_B=" << stride_B << " stride_AQ=" << stride_AQ
-                  << " stride_C=" << stride_C << "\n";
+                  << " stride_C=" << N << ", got stride_A=" << stride_A << " stride_B=" << stride_B
+                  << " stride_AQ=" << stride_AQ << " stride_C=" << stride_C << "\n";
         return -1;
     }
 

@@ -116,7 +116,8 @@ int dispatcher_initialize()
 
 /**
  * Run ABQuantGrouped GEMM:
- *   C[M,N] = dequant(A[M,K], AQ[ceil(M/aM), ceil(K/aK)]) @ dequant(B[K,N], BQ[ceil(K/bK), ceil(N/bN)])
+ *   C[M,N] = dequant(A[M,K], AQ[ceil(M/aM), ceil(K/aK)]) @ dequant(B[K,N], BQ[ceil(K/bK),
+ * ceil(N/bN)])
  *
  * A, B, AQ, BQ, C are host pointers. This function manages device memory internally.
  *
@@ -181,9 +182,9 @@ int dispatcher_run_abquant_gemm(const void* A,
             (M + static_cast<int64_t>(AQuantGroupSize::kM) - 1) / AQuantGroupSize::kM;
         if(QK_A != exp_QK_A || QM_A != exp_QM_A)
         {
-            std::cerr << "dispatcher_run_abquant_gemm: QK_A/QM_A mismatch. "
-                      << "Got (" << QK_A << ", " << QM_A << "), "
-                      << "expected (" << exp_QK_A << ", " << exp_QM_A << ")\n";
+            std::cerr << "dispatcher_run_abquant_gemm: QK_A/QM_A mismatch. " << "Got (" << QK_A
+                      << ", " << QM_A << "), " << "expected (" << exp_QK_A << ", " << exp_QM_A
+                      << ")\n";
             return -1;
         }
     }
@@ -196,9 +197,9 @@ int dispatcher_run_abquant_gemm(const void* A,
             (N + static_cast<int64_t>(BQuantGroupSize::kN) - 1) / BQuantGroupSize::kN;
         if(QK_B != exp_QK_B || QN_B != exp_QN_B)
         {
-            std::cerr << "dispatcher_run_abquant_gemm: QK_B/QN_B mismatch. "
-                      << "Got (" << QK_B << ", " << QN_B << "), "
-                      << "expected (" << exp_QK_B << ", " << exp_QN_B << ")\n";
+            std::cerr << "dispatcher_run_abquant_gemm: QK_B/QN_B mismatch. " << "Got (" << QK_B
+                      << ", " << QN_B << "), " << "expected (" << exp_QK_B << ", " << exp_QN_B
+                      << ")\n";
             return -1;
         }
     }
@@ -209,9 +210,8 @@ int dispatcher_run_abquant_gemm(const void* A,
     if(stride_A != K || stride_B != K || stride_AQ != QK_A || stride_BQ != QN_B || stride_C != N)
     {
         std::cerr << "dispatcher_run_abquant_gemm: non-packed strides not supported. "
-                  << "Expected stride_A=" << K << " stride_B=" << K
-                  << " stride_AQ=" << QK_A << " stride_BQ=" << QN_B << " stride_C=" << N
-                  << "\n";
+                  << "Expected stride_A=" << K << " stride_B=" << K << " stride_AQ=" << QK_A
+                  << " stride_BQ=" << QN_B << " stride_C=" << N << "\n";
         return -1;
     }
 
@@ -228,31 +228,78 @@ int dispatcher_run_abquant_gemm(const void* A,
     CDataType* C_dev  = nullptr;
 
     auto cleanup = [&]() {
-        if(A_dev)  (void)hipFree(A_dev);
-        if(B_dev)  (void)hipFree(B_dev);
-        if(AQ_dev) (void)hipFree(AQ_dev);
-        if(BQ_dev) (void)hipFree(BQ_dev);
-        if(C_dev)  (void)hipFree(C_dev);
+        if(A_dev)
+            (void)hipFree(A_dev);
+        if(B_dev)
+            (void)hipFree(B_dev);
+        if(AQ_dev)
+            (void)hipFree(AQ_dev);
+        if(BQ_dev)
+            (void)hipFree(BQ_dev);
+        if(C_dev)
+            (void)hipFree(C_dev);
     };
 
-    if(hipMalloc(&A_dev,  M * K * sizeof(ADataType))       != hipSuccess) { cleanup(); return -1; }
-    if(hipMalloc(&B_dev,  K * N * sizeof(BDataType))       != hipSuccess) { cleanup(); return -1; }
-    if(hipMalloc(&AQ_dev, QM_A * QK_A * sizeof(QDataType)) != hipSuccess) { cleanup(); return -1; }
-    if(hipMalloc(&BQ_dev, QK_B * QN_B * sizeof(QDataType)) != hipSuccess) { cleanup(); return -1; }
-    if(hipMalloc(&C_dev,  M * N * sizeof(CDataType))       != hipSuccess) { cleanup(); return -1; }
+    if(hipMalloc(&A_dev, M * K * sizeof(ADataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMalloc(&B_dev, K * N * sizeof(BDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMalloc(&AQ_dev, QM_A * QK_A * sizeof(QDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMalloc(&BQ_dev, QK_B * QN_B * sizeof(QDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMalloc(&C_dev, M * N * sizeof(CDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
 
-    if(hipMemcpy(A_dev,  A_host,  M * K * sizeof(ADataType),       hipMemcpyHostToDevice) != hipSuccess) { cleanup(); return -1; }
-    if(hipMemcpy(B_dev,  B_host,  K * N * sizeof(BDataType),       hipMemcpyHostToDevice) != hipSuccess) { cleanup(); return -1; }
-    if(hipMemcpy(AQ_dev, AQ_host, QM_A * QK_A * sizeof(QDataType), hipMemcpyHostToDevice) != hipSuccess) { cleanup(); return -1; }
-    if(hipMemcpy(BQ_dev, BQ_host, QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) != hipSuccess) { cleanup(); return -1; }
-    if(hipMemset(C_dev,  0,       M * N * sizeof(CDataType))                              != hipSuccess) { cleanup(); return -1; }
+    if(hipMemcpy(A_dev, A_host, M * K * sizeof(ADataType), hipMemcpyHostToDevice) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemcpy(AQ_dev, AQ_host, QM_A * QK_A * sizeof(QDataType), hipMemcpyHostToDevice) !=
+       hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemcpy(BQ_dev, BQ_host, QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) !=
+       hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemset(C_dev, 0, M * N * sizeof(CDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
 
     // Build QuantGemmHostArgs: both AQ and BQ active
     ck_tile::QuantGemmHostArgs args;
     args.a_ptr     = A_dev;
     args.b_ptr     = B_dev;
-    args.aq_ptr    = AQ_dev;   // A-side scale: active
-    args.bq_ptr    = BQ_dev;   // B-side scale: active
+    args.aq_ptr    = AQ_dev; // A-side scale: active
+    args.bq_ptr    = BQ_dev; // B-side scale: active
     args.c_ptr     = C_dev;
     args.k_batch   = k_batch;
     args.M         = static_cast<ck_tile::index_t>(M);
