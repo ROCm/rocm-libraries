@@ -165,11 +165,11 @@ static constexpr ck::index_t MPerBlock = 64; using DeviceOpInstance = ck::tensor
                AElementOp,  BElementOp, CDEElementOp,   GemmSpec,   
                256,  Scale_Block_M, Scale_Block_N, Scale_Block_K,
                MPerBlock,   128,    128,
-               16,   32,
+               16,   16,
                16,   16,
                4,    2,
                S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
-               S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
+               S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
                4,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
                ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, ActOP, Nswizzle, IsInputGemm, IsSplitK, MulRoutedWeight,
                 int32_t, A0DataType, A0DataType, A0DataType, A0DataType, false>;
