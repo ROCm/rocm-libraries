@@ -37,13 +37,6 @@ set_target_properties( rocfft-internal-test PROPERTIES
 
 target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 
-# Instrument for code coverage (does nothing unless BUILD_CODE_COVERAGE is ON).
-rocfft_add_coverage_flags( rocfft-internal-test )
-if( BUILD_CODE_COVERAGE )
-  # This test binary also needs the coverage link flag directly.
-  target_link_options( rocfft-internal-test PRIVATE -fprofile-instr-generate )
-endif()
-
 # Link rocfft-function-pool directly, not roc::rocfft, to avoid a duplicate function_pool_data singleton.
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
