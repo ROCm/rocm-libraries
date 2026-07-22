@@ -731,14 +731,20 @@ DEF_BATCH(.format = VOP2,
 DEF_BATCH(.format = VOP3,
     VLshlAddU32Inst, "v_lshl_add_u32", .logical = {"VLShiftLeftAddU32", "_VLShiftLeftAddU32"},
     VLshlOrB32Inst, "v_lshl_or_b32", .logical = {"VLShiftLeftOrB32", "_VLShiftLeftOrB32"},
-    VLshlrevB16Inst, "v_lshlrev_b16", .logical = "VLShiftLeftB16",
-        .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
-    VLshrrevB64Inst, "v_lshrrev_b64", .logical = "VLShiftRightB64",
-        .operand_fields = { {D0, .size=64}, {S1, .size=64} },
     VMadI32I24Inst, "v_mad_i32_i24", .logical = "VMadI32I24",
         .operand_fields = { {S0, .size=24}, {S1, .size=24} },
     VMadU32U24Inst, "v_mad_u32_u24", .logical = "VMadU32U24",
         .operand_fields = { {S0, .size=24}, {S1, .size=24} },
+)
+
+// Vector ALU — VOP3-only shifts (2 sources: dst, shiftAmount, value).
+// Must use VOP3_2SRC (dst+src0+src1); the 4-field VOP3 format leaves a phantom
+// src2 that the StinkyIRVerifier reports as a missing operand.
+DEF_BATCH(.format = VOP3_2SRC,
+    VLshlrevB16Inst, "v_lshlrev_b16", .logical = "VLShiftLeftB16",
+        .operand_fields = { {D0, .size=16}, {S0, .size=16}, {S1, .size=16} },
+    VLshrrevB64Inst, "v_lshrrev_b64", .logical = "VLShiftRightB64",
+        .operand_fields = { {D0, .size=64}, {S1, .size=64} },
 )
 
 // Vector ALU — VOP1 (dual VOP1/VOP3 encoding)
