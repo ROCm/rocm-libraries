@@ -24,46 +24,12 @@ from smi_utils import (  # noqa: E402
     count_gpus,
     detect_gpu_ids,
     fetch_live_normalized_fields,
-    get_rocm_version,
     show_gpu_info,
     show_version,
     smi_equivalence_pairs,
-    use_amd_smi,
 )
 
 _GPU_HOST = shutil.which("rocm-smi") is not None and shutil.which("amd-smi") is not None
-
-
-class TestVersionSelection(unittest.TestCase):
-    def test_get_rocm_version_readable(self):
-        version = get_rocm_version()
-        if version is None:
-            self.skipTest("ROCM_PATH/.info/version not available")
-        self.assertRegex(version, r"^\d+\.\d+")
-
-    def test_use_amd_smi_when_rocm_below_10(self):
-        version = get_rocm_version()
-        if not version:
-            self.skipTest("ROCM version file not available")
-        major = int(version.split(".")[0])
-        if major >= 10:
-            self.skipTest(f"ROCm {version} is >= 10")
-        os.environ.pop("CK_SMI_TOOL", None)
-        self.assertFalse(use_amd_smi())
-
-    def test_use_amd_smi_override(self):
-        with unittest.mock.patch.dict(os.environ, {"CK_SMI_TOOL": "amd-smi"}):
-            self.assertTrue(use_amd_smi())
-
-    def test_use_amd_smi_fake_rocm_version(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmp:
-            info = Path(tmp) / ".info"
-            info.mkdir()
-            (info / "version").write_text("10.0.0\n")
-            with unittest.mock.patch.dict(os.environ, {"ROCM_PATH": tmp}, clear=False):
-                self.assertTrue(use_amd_smi())
 
 
 @unittest.skipUnless(_GPU_HOST, "requires rocm-smi and amd-smi on PATH")
@@ -120,9 +86,9 @@ class TestLiveWrappers(unittest.TestCase):
     def test_show_version_non_empty(self):
         self.assertTrue(show_version().strip())
 
-    def test_amd_smi_forced_still_matches_live_amd_ids(self):
-        with unittest.mock.patch.dict(os.environ, {"CK_SMI_TOOL": "amd-smi"}):
-            self.assertEqual(detect_gpu_ids(), self.fields["gpu_ids_amd"])
+    def test_rocm_smi_override_matches_live_rocm_ids(self):
+        with unittest.mock.patch.dict(os.environ, {"CK_SMI_TOOL": "rocm-smi"}):
+            self.assertEqual(detect_gpu_ids(), self.fields["gpu_ids_rocm"])
 
 
 if __name__ == "__main__":

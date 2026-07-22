@@ -1,9 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Version-aware GPU SMI wrappers (rocm-smi / amd-smi).
+"""GPU SMI wrappers (amd-smi / rocm-smi).
 
-Prefers amd-smi when ROCm >= 10.0; rocm-smi on older stacks. All call sites
-should use these helpers instead of invoking rocm-smi or amd-smi directly.
+Prefers amd-smi and falls back to rocm-smi if amd-smi is missing or fails. All
+call sites should use these helpers instead of invoking amd-smi or rocm-smi
+directly.
 """
 
 from __future__ import annotations
@@ -12,36 +13,21 @@ import os
 import re
 import shutil
 import subprocess
-from pathlib import Path
 from typing import Optional
 
 _ROCM_SMI = "rocm-smi"
 _AMD_SMI = "amd-smi"
 
 
-def get_rocm_version() -> Optional[str]:
-    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    version_file = Path(rocm_path) / ".info" / "version"
-    if version_file.is_file():
-        text = version_file.read_text(encoding="utf-8").strip()
-        return text or None
-    return None
+def _smi_order() -> tuple[str, str]:
+    """Return (primary, fallback) SMI tools to try, in order.
 
-
-def use_amd_smi() -> bool:
-    override = os.environ.get("CK_SMI_TOOL", "").strip().lower()
-    if override == "amd-smi":
-        return True
-    if override == "rocm-smi":
-        return False
-    version = get_rocm_version()
-    if not version:
-        return shutil.which(_AMD_SMI) is not None and shutil.which(_ROCM_SMI) is None
-    try:
-        major = int(version.split(".")[0])
-    except ValueError:
-        return False
-    return major >= 10
+    Defaults to amd-smi first, rocm-smi as fallback. Set CK_SMI_TOOL=rocm-smi
+    to force rocm-smi first (mainly for testing).
+    """
+    if os.environ.get("CK_SMI_TOOL", "").strip().lower() == "rocm-smi":
+        return (_ROCM_SMI, _AMD_SMI)
+    return (_AMD_SMI, _ROCM_SMI)
 
 
 def parse_rocm_showid(text: str) -> list[str]:
@@ -168,14 +154,11 @@ def detect_gpu_ids() -> list[str]:
     if env_ids is not None:
         return env_ids
 
-    primary, fallback = (
-        (_AMD_SMI, _ROCM_SMI) if use_amd_smi() else (_ROCM_SMI, _AMD_SMI)
-    )
     fetchers = {
         _ROCM_SMI: _gpu_ids_rocm_smi,
         _AMD_SMI: _gpu_ids_amd_smi,
     }
-    for tool in (primary, fallback):
+    for tool in _smi_order():
         if shutil.which(tool) is None:
             continue
         try:
@@ -190,18 +173,12 @@ def count_gpus() -> int:
 
 
 def _run_smi_primary_fallback(rocm_cmd: list[str], amd_cmd: list[str]) -> str:
-    primary, fallback = (
-        (_AMD_SMI, _ROCM_SMI) if use_amd_smi() else (_ROCM_SMI, _AMD_SMI)
-    )
-    pairs = (
-        (primary, amd_cmd if primary == _AMD_SMI else rocm_cmd),
-        (fallback, rocm_cmd if fallback == _ROCM_SMI else amd_cmd),
-    )
-    for tool, cmd in pairs:
+    cmds = {_ROCM_SMI: rocm_cmd, _AMD_SMI: amd_cmd}
+    for tool in _smi_order():
         if shutil.which(tool) is None:
             continue
         try:
-            return _run_cmd(cmd)
+            return _run_cmd(cmds[tool])
         except Exception:
             continue
     raise RuntimeError("no SMI tool available")
@@ -229,16 +206,15 @@ def check_gpu_available() -> bool:
 
 
 def show_version() -> str:
-    if use_amd_smi() and shutil.which(_AMD_SMI):
+    version_cmds = {
+        _AMD_SMI: [_AMD_SMI, "version"],
+        _ROCM_SMI: [_ROCM_SMI, "--showdriverversion"],
+    }
+    for tool in _smi_order():
+        if shutil.which(tool) is None:
+            continue
         try:
-            return _run_cmd([_AMD_SMI, "version"]).strip()
+            return _run_cmd(version_cmds[tool]).strip()
         except Exception:
-            pass
-    if shutil.which(_ROCM_SMI):
-        try:
-            return _run_cmd([_ROCM_SMI, "--showdriverversion"]).strip()
-        except Exception:
-            pass
-    if shutil.which(_AMD_SMI):
-        return _run_cmd([_AMD_SMI, "version"]).strip()
+            continue
     raise RuntimeError("no SMI tool available for version query")

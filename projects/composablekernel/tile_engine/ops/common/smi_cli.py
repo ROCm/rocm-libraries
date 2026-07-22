@@ -33,7 +33,7 @@ def main() -> int:
 
     sub.add_parser("check", help="Exit 0 if GPU is accessible via SMI")
 
-    sub.add_parser("show-version", help="Print driver / ROCm version info")
+    sub.add_parser("show-version", help="Print driver version info")
 
     args = parser.parse_args()
 
