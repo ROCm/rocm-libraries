@@ -37,31 +37,10 @@ namespace detail
 template<typename Invokable, typename InputT, typename InitT = InputT>
 using accumulator_t = _HIPCUB_STD::__accumulator_t<Invokable, InputT, InitT>;
 
+using arg_min = cub::detail::arg_min;
+using arg_max = cub::detail::arg_max;
+
 } // namespace detail
-
-struct ArgMax
-{
-    template<class Key, class Value>
-    HIPCUB_HOST_DEVICE
-    inline constexpr ::cub::KeyValuePair<Key, Value>
-        operator()(const ::cub::KeyValuePair<Key, Value>& a,
-                   const ::cub::KeyValuePair<Key, Value>& b) const
-    {
-        return ((b.value > a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
-    }
-};
-
-struct ArgMin
-{
-    template<class Key, class Value>
-    HIPCUB_HOST_DEVICE
-    inline constexpr ::cub::KeyValuePair<Key, Value>
-        operator()(const ::cub::KeyValuePair<Key, Value>& a,
-                   const ::cub::KeyValuePair<Key, Value>& b) const
-    {
-        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
-    }
-};
 
 END_HIPCUB_NAMESPACE
 
