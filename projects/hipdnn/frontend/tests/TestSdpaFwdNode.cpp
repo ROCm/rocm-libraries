@@ -373,7 +373,7 @@ TEST(TestSdpaFwdNode, PreValidateFailsAttnScaleTensorAndValueBothSet)
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1}).set_is_pass_by_value(true);
     attrs.set_attn_scale(scale);
-    attrs.set_attn_scale_value(1.0f);
+    attrs.attn_scale_value = 1.0f;
 
     const GraphAttributes graphAttrs;
     const SdpaFwdNode node(std::move(attrs), graphAttrs);
