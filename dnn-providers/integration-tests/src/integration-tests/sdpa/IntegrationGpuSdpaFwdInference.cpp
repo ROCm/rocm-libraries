@@ -140,7 +140,7 @@ public:
         graph::SdpaAttributes sdpaAttrs;
         const float attnScale
             = tc.attnScale > 0.0f ? tc.attnScale : 1.0f / std::sqrt(static_cast<float>(tc.headDim));
-        sdpaAttrs.set_attn_scale_value(attnScale);
+        sdpaAttrs.set_attn_scale(attnScale);
         if(tc.mask == SdpaMask::CAUSAL_BOTTOM_RIGHT)
         {
             // Modern causal form: unbounded left, right bound at the diagonal,
