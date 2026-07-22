@@ -43,7 +43,7 @@
                 "causal_mask": true,
                 "causal_mask_bottom_right": false,
                 "dropout_probability": null,
-                "attn_scale_value": 0.125,
+                "attn_scale_value": 0.08838834764831843,
                 "left_bound": null,
                 "right_bound": null,
                 "max_seq_len_kv": null,
@@ -61,12 +61,12 @@
                 2,
                 32,
                 2048,
-                64
+                128
             ],
             "strides": [
-                4194304,
-                131072,
-                64,
+                8388608,
+                262144,
+                128,
                 1
             ],
             "data_type": "float16",
@@ -79,12 +79,12 @@
                 2,
                 32,
                 2048,
-                64
+                128
             ],
             "strides": [
-                4194304,
-                131072,
-                64,
+                8388608,
+                262144,
+                128,
                 1
             ],
             "data_type": "float16",
@@ -97,12 +97,12 @@
                 2,
                 32,
                 2048,
-                64
+                128
             ],
             "strides": [
-                4194304,
-                131072,
-                64,
+                8388608,
+                262144,
+                128,
                 1
             ],
             "data_type": "float16",
@@ -115,12 +115,12 @@
                 2,
                 32,
                 2048,
-                64
+                128
             ],
             "strides": [
-                4194304,
-                131072,
-                64,
+                8388608,
+                262144,
+                128,
                 1
             ],
             "data_type": "float16",
