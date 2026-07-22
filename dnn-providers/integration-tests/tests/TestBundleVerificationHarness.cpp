@@ -249,6 +249,10 @@ std::shared_ptr<IntegrationTestBundle> makeRuntimePassByValueBundle()
                                                    TensorValue::NONE,
                                                    0,
                                                    true));
+    // Ordinary (non-runtime-PBV) input, to prove buildVariantPack still
+    // routes normal tensors to device memory alongside a PBV sibling.
+    tensors.push_back(CreateTensorAttributesDirect(
+        builder, 3, "scale", DataType::FLOAT, &scalarStrides, &scalarDims));
     tensors.push_back(CreateTensorAttributesDirect(
         builder, 2, "output", DataType::FLOAT, &outputStrides, &outputDims));
 
@@ -280,6 +284,17 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
     inputs.at(1)->fillTensorWithValue(0.01f);
     auto* expectedHostPointer = inputs.at(1)->rawHostData();
 
+    // Ordinary (non-PBV) input: must still route to device even though a PBV
+    // sibling is present in the same variant pack.
+    inputs.emplace(3, hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(3)));
+
+    // Uid with no entry in tensorAttributes at all: buildVariantPack must
+    // default isRuntimePassByValue to false (device pointer) rather than
+    // treating an unknown uid as runtime-PBV.
+    static constexpr int64_t K_UNKNOWN_UID = 99;
+    inputs.emplace(K_UNKNOWN_UID,
+                   hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(3)));
+
     OutputTensors outputs;
     outputs.emplace(2, hipdnn_test_sdk::detail::createTensorFromAttribute(*tensorAttributes.at(2)));
     auto variantPack = detail::buildVariantPack(
@@ -287,6 +302,8 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
 
     ASSERT_EQ(variantPack.at(1), expectedHostPointer);
     EXPECT_FLOAT_EQ(*static_cast<const float*>(variantPack.at(1)), 0.01f);
+    EXPECT_EQ(variantPack.at(3), inputs.at(3)->rawDeviceData());
+    EXPECT_EQ(variantPack.at(K_UNKNOWN_UID), inputs.at(K_UNKNOWN_UID)->rawDeviceData());
     EXPECT_EQ(variantPack.at(2), outputs.at(2)->rawDeviceData());
 }
 } // namespace
