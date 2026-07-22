@@ -178,6 +178,192 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
     }
 }
 
+// =============================================================================
+// Runtime pass-by-value scale tensor (RFC 0016)
+// =============================================================================
+
+// Build a forward SDPA graph with a runtime pass-by-value scale tensor
+// (is_runtime_pass_by_value=true, no baked value).
+flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithRuntimePbvScale()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+
+    // Runtime pass-by-value scale tensor: is_runtime_pass_by_value=true, no value
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                            scaleUid,
+                                                            "scale",
+                                                            DataType::FLOAT,
+                                                            &scaleDims,
+                                                            &scaleDims,
+                                                            false, // virtual
+                                                            TensorValue::NONE, // no baked value
+                                                            0, // value offset
+                                                            true)); // is_runtime_pass_by_value
+
+    const auto sdpaAttributes = CreateSdpaAttributes(builder,
+                                                      qUid,
+                                                      kUid,
+                                                      vUid,
+                                                      oUid,
+                                                      flatbuffers::nullopt, // attn_mask
+                                                      scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::BFLOAT16,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
+
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::HALF,
+                                         DataType::BFLOAT16,
+                                         &tensorAttributes,
+                                         &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// Build a forward SDPA graph with a non-pass-by-value scale tensor (a regular
+// device tensor, not a scalar). This should be rejected by isApplicable.
+flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+
+    // Regular device tensor — NOT pass-by-value, NOT a scalar
+    const std::vector<int64_t> scaleDims = {1};
+    const auto scaleUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, scaleUid, "scale", DataType::FLOAT, &scaleDims, &scaleDims));
+
+    const auto sdpaAttributes = CreateSdpaAttributes(builder,
+                                                      qUid,
+                                                      kUid,
+                                                      vUid,
+                                                      oUid,
+                                                      flatbuffers::nullopt, // attn_mask
+                                                      scaleUid); // scale_tensor_uid
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::BFLOAT16,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
+
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::HALF,
+                                         DataType::BFLOAT16,
+                                         &tensorAttributes,
+                                         &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaFwdGraphWithRuntimePbvScale();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsNonPassByValueScaleTensor)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaFwdGraphWithNonPbvScaleTensor();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor)
+{
+    // Existing withScale=true path uses a compile-time constant scale tensor
+    // (Float32Value baked in). Verify it still passes after the PBV changes.
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaFwdGraph(
+        {4, 8, 256, 128}, {4, 8, 256, 128}, hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        /*withAttnMask=*/false, /*withScale=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
 {
     // Create an SDPA graph with known dimensions (withStats = false by default)
