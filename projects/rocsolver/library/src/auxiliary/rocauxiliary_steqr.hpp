@@ -32,6 +32,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "lapack_device_functions.hpp"
 #include "rocauxiliary_lasr.hpp"
 #include "rocauxiliary_sterf.hpp"
@@ -67,7 +69,7 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
+    I m, el, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     I l1;
     I iters;
     S anorm, p;
@@ -114,21 +116,21 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                 }
             }
 
-            lsv = l = l1;
+            lsv = el = l1;
             lendsv = lend = m;
             l1 = m + 1;
 
             // Choose iteration type (QL or QR)
-            if(abs(D[lend]) < abs(D[l]))
+            if(abs(D[lend]) < abs(D[el]))
             {
                 lend = lsv;
-                l = lendsv;
+                el = lendsv;
             }
 
             // Get scaling factor
             anorm = find_max_tridiag(lsv, lendsv, D, E);
 
-            if(lend == l)
+            if(lend == el)
                 continue;
 
             lsv_scaling = lsv;
@@ -141,38 +143,38 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
             else if(anorm < ssfmin)
                 scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm);
 
-            if(lend >= l)
+            if(lend >= el)
             {
                 // QL iteration
-                while(l <= lend && iters < max_iters)
+                while(el <= lend && iters < max_iters)
                 {
                     // Find small subdiagonal element
-                    for(m = l; m <= lend - 1; m++)
+                    for(m = el; m <= lend - 1; m++)
                         if(abs(E[m] * E[m]) <= eps * eps * abs(D[m] * D[m + 1]))
                             break;
 
-                    lsv = l;
+                    lsv = el;
 
                     if(m < lend)
                         E[m] = 0;
-                    p = D[l];
-                    if(m == l)
+                    p = D[el];
+                    if(m == el)
                     {
-                        D[l] = p;
-                        l++;
+                        D[el] = p;
+                        el++;
                     }
-                    else if(m == l + 1)
+                    else if(m == el + 1)
                     {
                         // Use laev2 to compute 2x2 eigenvalues and eigenvectors
                         S rt1, rt2, c, s;
-                        laev2(D[l], E[l], D[l + 1], rt1, rt2, c, s);
-                        work[l] = c;
-                        work[n - 1 + l] = s;
+                        laev2(D[el], E[el], D[el + 1], rt1, rt2, c, s);
+                        work[el] = c;
+                        work[n - 1 + el] = s;
 
-                        D[l] = rt1;
-                        D[l + 1] = rt2;
-                        E[l] = 0;
-                        l = l + 2;
+                        D[el] = rt1;
+                        D[el + 1] = rt2;
+                        E[el] = 0;
+                        el = el + 2;
                     }
                     else
                     {
@@ -181,18 +183,18 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                         S f, g, c, s, b, r;
 
                         // Form shift
-                        g = (D[l + 1] - p) / (2 * E[l]);
+                        g = (D[el + 1] - p) / (2 * E[el]);
                         if(g >= 0)
                             r = abs(sqrt(1 + g * g));
                         else
                             r = -abs(sqrt(1 + g * g));
-                        g = D[m] - p + (E[l] / (g + r));
+                        g = D[m] - p + (E[el] / (g + r));
 
                         c = 1;
                         s = 1;
                         p = 0;
 
-                        for(I i = m - 1; i >= l; i--)
+                        for(I i = m - 1; i >= el; i--)
                         {
                             f = s * E[i];
                             b = c * E[i];
@@ -212,12 +214,12 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                             work[n - 1 + i] = -s;
                         }
 
-                        D[l] -= p;
-                        E[l] = g;
+                        D[el] -= p;
+                        E[el] = g;
                     }
 
                     // Apply saved rotations
-                    if(m != l)
+                    if(m != el)
                     {
                         ROCBLAS_CHECK(hWork.write_to_device_async(stream));
                         ROCBLAS_CHECK(rocsolver_lasr_template<T, S>(
@@ -231,35 +233,35 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
             else
             {
                 // QR iteration
-                while(l >= lend && iters < max_iters)
+                while(el >= lend && iters < max_iters)
                 {
                     // Find small subdiagonal element
-                    for(m = l; m >= lend + 1; m--)
+                    for(m = el; m >= lend + 1; m--)
                         if(abs(E[m - 1] * E[m - 1]) <= eps * eps * abs(D[m] * D[m - 1]))
                             break;
 
-                    lsv = l;
+                    lsv = el;
 
                     if(m > lend)
                         E[m - 1] = 0;
-                    p = D[l];
-                    if(m == l)
+                    p = D[el];
+                    if(m == el)
                     {
-                        D[l] = p;
-                        l--;
+                        D[el] = p;
+                        el--;
                     }
-                    else if(m == l - 1)
+                    else if(m == el - 1)
                     {
                         // Use laev2 to compute 2x2 eigenvalues and eigenvectors
                         S rt1, rt2, c, s;
-                        laev2(D[l - 1], E[l - 1], D[l], rt1, rt2, c, s);
+                        laev2(D[el - 1], E[el - 1], D[el], rt1, rt2, c, s);
                         work[m] = c;
                         work[n - 1 + m] = s;
 
-                        D[l - 1] = rt1;
-                        D[l] = rt2;
-                        E[l - 1] = 0;
-                        l = l - 2;
+                        D[el - 1] = rt1;
+                        D[el] = rt2;
+                        E[el - 1] = 0;
+                        el = el - 2;
                     }
                     else
                     {
@@ -268,18 +270,18 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                         S f, g, c, s, b, r;
 
                         // Form shift
-                        g = (D[l - 1] - p) / (2 * E[l - 1]);
+                        g = (D[el - 1] - p) / (2 * E[el - 1]);
                         if(g >= 0)
                             r = abs(sqrt(1 + g * g));
                         else
                             r = -abs(sqrt(1 + g * g));
-                        g = D[m] - p + (E[l - 1] / (g + r));
+                        g = D[m] - p + (E[el - 1] / (g + r));
 
                         c = 1;
                         s = 1;
                         p = 0;
 
-                        for(I i = m; i <= l - 1; i++)
+                        for(I i = m; i <= el - 1; i++)
                         {
                             f = s * E[i];
                             b = c * E[i];
@@ -299,12 +301,12 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                             work[n - 1 + i] = s;
                         }
 
-                        D[l] -= p;
-                        E[l - 1] = g;
+                        D[el] -= p;
+                        E[el - 1] = g;
                     }
 
                     // Apply saved rotations
-                    if(m != l)
+                    if(m != el)
                     {
                         ROCBLAS_CHECK(hWork.write_to_device_async(stream));
                         ROCBLAS_CHECK(rocsolver_lasr_template<T, S>(
@@ -332,9 +334,9 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
         {
             for(I ii = 1; ii < n; ii++)
             {
-                l = ii - 1;
-                m = l;
-                p = D[l];
+                el = ii - 1;
+                m = el;
+                p = D[el];
                 for(I j = ii; j < n; j++)
                 {
                     if(D[j] < p)
@@ -343,16 +345,16 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                         p = D[j];
                     }
                 }
-                if(m != l)
+                if(m != el)
                 {
-                    D[m] = D[l];
-                    D[l] = p;
+                    D[m] = D[el];
+                    D[el] = p;
                 }
 
-                if(m != l)
+                if(m != el)
                 {
                     ROCSOLVER_LAUNCH_KERNEL(swap_kernel<T>, dim3(blocks), dim3(BS1), (I)0, stream,
-                                            n, C + l * ldc, (I)1, C + m * ldc, (I)1);
+                                            n, C + el * ldc, (I)1, C + m * ldc, (I)1);
                 }
             }
         }
@@ -385,7 +387,7 @@ __device__ void run_steqr(const I tid,
                           const S ssfmax,
                           const bool ordered = true)
 {
-    __shared__ I m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
+    __shared__ I m, el, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     __shared__ I l1;
     __shared__ I iters;
     __shared__ S anorm, p;
@@ -413,15 +415,15 @@ __device__ void run_steqr(const I tid,
                 }
             }
 
-            lsv = l = l1;
+            lsv = el = l1;
             lendsv = lend = m;
             l1 = m + 1;
 
             // Choose iteration type (QL or QR)
-            if(abs(D[lend]) < abs(D[l]))
+            if(abs(D[lend]) < abs(D[el]))
             {
                 lend = lsv;
-                l = lendsv;
+                el = lendsv;
             }
 
             // Get scaling factor
@@ -433,7 +435,7 @@ __device__ void run_steqr(const I tid,
         }
         __syncthreads();
 
-        if(lend == l)
+        if(lend == el)
             continue;
 
         // Scale submatrix
@@ -445,40 +447,40 @@ __device__ void run_steqr(const I tid,
             scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm, tid, tid_inc);
         __syncthreads();
 
-        if(lend >= l)
+        if(lend >= el)
         {
             // QL iteration
-            while(l <= lend && iters < max_iters)
+            while(el <= lend && iters < max_iters)
             {
                 if(tid == 0)
                 {
                     // Find small subdiagonal element
-                    for(m = l; m <= lend - 1; m++)
+                    for(m = el; m <= lend - 1; m++)
                         if(abs(E[m] * E[m]) <= eps * eps * abs(D[m] * D[m + 1]))
                             break;
 
-                    lsv = l;
+                    lsv = el;
 
                     if(m < lend)
                         E[m] = 0;
-                    p = D[l];
-                    if(m == l)
+                    p = D[el];
+                    if(m == el)
                     {
-                        D[l] = p;
-                        l++;
+                        D[el] = p;
+                        el++;
                     }
-                    else if(m == l + 1)
+                    else if(m == el + 1)
                     {
                         // Use laev2 to compute 2x2 eigenvalues and eigenvectors
                         S rt1, rt2, c, s;
-                        laev2(D[l], E[l], D[l + 1], rt1, rt2, c, s);
-                        work[l] = c;
-                        work[n - 1 + l] = s;
+                        laev2(D[el], E[el], D[el + 1], rt1, rt2, c, s);
+                        work[el] = c;
+                        work[n - 1 + el] = s;
 
-                        D[l] = rt1;
-                        D[l + 1] = rt2;
-                        E[l] = 0;
-                        l = l + 2;
+                        D[el] = rt1;
+                        D[el + 1] = rt2;
+                        E[el] = 0;
+                        el = el + 2;
                     }
                     else
                     {
@@ -487,18 +489,18 @@ __device__ void run_steqr(const I tid,
                         S f, g, c, s, b, r;
 
                         // Form shift
-                        g = (D[l + 1] - p) / (2 * E[l]);
+                        g = (D[el + 1] - p) / (2 * E[el]);
                         if(g >= 0)
                             r = abs(sqrt(1 + g * g));
                         else
                             r = -abs(sqrt(1 + g * g));
-                        g = D[m] - p + (E[l] / (g + r));
+                        g = D[m] - p + (E[el] / (g + r));
 
                         c = 1;
                         s = 1;
                         p = 0;
 
-                        for(I i = m - 1; i >= l; i--)
+                        for(I i = m - 1; i >= el; i--)
                         {
                             f = s * E[i];
                             b = c * E[i];
@@ -518,14 +520,14 @@ __device__ void run_steqr(const I tid,
                             work[n - 1 + i] = -s;
                         }
 
-                        D[l] -= p;
-                        E[l] = g;
+                        D[el] -= p;
+                        E[el] = g;
                     }
                 }
                 __syncthreads();
 
                 // Apply saved rotations
-                if(m != l)
+                if(m != el)
                 {
                     run_lasr(rocblas_side_right, rocblas_pivot_variable, rocblas_backward_direction,
                              n, m - lsv + 1, work + lsv, work + n - 1 + lsv, C + 0 + lsv * ldc, ldc,
@@ -538,37 +540,37 @@ __device__ void run_steqr(const I tid,
         else
         {
             // QR iteration
-            while(l >= lend && iters < max_iters)
+            while(el >= lend && iters < max_iters)
             {
                 if(tid == 0)
                 {
                     // Find small subdiagonal element
-                    for(m = l; m >= lend + 1; m--)
+                    for(m = el; m >= lend + 1; m--)
                         if(abs(E[m - 1] * E[m - 1]) <= eps * eps * abs(D[m] * D[m - 1]))
                             break;
 
-                    lsv = l;
+                    lsv = el;
 
                     if(m > lend)
                         E[m - 1] = 0;
-                    p = D[l];
-                    if(m == l)
+                    p = D[el];
+                    if(m == el)
                     {
-                        D[l] = p;
-                        l--;
+                        D[el] = p;
+                        el--;
                     }
-                    else if(m == l - 1)
+                    else if(m == el - 1)
                     {
                         // Use laev2 to compute 2x2 eigenvalues and eigenvectors
                         S rt1, rt2, c, s;
-                        laev2(D[l - 1], E[l - 1], D[l], rt1, rt2, c, s);
+                        laev2(D[el - 1], E[el - 1], D[el], rt1, rt2, c, s);
                         work[m] = c;
                         work[n - 1 + m] = s;
 
-                        D[l - 1] = rt1;
-                        D[l] = rt2;
-                        E[l - 1] = 0;
-                        l = l - 2;
+                        D[el - 1] = rt1;
+                        D[el] = rt2;
+                        E[el - 1] = 0;
+                        el = el - 2;
                     }
                     else
                     {
@@ -577,18 +579,18 @@ __device__ void run_steqr(const I tid,
                         S f, g, c, s, b, r;
 
                         // Form shift
-                        g = (D[l - 1] - p) / (2 * E[l - 1]);
+                        g = (D[el - 1] - p) / (2 * E[el - 1]);
                         if(g >= 0)
                             r = abs(sqrt(1 + g * g));
                         else
                             r = -abs(sqrt(1 + g * g));
-                        g = D[m] - p + (E[l - 1] / (g + r));
+                        g = D[m] - p + (E[el - 1] / (g + r));
 
                         c = 1;
                         s = 1;
                         p = 0;
 
-                        for(I i = m; i <= l - 1; i++)
+                        for(I i = m; i <= el - 1; i++)
                         {
                             f = s * E[i];
                             b = c * E[i];
@@ -608,14 +610,14 @@ __device__ void run_steqr(const I tid,
                             work[n - 1 + i] = s;
                         }
 
-                        D[l] -= p;
-                        E[l - 1] = g;
+                        D[el] -= p;
+                        E[el - 1] = g;
                     }
                 }
                 __syncthreads();
 
                 // Apply saved rotations
-                if(m != l)
+                if(m != el)
                 {
                     run_lasr(rocblas_side_right, rocblas_pivot_variable, rocblas_forward_direction,
                              n, lsv - m + 1, work + m, work + n - 1 + m, C + 0 + m * ldc, ldc, tid,
@@ -649,9 +651,9 @@ __device__ void run_steqr(const I tid,
         {
             if(tid == 0)
             {
-                l = ii - 1;
-                m = l;
-                p = D[l];
+                el = ii - 1;
+                m = el;
+                p = D[el];
                 for(I j = ii; j < n; j++)
                 {
                     if(D[j] < p)
@@ -660,18 +662,18 @@ __device__ void run_steqr(const I tid,
                         p = D[j];
                     }
                 }
-                if(m != l)
+                if(m != el)
                 {
-                    D[m] = D[l];
-                    D[l] = p;
+                    D[m] = D[el];
+                    D[el] = p;
                 }
             }
             __syncthreads();
 
-            if(m != l)
+            if(m != el)
             {
                 for(I j = 0; j < n; j++)
-                    swap(C[j + l * ldc], C[j + m * ldc]);
+                    swap(C[j + el * ldc], C[j + m * ldc]);
             }
             __syncthreads();
         }
