@@ -314,6 +314,41 @@ def test_get_cu_count_rocminfo(monkeypatch):
     assert L.getCUCount() == 110
 
 
+def test_get_cu_count_subprocess_args(monkeypatch):
+    """Pin the exact rocminfo invocation the CU path depends on: the shell
+    command, PIPE capture, shell=True, and the ROCR_VISIBLE_DEVICES env."""
+    monkeypatch.delenv("CU", raising=False)
+
+    class _Res:
+        stdout = b"Compute Unit:            110\n"
+
+    calls = {}
+
+    def _rec(*a, **k):
+        calls["a"] = a
+        calls["k"] = k
+        return _Res()
+
+    monkeypatch.setattr(L.subprocess, "run", _rec)
+    assert L.getCUCount() == 110
+    assert calls["a"][0] == "rocminfo | grep Compute"
+    assert calls["k"]["stdout"] == L.subprocess.PIPE
+    assert calls["k"]["shell"] is True
+    assert calls["k"]["env"]["ROCR_VISIBLE_DEVICES"] == "0"
+
+
+def test_get_cu_count_rocminfo_multiline(monkeypatch):
+    """Multiple Compute-Unit lines: the last one wins, pinning the
+    split('\\n') + lines[-1] selection."""
+    monkeypatch.delenv("CU", raising=False)
+
+    class _Res:
+        stdout = b"Compute Unit:            110\nCompute Unit:            228\n"
+
+    monkeypatch.setattr(L.subprocess, "run", lambda *a, **k: _Res())
+    assert L.getCUCount() == 228
+
+
 def test_get_cu_count_rocminfo_no_match(monkeypatch):
     # rocminfo output without a "Compute Unit:" line -> regex misses ->
     # CU stays None -> printExit (covers the 696->701 no-match branch arm).
@@ -327,7 +362,7 @@ def test_get_cu_count_rocminfo_no_match(monkeypatch):
         L.getCUCount()
 
 
-def test_get_cu_count_failure(monkeypatch):
+def test_get_cu_count_failure(monkeypatch, capsys):
     # CU unset + subprocess raises -> exception swallowed -> printExit.
     monkeypatch.delenv("CU", raising=False)
 
@@ -337,3 +372,7 @@ def test_get_cu_count_failure(monkeypatch):
     monkeypatch.setattr(L.subprocess, "run", _boom)
     with pytest.raises(SystemExit):
         L.getCUCount()
+    assert capsys.readouterr().out == (
+        "Tensile::FATAL: Failed to get Compute Unit count from "
+        "rocminfo or env variable 'CU'\n"
+    )

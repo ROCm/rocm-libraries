@@ -100,12 +100,16 @@ def test_fast_yaml_scalar(value, snapshot):
         "1abc",             # digit start, not float -> bare
         ".name",            # '.' start, not float
         "1.2.3",            # digit start, float() fails -> bare
+        "it's: bad",        # apostrophe AND ': ' -> escaped-double-quote inside quotes
+        "inf",              # float('inf') accepted but bare start char -> quoted
+        ".5",               # '.' start (not special) + len>1 -> float() ok -> quoted
     ],
     ids=[
         "plain", "empty", "true", "false", "yes", "null", "tilde", "apostrophe",
         "dashstart", "leadingspace", "trailingspace", "colonspace", "endcolon",
         "hashcomment", "newline", "numberlike", "signedfloat", "dash_notnum",
         "digit_notfloat", "dot_notfloat", "dotted_notfloat",
+        "apostrophe_colon", "inf_bareword", "dot_twochar_num",
     ],
 )
 def test_fast_yaml_str(s, snapshot):
