@@ -166,7 +166,13 @@ function(clang_tidy_check TARGET)
     # COMMAND ${CLANG_TIDY_COMMAND} $<TARGET_PROPERTY:${TARGET},SOURCES>
     # COMMAND ${CLANG_TIDY_COMMAND} $<JOIN:$<TARGET_PROPERTY:${TARGET},SOURCES>, >
     foreach(SOURCE ${SOURCES})
-        if((NOT "${SOURCE}" MATCHES "(h|hpp|hxx)$") AND (NOT "${SOURCE}" MATCHES "TARGET_OBJECTS"))
+        # Sources marked MIOPEN_SKIP_TIDY (e.g. machine-generated Treelite model
+        # C) are excluded: clang-tidy flags them for function size/complexity and
+        # generated-code idioms that are meaningless to lint and would fail
+        # -warnings-as-errors.
+        get_source_file_property(_skip_tidy "${SOURCE}" MIOPEN_SKIP_TIDY)
+        if((NOT "${SOURCE}" MATCHES "(h|hpp|hxx)$") AND (NOT "${SOURCE}" MATCHES "TARGET_OBJECTS")
+           AND (NOT _skip_tidy))
             string(MAKE_C_IDENTIFIER "${SOURCE}" tidy_file)
             set(tidy_target tidy-target-${TARGET}-${tidy_file})
             add_custom_target(${tidy_target}

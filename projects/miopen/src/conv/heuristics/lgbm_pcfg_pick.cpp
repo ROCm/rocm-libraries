@@ -252,10 +252,10 @@ std::vector<std::string> RankBucket(PredictFn predict,
     std::vector<double> scores(cands.size());
     for(std::size_t c = 0; c < cands.size(); ++c)
     {
-        const auto& args = cands[c].args;
-        for(int a = 0; a < model.arg_count; ++a)
-            SetNumeric(row[static_cast<std::size_t>(model.prob_feat_count + a)],
-                       args[static_cast<std::size_t>(a)]);
+        const auto& args         = cands[c].args;
+        const std::size_t prob_n = static_cast<std::size_t>(model.prob_feat_count);
+        for(std::size_t a = 0; a < static_cast<std::size_t>(model.arg_count); ++a)
+            SetNumeric(row[prob_n + a], args[a]);
 
         double s = 0.0;
         predict(row.data(), /*pred_margin=*/0, &s);

@@ -347,7 +347,8 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         list(APPEND LGBM_RANK_DEFS "-D${sym}=lgbm_rank_${sym}")
     endforeach()
     set_source_files_properties(${LGBM_RANK_SRCS} PROPERTIES
-        COMPILE_OPTIONS "${LGBM_RANK_DEFS}")
+        COMPILE_OPTIONS "${LGBM_RANK_DEFS}"
+        MIOPEN_SKIP_TIDY ON) # machine-generated Treelite C; not lintable
 
     # Perf-config picker: one Treelite-compiled lambdarank model PER tuneable
     # solver, under lgbm_pcfg_models/<solver_name>/. Each package exports the same
@@ -379,7 +380,8 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
                 list(APPEND pcfg_defs "-D${sym}=lgbm_pcfg_${slug}_${sym}")
             endforeach()
             set_source_files_properties(${pcfg_srcs} PROPERTIES
-                COMPILE_OPTIONS "${pcfg_defs}")
+                COMPILE_OPTIONS "${pcfg_defs}"
+                MIOPEN_SKIP_TIDY ON) # machine-generated Treelite C; not lintable
         endif()
     endforeach()
 endif()
