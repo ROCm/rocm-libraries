@@ -466,8 +466,6 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsApplicable(const ExecutionContext& ctx
         return false;
     if(problem.HasNonPackedTensors())
         return false;
-    if(!problem.AllTensorsDimsFitIntoInt())
-        return false;
     if(problem.IsTensorsCasted())
         return false;
     if(problem.HasMixedDataTypes())

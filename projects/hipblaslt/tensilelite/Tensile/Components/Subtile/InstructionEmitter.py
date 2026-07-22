@@ -31,22 +31,51 @@ from rocisa.code import Label
 
 
 class SWaitCntEx(SWaitCnt):
-    """SWaitCnt with adjustVmcnt flag for the instruction scheduler post-pass."""
-    def __init__(self, adjustVmcnt=True, **kwargs):
+    """SWaitCnt with adjustVmcnt flag for the instruction scheduler post-pass.
+
+    isWaitGr is a typed marker the instruction scheduler uses to identify the
+    wait_gr SWaitCnt (instead of substring-matching the instruction comment).
+    """
+    def __init__(self, adjustVmcnt=True, isWaitGr=True, **kwargs):
         super().__init__(**kwargs)
         self._adjustVmcnt = adjustVmcnt
+        self._isWaitGr = isWaitGr
 
     @property
     def adjustVmcnt(self):
         return self._adjustVmcnt
 
+    @property
+    def isWaitGr(self):
+        return self._isWaitGr
+
     def __deepcopy__(self, memo):
         return SWaitCntEx(
             adjustVmcnt=self._adjustVmcnt,
+            isWaitGr=self._isWaitGr,
             vlcnt=self.vlcnt, vscnt=self.vscnt,
             dscnt=self.dscnt, kmcnt=self.kmcnt,
             comment=self.comment)
 
+
+
+def _zigzag_order(rows, cols):
+    """Return (row, col) pairs in boustrophedon (zigzag/snake) order.
+
+    Even rows traverse left-to-right, odd rows right-to-left.
+    Row transitions share the column coordinate with the last element
+    of the previous row, so every consecutive pair shares exactly one
+    coordinate -- guaranteeing a VGPR source-cache hit at every step.
+    """
+    result = []
+    for r in range(rows):
+        if r % 2 == 0:
+            for c in range(cols):
+                result.append((r, c))
+        else:
+            for c in range(cols - 1, -1, -1):
+                result.append((r, c))
+    return result
 
 class InstructionEmitter:
     """Emits GPU instructions for each opType in the LogicalScheduler output.
@@ -86,6 +115,16 @@ class InstructionEmitter:
             self.tileInfoMap['SA'] = scaleTileInfoA
             self.tileInfoMap['SB'] = scaleTileInfoB
 
+        # Per-uid K-window: numSubIterK / numUnroll[t].  Single-DU configs
+        # (numUnroll=1) span the full numSubIterK range; multi-DU slices it.
+        self._per_uid_k = {
+            t: config.numSubIterK // config.numUnroll.get(t, 1)
+            for t in ('A', 'B')
+        }
+        if self.hasScale:
+            self._per_uid_k['SA'] = config.numSubIterK // config.numUnroll.get('SA', 1)
+            self._per_uid_k['SB'] = config.numSubIterK // config.numUnroll.get('SB', 1)
+
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
@@ -94,11 +133,13 @@ class InstructionEmitter:
             'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
-            'lr_inc':           lambda em, ui: self.emit_lr_inc(em.source),
-            'gr_inc':           lambda em, ui: self.emit_gr_inc(em.source),
-            'skip':             lambda em, ui: self.emit_skip(em.source),
+            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source),
+            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source),
+            'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
+            'gl2_prefetch':     lambda em, ui: self.emit_gl2_prefetch(),
+            'gl2_prefetch_inc': lambda em, ui: self.emit_gl2_prefetch_inc(),
         }
 
         # Sentinel for the long-lived per-lane diff vgpr. Set by
@@ -112,36 +153,51 @@ class InstructionEmitter:
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
-        for a in placement.tileA.tileId_list:
-            for b in placement.tileB.tileId_list:
-                groupA = (a // self.config.lrA.mn) * self.config.lrA.mn
-                groupB = (b // self.config.lrB.mn) * self.config.lrB.mn
-                aTile = self.vgprTilesA[tile_maps['A'][groupA]]
-                bTile = self.vgprTilesB[tile_maps['B'][groupB]]
-                dTile = self.dtileInfo.vgprTiles[a + b * self.dtileInfo.localMMATileGrid[0]]
+        aTiles = placement.tileA.tileId_list
+        bTiles = placement.tileB.tileId_list
 
-                if self.hasScale:
-                    scaleGroupA = (a // self.config.lrSA.mn) * self.config.lrSA.mn
-                    scaleGroupB = (b // self.config.lrSB.mn) * self.config.lrSB.mn
-                    scaleATile = self.vgprTilesSA[tile_maps['SA'][scaleGroupA]]
-                    scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
-                    scaleAVgpr = next(iter(scaleATile))
-                    scaleBVgpr = next(iter(scaleBTile))
-                    mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
-                    mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
-                    kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
-                    kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                    sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
-                    sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
-                else:
-                    scaleAVgpr = scaleBVgpr = -1
-                    sAsel = sBsel = 0
+        hasWmmaSourceCache = self.writer.states.asmCaps.get("HasWMMA_V3", False)
+        if hasWmmaSourceCache and len(aTiles) > 1 and len(bTiles) > 1:
+            # Zigzag ordering: traverse the AxB tile grid in snake order so
+            # every consecutive WMMA pair shares exactly one operand (A or B),
+            # guaranteeing a VGPR source-cache hit at every step.
+            # Always sweep along the longer tile dimension for maximum reuse.
+            if len(aTiles) >= len(bTiles):
+                abPairs = [(aTiles[c], bTiles[r]) for r, c in _zigzag_order(len(bTiles), len(aTiles))]
+            else:
+                abPairs = [(aTiles[r], bTiles[c]) for r, c in _zigzag_order(len(aTiles), len(bTiles))]
+        else:
+            abPairs = [(a, b) for a in aTiles for b in bTiles]
 
-                module.add(emitMfmaInstruction(
-                    self.writer, self.kernel, aTile, bTile, dTile, dTile,
-                    scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
-                    scaleAsel=sAsel, scaleBsel=sBsel,
-                    comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
+        for a, b in abPairs:
+            groupA = (a // self.config.lrA.mn) * self.config.lrA.mn
+            groupB = (b // self.config.lrB.mn) * self.config.lrB.mn
+            aTile = self.vgprTilesA[tile_maps['A'][groupA]]
+            bTile = self.vgprTilesB[tile_maps['B'][groupB]]
+            dTile = self.dtileInfo.vgprTiles[a + b * self.dtileInfo.localMMATileGrid[0]]
+
+            if self.hasScale:
+                scaleGroupA = (a // self.config.lrSA.mn) * self.config.lrSA.mn
+                scaleGroupB = (b // self.config.lrSB.mn) * self.config.lrSB.mn
+                scaleATile = self.vgprTilesSA[tile_maps['SA'][scaleGroupA]]
+                scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
+                scaleAVgpr = next(iter(scaleATile))
+                scaleBVgpr = next(iter(scaleBTile))
+                mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
+                mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
+                kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
+                kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
+                sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
+                sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
+            else:
+                scaleAVgpr = scaleBVgpr = -1
+                sAsel = sBsel = 0
+
+            module.add(emitMfmaInstruction(
+                self.writer, self.kernel, aTile, bTile, dTile, dTile,
+                scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
+                scaleAsel=sAsel, scaleBsel=sBsel,
+                comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
         return list(module.flatitems())
 
     def emit_lr(self, placement, unroll_iter=0):
@@ -154,10 +210,21 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             vgprTiles = self.vgprTilesA if tensor == 'A' else self.vgprTilesB
             lrGran = self.config.lrA if tensor == 'A' else self.config.lrB
+            # `per_uid_k` (= numSubIterK / numUnroll) folds k into a
+            # uid-local subtile coordinate so multi-DU (numUnroll > 1)
+            # uids each iterate [0, per_uid_k). Under single-DU
+            # (numUnroll == 1) per_uid_k == numSubIterK and the modulo
+            # is a no-op for in-window k, but it ALIASES wrap-LRs that
+            # use k >= numSubIterK to address the alternate LDS half
+            # (PGR>=1 prefetch target) back to k=0 — losing the half
+            # offset. Skip the modulo in that case.
+            nUnroll = self.config.numUnroll.get(tensor, 1)
+            per_uid_k = self._per_uid_k[tensor] if nUnroll > 1 else None
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
-                    subtileK = k // self.subtileShapeK
-                    subIterK_within = k % self.subtileShapeK
+                    local_k = (k % per_uid_k) if per_uid_k is not None else k
+                    subtileK = local_k // self.subtileShapeK
+                    subIterK_within = local_k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
@@ -188,9 +255,10 @@ class InstructionEmitter:
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
             grGran = self.config.grA if tensor == 'A' else self.config.grB
+            uid_k_base = placement.unrollId * grGran.k
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
-                    subtileK = k // self.subtileShapeK
+                    subtileK = (k - uid_k_base) // self.subtileShapeK
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
@@ -202,24 +270,35 @@ class InstructionEmitter:
         counts = source.wait_gr_counts
         if counts is None:
             return []
-        
+
+        # force_drain means "wait for every outstanding global read to retire"
+        # (full vmcnt(0) drain); the per-tensor counts are kept only for the
+        # diagnostic comment. See WaitGROp.force_drain in LogicalScheduler.py.
+        force_drain = getattr(source, 'force_drain', False)
+
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
-            tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+            tdmCnt = 0 if force_drain else (counts.A + counts.B + counts.SA + counts.SB)
+            label = "full drain" if force_drain else "tensor_load_to_lds"
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
-                                   comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+                                   comment=f"Wait TDM ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
 
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
                  'SA': 1, 
                  'SB': 1}  
-        grCnt = (counts.A * grMap['A'] +
-                 counts.B * grMap['B'] +
-                 counts.SA * grMap['SA'] +
-                 counts.SB * grMap['SB'])
+        if force_drain:
+            grCnt = 0
+            label = "full drain"
+        else:
+            grCnt = (counts.A * grMap['A'] +
+                     counts.B * grMap['B'] +
+                     counts.SA * grMap['SA'] +
+                     counts.SB * grMap['SB'])
+            label = "per-subIterK"
         swait = SWaitCntEx(vlcnt=grCnt, vscnt=-1,
                            adjustVmcnt=source.adjustVmcnt,
-                           comment=f"Wait GR (per-subIterK): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
+                           comment=f"Wait GR ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
         return [swait]
 
     def emit_wait_lr(self):
@@ -256,6 +335,44 @@ class InstructionEmitter:
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
+    def emit_gl2_prefetch(self):
+        """Emit GL2 prefetch loads (global_prefetch_b8) for all tensors."""
+        writer = self.writer
+        kernel = self.kernel
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
+        mod = writer.gl2PrefetchIssueLoad(kernel, tPA, tPB)
+        return list(mod.flatitems())
+
+    def emit_gl2_prefetch_inc(self):
+        """Emit GL2 prefetch address increment with end-of-K guard.
+
+        Mirrors the SIA path: when LoopCounterL <= PGR + PrefetchGL2,
+        zero the increment SGPRs so prefetch stops advancing past K.
+        Then advance all GL2 prefetch addresses by the (possibly zeroed) increment.
+        """
+        writer = self.writer
+        kernel = self.kernel
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
+        from rocisa.code import Module
+        from rocisa.instruction import SCmpLeU32, SCMovB32
+        from rocisa.container import sgpr
+        mod = Module("GL2 Prefetch Increment")
+        loopCounter = writer.loopCounter(kernel, writer.states.unrollIdx)
+        pgl = kernel["PrefetchGL2"]
+        pgr = kernel["PrefetchGlobalRead"]
+        mod.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
+                          comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
+        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
+        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
+        if kernel["ProblemType"].get("MXBlockA", 0):
+            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSA"), src=0))
+        if kernel["ProblemType"].get("MXBlockB", 0):
+            mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSB"), src=0))
+        mod.add(writer.gl2PrefetchIncrementAddr(kernel, tPA, tPB))
+        return list(mod.flatitems())
+
     def emit_skip(self, source):
         """Emit skip guard: compare LoopCounterL and branch."""
         labelName = source.target if source.rawLabel else f"SkipTo{source.target}"
@@ -269,7 +386,7 @@ class InstructionEmitter:
                 src0=sgpr("LoopCounterL"), src1=source.value,
                 comment=f"LoopCounter {source.compare} {source.value}?"))
         else:
-            with self.writer.allocTmpSgpr(1) as litSgprInfo:
+            with self.writer.allocTmpSgpr(1, tag="InstructionEmitter_skip_tmpSgpr") as litSgprInfo:
                 litSgpr = litSgprInfo.idx
                 module.add(SMovB32(
                     dst=sgpr(litSgpr), src=hex(source.value),
@@ -371,7 +488,7 @@ class InstructionEmitter:
                 writer.vgprPool.checkOut(1, f"tail_boundaryMask{i}")
                 for i in range(numBoundaryMasks)
             ]
-            with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+            with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_init_tmpSgpr") as tmpSgprInfo:
                 maskSgpr = tmpSgprInfo.idx
                 for i in range(numBoundaryMasks):
                     bm = self._tail_boundaryMask[i]
@@ -439,7 +556,7 @@ class InstructionEmitter:
         refIds = aIds or bIds
         vgprPerInUnroll = len(list(refTiles[refIds[0]])) if refIds else 0
 
-        with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount) as tmpSgprInfo:
+        with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_tmpSgpr") as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
 
             def _emit_cmp(cmpCls, literal, comment):
@@ -451,7 +568,7 @@ class InstructionEmitter:
                         src0=vgpr(self._tail_vDiff), src1=literal,
                         comment=comment))
                 else:
-                    with writer.allocTmpSgpr(1) as litSgprInfo:
+                    with writer.allocTmpSgpr(1, tag="InstructionEmitter_mask_k_litSgprInfo") as litSgprInfo:
                         litSgpr = litSgprInfo.idx
                         module.add(SMovB32(
                             dst=sgpr(litSgpr), src=hex(literal),
@@ -498,29 +615,40 @@ class InstructionEmitter:
                     src2=sgpr(maskSgpr, laneSGPRCount),
                     comment=f"mask = (diff < {literal}) ? 0 : -1"))
 
-            for label, ids, tilesDict in (("A", aIds, self.vgprTilesA),
-                                          ("B", bIds, self.vgprTilesB)):
-                for tid in ids:
-                    for i, v in enumerate(list(tilesDict[tid])):
-                        module.add(VAndB32(
-                            dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
-                            comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
+            # MX-scaled paths apply the K mask via the scale lanes (host
+            # zero-pads OOB scale bytes to 0x00, which v_mfma_scale treats
+            # as ~2^-127 and underflows the contribution to zero). Emitting
+            # a second data mask here is redundant and, in practice on
+            # gfx950, the per-lane V_AND against the cndmask-derived mask
+            # corrupts the v_mfma_scale operand bypass and double-zeros
+            # valid residual lanes (~0.5% wrong outputs at K%MIK!=0).
+            #
+            # Skip the data K-mask for the MX paths that the gfx950 corruption
+            # actually hits: all multi-DU MX kernels, and all 8-bit-float MX
+            # (MXFP8) kernels regardless of unroll depth. GPU-validated on
+            # gfx950 (full-element, K%MIK!=0 tails): single-DU MXFP8 fails with
+            # the mask and passes without it, while MXFP4 (4-bit) passes either
+            # way -- so single-DU MXFP4 keeps the mask and stays develop-
+            # identical, but single-DU MXFP8 must skip it like multi-DU does.
+            _emit_mask_multi_du = (self.config.numUnroll.get('A', 1) > 1
+                                   or self.config.numUnroll.get('B', 1) > 1)
+            _data_is_8bit_float = kernel["ProblemType"]["DataTypeA"].is8bitFloat()
+            _skip_data_kmask = self.hasScale and (_emit_mask_multi_du
+                                                  or _data_is_8bit_float)
+            if not _skip_data_kmask:
+                for label, ids, tilesDict in (("A", aIds, self.vgprTilesA),
+                                              ("B", bIds, self.vgprTilesB)):
+                    for tid in ids:
+                        for i, v in enumerate(list(tilesDict[tid])):
+                            module.add(VAndB32(
+                                dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
+                                comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
 
-            # MX scale mask (FP4 only): reuse the A/B mask we just built.
-            # The A/B mask for subIterK=base is binary per-lane:
-            #   laneK_base >= rem → 0   (zero A/B[base]; also OK to zero scale
-            #                            for both byte-pairs — see below)
-            #   else              → -1  (keep)
-            # Scale vgpr packs lrSA.k subIterK pairs (bytes 0..1 → base,
-            # bytes 2..3 → base+1). Applying the base mask to the scale:
-            #   • lane fails at base → scale zeroed → MFMAs at base, base+1
-            #     see scale=0; A/B[base]=0 by the same mask, and A/B[base+1]
-            #     is masked by its own emit_mask_k → both products = 0. ✓
-            #   • lane passes at base, fails at base+1 → scale bytes 2..3 left
-            #     stale, but A/B[base+1] is masked to 0 by its own emit_mask_k
-            #     call → product = 0 regardless of scale value. ✓
-            # So a single VAnd with maskVgprs[0] suffices per scale-group
-            # boundary; no separate compute or scratch vgpr needed.
+            # Scale-mask reuse (non-BF16 hasScale only): AND the scale
+            # vgprs with the data mask we just built. Redundant when
+            # host zero-padding leaves OOB scale bytes at 0x00 (0x00
+            # AND 0 = 0x00) but kept to stay explicit under any input
+            # pattern.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
             if (not isBF16) and self.hasScale \
                     and (self.vgprTilesSA or self.vgprTilesSB) \
