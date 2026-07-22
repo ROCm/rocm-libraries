@@ -50,6 +50,7 @@ add_executable(rpp_tests
     image/bitwise/bitwise_not_test.cpp
     image/data_exchange/copy_test.cpp
     image/geometric/crop_test.cpp
+    image/geometric/warp_affine_test.cpp
     image/statistical/tensor_sum_test.cpp
     image/statistical/threshold_test.cpp
     # TODO: Reduction kernels below are unusually slow on HIP implementations
