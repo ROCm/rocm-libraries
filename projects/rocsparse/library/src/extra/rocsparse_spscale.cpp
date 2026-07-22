@@ -41,6 +41,27 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    // Formats supported by rocsparse_spscale. Blocked-ELL (BELL) is intentionally not part of
+    // this set: it currently falls through to rocsparse_status_not_implemented (see the note in
+    // the header and CHANGELOG).
+    static bool spscale_is_supported_format(rocsparse_format format)
+    {
+        switch(format)
+        {
+        case rocsparse_format_coo:
+        case rocsparse_format_coo_aos:
+        case rocsparse_format_csr:
+        case rocsparse_format_csc:
+        case rocsparse_format_bsr:
+        case rocsparse_format_ell:
+        case rocsparse_format_sell:
+            return true;
+        case rocsparse_format_bell:
+            return false;
+        }
+        return false;
+    }
+
     static rocsparse_status spscale_checkarg(rocsparse_handle            handle,
                                              const void*                 alpha,
                                              rocsparse_const_spmat_descr mat_A,
@@ -53,11 +74,13 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(3, mat_C, (mat_C->init == false), rocsparse_status_not_initialized);
 
-        // Currently only CSR format is supported.
+        // A and C must share the same format, and the format must be one that is supported.
         ROCSPARSE_CHECKARG(
-            2, mat_A, (mat_A->format != rocsparse_format_csr), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(
-            3, mat_C, (mat_C->format != rocsparse_format_csr), rocsparse_status_not_implemented);
+            3, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(2,
+                           mat_A,
+                           (rocsparse::spscale_is_supported_format(mat_A->format) == false),
+                           rocsparse_status_not_implemented);
 
         // A and C must have matching shape, nonzero count and types.
         ROCSPARSE_CHECKARG(3, mat_C, (mat_C->rows != mat_A->rows), rocsparse_status_invalid_size);
@@ -70,6 +93,48 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(
             3, mat_C, (mat_C->data_type != mat_A->data_type), rocsparse_status_type_mismatch);
 
+        // Format specific layout parameters must also match between A and C.
+        switch(mat_A->format)
+        {
+        case rocsparse_format_bsr:
+        {
+            ROCSPARSE_CHECKARG(
+                3, mat_C, (mat_C->block_dim != mat_A->block_dim), rocsparse_status_invalid_size);
+            break;
+        }
+        case rocsparse_format_ell:
+        {
+            ROCSPARSE_CHECKARG(
+                3, mat_C, (mat_C->ell_width != mat_A->ell_width), rocsparse_status_invalid_size);
+            break;
+        }
+        case rocsparse_format_bell:
+        {
+            ROCSPARSE_CHECKARG(
+                3, mat_C, (mat_C->ell_cols != mat_A->ell_cols), rocsparse_status_invalid_size);
+            ROCSPARSE_CHECKARG(
+                3, mat_C, (mat_C->block_dim != mat_A->block_dim), rocsparse_status_invalid_size);
+            break;
+        }
+        case rocsparse_format_sell:
+        {
+            ROCSPARSE_CHECKARG(3,
+                               mat_C,
+                               (mat_C->sell_slice_size != mat_A->sell_slice_size),
+                               rocsparse_status_invalid_size);
+            ROCSPARSE_CHECKARG(3,
+                               mat_C,
+                               (mat_C->sell_colval_size != mat_A->sell_colval_size),
+                               rocsparse_status_invalid_size);
+            break;
+        }
+        case rocsparse_format_coo:
+        case rocsparse_format_coo_aos:
+        case rocsparse_format_csr:
+        case rocsparse_format_csc:
+            break;
+        }
+
         // Batched matrices are not supported.
         ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(3, mat_C, (mat_C->batch_count != 1), rocsparse_status_not_implemented);
@@ -81,63 +146,145 @@ namespace rocsparse
         return rocsparse_status_continue;
     }
 
+    // Device-to-device copy of a single structure array. Only performed when both endpoints are
+    // valid and there is something to copy.
+    static rocsparse_status
+        spscale_copy_array(rocsparse_handle handle, void* dst, const void* src, size_t bytes)
+    {
+        if(bytes > 0 && dst != nullptr && src != nullptr)
+        {
+            RETURN_IF_HIP_ERROR(
+                hipMemcpyAsync(dst, src, bytes, hipMemcpyDeviceToDevice, handle->stream));
+        }
+        return rocsparse_status_success;
+    }
+
     static rocsparse_status spscale_core(rocsparse_handle            handle,
                                          const void*                 alpha,
                                          rocsparse_const_spmat_descr mat_A,
                                          rocsparse_spmat_descr       mat_C)
     {
-        const int64_t m   = mat_A->rows;
-        const int64_t nnz = mat_A->nnz;
+        const int64_t rows = mat_A->rows;
+        const int64_t cols = mat_A->cols;
+        const int64_t nnz  = mat_A->nnz;
 
-        const size_t row_bytes
-            = static_cast<size_t>(m + 1) * rocsparse::indextype_sizeof(mat_A->row_type);
-        const size_t col_bytes
-            = static_cast<size_t>(nnz) * rocsparse::indextype_sizeof(mat_A->col_type);
-        const size_t val_bytes
-            = static_cast<size_t>(nnz) * rocsparse::datatype_sizeof(mat_A->data_type);
+        const size_t row_size = rocsparse::indextype_sizeof(mat_A->row_type);
+        const size_t col_size = rocsparse::indextype_sizeof(mat_A->col_type);
+        const size_t val_size = rocsparse::datatype_sizeof(mat_A->data_type);
+
+        // Number of value entries to copy and scale. This is format specific and is not always
+        // equal to nnz (e.g. BSR stores block_dim^2 values per block-nonzero).
+        int64_t val_length = 0;
 
         // Copy the sparsity structure of A into C. The index base of A and C is guaranteed to
         // match by the argument checks, so a plain device-to-device copy is sufficient.
-        if(mat_C->row_data != nullptr && mat_A->const_row_data != nullptr)
+        switch(mat_A->format)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(mat_C->row_data,
-                                               mat_A->const_row_data,
-                                               row_bytes,
-                                               hipMemcpyDeviceToDevice,
-                                               handle->stream));
+        case rocsparse_format_csr:
+        {
+            // row_data[rows + 1], col_data[nnz], val[nnz].
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->row_data, mat_A->const_row_data, size_t(rows + 1) * row_size));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->col_data, mat_A->const_col_data, size_t(nnz) * col_size));
+            val_length = nnz;
+            break;
+        }
+        case rocsparse_format_csc:
+        {
+            // col_data[cols + 1], row_data[nnz], val[nnz].
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->col_data, mat_A->const_col_data, size_t(cols + 1) * col_size));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->row_data, mat_A->const_row_data, size_t(nnz) * row_size));
+            val_length = nnz;
+            break;
+        }
+        case rocsparse_format_coo:
+        {
+            // row_data[nnz], col_data[nnz], val[nnz].
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->row_data, mat_A->const_row_data, size_t(nnz) * row_size));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->col_data, mat_A->const_col_data, size_t(nnz) * col_size));
+            val_length = nnz;
+            break;
+        }
+        case rocsparse_format_coo_aos:
+        {
+            // ind_data[2 * nnz], val[nnz].
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->ind_data, mat_A->const_ind_data, size_t(2 * nnz) * col_size));
+            val_length = nnz;
+            break;
+        }
+        case rocsparse_format_bsr:
+        {
+            // row_data[rows + 1], col_data[nnz], val[nnz * block_dim * block_dim].
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->row_data, mat_A->const_row_data, size_t(rows + 1) * row_size));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->col_data, mat_A->const_col_data, size_t(nnz) * col_size));
+            val_length = nnz * mat_A->block_dim * mat_A->block_dim;
+            break;
+        }
+        case rocsparse_format_ell:
+        {
+            // col_data[rows * ell_width], val[rows * ell_width]. ELL has no row_data and the
+            // descriptor nnz already equals rows * ell_width.
+            const int64_t ell_length = rows * mat_A->ell_width;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->col_data, mat_A->const_col_data, size_t(ell_length) * col_size));
+            val_length = ell_length;
+            break;
+        }
+        case rocsparse_format_sell:
+        {
+            // row_data[nslices + 1], col_data[sell_colval_size], val[sell_colval_size].
+            const int64_t nslices
+                = (mat_A->sell_slice_size > 0)
+                      ? (rows + mat_A->sell_slice_size - 1) / mat_A->sell_slice_size
+                      : 0;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->row_data, mat_A->const_row_data, size_t(nslices + 1) * row_size));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::spscale_copy_array(handle,
+                                              mat_C->col_data,
+                                              mat_A->const_col_data,
+                                              size_t(mat_A->sell_colval_size) * col_size));
+            val_length = mat_A->sell_colval_size;
+            break;
+        }
+        case rocsparse_format_bell:
+        {
+            // Blocked-ELL is not supported yet.
+            return rocsparse_status_not_implemented;
+        }
         }
 
-        if(nnz > 0)
+        if(val_length > 0)
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(mat_C->col_data,
-                                               mat_A->const_col_data,
-                                               col_bytes,
-                                               hipMemcpyDeviceToDevice,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(mat_C->val_data,
-                                               mat_A->const_val_data,
-                                               val_bytes,
-                                               hipMemcpyDeviceToDevice,
-                                               handle->stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_copy_array(
+                handle, mat_C->val_data, mat_A->const_val_data, size_t(val_length) * val_size));
 
             // Scale the copied values by alpha.
             switch(mat_A->data_type)
             {
             case rocsparse_datatype_f32_r:
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::spscale_scale_values<float>(handle, nnz, alpha, mat_C->val_data));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_scale_values<float>(
+                    handle, val_length, alpha, mat_C->val_data));
                 break;
             case rocsparse_datatype_f64_r:
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::spscale_scale_values<double>(handle, nnz, alpha, mat_C->val_data));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_scale_values<double>(
+                    handle, val_length, alpha, mat_C->val_data));
                 break;
             case rocsparse_datatype_f32_c:
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_scale_values<rocsparse_float_complex>(
-                    handle, nnz, alpha, mat_C->val_data));
+                    handle, val_length, alpha, mat_C->val_data));
                 break;
             case rocsparse_datatype_f64_c:
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::spscale_scale_values<rocsparse_double_complex>(
-                    handle, nnz, alpha, mat_C->val_data));
+                    handle, val_length, alpha, mat_C->val_data));
                 break;
             default:
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -167,7 +314,7 @@ try
 
     ROCSPARSE_CHECKARG_POINTER(4, buffer_size);
 
-    // The CSR scaling does not require any additional workspace.
+    // Scaling does not require any additional workspace for the supported formats.
     *buffer_size = 0;
 
     return rocsparse_status_success;

@@ -90,7 +90,10 @@ rocsparse_status rocsparse_spscale_buffer_size(rocsparse_handle            handl
 *  \p alpha can be passed in host or device memory according to the pointer mode set on the
 *  handle (\ref rocsparse_set_pointer_mode).
 *
-*  \note Currently only \ref rocsparse_format_csr is supported. Other formats return
+*  \note The following formats are supported: \ref rocsparse_format_coo,
+*  \ref rocsparse_format_coo_aos, \ref rocsparse_format_csr, \ref rocsparse_format_csc,
+*  \ref rocsparse_format_bsr, \ref rocsparse_format_ell and \ref rocsparse_format_sell. \p A and
+*  \p C must use the same format. \ref rocsparse_format_bell is not supported yet and returns
 *  \ref rocsparse_status_not_implemented.
 *  \note Only the non-transpose operation is supported.
 *  \note
@@ -123,8 +126,8 @@ rocsparse_status rocsparse_spscale_buffer_size(rocsparse_handle            handl
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p alpha, \p mat_A or \p mat_C pointer is invalid.
-*  \retval rocsparse_status_not_implemented the format of \p mat_A / \p mat_C is not
-*          \ref rocsparse_format_csr.
+*  \retval rocsparse_status_not_implemented the formats of \p mat_A and \p mat_C differ, or the
+*          format is not one of the supported formats.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spscale(rocsparse_handle            handle,

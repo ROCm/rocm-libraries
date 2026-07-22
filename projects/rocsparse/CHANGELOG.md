@@ -6,7 +6,7 @@ Documentation for rocSPARSE is available at
 ## rocSPARSE changes since ROCm 7.13.0
 
 ### Added
-* Added the `rocsparse_spscale` and `rocsparse_spscale_buffer_size` generic routines for sparse matrix scaling (`C = alpha * A`), where `C` shares the sparsity pattern of `A` and its values are scaled by `alpha`. CSR format is supported, with host and device pointer mode for `alpha`.
+* Added the `rocsparse_spscale` and `rocsparse_spscale_buffer_size` generic routines for sparse matrix scaling (`C = alpha * A`), where `C` shares the sparsity pattern of `A` and its values are scaled by `alpha`. The COO, COO AoS, CSR, CSC, BSR, ELL, and SELL formats are supported, with host and device pointer mode for `alpha`.
 * Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
 
 ### Upcoming changes

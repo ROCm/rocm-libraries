@@ -85,15 +85,13 @@ void testing_spscale_bad_arg(const Arguments& arg)
     }
 }
 
-template <typename I, typename J, typename T>
-void testing_spscale(const Arguments& arg)
+// Generic driver shared by every format. It takes an already-initialized host matrix \p hA,
+// allocates C with the same layout, runs rocsparse_spscale in host and device pointer mode and
+// validates the result against a host reference C = alpha * A.
+template <typename T, typename HostMatrix, typename DeviceMatrix>
+static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
 {
-    J                    M    = arg.M;
-    J                    N    = arg.N;
-    rocsparse_index_base base = arg.baseA;
-
-    T h_alpha = arg.get_alpha<T>();
-
+    T  h_alpha     = arg.get_alpha<T>();
     T* h_alpha_ptr = &h_alpha;
 
     device_vector<T> d_alpha(1);
@@ -103,24 +101,12 @@ void testing_spscale(const Arguments& arg)
     // Create rocsparse handle
     rocsparse_local_handle handle;
 
-    // Declare host matrix A.
-    host_csr_matrix<T, I, J> hA;
-
-    const bool            to_int    = arg.timing ? false : true;
-    static constexpr bool full_rank = false;
-
-    // Init matrix A from the input rocsparse_matrix_init
-    {
-        rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
-        matrix_factory.init_csr(hA, M, N, base);
-    }
-
     // Declare device matrix A.
-    device_csr_matrix<T, I, J> dA(hA);
+    DeviceMatrix dA(hA);
 
-    // Declare and set up C with the same sparsity pattern size as A.
-    device_csr_matrix<T, I, J> dC;
-    dC.define(M, N, hA.nnz, base);
+    // Declare and set up C with the same layout as A but without copying its content: the
+    // structure and the scaled values are produced by rocsparse_spscale itself.
+    DeviceMatrix dC(dA, false);
 
     // Declare local spmat.
     rocsparse_local_spmat mat_A(dA), mat_C(dC);
@@ -135,9 +121,10 @@ void testing_spscale(const Arguments& arg)
 
     if(arg.unit_check)
     {
-        // Compute C on host: C = alpha * A (same sparsity pattern as A).
-        host_csr_matrix<T, I, J> hC(hA);
-        for(I i = 0; i < hC.nnz; ++i)
+        // Compute C on host: C = alpha * A (same layout as A, values scaled by alpha).
+        HostMatrix   hC(hA);
+        const size_t nvalues = hC.val.size();
+        for(size_t i = 0; i < nvalues; ++i)
         {
             hC.val[i] = h_alpha * hA.val[i];
         }
@@ -151,11 +138,6 @@ void testing_spscale(const Arguments& arg)
             hC.near_check(dC);
         }
 
-        if(ROCSPARSE_REPRODUCIBILITY)
-        {
-            rocsparse_reproducibility::save("dC pointer mode host", dC);
-        }
-
         // Compute C on device multiple times (device pointer mode).
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
         for(int32_t i = 0; i < 2; i++)
@@ -163,11 +145,6 @@ void testing_spscale(const Arguments& arg)
             CHECK_ROCSPARSE_ERROR(
                 rocsparse_spscale(handle, d_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer));
             hC.near_check(dC);
-        }
-
-        if(ROCSPARSE_REPRODUCIBILITY)
-        {
-            rocsparse_reproducibility::save("dC pointer mode device", dC);
         }
     }
 
@@ -196,18 +173,16 @@ void testing_spscale(const Arguments& arg)
 
         gpu_solve_time_used = (get_time_us() - gpu_solve_time_used) / number_hot_calls;
 
-        // C = alpha * A : nnz multiplies, and read/write of the value and structure arrays.
-        double gbyte_count
-            = (sizeof(T) * (2.0 * hA.nnz) + sizeof(J) * hA.nnz + sizeof(I) * (M + 1)) / 1e9;
+        // C = alpha * A : read A's values and write C's values.
+        const double nvalues     = static_cast<double>(hA.val.size());
+        double       gbyte_count = (sizeof(T) * (2.0 * nvalues)) / 1e9;
 
         double gpu_gbyte = get_gpu_gbyte(gpu_solve_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
-                            M,
+                            arg.M,
                             display_key_t::N,
-                            N,
-                            display_key_t::nnz_A,
-                            dA.nnz,
+                            arg.N,
                             display_key_t::alpha,
                             h_alpha,
                             display_key_t::bandwidth,
@@ -217,6 +192,94 @@ void testing_spscale(const Arguments& arg)
     }
 
     CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+}
+
+template <typename I, typename J, typename T>
+void testing_spscale(const Arguments& arg)
+{
+    rocsparse_index_base base = arg.baseA;
+
+    const bool            to_int    = arg.timing ? false : true;
+    static constexpr bool full_rank = false;
+
+    switch(arg.formatA)
+    {
+    case rocsparse_format_coo:
+    {
+        I                                 m = arg.M, n = arg.N;
+        rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
+        host_coo_matrix<T, I>             hA;
+        matrix_factory.init_coo(hA, m, n, base);
+        testing_spscale_dispatch<T, host_coo_matrix<T, I>, device_coo_matrix<T, I>>(arg, hA);
+        break;
+    }
+    case rocsparse_format_coo_aos:
+    {
+        I                                 m = arg.M, n = arg.N;
+        rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
+        host_coo_aos_matrix<T, I>         hA;
+        matrix_factory.init_coo_aos(hA, m, n, base);
+        testing_spscale_dispatch<T, host_coo_aos_matrix<T, I>, device_coo_aos_matrix<T, I>>(arg,
+                                                                                            hA);
+        break;
+    }
+    case rocsparse_format_csr:
+    {
+        J                                 m = arg.M, n = arg.N;
+        rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
+        host_csr_matrix<T, I, J>          hA;
+        matrix_factory.init_csr(hA, m, n, base);
+        testing_spscale_dispatch<T, host_csr_matrix<T, I, J>, device_csr_matrix<T, I, J>>(arg, hA);
+        break;
+    }
+    case rocsparse_format_csc:
+    {
+        J                                 m = arg.M, n = arg.N;
+        rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
+        host_csc_matrix<T, I, J>          hA;
+        matrix_factory.init_csc(hA, m, n, base);
+        testing_spscale_dispatch<T, host_csc_matrix<T, I, J>, device_csc_matrix<T, I, J>>(arg, hA);
+        break;
+    }
+    case rocsparse_format_bsr:
+    {
+        rocsparse_matrix_factory<T, I, J> matrix_factory(arg, to_int, full_rank);
+        host_gebsr_matrix<T, I, J>        hA;
+        J                                 block_dim = arg.block_dim;
+        J                                 mb        = (arg.M + block_dim - 1) / block_dim;
+        J                                 nb        = (arg.N + block_dim - 1) / block_dim;
+        matrix_factory.init_gebsr(hA, mb, nb, block_dim, block_dim, base);
+        testing_spscale_dispatch<T, host_gebsr_matrix<T, I, J>, device_gebsr_matrix<T, I, J>>(arg,
+                                                                                              hA);
+        break;
+    }
+    case rocsparse_format_ell:
+    {
+        I                                 m = arg.M, n = arg.N;
+        rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
+        host_ell_matrix<T, I>             hA;
+        matrix_factory.init_ell(hA, m, n, base);
+        testing_spscale_dispatch<T, host_ell_matrix<T, I>, device_ell_matrix<T, I>>(arg, hA);
+        break;
+    }
+    case rocsparse_format_sell:
+    {
+        // The SELL matrix factory requires a single index type (I == J).
+        I                                 m = arg.M, n = arg.N;
+        rocsparse_matrix_factory<T, I, I> matrix_factory(arg, to_int, full_rank);
+        host_sell_matrix<T, I, I>         hA;
+        matrix_factory.init_sell(hA, m, n, arg.sell_slice_size, base);
+        testing_spscale_dispatch<T, host_sell_matrix<T, I, I>, device_sell_matrix<T, I, I>>(arg,
+                                                                                            hA);
+        break;
+    }
+    case rocsparse_format_bell:
+    {
+        // Blocked-ELL is not supported by rocsparse_spscale yet and is excluded from the tests.
+        CHECK_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        break;
+    }
+    }
 }
 
 void testing_spscale_extra(const Arguments& arg) {}

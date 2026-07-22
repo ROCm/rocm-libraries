@@ -37,7 +37,7 @@ Definitions:
 Tests:
 # C = alpha * A
 
-# Quick
+# Quick - all supported formats (COO, COO AoS, CSR, CSC, BSR, ELL, SELL). BELL is not supported.
 - name: spscale
   category: quick
   function: spscale
@@ -45,9 +45,18 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [300, 512]
   N: [300, 254]
+  block_dim: [2]
+  sell_slice_size: [8]
   alpha_alphai: *alpha_range_quick
   baseA: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
   matrix: [rocsparse_matrix_random]
 
 - name: spscale_file
@@ -60,6 +69,7 @@ Tests:
   alpha_alphai: *alpha_range_quick
   baseA: [rocsparse_index_base_one]
   baseC: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
              nos2,
@@ -83,9 +93,18 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [2000]
   N: [1956]
+  block_dim: [3]
+  sell_slice_size: [16]
   alpha_alphai: *alpha_range_checkin
   baseA: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
   matrix: [rocsparse_matrix_random]
 
 - name: spscale
@@ -95,9 +114,18 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [850]
   N: [732]
+  block_dim: [4]
+  sell_slice_size: [32]
   alpha_alphai: *alpha_range_checkin
   baseA: [rocsparse_index_base_one]
   baseC: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_coo,
+            rocsparse_format_coo_aos,
+            rocsparse_format_csr,
+            rocsparse_format_csc,
+            rocsparse_format_bsr,
+            rocsparse_format_ell,
+            rocsparse_format_sell]
   matrix: [rocsparse_matrix_random]
 
 - name: spscale_file
@@ -110,6 +138,7 @@ Tests:
   alpha_alphai: *alpha_range_checkin
   baseA: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
              nos3,

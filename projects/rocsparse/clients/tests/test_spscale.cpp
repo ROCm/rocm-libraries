@@ -35,4 +35,7 @@ TEST_ROUTINE_WITH_CONFIG(spscale,
                          arg.alphai,
                          arg.baseA,
                          arg.baseC,
+                         arg.formatA,
+                         arg.block_dim,
+                         arg.sell_slice_size,
                          arg.matrix);
