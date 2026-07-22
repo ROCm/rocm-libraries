@@ -67,6 +67,9 @@ set(CK_TILE_CTEST_QUICK_TESTS
     test_ck_tile_grouped_gemm_quick
     test_ck_tile_grouped_conv_quick
     test_ck_tile_fmha_quick
+    test_ck_tile_fmha_fwd_tuning_quick
+    test_ck_tile_fmha_fwd_fp8_quick
+    test_ck_tile_fmha_bwd_tuning_quick
     test_ck_tile_moe_quick
     test_ck_tile_pooling_quick
 )

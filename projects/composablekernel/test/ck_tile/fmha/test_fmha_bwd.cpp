@@ -129,6 +129,28 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
                                  ));
 TEST_P(AllLong, DataTypeConfig) { fmha_bwd_test(GetParam()); }
 
+// A compact, always-enabled sweep for tuning-sensitive head dimensions. Keep
+// the feature-heavy combinations in the suites below; this one intentionally
+// crosses the four principal tile families with batch/group mode and both an
+// aligned unmasked shape and an odd-sized causal shape.
+class Tuning : public TestWithParam<FmhaBwdTestParam>
+{
+};
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaBwd,
+                         Tuning,
+                         Combine(ModeValues,
+                                 HDimValues,
+                                 Values(std::tuple{true, true}), // perm
+                                 Values("n"),                    // bias_str
+                                 Values(false),                  // use_dbias
+                                 Values(0.0f),                   // p_drop
+                                 Values(std::tuple{0, 0, false}),
+                                 Values(std::tuple{2, 4, 2, 128, 256, "0"},
+                                        std::tuple{1, 2, 1, 257, 129, "1"}),
+                                 Values(false) // deterministic
+                                 ));
+TEST_P(Tuning, DataTypeConfig) { fmha_bwd_test(GetParam()); }
+
 class HDimPadding : public TestWithParam<FmhaBwdTestParam>
 {
 };

@@ -83,32 +83,25 @@ function(add_gtest_bwd test_group)
 endfunction()
 
 
-function(add_gtest_fwd_quick)
-    if(NOT TARGET ${FMHA_FWD_INSTANCES})
+function(add_fmha_quick_codegen
+         quick_instance_target full_instance_target quick_api quick_optdim
+         quick_codegen_filter)
+    if(NOT TARGET ${full_instance_target})
         return()
     endif()
 
-    set(quick_instance_target tile_fmha_fwd_quick_instances)
-    set(quick_test_target test_ck_tile_fmha_fwd_quick)
-    set(quick_codegen_dir "${CMAKE_CURRENT_BINARY_DIR}/quick_codegen")
-    set(quick_blob_list "${quick_codegen_dir}/fwd_blob_list.txt")
-
-    set(quick_targets ${SUPPORTED_GPU_TARGETS})
-    list(FILTER quick_targets INCLUDE REGEX "gfx9|gfx1[12]")
+    set(quick_targets ${ARGN})
     list(JOIN quick_targets "," quick_targets_arg)
-
-    # Generate only the FP16 traits exercised below. The API-specific filters
-    # are ordered as fwd, split-KV combine@kernel, append-KV, paged-KV. The
-    # regular FWD filter admits d32 plus d64 for the head-dimension padding
-    # case; gfx9 paged-KV starts at d128.
-    set(quick_codegen_filter
-        "fmha_fwd_d[36][24]_fp16_*_nlogits*_nskip*_nsink*,*d32_fp16_batch*lse*@*d32_fp16_batch*_nlogits_nbias_nmask_lse*_npagedkv_nsink*,*d32_fp16*,*d128_fp16_batch*_nlogits_nbias_nmask_nlse_nskip*_pagedkv_nsink*"
+    set(quick_codegen_dir
+        "${CMAKE_CURRENT_BINARY_DIR}/${quick_instance_target}_codegen"
     )
+    set(quick_blob_list "${quick_codegen_dir}/blob_list.txt")
+
     set(quick_codegen_args
         "${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha/generate.py"
         --targets "${quick_targets_arg}"
-        --api "fwd,fwd_splitkv,fwd_appendkv,pagedkv_prefill"
-        --optdim 32,64,128
+        --api "${quick_api}"
+        --optdim "${quick_optdim}"
         --filter "${quick_codegen_filter}"
     )
     file(GLOB_RECURSE quick_codegen_scripts CONFIGURE_DEPENDS
@@ -117,6 +110,7 @@ function(add_gtest_fwd_quick)
     )
 
     file(MAKE_DIRECTORY "${quick_codegen_dir}")
+    file(REMOVE "${quick_blob_list}")
     execute_process(
         COMMAND ${Python3_EXECUTABLE} ${quick_codegen_args}
                 --list_blobs "${quick_blob_list}"
@@ -132,7 +126,7 @@ function(add_gtest_fwd_quick)
         COMMAND ${Python3_EXECUTABLE} ${quick_codegen_args}
                 --output_dir "${quick_codegen_dir}"
         DEPENDS ${quick_codegen_scripts}
-        COMMENT "Generate quick CK-Tile FMHA FWD kernels"
+        COMMENT "Generate quick CK-Tile FMHA kernels"
     )
 
     add_library(${quick_instance_target} OBJECT EXCLUDE_FROM_ALL)
@@ -147,25 +141,31 @@ function(add_gtest_fwd_quick)
     )
 
     get_target_property(
-        quick_private_options ${FMHA_FWD_INSTANCES} COMPILE_OPTIONS
+        quick_private_options ${full_instance_target} COMPILE_OPTIONS
     )
     get_target_property(
-        quick_interface_options ${FMHA_FWD_INSTANCES} INTERFACE_COMPILE_OPTIONS
+        quick_interface_options ${full_instance_target} INTERFACE_COMPILE_OPTIONS
     )
     target_compile_options(
         ${quick_instance_target}
         PRIVATE ${quick_private_options}
         INTERFACE ${quick_interface_options}
     )
+endfunction()
 
-    set_source_files_properties(test_fmha_fwd.cpp PROPERTIES LANGUAGE HIP)
-    add_executable(${quick_test_target} test_fmha_fwd.cpp)
+function(add_fmha_quick_executable
+         quick_test_target quick_source data_type_config quick_instance_target)
+    get_target_property(quick_targets ${quick_instance_target} HIP_ARCHITECTURES)
+    set_source_files_properties(${quick_source} PROPERTIES LANGUAGE HIP)
+    add_executable(${quick_test_target} ${quick_source})
     set_property(TARGET ${quick_test_target} PROPERTY HIP_ARCHITECTURES ${quick_targets})
     target_compile_options(
         ${quick_test_target}
         PRIVATE -Wno-global-constructors -Wno-undef
     )
-    target_compile_definitions(${quick_test_target} PRIVATE DataTypeConfig=FmhaFwdFp16)
+    target_compile_definitions(
+        ${quick_test_target} PRIVATE DataTypeConfig=${data_type_config}
+    )
     target_link_libraries(
         ${quick_test_target}
         PRIVATE ${quick_instance_target} gtest_main getopt::getopt
@@ -173,6 +173,46 @@ function(add_gtest_fwd_quick)
     add_dependencies(tests ${quick_test_target})
     add_dependencies(check ${quick_test_target})
     rocm_install(TARGETS ${quick_test_target} COMPONENT tests)
+endfunction()
+
+function(add_fmha_quick_category_test alias_name quick_test_target)
+    set(quick_cases ${ARGN})
+    list(JOIN quick_cases ":" quick_filter)
+    add_ck_tile_category_test(
+        ${alias_name}
+        ${quick_test_target}
+        "--gtest_filter=${quick_filter}"
+    )
+    set_property(TEST ${alias_name} APPEND PROPERTY LABELS CK_TILE_FMHA_TESTS)
+endfunction()
+
+function(add_gtest_fwd_quick)
+    if(NOT TARGET ${FMHA_FWD_INSTANCES})
+        return()
+    endif()
+
+    set(quick_targets ${SUPPORTED_GPU_TARGETS})
+    list(FILTER quick_targets INCLUDE REGEX "gfx9|gfx1[12]")
+
+    set(quick_instance_target tile_fmha_fwd_quick_instances)
+    set(quick_test_target test_ck_tile_fmha_fwd_quick)
+    # Generate only the FP16 feature traits exercised below. The API-specific
+    # filters are ordered as fwd, split-KV combine@kernel, append-KV, paged-KV.
+    set(quick_codegen_filter
+        "fmha_fwd_d[36][24]_fp16_*_nlogits*_nskip*_nsink*,*d32_fp16_batch*lse*@*d32_fp16_batch*_nlogits_nbias_nmask_lse*_npagedkv_nsink*,*d32_fp16*,*d128_fp16_batch*_nlogits_nbias_nmask_nlse_nskip*_pagedkv_nsink*"
+    )
+    add_fmha_quick_codegen(
+        ${quick_instance_target}
+        ${FMHA_FWD_INSTANCES}
+        "fwd,fwd_splitkv,fwd_appendkv,pagedkv_prefill"
+        "32,64,128"
+        "${quick_codegen_filter}"
+        ${quick_targets}
+    )
+    add_fmha_quick_executable(
+        ${quick_test_target} test_fmha_fwd.cpp FmhaFwdFp16
+        ${quick_instance_target}
+    )
 
     # Vary batch/group mode and input permutation, then sample head-dimension
     # padding, bias/dropout, and the paged/split/append KV APIs.
@@ -188,14 +228,101 @@ function(add_gtest_fwd_quick)
         "TestCkTileFmhaFwd/SplitKV.FmhaFwdFp16/0"
         "TestCkTileFmhaFwd/AppendKV.FmhaFwdFp16/1"
     )
-    list(JOIN quick_cases ":" quick_filter)
-    add_ck_tile_category_test(
+    add_fmha_quick_category_test(
         test_ck_tile_fmha_quick
         ${quick_test_target}
-        "--gtest_filter=${quick_filter}"
+        ${quick_cases}
     )
-    set_property(
-        TEST test_ck_tile_fmha_quick APPEND PROPERTY LABELS CK_TILE_FMHA_TESTS
+endfunction()
+
+function(add_gtest_fwd_tuning_quick)
+    set(quick_targets ${SUPPORTED_GPU_TARGETS})
+    list(FILTER quick_targets INCLUDE REGEX "gfx9|gfx1[12]")
+
+    set(quick_instance_target tile_fmha_fwd_tuning_quick_instances)
+    set(quick_test_target test_ck_tile_fmha_fwd_tuning_quick_bin)
+    set(quick_codegen_filter
+        "fmha_fwd_d*_fp16_*_nlogits_nbias_nmask_lse_ndropout_nskip_nqscale_ntrload_nsink*"
+    )
+    add_fmha_quick_codegen(
+        ${quick_instance_target} ${FMHA_FWD_INSTANCES} "fwd" "32,64,128,256"
+        "${quick_codegen_filter}" ${quick_targets}
+    )
+    add_fmha_quick_executable(
+        ${quick_test_target} test_fmha_fwd.cpp FmhaFwdFp16
+        ${quick_instance_target}
+    )
+
+    set(quick_cases)
+    foreach(case_index 28 35 84 91 168 175)
+        list(APPEND quick_cases
+            "TestCkTileFmhaFwd/General.FmhaFwdFp16/${case_index}"
+        )
+    endforeach()
+    add_fmha_quick_category_test(
+        test_ck_tile_fmha_fwd_tuning_quick ${quick_test_target} ${quick_cases}
+    )
+endfunction()
+
+function(add_gtest_fwd_fp8_quick)
+    set(quick_targets ${SUPPORTED_GPU_TARGETS})
+    list(FILTER quick_targets INCLUDE REGEX "gfx9|gfx1[12]")
+    list(FILTER quick_targets EXCLUDE REGEX "gfx908|gfx90a")
+    if(NOT quick_targets)
+        return()
+    endif()
+
+    set(quick_instance_target tile_fmha_fwd_fp8_quick_instances)
+    set(quick_test_target test_ck_tile_fmha_fwd_fp8_quick_bin)
+    set(quick_codegen_filter
+        "fmha_fwd_d*_fp8bf16_*_nlogits_nbias_nmask_nlse_ndropout_nskip_pertensor_ntrload_nsink*"
+    )
+    add_fmha_quick_codegen(
+        ${quick_instance_target} ${FMHA_FWD_INSTANCES} "fwd" "64,128,256"
+        "${quick_codegen_filter}" ${quick_targets}
+    )
+    add_fmha_quick_executable(
+        ${quick_test_target} test_fmha_fwd.cpp FmhaFwdFp8Bf16
+        ${quick_instance_target}
+    )
+
+    set(quick_cases)
+    foreach(case_index 0 7 28 35 56 63)
+        list(APPEND quick_cases
+            "TestCkTileFmhaFwd/General.FmhaFwdFp8Bf16/${case_index}"
+        )
+    endforeach()
+    add_fmha_quick_category_test(
+        test_ck_tile_fmha_fwd_fp8_quick ${quick_test_target} ${quick_cases}
+    )
+endfunction()
+
+function(add_gtest_bwd_tuning_quick)
+    set(quick_targets ${SUPPORTED_GPU_TARGETS})
+    list(FILTER quick_targets INCLUDE REGEX "gfx9|gfx1[12]")
+
+    set(quick_instance_target tile_fmha_bwd_tuning_quick_instances)
+    set(quick_test_target test_ck_tile_fmha_bwd_tuning_quick_bin)
+    set(quick_codegen_filter
+        "fmha_bwd_dot_do_o_d*_fp16_*@fmha_bwd_convert_dq_d*_fp16_*_ndeterministic@fmha_bwd_d*_fp16_*_npad_nbias_ndbias_*mask_ndropout_ndeterministic_ntrload*"
+    )
+    add_fmha_quick_codegen(
+        ${quick_instance_target} ${FMHA_BWD_INSTANCES} "bwd" "32,64,128,256"
+        "${quick_codegen_filter}" ${quick_targets}
+    )
+    add_fmha_quick_executable(
+        ${quick_test_target} test_fmha_bwd.cpp FmhaBwdFp16
+        ${quick_instance_target}
+    )
+
+    set(quick_cases)
+    foreach(case_index RANGE 0 15)
+        list(APPEND quick_cases
+            "TestCkTileFmhaBwd/Tuning.FmhaBwdFp16/${case_index}"
+        )
+    endforeach()
+    add_fmha_quick_category_test(
+        test_ck_tile_fmha_bwd_tuning_quick ${quick_test_target} ${quick_cases}
     )
 endfunction()
 
@@ -204,6 +331,9 @@ add_gtest_fwd(${TEST_NAME}_fwd)
 add_gtest_bwd(${TEST_NAME}_bwd)
 add_custom_target(${TEST_NAME} DEPENDS ${TEST_NAME}_fwd ${TEST_NAME}_bwd)
 add_gtest_fwd_quick()
+add_gtest_fwd_tuning_quick()
+add_gtest_fwd_fp8_quick()
+add_gtest_bwd_tuning_quick()
 
 # Umbrella target to build and run all ck_tile fmha tests
 # Usage: ninja ck_tile_fmha_tests
