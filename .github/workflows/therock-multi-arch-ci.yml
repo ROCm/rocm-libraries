@@ -116,6 +116,8 @@ jobs:
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
       stage_reuse_baseline_repository: "ROCm/TheRock"
       stage_reuse_mode: "reuse-stage"
+      # rocm-libraries only affects math-libs stage; reuse compiler-runtime
+      stage_reuse_external_rebuild_stages: "math-libs"
       repository: ROCm/TheRock
       ref: users/geomin12/superrepo-multi-arch
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
