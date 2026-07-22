@@ -54,6 +54,7 @@ static bool latrd_forsytrd_multi_kernel = std::getenv("LATRD_MULTI_KERNEL") != n
 static bool force_coop_launch = std::getenv("COOP_LAUNCH") != nullptr ? true : false;
 
 static bool latrd_sw_grid_sync = std::getenv("LATRD_SW_GRID_SYNC") != nullptr ? true : false;
+static bool latrd_sw_raw_sync  = std::getenv("LATRD_SW_RAW_SYNC")  != nullptr ? true : false;
 
 #define HIP_TRACE(call)                                                                      \
     do                                                                                       \
@@ -3118,6 +3119,341 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
     }
 }
 
+// Raw-buffer variant of latrd_lower_kernel_fused.
+// All cross-block global writes use raw buffer stores with the 0x10 (sc1) flag so they
+// bypass the L2 cache and are immediately visible to other blocks via device-scope
+// coherency.  The software grid sync therefore only needs barrier() (no L2 fences)
+// instead of sync().  Enabled via LATRD_SW_RAW_SYNC=1.
+template <int MAX_THDS, typename T, typename I, typename S, typename U>
+__global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused_alt(const I n,
+                                                                         const rocblas_int nb,
+                                                                         U AA,
+                                                                         const rocblas_stride shiftA,
+                                                                         const I lda,
+                                                                         const rocblas_stride strideA,
+                                                                         S* EE,
+                                                                         const rocblas_stride strideE,
+                                                                         T* tauA,
+                                                                         const rocblas_stride strideP,
+                                                                         T* WW,
+                                                                         const rocblas_int shiftW,
+                                                                         const rocblas_int ldw,
+                                                                         const rocblas_stride strideW,
+                                                                         T* work,
+                                                                         uint8_t* syncBuf)
+{
+    SoftwareGridSync swGrid(syncBuf);
+
+    I batch_id = blockIdx.z;
+    I bid = blockIdx.x;
+    I tid = threadIdx.x;
+
+    // Select batch instance
+    T* A = load_ptr_batch<T>(AA, batch_id, shiftA, strideA);
+    S* E = load_ptr_batch<S>(EE, batch_id, 0, strideE);
+    T* tau = load_ptr_batch<T>(tauA, batch_id, 0, strideP);
+    T* W = load_ptr_batch<T>(WW, batch_id, 0, strideW);
+
+    extern __shared__ double lmem[];
+    T* tau_j = reinterpret_cast<T*>(lmem);
+    T* pSmem = tau_j + 1;
+    T* pSz1 = pSmem + MAX_THDS;
+    T* pSz2 = pSz1 + nb;
+
+    constexpr rocblas_int z_align = 128 / sizeof(T);
+    const rocblas_int nb_padded = ((nb + z_align - 1) / z_align) * z_align;
+    rocblas_int work_stride = 2 * nb_padded;
+    T* z1 = work + (rocblas_stride)batch_id * work_stride;
+    T* z2 = z1 + nb_padded;
+
+    T* pA = A;
+    T* pW = W;
+
+    // Build raw buffer descriptors for all global arrays written before a barrier.
+    // The 0xffffffff num_records covers the full allocation; 0x10 sc1 flag on each
+    // store bypasses the L2 write-back so other blocks see the value immediately.
+    auto A_buf   = __builtin_amdgcn_make_buffer_rsrc(pA,  0, 0xffffffff, 0);
+    auto W_buf   = __builtin_amdgcn_make_buffer_rsrc(pW,  0, 0xffffffff, 0);
+    auto tau_buf = __builtin_amdgcn_make_buffer_rsrc(tau, 0, 0xffffffff, 0);
+    auto z1_buf  = __builtin_amdgcn_make_buffer_rsrc(z1,  0, 0xffffffff, 0);
+    auto z2_buf  = __builtin_amdgcn_make_buffer_rsrc(z2,  0, 0xffffffff, 0);
+
+    // Raw buffer store/load helpers for T (float=b32, double=b64) with 0x10 sc1 flag.
+    // sc1 stores bypass the L2 write-back; sc1 loads bypass the L2 read cache.
+    // Using both on writer and reader sides ensures coherency without L2 flush/invalidate
+    // fences, making barrier() (execution-only sync) sufficient for cross-block coordination.
+    // sc1 raw store: bypasses L2 write-back (device-scope visible immediately).
+    // sc1 raw load:  bypasses L2 read cache (fetches from device memory directly).
+    // Pairing sc1 stores on writers with sc1 loads on readers avoids the need for
+    // L2 flush/invalidate fences, so barrier() suffices instead of sync().
+    using u64_t = uint32_t __attribute__((ext_vector_type(2)));
+    auto raw_store = [](T val, __amdgpu_buffer_rsrc_t buf, int byte_off) __attribute__((always_inline)) {
+        if constexpr(sizeof(T) == 4) {
+            uint32_t bits; memcpy(&bits, &val, 4);
+            __builtin_amdgcn_raw_buffer_store_b32(bits, buf, byte_off, 0, 0x10);
+        } else {
+            u64_t tmp; memcpy(&tmp, &val, 8);
+            __builtin_amdgcn_raw_buffer_store_b64(tmp, buf, byte_off, 0, 0x10);
+        }
+    };
+    auto raw_load = [](__amdgpu_buffer_rsrc_t buf, int byte_off) __attribute__((always_inline)) -> T {
+        T val;
+        if constexpr(sizeof(T) == 4) {
+            uint32_t bits = __builtin_amdgcn_raw_buffer_load_b32(buf, byte_off, 0, 0x10);
+            memcpy(&val, &bits, 4);
+        } else {
+            u64_t tmp = __builtin_amdgcn_raw_buffer_load_b64(buf, byte_off, 0, 0x10);
+            memcpy(&val, &tmp, 8);
+        }
+        return val;
+    };
+    auto raw_store_A   = [&](T val, int off) { raw_store(val, A_buf,   off); };
+    auto raw_store_W   = [&](T val, int off) { raw_store(val, W_buf,   off); };
+    auto raw_store_z1  = [&](T val, int off) { raw_store(val, z1_buf,  off); };
+    auto raw_store_z2  = [&](T val, int off) { raw_store(val, z2_buf,  off); };
+    auto raw_load_A    = [&](int off)        { return raw_load(A_buf,   off); };
+    auto raw_load_W    = [&](int off)        { return raw_load(W_buf,   off); };
+    auto raw_load_z1   = [&](int off)        { return raw_load(z1_buf,  off); };
+    auto raw_load_z2   = [&](int off)        { return raw_load(z2_buf,  off); };
+    auto raw_load_tau  = [&](int off)        { return raw_load(tau_buf, off); };
+
+    I ldSA = lda;
+    I ldSW = ldw;
+
+    I nj{};
+    T temp{};
+    for(rocblas_int j = 0; j < nb; ++j)
+    {
+        nj = n - j - 1;
+        T* v = pA + (j + 1) + j * ldSA; // used for pointer arithmetic to compute A byte offsets
+
+        // Part A: update A(j:n-1, j) with previously computed reflectors.
+        // Reads pW/pA cols 0..j-1 written by Part E of previous iterations (raw stores).
+        if(j > 0)
+        {
+            for(I jj = tid; jj < j; jj += MAX_THDS)
+            {
+                pSz1[jj] = conj(raw_load_W((int)((j + (I)jj * ldSW) * sizeof(T))));
+                pSz2[jj] = conj(raw_load_A((int)((j + (I)jj * ldSA) * sizeof(T))));
+            }
+            __syncthreads();
+
+            const I warp_id = tid / warpSize;
+            const I lane_id = tid % warpSize;
+
+            for(I ii_base = bid * (MAX_THDS / warpSize); ii_base < nj + 1;
+                ii_base += gridDim.x * (MAX_THDS / warpSize))
+            {
+                I ii = ii_base + warp_id;
+                temp = T(0);
+                if(ii < nj + 1)
+                {
+                    for(I jj = lane_id; jj < j; jj += warpSize)
+                        temp += raw_load_A((int)((j + ii + (I)jj * ldSA) * sizeof(T))) * pSz1[jj]
+                              + raw_load_W((int)((j + ii + (I)jj * ldSW) * sizeof(T))) * pSz2[jj];
+                }
+                reduce_wave_sum(temp);
+
+                if(lane_id == 0 && ii < nj + 1)
+                {
+                    int aoff = (int)((ii + j + (I)j * ldSA) * sizeof(T));
+                    T updated = raw_load_A(aoff) - temp;
+                    raw_store_A(updated, aoff);
+                }
+            }
+            swGrid.barrier();
+        }
+
+        // Part B: Householder reflector generation.
+        // Reads v (A col j) raw-stored by Part A (all blocks); block 0 needs raw loads.
+        if(bid == 0)
+        {
+            if(nj > 0)
+            {
+                temp = T(0);
+                for(I ii = tid; ii < nj - 1; ii += MAX_THDS)
+                {
+                    T vi1 = raw_load_A((int)((&v[ii + 1] - pA) * sizeof(T)));
+                    temp += vi1 * conj(vi1);
+                }
+                reduce_block_sum(temp, pSmem);
+
+                if(tid == 0)
+                {
+                    T v0 = raw_load_A((int)((&v[0] - pA) * sizeof(T)));
+                    run_set_taubeta<T>(tau_j, &temp, &v0, E + j);
+                    raw_store(tau_j[0], tau_buf, j * (int)sizeof(T));
+                    // E[j] is only needed by the host after the kernel; no cross-block read.
+                    raw_store_A(v0, (int)((&v[0] - pA) * sizeof(T))); // v[0] <- 1 (or unchanged)
+                    pSmem[0] = temp; // scale factor (intra-block only)
+                }
+                __syncthreads();
+
+                T scal = pSmem[0];
+                // Scale v[1:nj-1] in-place via raw buffer stores (v aliases A col j).
+                for(I ii = tid; ii < nj; ii += MAX_THDS)
+                {
+                    if(ii > 0)
+                    {
+                        T vi = raw_load_A((int)((&v[ii] - pA) * sizeof(T)));
+                        raw_store_A(vi * scal, (int)((&v[ii] - pA) * sizeof(T)));
+                    }
+                }
+            }
+            else if(tid == 0)
+            {
+                tau_j[0] = T(0);
+                raw_store(T(0), tau_buf, j * (int)sizeof(T));
+            }
+        }
+        swGrid.barrier();
+
+        // After Part B barrier, reload tau_j[0] via sc1 load (matches sc1 store by block 0).
+        if(tid == 0)
+            tau_j[0] = raw_load_tau(j * (int)sizeof(T));
+        __syncthreads();
+
+        // Part C: dot products for W updates.
+        // Reads v (A col j), A, and W cols 0..j-1 -- all raw-stored by prior parts.
+        {
+            // vbase = byte offset of v[0] from pA
+            int vbase = (int)((&v[0] - pA) * sizeof(T));
+            // Step 4: w(j+1:n-1) = A(j+1:n-1, j+1:n-1) * v
+            int Atmp_base = (int)(((j + 1) + (I)(j + 1) * ldSA) * sizeof(T));
+            for(I ii = bid; ii < nj; ii += gridDim.x)
+            {
+                temp = T(0);
+                for(I jj = tid; jj < nj; jj += MAX_THDS)
+                {
+                    T aval = raw_load_A((int)(Atmp_base + (jj + (rocblas_stride)ii * ldSA) * sizeof(T)));
+                    T vval = raw_load_A((int)(vbase + jj * sizeof(T)));
+                    temp += aval * vval;
+                }
+                reduce_block_sum(temp, pSmem);
+                if(tid == 0)
+                    raw_store_W(temp, (int)(((j + 1 + ii) + (I)j * ldSW) * sizeof(T)));
+                __syncthreads();
+            }
+
+            // Steps 5 & 7: z1 = W'*v, z2 = A'*v (W/A cols 0..j-1, written by prev Part E)
+            int Wtmp_base = (int)((j + 1) * sizeof(T)); // pW + (j+1)
+            int Atmp2_base = (int)((j + 1) * sizeof(T)); // pA + (j+1)
+            if(gridDim.x == 1)
+            {
+                for(I jj = tid; jj < j; jj += MAX_THDS)
+                {
+                    T s1 = T(0), s2 = T(0);
+                    for(I ii = 0; ii < nj; ++ii)
+                    {
+                        T vval = raw_load_A((int)(vbase + ii * sizeof(T)));
+                        s1 += raw_load_W((int)(Wtmp_base + (ii + (I)jj * ldSW) * sizeof(T))) * vval;
+                        s2 += raw_load_A((int)(Atmp2_base + (ii + (I)jj * ldSA) * sizeof(T))) * vval;
+                    }
+                    raw_store_z1(s1, (int)(jj * sizeof(T)));
+                    raw_store_z2(s2, (int)(jj * sizeof(T)));
+                }
+            }
+            else
+            {
+                for(I jj = bid; jj < j; jj += gridDim.x)
+                {
+                    T s1 = T(0);
+                    for(I ii = tid; ii < nj; ii += MAX_THDS)
+                    {
+                        T vval = raw_load_A((int)(vbase + ii * sizeof(T)));
+                        s1 += raw_load_W((int)(Wtmp_base + (ii + (I)jj * ldSW) * sizeof(T))) * vval;
+                    }
+                    reduce_block_sum(s1, pSmem);
+                    if(tid == 0)
+                        raw_store_z1(s1, (int)(jj * sizeof(T)));
+                    __syncthreads();
+                }
+                for(I jj = bid; jj < j; jj += gridDim.x)
+                {
+                    T s2 = T(0);
+                    for(I ii = tid; ii < nj; ii += MAX_THDS)
+                    {
+                        T vval = raw_load_A((int)(vbase + ii * sizeof(T)));
+                        s2 += raw_load_A((int)(Atmp2_base + (ii + (I)jj * ldSA) * sizeof(T))) * vval;
+                    }
+                    reduce_block_sum(s2, pSmem);
+                    if(tid == 0)
+                        raw_store_z2(s2, (int)(jj * sizeof(T)));
+                    __syncthreads();
+                }
+            }
+        }
+        swGrid.barrier();
+
+        // Part D: fused Steps 6 and 8 -- update w with z1/z2.
+        // Reads z1/z2 (raw-stored by Part C) and A/W cols 0..j-1 (raw-stored by prior Part E).
+        for(I ii = tid; ii < j; ii += MAX_THDS)
+        {
+            pSz1[ii] = raw_load_z1((int)(ii * sizeof(T)));
+            pSz2[ii] = raw_load_z2((int)(ii * sizeof(T)));
+        }
+        __syncthreads();
+
+        {
+            int Atmp_base = (int)((j + 1) * sizeof(T)); // pA + (j+1)
+            int Wtmp_base = (int)((j + 1) * sizeof(T)); // pW + (j+1)
+            const I warp_id = tid / warpSize;
+            const I lane_id = tid % warpSize;
+            for(I ii_base = bid * (MAX_THDS / warpSize); ii_base < nj;
+                ii_base += gridDim.x * (MAX_THDS / warpSize))
+            {
+                I ii = ii_base + warp_id;
+                temp = T(0);
+                if(ii < nj)
+                {
+                    for(I jj = lane_id; jj < j; jj += warpSize)
+                    {
+                        temp -= raw_load_A((int)(Atmp_base + (ii + (I)jj * ldSA) * sizeof(T))) * pSz1[jj];
+                        temp -= raw_load_W((int)(Wtmp_base + (ii + (I)jj * ldSW) * sizeof(T))) * pSz2[jj];
+                    }
+                }
+                reduce_wave_sum(temp);
+                if(lane_id == 0 && ii < nj)
+                {
+                    int woff = (int)(((j + 1 + ii) + (I)j * ldSW) * sizeof(T));
+                    T updated = raw_load_W(woff) + temp;
+                    raw_store_W(updated, woff);
+                }
+            }
+        }
+        swGrid.barrier();
+
+        // Part E: final AXPY -- w(j+1:n-1) = alpha*v + tau_j*w.
+        // Reads v (A col j, raw-stored by Part B) and w partial (W col j, raw-stored by Part D).
+        if(bid == 0)
+        {
+            int vbase = (int)((&v[0] - pA) * sizeof(T));
+            temp = T(0);
+            for(I ii = tid; ii < nj; ii += MAX_THDS)
+            {
+                T vval = raw_load_A((int)(vbase + ii * sizeof(T)));
+                T wval = raw_load_W((int)(((j + 1 + ii) + (I)j * ldSW) * sizeof(T)));
+                temp += vval * conj(wval);
+            }
+            reduce_block_sum(temp, pSmem);
+
+            if(tid == 0)
+                pSmem[0] = -0.5 * tau_j[0] * tau_j[0] * temp;
+            __syncthreads();
+
+            T alpha = pSmem[0];
+            for(I ii = tid; ii < nj; ii += MAX_THDS)
+            {
+                T vval = raw_load_A((int)(vbase + ii * sizeof(T)));
+                T wval = raw_load_W((int)(((j + 1 + ii) + (I)j * ldSW) * sizeof(T)));
+                raw_store_W(alpha * vval + tau_j[0] * wval,
+                            (int)(((j + 1 + ii) + (I)j * ldSW) * sizeof(T)));
+            }
+        }
+        swGrid.barrier();
+    }
+}
+
 template <typename T, typename S, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                                                  const rocblas_fill uplo,
@@ -3260,9 +3596,11 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
 
             // Compute grid width: enough blocks to cover n rows, capped by cooperative-launch limit.
             // hipLaunchCooperativeKernel requires gridDim.x * gridDim.z <= max resident blocks.
-            void* kernel_fn = latrd_sw_grid_sync
-                ? (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, true>)
-                : (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, false>);
+            void* kernel_fn = latrd_sw_raw_sync
+                ? (void*)(latrd_lower_kernel_fused_alt<FUSED_THDS, T, rocblas_int, S, U>)
+                : (latrd_sw_grid_sync
+                    ? (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, true>)
+                    : (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, false>));
             int max_blocks_per_sm = 0;
             HIP_TRACE(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, kernel_fn,
                                                                    FUSED_THDS, lmemsize_fused));
@@ -3281,10 +3619,10 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             }
             rocblas_int grid_x = std::min(want_grid_x, max_grid_x);
 
-            // Allocate software grid-sync buffer when LATRD_SW_GRID_SYNC is set.
+            // Allocate software grid-sync buffer when LATRD_SW_GRID_SYNC or LATRD_SW_RAW_SYNC is set.
             // The buffer has one byte per block per sync call; 5 syncs per j-iteration.
             uint8_t* d_sync_buf = nullptr;
-            if(latrd_sw_grid_sync)
+            if(latrd_sw_grid_sync || latrd_sw_raw_sync)
             {
                 size_t num_blocks = (size_t)grid_x * batch_count;
                 size_t num_syncs  = (size_t)5 * k; // 5 grid syncs per outer loop iteration
@@ -3300,9 +3638,9 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
 
             if(print_debug_messages_latrd_forsytrd)
                 std::fprintf(stderr,
-                             "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d sw_grid_sync=%d\n",
+                             "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d sw_grid_sync=%d sw_raw_sync=%d\n",
                              n, max_blocks_per_sm, max_total_blocks, grid_x,
-                             (int)latrd_sw_grid_sync);
+                             (int)latrd_sw_grid_sync, (int)latrd_sw_raw_sync);
 
             HIP_TRACE(hipLaunchCooperativeKernel(kernel_fn, dim3(grid_x, 1, batch_count),
                                                  dim3(FUSED_THDS), kernelArgs, lmemsize_fused,
