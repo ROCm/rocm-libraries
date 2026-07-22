@@ -56,15 +56,18 @@ class TestUpdateLogic:
         }
         return mock_problem_type
 
-    def create_mock_solution(self, isa=(9, 0, 6)):
+    def create_mock_solution(self, isa=(9, 0, 6), include_problem_type=True):
         """Helper to create mock solution"""
         mock_solution = Mock()
 
-        mock_solution.getAttributes.return_value = {
+        attrs = {
             "ISA": isa,
             "KernelLanguage": "Assembly",
             "SolutionIndex": 0,
         }
+        if include_problem_type:
+            attrs["ProblemType"] = self.create_mock_problem_type()
+        mock_solution.getAttributes.return_value = attrs
         return mock_solution
 
     @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
@@ -113,6 +116,8 @@ class TestUpdateLogic:
             # Verify solution was converted
             assert len(updated_data[5]) == 1
             assert updated_data[5][0]["ISA"] == [9, 0, 6]  # Tuple converted to list
+            assert "ProblemType" in updated_data[5][0]
+            assert updated_data[5][0]["ProblemType"]["DataType"] == MockDataType.Float.value
 
     @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
     def test_updates_with_output_path(self, mock_parse):
@@ -259,7 +264,7 @@ class TestUpdateLogic:
         from Tensile.TensileUpdateLibrary import UpdateLogic
 
         mock_problem_type = self.create_mock_problem_type()
-        mock_solution = self.create_mock_solution(isa=(9, 4, 2))
+        mock_solution = self.create_mock_solution(isa=(9, 4, 2), include_problem_type=False)
         mock_parse.return_value = (None, None, mock_problem_type, [mock_solution], None, None, None)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -286,8 +291,38 @@ class TestUpdateLogic:
             # ProblemType/Solutions refreshed with enum values / list ISA
             assert updated_data["ProblemType"]["DataType"] == MockDataType.Float.value
             assert updated_data["Solutions"][0]["ISA"] == [9, 4, 2]
+            assert "ProblemType" not in updated_data["Solutions"][0]
             # Unrelated keys left untouched
             assert updated_data["LibraryType"] == "GridBased"
+
+    @patch('Tensile.TensileUpdateLibrary.LibraryIO.parseLibraryLogicData')
+    def test_dict_solution_injects_top_level_problem_type(self, mock_parse):
+        """UpdateLogic should inject top-level ProblemType when solution lacks it"""
+        from Tensile.TensileUpdateLibrary import UpdateLogic
+
+        mock_problem_type = self.create_mock_problem_type()
+        mock_solution = self.create_mock_solution(include_problem_type=False)
+        mock_parse.return_value = (None, None, mock_problem_type, [mock_solution], None, None, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_file = os.path.join(tmpdir, "logic.yaml")
+            input_data = {
+                "MinimumRequiredVersion": "4.0.0",
+                "ProblemType": {"old": "pt"},
+                "Solutions": [{"old": "sol"}],
+            }
+
+            with open(input_file, 'w') as f:
+                yaml.dump(input_data, f)
+
+            UpdateLogic(input_file, tmpdir, "")
+
+            with open(input_file, 'r') as f:
+                updated_data = yaml.safe_load(f)
+
+            assert updated_data["ProblemType"]["DataType"] == MockDataType.Float.value
+            assert updated_data["ProblemType"]["ActivationType"] == MockActivationType.None_.value
+            assert "ProblemType" not in updated_data["Solutions"][0]
 
 
 @pytest.mark.unit
