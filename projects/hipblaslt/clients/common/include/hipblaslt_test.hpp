@@ -178,24 +178,13 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 #ifdef GOOGLE_TEST
 
 /* ============================================================================================ */
-// Function which matches Arguments with a category, accounting for arg.known_bug_platforms
-bool match_test_category(const Arguments& arg, const char* category);
-
-// Skip the current TEST_P body when the parameter has been flagged as a known bug
-// for this GPU platform. Used as the first statement in TEST_P bodies. The category
-// field is set to "known_bug" either at gentest time (unconditional matches in
-// known_bugs.yaml) or at registration time by match_test_category() when the current
-// GPU arch matches an entry's known_bug_platforms list.
-#define SKIP_IF_KNOWN_BUG_FOR_PLATFORM()                                            \
-    do                                                                              \
-    {                                                                               \
-        const auto& _kb_arg = GetParam();                                           \
-        if(!strcmp(_kb_arg.category, "known_bug"))                                  \
-        {                                                                           \
-            GTEST_SKIP() << KNOWN_BUG_STRING                                        \
-                         << " (platforms=" << _kb_arg.known_bug_platforms << ")";   \
-        }                                                                           \
-    } while(0)
+// Returns true when a parameter is a known bug that must not run on the current
+// GPU platform: either it was tagged unconditionally at gentest time
+// (category == "known_bug" from known_bugs.yaml) or the current arch is listed in
+// the entry's known_bug_platforms. Such parameters are filtered out at
+// INSTANTIATE_TEST_SUITE_P time (see INSTANTIATE_TEST_CATEGORY below) so they never
+// register, instead of registering and then skipping them at runtime.
+bool is_known_bug_for_platform(const Arguments& arg);
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream
 // The filter is by category and by the type_filter() and function_filter()
@@ -205,7 +194,7 @@ bool match_test_category(const Arguments& arg, const char* category);
         category,                                                              \
         testclass,                                                             \
         testing::ValuesIn(HipBlasLt_TestData::begin([](const Arguments& arg) { \
-                              return match_test_category(arg, #category)       \
+                              return !is_known_bug_for_platform(arg)           \
                                      && testclass::function_filter(arg)        \
                                      && testclass::type_filter(arg);           \
                           }),                                                  \
