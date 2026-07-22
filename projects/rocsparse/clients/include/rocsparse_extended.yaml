@@ -239,6 +239,7 @@ Tests:
     - csrsm: *level3_shared
     - gebsrmm: *level3_shared
     - sddmm: *level3_shared_mixed_index
+    - sddmm_batched_ell: *level3_shared_mixed_index
     - sddmm_batched_coo: *level3_shared_mixed_index
     - sddmm_batched_csr: *level3_shared_mixed_index
     - sddmm_batched_csc: *level3_shared_mixed_index
