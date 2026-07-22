@@ -37,6 +37,15 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
+namespace detail::reduce
+{
+
+/// \brief Functor to generate a key-value pair from an index and value
+template<typename Iterator, typename OutputValueT>
+using generate_idx_value = cub::detail::reduce::generate_idx_value<Iterator, OutputValueT>;
+
+} // namespace detail::reduce
+
 struct DeviceSegmentedReduce
 {
     template<typename InputIteratorT,
