@@ -413,8 +413,11 @@ namespace rocsparse
             (boost_val_pointer_mode == rocsparse_pointer_mode_host));
 
         // Copy the real diagonal D out to the optional user vector once the factorization is done.
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::csrildlt0_copy_diag<T, I, J>(handle, csrildlt0_info, A, diag)));
+        if(diag != nullptr)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::csrildlt0_copy_diag<T, I, J>(handle, csrildlt0_info, A, diag)));
+        }
 
         return rocsparse_status_success;
     }
