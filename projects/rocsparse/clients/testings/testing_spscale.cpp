@@ -83,6 +83,53 @@ void testing_spscale_bad_arg(const Arguments& arg)
                                 local_buffer_size,
                                 temp_buffer);
     }
+
+    // Consistency checks between A and C that the generic bad-arg harness does not exercise.
+    // These go through rocsparse_spscale_buffer_size, which runs the same argument checks.
+    {
+        // Format mismatch: A is CSR, C is COO.
+        rocsparse_local_spmat local_C_coo(
+            m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, base, ttype);
+        rocsparse_spmat_descr mat_C_coo = local_C_coo;
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_coo, buffer_size),
+            rocsparse_status_not_implemented);
+
+        // Dimension mismatch: C has a different number of rows.
+        rocsparse_local_spmat local_C_rows(
+            m + 1, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, ttype);
+        rocsparse_spmat_descr mat_C_rows = local_C_rows;
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_rows, buffer_size),
+            rocsparse_status_invalid_size);
+
+        // Data-type mismatch between A and C.
+        const rocsparse_datatype other_ttype = (ttype == rocsparse_datatype_f32_r)
+                                                   ? rocsparse_datatype_f64_r
+                                                   : rocsparse_datatype_f32_r;
+        rocsparse_local_spmat    local_C_dtype(
+            m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, other_ttype);
+        rocsparse_spmat_descr mat_C_dtype = local_C_dtype;
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_dtype, buffer_size),
+            rocsparse_status_type_mismatch);
+
+        // Index-base mismatch: differing base between A and C is not supported yet.
+        rocsparse_local_spmat local_C_base(m,
+                                           n,
+                                           nnz,
+                                           csr_row_ptr_C,
+                                           csr_col_ind_C,
+                                           csr_val_C,
+                                           itype,
+                                           jtype,
+                                           rocsparse_index_base_one,
+                                           ttype);
+        rocsparse_spmat_descr mat_C_base = local_C_base;
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_base, buffer_size),
+            rocsparse_status_not_implemented);
+    }
 }
 
 // Generic driver shared by every format. It takes an already-initialized host matrix \p hA,
