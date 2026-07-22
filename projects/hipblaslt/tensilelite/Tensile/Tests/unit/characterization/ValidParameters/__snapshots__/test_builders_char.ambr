@@ -1406,6 +1406,7 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentInterleave',
     'LDSTrInst',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
@@ -1936,6 +1937,15 @@
         'Assembly',
       ]),
       'len': 1,
+      'type': 'list',
+    }),
+    'LDSSegmentInterleave': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'LDSTrInst': dict({
