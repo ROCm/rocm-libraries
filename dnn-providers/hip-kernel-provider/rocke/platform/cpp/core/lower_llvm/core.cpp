@@ -997,8 +997,7 @@ static const char* ll_val_to_gname(const rocke_lower_t* L, const char* value_nam
  * slot (a NULL op still ticks the counter but does not recurse), plus every
  * op in each sub-region.  The subtree rooted at index `idx` therefore occupies
  * contiguous sequence indices [idx, idx + ll_subtree_size(op) - 1]. */
-static int
-    ll_subtree_size(const rocke_op_t* op)
+static int ll_subtree_size(const rocke_op_t* op)
 {
     int n = 1;
     if(!op)
@@ -1322,7 +1321,7 @@ const char*
     rocke_ll_smem_base_cache_t ent;
     ent.block = blk;
     ent.gname = gname;
-    ent.base  = base;
+    ent.base = base;
     int rc;
     rocke_vec_push(&L->arena, &L->smem_base_cache, ent, rc);
     if(rc != 0)
