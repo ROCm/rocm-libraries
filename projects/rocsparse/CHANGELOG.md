@@ -6,6 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
+* Added the `rocsparse_spscale` and `rocsparse_spscale_buffer_size` generic routines for sparse matrix scaling (`C = alpha * A`), where `C` shares the sparsity pattern of `A` and its values are scaled by `alpha`. The COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported, with host and device pointer mode for `alpha`.
 * Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
 
 ### Changed
@@ -23,7 +24,6 @@ Documentation for rocSPARSE is available at
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
 ### Added
-* Added the `rocsparse_spscale` and `rocsparse_spscale_buffer_size` generic routines for sparse matrix scaling (`C = alpha * A`), where `C` shares the sparsity pattern of `A` and its values are scaled by `alpha`. The COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported, with host and device pointer mode for `alpha`.
 * Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
 
 ### Upcoming changes
