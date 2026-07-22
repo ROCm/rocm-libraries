@@ -414,7 +414,7 @@ int main(int argc, char* argv[])
             else
             {
                 // emulationtype == emulation_extended given CLI11's check above
-                assert(emulationtype == emulation_extended);
+                assert((emulationtype == emulation_extended));
                 emulation_prob = 1;
                 test_prob      = 0.02;
                 unittest_prob  = 0.02;
