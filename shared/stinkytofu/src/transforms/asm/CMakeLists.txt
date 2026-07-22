@@ -16,6 +16,7 @@ target_sources(stinkytofu_objs PRIVATE
     PeepholeOptimizationPass.cpp
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
+    AsmMovePropagationPass.cpp
     LegalizationUtils.cpp
     ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
