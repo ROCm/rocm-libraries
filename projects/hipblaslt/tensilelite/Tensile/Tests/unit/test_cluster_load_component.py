@@ -198,6 +198,14 @@ class TestDeclareUndeclare:
         self._c().undeclareSgprs(w, _kernel(useSubtile=True))
         assert w.undefined == ["MulticastMaskA", "MulticastMaskB"]
 
+    def test_undeclare_metadata(self):
+        # The metadata SGPR is freed alongside the split A/B masks on the sparse
+        # TDM path (enableTDMMetadata).
+        _init_rocisa_gfx1250()
+        w = _StubWriter()
+        self._c().undeclareSgprs(w, _kernel(useSubtile=True, sparse=1, tdmMeta=True))
+        assert w.undefined == ["MulticastMaskA", "MulticastMaskB", "MulticastMaskMetadata"]
+
     def test_undeclare_noop_when_multicast_off(self):
         _init_rocisa_gfx1250()
         w = _StubWriter()
@@ -245,6 +253,29 @@ class TestComputeMasks:
         mod = self._c().computeMasks(_StubWriter(), _kernel(multicast=False),
                                      sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
         assert str(mod).strip() == ""
+
+    def test_metadata_mask_sparse_a(self):
+        # Sparse==1: the metadata mask follows sparse A -- shift maskA (0x5 for
+        # ClusterDim=[2,2]) by wg_x into MulticastMaskMetadata.
+        _init_rocisa_gfx1250()
+        mod = self._c().computeMasks(
+            _StubWriter(), _kernel(clusterDim=(2, 2), sparse=1, tdmMeta=True),
+            sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        assert "Setting metadata mask (follows sparse A)" in src
+        assert "s_lshl_b32 s[sgprMulticastMaskMetadata], 0x5, s61" in src
+
+    def test_metadata_mask_sparse_b(self):
+        # Sparse==2: the metadata mask follows sparse B -- shift maskB (0x3) by
+        # (wg_y * nwg_x) computed into the sTmp+4 scratch slot.
+        _init_rocisa_gfx1250()
+        mod = self._c().computeMasks(
+            _StubWriter(), _kernel(clusterDim=(2, 2), sparse=2, tdmMeta=True),
+            sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        assert "Shift factor: wg_y * nwg_x (metadata)" in src
+        assert "Setting metadata mask (follows sparse B)" in src
+        assert "s_lshl_b32 s[sgprMulticastMaskMetadata], 0x3, s64" in src
 
 
 # --- applyToDescriptor emitted asm -----------------------------------------
