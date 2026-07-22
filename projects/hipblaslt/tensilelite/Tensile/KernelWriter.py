@@ -3404,8 +3404,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return module
 
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllSubtilePAP"), "")
-    module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Under StreamKForceDPOnly the reduction is always forced to the tree path
+    # (AddressFlags != 0 invariant), so this parallel-reduction skip never fires;
+    # fold it out and keep only the StreamKIter >= StreamKIterEnd (last-tile) check.
+    if not kernel["StreamKForceDPOnly"]:
+      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     if not skipBarrier:

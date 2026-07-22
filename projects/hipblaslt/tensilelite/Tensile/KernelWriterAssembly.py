@@ -13738,8 +13738,15 @@ class KernelWriterAssembly(KernelWriter):
       # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
       # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be initialized to workspace pointer (AddressC/D)
       # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be initialized to batch matrix address from pointer array (AddressC/D)      
-      skComponent = Component.StreamK.find(self)
-      module.add(skComponent.initializeSrdAddressFlagsCheck(GeneralBatchedGemmSrdInitiation))
+      if kernel["StreamKForceDPOnly"]:
+        # DP-only: reduction is always forced to the tree path (AddressFlags != 0
+        # invariant), so initializeSrdAddressFlagsCheck always branches to the
+        # general-batched (Srd=0) initialization. Fold it to an unconditional branch
+        # here (the component method reads AddressFlags) and drop the dead reader.
+        module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="DP-only: synchronizer always present, skip flag check"))
+      else:
+        skComponent = Component.StreamK.find(self)
+        module.add(skComponent.initializeSrdAddressFlagsCheck(GeneralBatchedGemmSrdInitiation))
     module.add(RegularSrdInitialization)      
     module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" ))
     module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName()))
@@ -15053,6 +15060,13 @@ class KernelWriterAssembly(KernelWriter):
     if gsuLimit > 1:
       gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
       if kernel["StreamK"]:
+        # DP-only never reaches this GSU-split store branch: SK3 sets GlobalSplitU==0
+        # and StreamKForceDPOnly forces noGSUBranch=True (gsuLimit==1), so this block
+        # is not entered. Assert to keep this dead AddressFlags reader out of DP-only
+        # codegen and to fail loudly (rather than read a removed SGPR) if that
+        # invariant ever changes.
+        assert not kernel["StreamKForceDPOnly"], \
+          "StreamKForceDPOnly must not reach the GSU-split AddressFlags store branch"
         if deferGSU0:
           gsu0DeferredLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred"), comment="")
           gsu0ReturnLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred_Return"), comment="")
@@ -18038,9 +18052,14 @@ class KernelWriterAssembly(KernelWriter):
       return module
 
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllPAP"), "")
-    # Parallel reduction (no synchronizer): WGs do not advance across tiles
-    module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Parallel reduction (no synchronizer): WGs do not advance across tiles.
+    # Under StreamKForceDPOnly the reduction is always forced to the tree path
+    # (Synchronizer always non-null, AddressFlags != 0 invariant), so this
+    # parallel-reduction skip never fires; fold it out and keep only the
+    # StreamKIter >= StreamKIterEnd (last-tile) check.
+    if not kernel["StreamKForceDPOnly"]:
+      module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
 
