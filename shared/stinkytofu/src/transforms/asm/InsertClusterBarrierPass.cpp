@@ -936,8 +936,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                         }
                         break;
                     }
-                    producerDrainAnchors.push_back(
-                        (postIt != bb.end()) ? postIt.getNodePtr() : nullptr);
+                    producerDrainAnchors.push_back((postIt != bb.end()) ? postIt.getNodePtr()
+                                                                        : nullptr);
                 }
             }
 
