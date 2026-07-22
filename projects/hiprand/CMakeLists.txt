@@ -261,17 +261,19 @@ if(HIPRAND_ENABLE_COVERAGE)
   # still hit ccache, so the build is not fully recompiled.
   target_compile_definitions(hiprand PRIVATE HIPRAND_COVERAGE_INSTRUMENTED=1)
 
-  # ROCm 7.14 fix: Coverage instrumentation only supported for host code.
-  # Device code compilation (HIP offload) does not have profiling runtime support
-  # for amdgcn targets, so we must filter coverage flags to host-only compilation.
-  # Use $<COMPILE_LANGUAGE:CXX> to target host C++ files only (not HIP device passes).
+  # ROCm 7.14: Device PGO/coverage requires the new offload driver. While it's the
+  # default in 7.14, explicitly enable it to ensure the correct compilation model.
   target_compile_options(hiprand PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:-g>
-    $<$<COMPILE_LANGUAGE:CXX>:-O0>
-    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
-    $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
+    -g
+    -O0
+    -fprofile-instr-generate
+    -fcoverage-mapping
+    --offload-new-driver
   )
-  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
+  target_link_options(hiprand PUBLIC
+    -fprofile-instr-generate
+    --offload-new-driver
+  )
 endif()
 
 rocm_create_package(
