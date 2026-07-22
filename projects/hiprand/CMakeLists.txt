@@ -260,7 +260,17 @@ if(HIPRAND_ENABLE_COVERAGE)
   # freshly instrumented object. This busts only hipRAND's cache entry; LLVM/HIP/etc.
   # still hit ccache, so the build is not fully recompiled.
   target_compile_definitions(hiprand PRIVATE HIPRAND_COVERAGE_INSTRUMENTED=1)
-  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+
+  # ROCm 7.14 fix: Coverage instrumentation only supported for host code.
+  # Device code compilation (HIP offload) does not have profiling runtime support
+  # for amdgcn targets, so we must filter coverage flags to host-only compilation.
+  # Use $<COMPILE_LANGUAGE:CXX> to target host C++ files only (not HIP device passes).
+  target_compile_options(hiprand PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-g>
+    $<$<COMPILE_LANGUAGE:CXX>:-O0>
+    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
+    $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
+  )
   target_link_options(hiprand PUBLIC -fprofile-instr-generate)
 endif()
 
