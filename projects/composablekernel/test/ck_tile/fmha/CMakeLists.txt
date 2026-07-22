@@ -146,6 +146,24 @@ function(add_fmha_quick_codegen
     get_target_property(
         quick_interface_options ${full_instance_target} INTERFACE_COMPILE_OPTIONS
     )
+    if("${full_instance_target}" STREQUAL "${FMHA_FWD_INSTANCES}")
+        foreach(api_option
+                "fwd_splitkv;CK_TILE_FMHA_FWD_SPLITKV_API"
+                "fwd_appendkv;CK_TILE_FMHA_FWD_APPENDKV_API"
+                "pagedkv_prefill;CK_TILE_FMHA_FWD_PAGEDKV_API"
+                "batch_prefill;CK_TILE_FMHA_FWD_BATCH_PREFILL_API")
+            list(GET api_option 0 api_name)
+            list(GET api_option 1 api_macro)
+            list(REMOVE_ITEM quick_interface_options
+                "-D${api_macro}=0" "-D${api_macro}=1"
+            )
+            if("${quick_api}" MATCHES "(^|,)${api_name}(,|$)")
+                list(APPEND quick_interface_options "-D${api_macro}=1")
+            else()
+                list(APPEND quick_interface_options "-D${api_macro}=0")
+            endif()
+        endforeach()
+    endif()
     target_compile_options(
         ${quick_instance_target}
         PRIVATE ${quick_private_options}
