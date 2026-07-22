@@ -9497,7 +9497,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         requiredUnalignedSgprVar.append("StreamKTileID")
       if self.isPrefetchAcrossPersistentEnabled(kernel):
         requiredUnalignedSgprVar.append("SkPrefetchPrimed")
-      if kernel["StreamKAtomic"] == 0:
+      # SrdWS is the 4-aligned StreamK workspace SRD, used only by the
+      # partials/fixup reduction path. Under StreamKForceDPOnly there are no
+      # partials/fixup: computeStoreSrdStartCommon and storeBranchesCommon
+      # early-return, computeWorkspaceSrd (the sole AddressWS->SrdWS init) and
+      # the tc=='WS' workspace store are never emitted, and the epilogue SrdWS
+      # borrow is guarded by "SrdWS" in self.sgprs. So skip these 4 aligned
+      # SGPRs (plus any alignment padding) for DP-only kernels. AddressWS and
+      # AddressFlags are intentionally NOT skipped: they are kernarg-loaded with
+      # a fixed host layout (ContractionSolution.cpp appends ws/Flags for every
+      # streamK>0 && atomic==0 kernel regardless of DP-only), and AddressFlags
+      # still has live runtime readers under DP-only (globalWriteElements GSU
+      # branch, prefetchAcrossPersistent).
+      if kernel["StreamKAtomic"] == 0 and not kernel["StreamKForceDPOnly"]:
         requiredAligned4SgprVar.append("SrdWS")
 
     if kernel["UseSubtileImpl"]:
