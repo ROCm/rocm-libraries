@@ -7397,7 +7397,10 @@ class KernelWriterAssembly(KernelWriter):
 
         if tailloopInNll and NLLindex == 0:
           # tailLoop in NLL case
-          if kernel["StreamK"]:
+          # DP-only: every WG processes the final iteration of its tile
+          # (StreamKLocalEnd == ItersPerTile), so the "skip TailLoopINNLL" guard
+          # never fires and there is no StreamKLocalEnd SGPR to read.
+          if kernel["StreamK"] and not kernel["StreamKForceDPOnly"]:
             # StreamK + TailLoopINNLL case
             # skip TailLoopINNLL if StreamK WG not processing final iteration
             # Check if tile finished
@@ -19309,6 +19312,11 @@ class KernelWriterAssembly(KernelWriter):
     incSgprName = f"tdm{tcA}{tcB}Incs"
     group0Name = f"tdm{tcA}Group0"
 
+    # DP-only: StreamKLocalStart == 0, so the K-offset is 0 * increment == 0 and
+    # applying it is a no-op. StreamKLocalStart is not allocated in DP-only mode.
+    if kernel["StreamKForceDPOnly"]:
+      return mod
+
     with self.allocTmpSgpr(1, tag="tdmApplyStreamKOffsetWaveSeparated_tmpSgprRes") as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalStart"), src1=sgpr(incSgprName),
@@ -19327,8 +19335,20 @@ class KernelWriterAssembly(KernelWriter):
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
       tmpSgpr = tmpSgprRes.idx
-      mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
-                      comment="tail iteration index within current StreamK tile"))
+      # DP-only: StreamKLocalEnd == ItersPerTile (every WG spans a full tile), so
+      # the tail iteration index is (ItersPerTile - 1). StreamKLocalEnd is not
+      # allocated in DP-only mode; derive it from the ItersPerTile constant
+      # (kept in a VGPR on gfx1250).
+      if kernel["StreamKForceDPOnly"]:
+        sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+        if self.isStreamKConstantsToVgprEnabled(kernel):
+          mod.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"])))
+        mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(sIpt), src1=1,
+                        comment="tail iteration index within current StreamK tile (DP-only: ItersPerTile - 1)"))
+        self.releaseStreamKConstSgpr(sIpt)
+      else:
+        mod.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr("StreamKLocalEnd"), src1=1,
+                        comment="tail iteration index within current StreamK tile"))
       mod.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(incSgprName),
                       comment="StreamK tail K-offset = (localEnd - 1) * increment"))
       mod.add(SAddU32(dst=sgpr(f"{group0Name}+2"), src0=sgpr(f"{group0Name}+2"), src1=sgpr(tmpSgpr),

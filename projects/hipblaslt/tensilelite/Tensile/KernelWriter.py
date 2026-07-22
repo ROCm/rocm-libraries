@@ -9490,9 +9490,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       requiredUnalignedSgprVar += [
         "StreamKIter",
         "StreamKIterEnd",
-        "StreamKLocalStart",
-        "StreamKLocalEnd",
       ]
+      # Under StreamKForceDPOnly every WG processes complete tiles, so the
+      # per-tile local iteration bounds are compile-time constants
+      # (StreamKLocalStart == 0, StreamKLocalEnd == ItersPerTile). Skip these
+      # two persistent SGPRs; all readers are constant-folded/removed under
+      # DP-only (see StreamK.py Common methods, graWorkGroup, and the TDM
+      # StreamK-offset helpers, all gated on StreamKForceDPOnly).
+      if not kernel["StreamKForceDPOnly"]:
+        requiredUnalignedSgprVar += [
+          "StreamKLocalStart",
+          "StreamKLocalEnd",
+        ]
       if len(kernel["SpaceFillingAlgo"]):
         requiredUnalignedSgprVar.append("StreamKTileID")
       if self.isPrefetchAcrossPersistentEnabled(kernel):
