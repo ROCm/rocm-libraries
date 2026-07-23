@@ -568,6 +568,9 @@ struct config_t {
   /// LDS load vector width for matrix B (elements per LDS read)
   int vector_width_b = 1;
 
+  /// cluster dimensions
+  dim3_t cluster_dim{1, 1, 1};
+
   /// Backend-specific parameters (type should match target).
   /// Use tensile() accessor to get/set Tensile-specific params.
   backend_params_t backend{};
