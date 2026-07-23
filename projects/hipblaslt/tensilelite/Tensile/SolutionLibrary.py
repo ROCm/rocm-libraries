@@ -28,7 +28,7 @@ from . import Properties
 from . import Hardware
 from . import Contractions
 from Tensile.Common import state, IsaInfo
-from Tensile.Common.Architectures import gfxToIsa, supportsChipIdPredicate
+from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 
 class SingleSolutionLibrary:
@@ -71,18 +71,7 @@ class PlaceholderLibrary:
         pass
 
     def merge(self, other):
-        otherName = getattr(other, 'filenamePrefix', None)
-        if otherName != self.filenamePrefix:
-            raise RuntimeError(
-                "[PlaceholderLibrary.merge] COLLISION: two source YAMLs "
-                "converge at the same dispatch slot but reference different "
-                "per-file libraries; one .dat will be orphaned.\n"
-                f"  self:  {self.filenamePrefix}\n"
-                f"  other: {otherName!r}\n"
-                "  Likely cause: chip-id placeholder-suffix gate is out of "
-                "sync with HardwarePredicate.FromHardware, or sibling YAMLs "
-                "declare divergent DeviceNames on a chip-id-unaware arch."
-            )
+        pass
 
 
 class MatchingLibrary:
@@ -272,6 +261,52 @@ class MLPClassificationLibrary:
         self.problemFeatures = problem_features
 
 
+class EmbeddingSimilarityLibrary:
+    Tag = "EmbeddingSimilarity"
+    StateKeys = [("type", "tag"), "table"]
+
+    @classmethod
+    def FromOriginalState(cls, d, solutions):
+        origTable = d["table"]
+        table = []
+
+        try:
+            indexStart  = origTable[0]
+            indexOffset = origTable[1]
+            for index in range(indexStart, indexStart + indexOffset):
+                value = IndexSolutionLibrary(solutions[index])
+                table.append(value)
+        except KeyError:
+            pass
+
+        encoder = d.get("encoder")
+        solution_embeddings = d.get("solution_embeddings")
+        hardware_constants = d.get("hardware_constants")
+        quantize = d.get("quantize", False)
+        fallback = d.get("fallback", {})
+        return cls(table, encoder, solution_embeddings, hardware_constants, quantize, fallback)
+
+    @property
+    def tag(self):
+        return self.__class__.Tag
+
+    def merge(self, other):
+        raise RuntimeError(
+            "EmbeddingSimilarity does not support merging yet."
+        )
+
+    def remapSolutionIndices(self, indexMap):
+        pass
+
+    def __init__(self, table, encoder, solution_embeddings, hardware_constants, quantize=False, fallback={}):
+        self.table = table
+        self.encoder = encoder
+        self.solution_embeddings = solution_embeddings
+        self.hardware_constants = hardware_constants
+        self.quantize = quantize
+        self.fallback = fallback
+
+
 class ProblemMapLibrary:
     Tag = "ProblemMap"
     StateKeys = [("type", "tag"), ("property", "mappingProperty"), ("map", "mapping")]
@@ -333,53 +368,6 @@ class PredicateLibrary:
 class MasterSolutionLibrary:
     StateKeys = ["solutions", "library"]
 
-    @staticmethod
-    def hardware(d, library, placeholderName, lazyLibrary, logicFile=None):
-        """Build the Hardware-level PredicateLibrary row and update the
-        placeholder filename.
-
-        Lifted out of ``FromOriginalState`` so the placeholder-suffix gating
-        invariant (the ``_ID<chipid>`` suffix must only be appended when the
-        runtime ``HardwarePredicate`` also discriminates on chip-id, see
-        ``Hardware.HardwarePredicate.FromHardware`` and
-        ``supportsChipIdPredicate``) can be exercised behaviorally rather than
-        by source-string inspection.
-        """
-        devicePart = d["ArchitectureName"]
-        cuCount = d["CUCount"]
-
-        pciChipId = d.get("DeviceNames", None)
-
-        newLib = PredicateLibrary(tag="Hardware")
-        if devicePart == "fallback":
-            pred = Hardware.HardwarePredicate("TruePred")
-        else:
-            pred = Hardware.HardwarePredicate.FromHardware(
-                gfxToIsa(devicePart), cuCount, pciChipId, logicFile=logicFile
-            )
-
-        newLib.rows.append({"predicate": pred, "library": library})
-
-        if lazyLibrary:
-            if cuCount: placeholderName += "_CU" + str(cuCount)
-            # Only append the chip-id suffix on architectures whose runtime
-            # HardwarePredicate also includes the chip-id discriminator
-            # (see Hardware.HardwarePredicate.FromHardware). Otherwise the
-            # filename diverges between sibling YAMLs while their predicates
-            # remain equal, producing PredicateLibrary.merge collisions whose
-            # PlaceholderLibrary children silently drop one leaf.
-            if pciChipId and supportsChipIdPredicate(devicePart):
-                # Convert device names list to a sanitized string for filename
-                # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
-                if isinstance(pciChipId, list):
-                    chipIdStr = '-'.join([str(d).replace('Device ', '').strip() for d in pciChipId])
-                else:
-                    chipIdStr = str(pciChipId).replace('Device ', '').strip()
-                placeholderName += "_ID" + chipIdStr
-            placeholderName += "_" + str(devicePart)
-
-        return newLib, placeholderName
-
     @classmethod
     def FixSolutionIndices(cls, solutions):
         # fix missing and duplicate solution indices.
@@ -413,7 +401,34 @@ class MasterSolutionLibrary:
 
         # functions for creating each "level" of the library
         def hardware(d, problemType, solutions, library, placeholderName):
-            return cls.hardware(d, library, placeholderName, lazyLibrary, logicFile=logicFile)
+            devicePart = d["ArchitectureName"]
+            cuCount = d["CUCount"]
+
+            pciChipId = d.get("DeviceNames", None)
+
+            newLib = PredicateLibrary(tag="Hardware")
+            if devicePart == "fallback":
+                pred = Hardware.HardwarePredicate("TruePred")
+            else:
+                pred = Hardware.HardwarePredicate.FromHardware(
+                    gfxToIsa(devicePart), cuCount, pciChipId, logicFile=logicFile
+                )
+
+            newLib.rows.append({"predicate": pred, "library": library})
+
+            if lazyLibrary:
+                if cuCount: placeholderName += "_CU" + str(cuCount)
+                if pciChipId:
+                    # Convert device names list to a sanitized string for filename
+                    # e.g., ['Device 75a0', 'Device 75b0'] -> 'ID75a0-75b0'
+                    if isinstance(pciChipId, list):
+                        chipIdStr = '-'.join([str(d).replace('Device ', '').strip() for d in pciChipId])
+                    else:
+                        chipIdStr = str(pciChipId).replace('Device ', '').strip()
+                    placeholderName += "_ID" + chipIdStr
+                placeholderName += "_" + str(devicePart)
+
+            return newLib, placeholderName
 
         def operationIdentifier(d, problemType, solutions, library, placeholderName):
             operationID = problemType.operationIdentifier
@@ -486,6 +501,13 @@ class MasterSolutionLibrary:
                 regressionLib = MLPClassificationLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": regressionLib})
+            elif d["LibraryType"] == "EmbeddingSimilarity":
+                predicate = Properties.Predicate(tag="Embedding")
+
+                regressionLib = EmbeddingSimilarityLibrary.FromOriginalState(d["Library"], solutions)
+                library = PredicateLibrary(tag="Problem")
+                library.rows.append({"predicate": predicate, "library": regressionLib})
+                
             else:
                 assert 0 and "Unrecognized LibraryType."
 
