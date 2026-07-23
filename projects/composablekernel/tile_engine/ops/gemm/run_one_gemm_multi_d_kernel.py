@@ -47,7 +47,6 @@ if gemm_pypath:
 from gemm_utils import (  # noqa: E402
     MultiDGemmProblem,
     GpuMultiDGemmRunner,
-    _multi_d_layout_from_kernel_name,
 )
 import numpy as np  # noqa: E402
 
