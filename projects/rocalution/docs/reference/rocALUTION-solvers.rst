@@ -10,51 +10,23 @@ rocALUTION solvers
 
 This document provides a category-wise listing of the solver APIs along with the information required to use them.
 
+Member documentation for each solver class is on the :ref:`api` page. The sections below group solvers by category and describe how to use them in practice.
+
 Code structure
 ==============
 
-.. doxygenclass:: rocalution::Solver
-
-It provides an interface for:
-
-.. doxygenfunction:: rocalution::Solver::SetOperator
-.. doxygenfunction:: rocalution::Solver::Build
-.. doxygenfunction:: rocalution::Solver::Clear
-.. doxygenfunction:: rocalution::Solver::Solve
-.. doxygenfunction:: rocalution::Solver::Print
-.. doxygenfunction:: rocalution::Solver::ReBuildNumeric
-.. doxygenfunction:: rocalution::Solver::MoveToHost
-.. doxygenfunction:: rocalution::Solver::MoveToAccelerator
+:cpp:class:`rocalution::Solver`
 
 Iterative linear solvers
 ========================
 
-.. doxygenclass:: rocalution::IterativeLinearSolver
-
-It provides an interface for:
-
-.. doxygenfunction:: rocalution::IterativeLinearSolver::Init(double, double, double, int)
-.. doxygenfunction:: rocalution::IterativeLinearSolver::Init(double, double, double, int, int)
-.. doxygenfunction:: rocalution::IterativeLinearSolver::InitMinIter
-.. doxygenfunction:: rocalution::IterativeLinearSolver::InitMaxIter
-.. doxygenfunction:: rocalution::IterativeLinearSolver::InitTol
-.. doxygenfunction:: rocalution::IterativeLinearSolver::RecordResidualHistory
-.. doxygenfunction:: rocalution::IterativeLinearSolver::RecordHistory
-.. doxygenfunction:: rocalution::IterativeLinearSolver::Verbose
-.. doxygenfunction:: rocalution::IterativeLinearSolver::SetPreconditioner
-.. doxygenfunction:: rocalution::IterativeLinearSolver::SetResidualNorm
-.. doxygenfunction:: rocalution::IterativeLinearSolver::GetAmaxResidualIndex
-.. doxygenfunction:: rocalution::IterativeLinearSolver::GetSolverStatus
+:cpp:class:`rocalution::IterativeLinearSolver`
 
 Building and solving phase
 ==========================
 Each iterative solver consists of a building step and a solving step. During the building step all necessary auxiliary data is allocated and the preconditioner is constructed. You can now call the solving procedure, which can be called several times.
 
 When the initial matrix associated with the solver is on the accelerator, the solver tries to build everything on the accelerator. However, some preconditioners and solvers (such as FSAI and AMG) must be constructed on the host before being transferred to the accelerator. If the initial matrix is on the host and you want to run the solver on the accelerator, then you need to move the solver to the accelerator, matrix, right-hand side, and solution vector.
-
-.. note:: 
-
-  If you have a preconditioner associated with the solver, it is moved automatically to the accelerator when you move the solver.
 
 .. code-block:: cpp
 
@@ -105,19 +77,10 @@ When the initial matrix associated with the solver is on the accelerator, the so
   // Compute the solution on the accelerator
   ls.Solve(rhs, &x);
 
-
 Clear function and destructor
 =============================
 
-The :cpp:func:`rocalution::Solver::Clear` function clears all the data which is in the solver, including the associated preconditioner. Thus, the solver is not anymore associated with this preconditioner.
-
-.. note:: 
-
-  The preconditioner is not deleted (via destructor), only a :cpp:func:`rocalution::Preconditioner::Clear` is called.
-
-.. note:: 
-
-  When the destructor of the solver class is called, it automatically calls the *Clear()* function. Be careful, when declaring your solver and preconditioner in different places - we highly recommend to manually call the *Clear()* function of the solver and not rely on the destructor of the solver.
+See :cpp:func:`rocalution::Solver::Clear` and the :cpp:class:`rocalution::Solver` class documentation on the :ref:`api` page.
 
 Numerical update
 ================
@@ -127,122 +90,77 @@ Some preconditioners require two phases in the their construction: an algebraic 
 Fixed-Point iteration
 =====================
 
-.. doxygenclass:: rocalution::FixedPoint
-.. doxygenfunction:: rocalution::FixedPoint::SetRelaxation
+:cpp:class:`rocalution::FixedPoint`
 
 Krylov subspace solvers
 =======================
 
-CG
---
-.. doxygenclass:: rocalution::CG
+:cpp:class:`rocalution::CG`
 
-CR
---
-.. doxygenclass:: rocalution::CR
+:cpp:class:`rocalution::CR`
 
-GMRES
------
-.. doxygenclass:: rocalution::GMRES
-.. doxygenfunction:: rocalution::GMRES::SetBasisSize
+:cpp:class:`rocalution::GMRES`
 
-FGMRES
-------
-.. doxygenclass:: rocalution::FGMRES
-.. doxygenfunction:: rocalution::FGMRES::SetBasisSize
+:cpp:class:`rocalution::FGMRES`
 
-BiCGStab
---------
-.. doxygenclass:: rocalution::BiCGStab
+:cpp:class:`rocalution::BiCGStab`
 
-IDR
----
-.. doxygenclass:: rocalution::IDR
-.. doxygenfunction:: rocalution::IDR::SetShadowSpace
+:cpp:class:`rocalution::IDR`
 
-FCG
----
-.. doxygenclass:: rocalution::FCG
+:cpp:class:`rocalution::FCG`
 
-QMRCGStab
----------
-.. doxygenclass:: rocalution::QMRCGStab
+:cpp:class:`rocalution::QMRCGStab`
 
-BiCGStab(l)
------------
-.. doxygenclass:: rocalution::BiCGStabl
-.. doxygenfunction:: rocalution::BiCGStabl::SetOrder
+:cpp:class:`rocalution::BiCGStabl`
 
 Chebyshev iteration scheme
 ==========================
 
-.. doxygenclass:: rocalution::Chebyshev
+:cpp:class:`rocalution::Chebyshev`
 
 Mixed-precision defect correction scheme
 ========================================
 
-.. doxygenclass:: rocalution::MixedPrecisionDC
+:cpp:class:`rocalution::MixedPrecisionDC`
 
 MultiGrid solvers
 =================
 
 The library provides algebraic multigrid and a skeleton for geometric multigrid methods. The ``BaseMultigrid`` class itself doesn't construct data for the method. It contains the solution procedure for V, W and K-cycles. The AMG has two different versions for Local (non-MPI) and for Global (MPI) type of computations.
 
-.. doxygenclass:: rocalution::BaseMultiGrid
+:cpp:class:`rocalution::BaseMultiGrid`
 
 Geometric multiGrid
 -------------------
 
-.. doxygenclass:: rocalution::MultiGrid
+:cpp:class:`rocalution::MultiGrid`
 
 Algebraic multiGrid
 -------------------
 
-.. doxygenclass:: rocalution::BaseAMG
-.. doxygenfunction:: rocalution::BaseAMG::BuildHierarchy
-.. doxygenfunction:: rocalution::BaseAMG::BuildSmoothers
-.. doxygenfunction:: rocalution::BaseAMG::SetCoarsestLevel
-.. doxygenfunction:: rocalution::BaseAMG::SetManualSmoothers
-.. doxygenfunction:: rocalution::BaseAMG::SetManualSolver
-.. doxygenfunction:: rocalution::BaseAMG::SetDefaultSmootherFormat
-.. doxygenfunction:: rocalution::BaseAMG::SetOperatorFormat
-.. doxygenfunction:: rocalution::BaseAMG::GetNumLevels
+:cpp:class:`rocalution::BaseAMG`
 
 Unsmoothed aggregation AMG
 ==========================
 
-.. doxygenclass:: rocalution::UAAMG
-.. doxygenfunction:: rocalution::UAAMG::SetCouplingStrength
-.. doxygenfunction:: rocalution::UAAMG::SetOverInterp
+:cpp:class:`rocalution::UAAMG`
 
 Smoothed aggregation AMG
 ========================
 
-.. doxygenclass:: rocalution::SAAMG
-.. doxygenfunction:: rocalution::SAAMG::SetCouplingStrength
-.. doxygenfunction:: rocalution::SAAMG::SetInterpRelax
+:cpp:class:`rocalution::SAAMG`
 
 Ruge-stueben AMG
 ================
 
-.. doxygenclass:: rocalution::RugeStuebenAMG
-.. doxygenfunction:: rocalution::RugeStuebenAMG::SetStrengthThreshold
+:cpp:class:`rocalution::RugeStuebenAMG`
 
 Pairwise AMG
 ============
 
-.. doxygenclass:: rocalution::PairwiseAMG
-.. doxygenfunction:: rocalution::PairwiseAMG::SetBeta
-.. doxygenfunction:: rocalution::PairwiseAMG::SetOrdering
-.. doxygenfunction:: rocalution::PairwiseAMG::SetCoarseningFactor
+:cpp:class:`rocalution::PairwiseAMG`
 
 Direct linear solvers
 =====================
-.. doxygenclass:: rocalution::DirectLinearSolver
-.. doxygenclass:: rocalution::LU
-.. doxygenclass:: rocalution::QR
-.. doxygenclass:: rocalution::Inversion
 
-.. note:: 
-
-  These methods can only be used with local-type problems.
+:cpp:class:`rocalution::DirectLinearSolver`, :cpp:class:`rocalution::LU`, :cpp:class:`rocalution::QR`, :cpp:class:`rocalution::Inversion`

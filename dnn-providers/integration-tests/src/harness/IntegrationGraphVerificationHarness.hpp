@@ -584,14 +584,12 @@ public:
         // as two 4-bit values per byte) so the buffer can be consumed directly by
         // the kernel. Both are filled from the same seed, so they hold identical
         // logical values.
-        refBundle.tensors.insert(
-            {tensorId,
-             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr,
-                                                                   /*packSubByteElements=*/false)});
-        gpuBundle.tensors.insert(
-            {tensorId,
-             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr,
-                                                                   /*packSubByteElements=*/true)});
+        refBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(
+                                *tensorAttr, /*packSubByteElements=*/false));
+        gpuBundle.addTensor(*tensorAttr,
+                            hipdnn_test_sdk::utilities::createTensorFromAttribute(
+                                *tensorAttr, /*packSubByteElements=*/true));
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;
