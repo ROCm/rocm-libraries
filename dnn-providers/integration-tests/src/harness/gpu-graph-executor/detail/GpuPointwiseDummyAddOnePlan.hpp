@@ -47,14 +47,34 @@ private:
 class GpuDummyAddOnePlanBuilder : public IGpuGraphNodePlanBuilder
 {
 public:
-    bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                      [[maybe_unused]] const std::unordered_map<
-                          int64_t,
-                          const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>& tensorMap)
-        const override
+    bool isApplicable(
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap) const override
     {
-        return node.attributes_type()
-               == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+        if(node.attributes_type()
+           != hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes)
+        {
+            return false;
+        }
+
+        const auto* attrs = node.attributes_as_PointwiseAttributes();
+
+        // Reject if any operand this op consumes is runtime pass-by-value; the
+        // dummy add-one plan cannot resolve a PBV host scalar. Enumerate every
+        // operand (required in_0/out_0 and optional in_1/in_2/axis) so the check
+        // is exhaustive.
+        std::vector<int64_t> operandUids{attrs->in_0_tensor_uid(), attrs->out_0_tensor_uid()};
+        for(const auto optional :
+            {attrs->in_1_tensor_uid(), attrs->in_2_tensor_uid(), attrs->axis_tensor_uid()})
+        {
+            if(optional.has_value())
+            {
+                operandUids.push_back(*optional);
+            }
+        }
+        return !anyOperandIsRuntimePassByValue(tensorMap, operandUids);
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>
