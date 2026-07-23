@@ -60,6 +60,11 @@ const vector<int> singular_range = {
     // the orthogonality error improved.
 };
 
+const vector<vector<int>> known_bug_size_range = {
+    // normal (valid) samples
+    {15, 15, 15, 15},
+};
+
 const vector<vector<int>> matrix_size_range = {
     // quick return
     {0, 1, 1, 1}, // m = 0
@@ -71,12 +76,17 @@ const vector<vector<int>> matrix_size_range = {
     {20, 10, 20, 5}, // invalid ldr (m > n)
     {10, 20, 10, 5}, // invalid ldr (n > m)
     // normal (valid) samples
-    {15, 15, 15, 15},
     {30, 30, 100, 30},
     {40, 40, 40, 100},
     {100, 30, 130, 30},
     {20, 80, 20, 20},
-    {10, 100, 40, 80}};
+    {10, 100, 40, 80},
+};
+
+const vector<vector<int64_t>> known_bug_size_range_64 = {
+    // normal (valid) samples
+    {15, 15, 15, 15},
+};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
@@ -89,12 +99,12 @@ const vector<vector<int64_t>> matrix_size_range_64 = {
     {20, 10, 20, 5}, // invalid ldr (m > n)
     {10, 20, 10, 5}, // invalid ldr (n > m)
     // normal (valid) samples
-    {15, 15, 15, 15},
     {30, 30, 100, 30},
     {40, 40, 40, 100},
     {100, 30, 130, 30},
     {20, 80, 20, 20},
-    {10, 100, 40, 80}};
+    {10, 100, 40, 80},
+};
 
 // ============================================================================
 // Test sizes for daily_lapack tests (larger/longer tests)
@@ -352,3 +362,12 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR_64,
                          Combine(ValuesIn(large_matrix_size_range_64),
                                  ValuesIn(large_singular_range)));
+
+// Known bug tests
+INSTANTIATE_TEST_SUITE_P(known_bug,
+                         CHOLQR,
+                         Combine(ValuesIn(known_bug_size_range), ValuesIn(singular_range)));
+
+INSTANTIATE_TEST_SUITE_P(known_bug,
+                         CHOLQR_64,
+                         Combine(ValuesIn(known_bug_size_range_64), ValuesIn(singular_range)));
