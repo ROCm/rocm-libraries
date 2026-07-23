@@ -1575,6 +1575,54 @@ constexpr topk_air_config_params topk_air_config_params_base()
 
 } // namespace detail
 
+namespace detail
+{
+struct segmented_topk_air_config_params
+{
+    kernel_config_params kernel_config;
+    unsigned int         radix_bits                   = 8;
+    unsigned int         candidate_buffer_coefficient = 256;
+    unsigned int         thread_counter_limit         = 32;
+};
+} // namespace detail
+
+/// \brief Configuration of device-level segmented_topk_air
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+/// \tparam RadixBits How many bits are processed per iteration.
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int RadixBits,
+         unsigned int CandidateBufferCoefficient = 256,
+         unsigned int ThreadCounterLimit         = 32>
+struct segmented_topk_air_config : public detail::segmented_topk_air_config_params
+{
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+    constexpr segmented_topk_air_config()
+        : detail::segmented_topk_air_config_params{
+              {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT},
+              RadixBits,
+              CandidateBufferCoefficient,
+              ThreadCounterLimit
+    }
+    {}
+#endif
+};
+
+namespace detail
+{
+template<class Key, class Value, class SizeIn>
+constexpr segmented_topk_air_config_params segmented_topk_air_config_params_base()
+{
+    // TODO: calculate default config based on item_scale
+    return segmented_topk_air_config_params{
+        {256, 4}
+    };
+};
+
+} // namespace detail
+
 END_ROCPRIM_NAMESPACE
 
 /// @}
