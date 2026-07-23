@@ -444,13 +444,13 @@ top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then t
 follow-up ([Section 8.3](#83-future-jit-and-normalized-providers)); a prebuilt kernel encodes one fixed
 graph shape, so bounded matching covers it, and operand optionality is handled by shipping distinct UKDs.
 
-**A fused match.** The same UMD form matches several ops as one fusable unit. This UMD matches a Conv,
-Bias, and ReLU chain. Its `$graph.node_count == 3` makes the fusion legal: the pattern is a closed,
-exact match of the whole graph (any extra node means no match), so the intermediates (`$conv_out`,
-`$bias_out`) cannot be read elsewhere and one UKD serves the whole chain as a single kernel. (To fuse
-the same chain embedded in a larger graph, drop the count and instead require each intermediate be
-`$conv_out.virtual`, internal to the pattern; that is the general form, and is what lets a subgraph be
-matched and reused inside a larger graph.)
+**A fused match.** The same UMD form matches several ops as one fusable unit. A pattern matches a
+subgraph *wherever* it appears, so this Conv, Bias, and ReLU chain matches even when embedded in a
+larger graph. The fusion is legal only if the intermediates it absorbs do not escape, so the criteria
+require `$conv_out` and `$bias_out` to be `virtual` (produced and consumed inside the pattern, read
+nowhere else); then one UKD serves the whole chain as a single kernel. (`$graph.node_count == 3` is the
+stricter alternative, for a matcher that should accept only a graph that is exactly these ops and
+nothing more.)
 
 ```jsonc
 {
@@ -472,7 +472,8 @@ matched and reused inside a larger graph.)
     {"==":    [{"var": "$y.stride_order"}, [0, 2, 3, 1]]}, {"var": "$y.packed"},  // NHWC
     {"shape": [{"var": "$y"}, ["batch", "out_h", "out_w", "out_channels"]]},
     {"shape": [{"var": "$bias"}, ["out_channels"]]},
-    {"==":    [{"var": "$graph.node_count"}, 3]}  // exactly these 3 ops, so the intermediates are private
+    {"var": "$conv_out.virtual"},  // internal to the pattern (read nowhere else), so the fusion is legal
+    {"var": "$bias_out.virtual"}
   ]}
 }
 ```
