@@ -88,6 +88,11 @@ namespace TensileLite
                             auto solution = slnIter->second;
                             lib.solution_list.emplace_back(index, solution);
 
+                            origami::dim3_t origami_cluster_dim = {
+                                static_cast<size_t>(solution->sizeMapping.clusterDim.x),
+                                static_cast<size_t>(solution->sizeMapping.clusterDim.y),
+                                static_cast<size_t>(solution->sizeMapping.clusterDim.z)};
+
                             origami::dim3_t origami_mi;
                             if(solution->sizeMapping.matrixInstruction[0] == 0
                                && solution->sizeMapping.matrixInstruction[1] == 0
@@ -127,6 +132,7 @@ namespace TensileLite
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a             = solution->sizeMapping.nonTemporalA,
                                 .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .cluster_dim               = origami_cluster_dim,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
