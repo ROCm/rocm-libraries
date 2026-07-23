@@ -57,6 +57,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/WaitCntValidationCheckPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -179,6 +180,12 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     }
 
     pm.addPass(createMemTokenConsistencyCheckPass());
+
+    // Whole-kernel wait-count validation: verify s_wait_* drains every async
+    // mem dependency. Implicit-dep materialises LDS pseudo-reg edges the
+    // validator's def-use build needs (same prerequisite as insertion).
+    pm.addPass(createStinkyBuildImplicitDependencyPass());
+    pm.addPass(createWaitCntValidationCheckPass());
 
     if (runScheduler) {
         pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
