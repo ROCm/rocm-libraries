@@ -40,6 +40,36 @@ this accessor; your type owns path resolution. Conventions:
 - returning `Value()` (null) means "not found" and triggers a `var` default if
   the rule supplies one.
 
+### Sample: `JsonDataSource`
+
+`JsonDataSource.hpp` provides a ready-made data source backed by an
+`nlohmann::json` document, so you can evaluate rules against JSON without writing
+an accessor:
+
+```cpp
+#include "hip_kernel_provider_common/JsonDataSource.hpp"
+
+jlogic::JsonDataSource src(nlohmann::json{{"q", {{"dims", {8, 16}}}}});
+auto expr = jlogic::compile<jlogic::JsonDataSource>(rule);
+jlogic::Value r = expr(src);
+```
+
+It resolves dotted keys (`a.b.c`), `[N]` array subscripts (`arr[0]`,
+`rows[2].name`, `grid[0][1]`), and dot-form indices (`arr.1`). A leading
+variable sigil is stripped, so `"$q.dims[0]"` and `"q.dims[0]"` address the same
+location. It also offers the inverse, `setData`, which writes a `Value` back into
+the document and creates intermediate objects and arrays on demand:
+
+```cpp
+src.setData("$q.dims[0]", 2);   // -> {"q":{"dims":[2, 16]}}
+```
+
+A `[N]` subscript grows an array (filling gaps with null); any other key creates
+or descends into an object; the empty path replaces the whole document.
+`setData` throws `std::invalid_argument` on a malformed path or a non-numeric
+index applied to an array. Objects and null in the document read back as `Value`
+null, matching `Value`'s scalar/array-only model.
+
 ## `Value`
 
 A json-like tagged value with no external dependency. Alternatives: null, bool,
@@ -61,7 +91,7 @@ anywhere a literal can, by prefixing it with a sigil (`$` by default):
 | ------------ | ------------------- | ----------------------- |
 | `"$x"`       | `{"var": "x"}`      | top-level key           |
 | `"$a.b.c"`   | `{"var": "a.b.c"}`  | nested path             |
-| `"$arr.0"`   | `{"var": "arr.0"}`  | array index             |
+| `"$arr[0]"`  | `{"var": "arr[0]"}` | array index (subscript) |
 | `"$"`        | `{"var": ""}`       | whole document          |
 | `"$$text"`   | `"$text"`           | escaped string literal  |
 
@@ -71,7 +101,7 @@ begin with `$`.
 
 ## Supported operators
 
-Data access: `var` (dotted paths, array indices, `""` whole-document,
+Data access: `var` (dotted paths, `[N]` array subscripts, `""` whole-document,
 `[path, default]` fallback, and computed `[expr, default]` paths);
 `value_or_default` (`{"value_or_default": ["$x", default]}`) returns the
 variable's value when the path resolves and the default otherwise. It keys on

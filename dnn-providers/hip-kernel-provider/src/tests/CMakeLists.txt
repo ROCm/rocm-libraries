@@ -29,6 +29,7 @@ add_executable(
     core/TestUtils.cpp
     core/TestPluginPublic.cpp
     core/TestJsonLogic.cpp
+    core/TestJsonDataSource.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "hip_kernel_provider_common/JsonDataSource.hpp"
 #include "hip_kernel_provider_common/JsonLogic.hpp"
 
 namespace jlogic = hip_kernel_provider_common::jsonlogic;
@@ -22,103 +23,20 @@ using V = jlogic::Value;
 
 namespace
 {
-// ---------------------------------------------------------------------------
-// A sample data source: wraps an nlohmann::json document and resolves dotted
-// paths to jlogic::Value. Demonstrates the getData(std::string) contract.
-// ---------------------------------------------------------------------------
-struct JsonData
-{
-    json doc;
-
-    static V convert(const json& j)
-    {
-        if(j.is_boolean())
-        {
-            return {j.get<bool>()};
-        }
-        if(j.is_number_integer() || j.is_number_unsigned())
-        {
-            return {j.get<std::int64_t>()};
-        }
-        if(j.is_number_float())
-        {
-            return {j.get<double>()};
-        }
-        if(j.is_string())
-        {
-            return {j.get<std::string>()};
-        }
-        if(j.is_array())
-        {
-            V::Array a;
-            a.reserve(j.size());
-            for(const auto& e : j)
-            {
-                a.push_back(convert(e));
-            }
-            return {std::move(a)};
-        }
-        return {}; // null or object -> not representable, treated as null
-    }
-
-    V getData(const std::string& path) const
-    {
-        if(path.empty())
-        {
-            return convert(doc);
-        }
-        const json* cur = &doc;
-        std::size_t start = 0;
-        while(start <= path.size())
-        {
-            const std::size_t dot = path.find('.', start);
-            const std::string seg
-                = path.substr(start, (dot == std::string::npos ? path.size() : dot) - start);
-            if(cur->is_object())
-            {
-                const auto it = cur->find(seg);
-                if(it == cur->end())
-                {
-                    return {};
-                }
-                cur = &*it;
-            }
-            else if(cur->is_array())
-            {
-                char* end = nullptr;
-                const long idx = std::strtol(seg.c_str(), &end, 10);
-                if(*end != '\0' || idx < 0 || static_cast<std::size_t>(idx) >= cur->size())
-                {
-                    return {};
-                }
-                cur = &(*cur)[static_cast<std::size_t>(idx)];
-            }
-            else
-            {
-                return {};
-            }
-            if(dot == std::string::npos)
-            {
-                break;
-            }
-            start = dot + 1;
-        }
-        return convert(*cur);
-    }
-};
-
-const JsonData D{json{{"x", 41},
-                      {"y", 8},
-                      {"name", "amd"},
-                      {"nested", {{"a", {{"b", 7}}}}},
-                      {"arr", {10, 20, 30}},
-                      {"flag", true},
-                      {"zero", 0}}};
+const jlogic::JsonDataSource D{json{{"x", 41},
+                                    {"y", 8},
+                                    {"name", "amd"},
+                                    {"nested", {{"a", {{"b", 7}}}}},
+                                    {"arr", {10, 20, 30}},
+                                    {"grid", {{1, 2}, {3, 4}}},
+                                    {"rows", {{{"name", "a0"}}, {{"name", "a1"}}}},
+                                    {"flag", true},
+                                    {"zero", 0}}};
 
 // Compile a rule and evaluate it against the shared document D.
 V eval(const json& rule)
 {
-    return jlogic::compile<JsonData>(rule)(D);
+    return jlogic::compile<jlogic::JsonDataSource>(rule)(D);
 }
 } // namespace
 
@@ -151,6 +69,24 @@ TEST(JsonLogic, InlineVariables)
     EXPECT_EQ(eval(json({{"+", json::array({"$x", "$y"})}})), V(49));
     EXPECT_EQ(eval(json({{"+", json::array({"$x", 1})}})), V(42));
     EXPECT_EQ(eval(json({{"==", json::array({"amd", "$name"})}})), V(true));
+}
+
+TEST(JsonLogic, SubscriptIndex)
+{
+    // [N] subscript, stock and inline forms
+    EXPECT_EQ(eval(json({{"var", "arr[0]"}})), V(10));
+    EXPECT_EQ(eval("$arr[2]"), V(30));
+    // subscript and dotted keys mixed
+    EXPECT_EQ(eval("$rows[1].name"), V("a1"));
+    // chained subscripts into a nested array
+    EXPECT_EQ(eval("$grid[0][1]"), V(2));
+    EXPECT_EQ(eval("$grid[1][0]"), V(3));
+    // dot-form array index still resolves
+    EXPECT_EQ(eval("$arr.1"), V(20));
+    // out-of-range, non-numeric, and subscript-on-non-array resolve to null
+    EXPECT_EQ(eval("$arr[9]"), V());
+    EXPECT_EQ(eval("$arr[x]"), V());
+    EXPECT_EQ(eval("$nested[0]"), V());
 }
 
 TEST(JsonLogic, Arithmetic)
@@ -265,20 +201,21 @@ TEST(JsonLogic, Umd0018ConstraintShapes)
 
 TEST(JsonLogic, CompileOnceReuseAcrossData)
 {
-    const auto expr = jlogic::compile<JsonData>(json({{"*", json::array({"$x", 2})}}));
-    const JsonData a{json{{"x", 3}}};
-    const JsonData b{json{{"x", 10}}};
+    const auto expr
+        = jlogic::compile<jlogic::JsonDataSource>(json({{"*", json::array({"$x", 2})}}));
+    const jlogic::JsonDataSource a{json{{"x", 3}}};
+    const jlogic::JsonDataSource b{json{{"x", 10}}};
     EXPECT_EQ(expr(a), V(6));
     EXPECT_EQ(expr(b), V(20));
 }
 
 TEST(JsonLogic, MalformedRulesThrowAtCompileTime)
 {
-    EXPECT_THROW(jlogic::compile<JsonData>(json({{"nope", json::array({1, 2})}})),
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"nope", json::array({1, 2})}})),
                  jlogic::JsonLogicCompileError);
-    EXPECT_THROW(jlogic::compile<JsonData>(json({{"/", json::array({1, 2, 3})}})),
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"/", json::array({1, 2, 3})}})),
                  jlogic::JsonLogicCompileError);
-    EXPECT_THROW(jlogic::compile<JsonData>(json({{"abs", json::array({1, 2})}})),
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"abs", json::array({1, 2})}})),
                  jlogic::JsonLogicCompileError);
 }
 
@@ -287,7 +224,7 @@ TEST(JsonLogic, VariablesCollectsReferencedPaths)
     using S = std::set<std::string>;
     // Keep the Expression alive while draining the borrowed range into a set.
     const auto vars = [](const json& rule) {
-        const auto expr = jlogic::compile<JsonData>(rule);
+        const auto expr = jlogic::compile<jlogic::JsonDataSource>(rule);
         return S(expr.variables().begin(), expr.variables().end());
     };
     // inline vars across an op
@@ -308,7 +245,8 @@ TEST(JsonLogic, VariablesCollectsReferencedPaths)
 TEST(JsonLogic, VariablesRangeIsLazyAndKeepsDuplicates)
 {
     // range-for yields every occurrence, duplicates included
-    const auto expr = jlogic::compile<JsonData>(json({{"+", json::array({"$x", "$x", "$y"})}}));
+    const auto expr
+        = jlogic::compile<jlogic::JsonDataSource>(json({{"+", json::array({"$x", "$x", "$y"})}}));
     std::vector<std::string> seen;
     for(const std::string& v : expr.variables())
     {
@@ -319,7 +257,7 @@ TEST(JsonLogic, VariablesRangeIsLazyAndKeepsDuplicates)
     EXPECT_EQ(std::count(seen.begin(), seen.end(), std::string("y")), 1);
 
     // empty range: begin() == end(), the body never runs
-    const auto lit = jlogic::compile<JsonData>(json(42));
+    const auto lit = jlogic::compile<jlogic::JsonDataSource>(json(42));
     EXPECT_TRUE(lit.variables().begin() == lit.variables().end());
 
     // composes with STL algorithms over the borrowed references
@@ -331,16 +269,18 @@ TEST(JsonLogic, VariablesRangeIsLazyAndKeepsDuplicates)
 TEST(JsonLogic, WholeDocumentAndDynamicKeysRejected)
 {
     // whole-document references: inline sigil, empty var, empty array, null
-    EXPECT_THROW(jlogic::compile<JsonData>(json("$")), jlogic::JsonLogicCompileError);
-    EXPECT_THROW(jlogic::compile<JsonData>(json({{"var", ""}})), jlogic::JsonLogicCompileError);
-    EXPECT_THROW(jlogic::compile<JsonData>(json({{"var", json::array()}})),
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json("$")), jlogic::JsonLogicCompileError);
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"var", ""}})),
                  jlogic::JsonLogicCompileError);
-    EXPECT_THROW(jlogic::compile<JsonData>(json({{"var", nullptr}})),
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"var", json::array()}})),
+                 jlogic::JsonLogicCompileError);
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(json({{"var", nullptr}})),
                  jlogic::JsonLogicCompileError);
     // computed / dynamic keys (object key, or computed first array element)
-    EXPECT_THROW(jlogic::compile<JsonData>(json({{"var", {{"+", json::array({1, 2})}}}})),
-                 jlogic::JsonLogicCompileError);
     EXPECT_THROW(
-        jlogic::compile<JsonData>(json({{"var", json::array({{{"+", json::array({1, 2})}}, 0})}})),
+        jlogic::compile<jlogic::JsonDataSource>(json({{"var", {{"+", json::array({1, 2})}}}})),
         jlogic::JsonLogicCompileError);
+    EXPECT_THROW(jlogic::compile<jlogic::JsonDataSource>(
+                     json({{"var", json::array({{{"+", json::array({1, 2})}}, 0})}})),
+                 jlogic::JsonLogicCompileError);
 }
