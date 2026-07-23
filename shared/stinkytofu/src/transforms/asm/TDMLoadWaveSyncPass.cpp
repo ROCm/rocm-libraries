@@ -77,8 +77,8 @@ void tagExistingWaveGroupBarrier(StinkyInstruction* barrier, const std::string& 
 /// `Frontier`) is the earliest deferrable load of the group and the barrier site;
 /// this holds the rest of the group's state.
 struct DeferEntry {
-    std::vector<int> deferSeen;    // union of the group's deferrable tokens
-    bool barrierInGap = false;     // a barrier already sits between the group and the boundary
+    std::vector<int> deferSeen;  // union of the group's deferrable tokens
+    bool barrierInGap = false;   // a barrier already sits between the group and the boundary
     StinkyInstruction* gapBarrier = nullptr;  // wait-half of that barrier, for tagging
 };
 
@@ -395,8 +395,8 @@ class TDMLoadWaveSyncPass : public StinkyInstPass {
             if (mergedTokens.count(anchor)) continue;  // that split got a real insertion
             if (tagged.count(barrier)) continue;       // one barrier, tag once
             auto wi = anchorWait.find(anchor);
-            tagExistingWaveGroupBarrier(
-                barrier, barrierTag(wi == anchorWait.end() ? nullptr : wi->second));
+            tagExistingWaveGroupBarrier(barrier,
+                                        barrierTag(wi == anchorWait.end() ? nullptr : wi->second));
             tagged.emplace(barrier, true);
         }
 

@@ -72,7 +72,8 @@ class DumpMemTokenIRStructurePass : public Pass {
     explicit DumpMemTokenIRStructurePass(DumpMemTokenIRStructurePassConfig config)
         : config_(std::move(config)) {}
 
-    DumpMemTokenIRStructurePass(const StinkyAsmModule& module, DumpMemTokenIRStructurePassConfig config)
+    DumpMemTokenIRStructurePass(const StinkyAsmModule& module,
+                                DumpMemTokenIRStructurePassConfig config)
         : module_(&module), config_(std::move(config)) {}
 
     PassID getPassID() const override {
@@ -86,8 +87,7 @@ class DumpMemTokenIRStructurePass : public Pass {
     // With a module, dump every function; without one, dump just the function the
     // PassManager hands us (opt-tool / per-function use). Both cover the full picture
     // for the module hook, which is the intended before/after bracket.
-    PreservedAnalyses run(Function& func, PassContext& /*ctx*/,
-                          AnalysisManager& /*AM*/) override {
+    PreservedAnalyses run(Function& func, PassContext& /*ctx*/, AnalysisManager& /*AM*/) override {
         if (config_.path.empty()) return PreservedAnalyses::all();
         std::ofstream out(config_.path, std::ios::out | std::ios::trunc);
         if (out) {
@@ -113,7 +113,7 @@ char DumpMemTokenIRStructurePass::ID = 0;
 }  // namespace
 
 std::unique_ptr<Pass> createDumpMemTokenIRStructurePass(const StinkyAsmModule& module,
-                                                 DumpMemTokenIRStructurePassConfig config) {
+                                                        DumpMemTokenIRStructurePassConfig config) {
     return std::make_unique<DumpMemTokenIRStructurePass>(module, std::move(config));
 }
 

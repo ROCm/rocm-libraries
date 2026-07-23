@@ -28,8 +28,8 @@
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/ir/DumpMemTokenIRStructurePass.hpp"
+#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
