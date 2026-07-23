@@ -315,9 +315,25 @@ int dispatcher_run_batched_contraction(const void* A,
         /*E_strides*/ E_strides);
 
     const bool do_time = (time_ms != nullptr);
-    const int warmup   = do_time ? env_int("CK_TILE_BENCH_WARMUP", 20) : 0;
-    const int repeat   = do_time ? env_int("CK_TILE_BENCH_REPEAT", 50) : 1;
-    ck_tile::stream_config stream_cfg{nullptr, do_time, 0, warmup, repeat, false, false, 1};
+    // Defaults mirror the Old-TE profiler so bridge-vs-Old-TE timings are
+    // apples-to-apples out of the box: warmup=50, repeat=100, GPU timer,
+    // flush_cache=true, rotating_count=1000. warmup/repeat remain env-overridable
+    // (CK_TILE_BENCH_WARMUP / CK_TILE_BENCH_REPEAT) for custom sweeps -- set the
+    // same values on both sides to keep the comparison fair.
+    const int warmup = do_time ? env_int("CK_TILE_BENCH_WARMUP", 50) : 0;
+    const int repeat = do_time ? env_int("CK_TILE_BENCH_REPEAT", 100) : 1;
+    // stream_config field order: stream_id, time_kernel, log_level, cold_niters
+    // (warmup), nrepeat, is_gpu_timer, flush_cache, rotating_count.
+    ck_tile::stream_config stream_cfg{
+        nullptr,           // stream_id_
+        do_time,           // time_kernel_
+        0,                 // log_level_
+        warmup,            // cold_niters_
+        repeat,            // nrepeat_
+        do_time,           // is_gpu_timer_
+        do_time,           // flush_cache_
+        do_time ? 1000 : 1 // rotating_count_
+    };
 
     float exec_time = 0.0f;
     try
