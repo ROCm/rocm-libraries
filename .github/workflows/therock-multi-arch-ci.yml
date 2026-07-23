@@ -70,6 +70,8 @@ jobs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      reusable_stages: ${{ steps.configure.outputs.reusable_stages }}
+      rebuild_stages: ${{ steps.configure.outputs.rebuild_stages }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -83,8 +85,10 @@ jobs:
           repository: ROCm/TheRock
           ref: users/geomin12/superrepo-multi-arch
           path: _therock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
+          sparse-checkout: |
+            build_tools
+            BUILD_TOPOLOGY.toml
+          sparse-checkout-cone-mode: false
 
       - name: Configure CI
         id: configure
@@ -92,13 +96,15 @@ jobs:
           # TEST OVERRIDE: Force rocprim as changed project to test filtering
           # TODO(geomin12): Remove after testing cross-repo artifact reuse
           TEST_OVERRIDE_CHANGED_PROJECTS: "projects/rocprim"
+        working-directory: _therock
         run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
+          python3 build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
             --base-sha "${{ github.event.pull_request.base.sha }}" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
-            --config-path ".github/repos-config.json"
+            --config-path "../.github/repos-config.json" \
+            --enable-stage-reuse
 
   setup:
     needs: configure
@@ -111,12 +117,11 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # HARDCODED: Use prebuilt stages from known good TheRock run
-      # Note: compiler-runtime is NOT copied because its CMake config files have
-      # hardcoded absolute paths from TheRock's build environment. Building it
-      # locally ensures correct paths. Other stages don't have this issue.
+      # Automatic stage reuse: use reusable_stages from configure job
+      # Manual override via inputs.prebuilt_stages takes precedence
+      # Note: compiler-runtime cannot be reused due to hardcoded CMake paths
       # TODO(geomin12): Add CMake config path relocation to enable compiler-runtime reuse
-      prebuilt_stages: ${{ inputs.prebuilt_stages || 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,media-libs,profiler-apps' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || needs.configure.outputs.reusable_stages }}
       baseline_run_id: ${{ inputs.baseline_run_id || '29947789954' }}
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
       stage_reuse_baseline_repository: "ROCm/TheRock"
