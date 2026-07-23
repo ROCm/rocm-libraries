@@ -13,14 +13,16 @@
   <!-- KDP reused box -->
   <rect x="250" y="60" width="440" height="86" rx="8" fill="#faf7fc" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="470" y="82" text-anchor="middle" font-size="13" font-weight="600" fill="#8e5bc4">KDP: reused unchanged</text>
-  <rect x="266" y="98" width="96" height="30" rx="6" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
-  <text x="314" y="118" text-anchor="middle" fill="#222">matchers</text>
-  <rect x="370" y="98" width="86" height="30" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
-  <text x="413" y="118" text-anchor="middle" fill="#222">engine</text>
-  <rect x="464" y="98" width="96" height="30" rx="6" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
-  <text x="512" y="118" text-anchor="middle" fill="#222">heuristic</text>
-  <rect x="568" y="98" width="106" height="30" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
-  <text x="621" y="118" text-anchor="middle" font-size="12" fill="#222">dispatch (UDD)</text>
+  <rect x="262" y="98" width="80" height="30" rx="6" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
+  <text x="302" y="118" text-anchor="middle" font-size="12" fill="#222">matchers</text>
+  <rect x="346" y="98" width="66" height="30" rx="6" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="379" y="118" text-anchor="middle" font-size="12" fill="#222">engine</text>
+  <rect x="416" y="98" width="82" height="30" rx="6" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="457" y="118" text-anchor="middle" font-size="12" fill="#222">heuristic</text>
+  <rect x="502" y="98" width="76" height="30" rx="6" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
+  <text x="540" y="118" text-anchor="middle" font-size="12" fill="#222">dispatch</text>
+  <rect x="582" y="98" width="92" height="30" rx="6" fill="#f6ede2" stroke="#b5651d" stroke-width="1.5"/>
+  <text x="628" y="118" text-anchor="middle" font-size="12" fill="#222">metadata</text>
 
   <!-- arrow KDP -> UKD -->
   <line x1="470" y1="146" x2="470" y2="176" stroke="#444" stroke-width="1.5" marker-end="url(#arrowUkdJit)"/>
@@ -69,5 +71,5 @@
   <text x="360" y="300" text-anchor="middle" font-size="10" fill="#8e5bc4">same source slot</text>
 
   <!-- Caption -->
-  <text x="470" y="540" text-anchor="middle" font-size="11" fill="#555">The KDP's matchers, engine, heuristic, and UDD are reused; only the source swaps AOT to JIT (Section 8.3).</text>
+  <text x="470" y="540" text-anchor="middle" font-size="11" fill="#555">The KDP's matchers, engine, heuristic, UDD, and metadata schema are reused; only the source swaps AOT to JIT (Section 8.3).</text>
 </svg>

@@ -62,7 +62,7 @@
   <rect x="822" y="70" width="56" height="44" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
   <text x="850" y="97" text-anchor="middle" font-family="Consolas, monospace" font-size="11">UHD</text>
 
-  <text x="720" y="132" text-anchor="middle" font-size="11" fill="#8a6d1f">descriptor files (a KDP + reusable UMD/UDD/UED/UHD)</text>
+  <text x="720" y="132" text-anchor="middle" font-size="11" fill="#8a6d1f">descriptor files (a KDP + reusable UMD/UDD/UED/UHD/KMD)</text>
 
   <!-- arrow down into engine -->
   <line x1="720" y1="140" x2="720" y2="182" stroke="#444" stroke-width="1.5" marker-end="url(#arrowBA)"/>
