@@ -19,6 +19,7 @@ Features:
 
 import argparse
 import importlib
+import json
 import os
 import subprocess
 import time
@@ -172,6 +173,62 @@ def _dump_git_state(g):
     print("=" * 78)
 
 
+def _ci_base_from_env():
+    """EXPERIMENTAL/DEBUG: authoritative base candidates from the CI environment.
+
+    On GitHub Actions the PR's true base is github.event.pull_request.base.sha (the target
+    branch tip at PR time). It is in the event payload at $GITHUB_EVENT_PATH and, for
+    pull_request runs, GITHUB_BASE_REF holds the target branch name. TheRock's own CI reads
+    exactly this. Returns a list of (why, value) to fetch+merge-base against, most
+    authoritative first. Also prints what it found so a real run shows whether the base is
+    even reachable at MIOpen-build time (else we must plumb it down from TheRock)."""
+    print("--- CI env (base discovery) ---")
+    for v in (
+        "GITHUB_EVENT_NAME",
+        "GITHUB_BASE_REF",
+        "GITHUB_HEAD_REF",
+        "GITHUB_REF",
+        "GITHUB_SHA",
+        "GITHUB_REPOSITORY",
+        "GITHUB_EVENT_PATH",
+        "GITHUB_BASE_SHA",
+        "PR_BASE_SHA",
+        "THEROCK_PR_BASE_SHA",
+        "CI",
+    ):
+        print(f"    {v}={os.environ.get(v)}")
+    print(
+        f"    token present: {bool(os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN'))}"
+    )
+    cands = []
+    ev = os.environ.get("GITHUB_EVENT_PATH")
+    if ev and os.path.isfile(ev):
+        try:
+            with open(ev) as f:
+                pr = json.load(f).get("pull_request") or {}
+            base = pr.get("base") or {}
+            print(
+                f"    event base.sha={base.get('sha')} base.ref={base.get('ref')} "
+                f"head.sha={(pr.get('head') or {}).get('sha')}"
+            )
+            if base.get("sha"):
+                cands.append(("event.base.sha", base["sha"]))
+            if base.get("ref"):
+                cands.append(("event.base.ref", base["ref"]))
+        except Exception as e:  # noqa: BLE001
+            print(f"    (could not parse GITHUB_EVENT_PATH: {e})")
+    for var in (
+        "GITHUB_BASE_SHA",
+        "PR_BASE_SHA",
+        "THEROCK_PR_BASE_SHA",
+        "GITHUB_BASE_REF",
+    ):
+        val = os.environ.get(var)
+        if val:
+            cands.append((f"env:{var}", val))
+    return cands
+
+
 def resolve_base_sha(source_dir, base_ref):
     """Determine the base commit for the impact diff, robust to CI checkouts.
 
@@ -187,6 +244,7 @@ def resolve_base_sha(source_dir, base_ref):
     """
     g = ["git", "-C", source_dir]
     _dump_git_state(g)
+    env_bases = _ci_base_from_env()
 
     def try_merge_base(ref, why):
         rc, sha, _ = _run_git(g + ["rev-parse", "--verify", "-q", f"{ref}^{{commit}}"])
@@ -240,29 +298,28 @@ def resolve_base_sha(source_dir, base_ref):
         if mb:
             return mb
 
-    # (3) develop is not present locally -> fetch it (progressively deeper) and retry.
-    fetches = [
-        (g + ["fetch", "--no-tags", "origin", "develop"], "fetch develop"),
-        (
-            g + ["fetch", "--no-tags", "--deepen=5000", "origin", "develop"],
-            "fetch deepen",
-        ),
-        (
-            g + ["fetch", "--no-tags", "--unshallow", "origin", "develop"],
-            "fetch unshallow",
-        ),
-    ]
-    for cmd, why in fetches:
-        print(f"DAPPER base: {why}: {' '.join(cmd)}")
-        rc, out, err = _run_git(cmd)
-        print(f"  -> rc={rc} {(err or out)[:400]}")
-        for ref in ("FETCH_HEAD", "origin/develop"):
-            mb = try_merge_base(ref, why)
-            if mb:
-                return mb
+    # (3) fetch a base and retry. Try the CI-authoritative base(s) FIRST (the PR's true
+    # base -- github.event.pull_request.base.sha / GITHUB_BASE_REF), then plain develop.
+    # For each target, escalate depth until HEAD and the base share history: shallow fetch,
+    # then deepen, then full unshallow (last resort). merge-base needs the fork point in
+    # local history, so a not-current PR may require deepening -- hence the escalation.
+    fetch_targets = env_bases + [("develop", "develop")]
+    for why, target in fetch_targets:
+        for depth in (["--depth=1"], ["--deepen=5000"], ["--unshallow"]):
+            cmd = g + ["fetch", "--no-tags"] + depth + ["origin", target]
+            print(f"DAPPER base: [{why}] {' '.join(cmd)}")
+            rc, out, err = _run_git(cmd)
+            print(f"  -> rc={rc} {(err or out)[:300]}")
+            if rc != 0:
+                continue
+            for ref in ("FETCH_HEAD", target, f"origin/{target}"):
+                mb = try_merge_base(ref, f"{why}/{depth[0]}")
+                if mb:
+                    return mb
 
     print(
-        f"DAPPER base: ALL strategies failed (tried refs: {tried} + fetch). "
+        f"DAPPER base: ALL strategies failed (local refs: {tried}; "
+        f"env bases: {[w for w, _ in env_bases]}; + develop fetch). "
         "Returning None -> entire_category fallback."
     )
     return None
