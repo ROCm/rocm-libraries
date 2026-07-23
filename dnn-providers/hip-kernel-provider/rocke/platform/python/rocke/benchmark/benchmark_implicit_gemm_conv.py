@@ -378,7 +378,7 @@ def main() -> int:
         dest="dump_fail",
         help=(
             "on the first verify FAIL, save kernel output, reference, and "
-            "abs-diff tensors to PATH/{kernel_name}_{out,ref,diff}.pt and stop "
+            "abs-diff tensors to PATH/{kernel_name}_{out,ref,diff}.txt and stop "
             "the sweep. Implies --verify."
         ),
     )
