@@ -62,6 +62,8 @@ add_executable(rpp_tests
     src/tests/image/geometric/rotate_test.cpp
     src/tests/image/geometric/remap_test.cpp
     src/tests/image/geometric/crop_and_patch_test.cpp
+    src/tests/image/morphological/erode_test.cpp
+    src/tests/image/morphological/dilate_test.cpp
     src/tests/image/statistical/tensor_sum_test.cpp
     src/tests/image/statistical/threshold_test.cpp
     src/tests/image/statistical/tensor_min_test.cpp
@@ -76,7 +78,9 @@ endif()
 target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest_main)
 
 if(rpp_BACKEND_TYPE STREQUAL "HIP" OR BACKEND STREQUAL "HIP")
-    target_compile_definitions(rpp_tests PRIVATE RPP_TEST_HAVE_HIP=1)
+    # GPU_SUPPORT exposes the HIP-only API symbols guarded behind it in the installed
+    # headers (e.g. rppt_erode/rppt_dilate); the legacy HIP suite defines it the same way.
+    target_compile_definitions(rpp_tests PRIVATE RPP_TEST_HAVE_HIP=1 GPU_SUPPORT=1)
 endif()
 
 gtest_discover_tests(rpp_tests)
