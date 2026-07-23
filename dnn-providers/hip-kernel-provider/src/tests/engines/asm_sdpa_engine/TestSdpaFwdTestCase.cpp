@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../../../integration_tests/asm_sdpa_engine/AsmSdpaConfigHelpers.hpp"
+#include "AsmSdpaConfigHelpers.hpp"
 
 using asm_sdpa_engine::SdpaFwdTestCase;
 

@@ -45,13 +45,15 @@ if(ENABLE_ASM_SDPA_ENGINE)
                 "Skipping SDPA integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
     else()
         target_sources(hip_kernel_provider_integration_tests PRIVATE
-            asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
+        # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
         target_include_directories(hip_kernel_provider_integration_tests PRIVATE
             ${CMAKE_CURRENT_BINARY_DIR}/../engines/asm_sdpa_engine/generated
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine
         )
         # Ensure codegen runs before compiling the integration tests
         add_dependencies(hip_kernel_provider_integration_tests asm_kernel_codegen)
