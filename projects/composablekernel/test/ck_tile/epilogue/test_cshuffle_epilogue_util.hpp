@@ -28,6 +28,78 @@ enum class ScaleType
     Tensor
 };
 
+// ----------------------------------------------------------------------------------------------
+// Wave32 GPU-ASM homogenization for the CShuffleEpilogue tests.
+//
+// On wave32 targets (e.g. gfx1201) the unified warp-gemm dispatcher and the legacy dispatcher
+// select DIFFERENT C-accumulator distributions for the MFMA-shaped configs below: the legacy
+// dispatcher reaches the CDNA wave64 MFMA warp gemms (64-lane C layout), while the unified
+// dispatcher selects a wave32 WMMA op (16x16) or an unsupported placeholder (32x32). These
+// configs are compiled but never executed -- every CShuffleEpilogue test GTEST_SKIPs on wave32
+// devices -- yet their emitted GPU ASM otherwise differs between the two frameworks.
+//
+// To keep the two frameworks' ASM byte-identical, pin the epilogue's warp gemm to the exact
+// legacy wave64 type for these configs when building the unified framework. Only the C
+// distribution *encoding* is used by the epilogue; the MFMA exec (whose builtins are invalid on
+// RDNA4) is never instantiated, so this compiles on wave32 exactly as the legacy build already
+// does. The primary template yields void, i.e. "use the normal dispatcher", so every other
+// config -- and the legacy build itself -- is left untouched.
+template <typename MfmaType, index_t MPerXdl, index_t NPerXdl, index_t KPerXdl>
+struct LegacyCShuffleEpilogueWarpGemm
+{
+    using type = void;
+};
+
+#if USE_NEW_UNIFIED_FRAMEWORK
+// fp16 (half_t) MFMA warp gemms.
+template <>
+struct LegacyCShuffleEpilogueWarpGemm<half_t, 32, 32, 8>
+{
+    using type = WarpGemmImpl<
+        WarpGemmAttributeMfma<WarpGemmAttributeMfmaImplF16F16F32M32N32K8<WGAttrCtlEnum::Default_>>>;
+};
+template <>
+struct LegacyCShuffleEpilogueWarpGemm<half_t, 32, 32, 16>
+{
+    using type = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
+        WarpGemmAttributeMfmaImplF16F16F32M32N32K8<WGAttrCtlEnum::Default_>,
+        2,
+        WGAttrNumAccessEnum::Single,
+        WGAttrNumAccessEnum::Single>>;
+};
+// fp8 (fp8_t) MFMA warp gemms.
+template <>
+struct LegacyCShuffleEpilogueWarpGemm<fp8_t, 16, 16, 32>
+{
+    using type = WarpGemmImpl<WarpGemmAttributeMfma<
+        WarpGemmAttributeMfmaImpl_f32_16x16x32_fp8_fp8<WGAttrCtlEnum::Default_>>>;
+};
+template <>
+struct LegacyCShuffleEpilogueWarpGemm<fp8_t, 16, 16, 64>
+{
+    using type = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
+        WarpGemmAttributeMfmaImpl_f32_16x16x32_fp8_fp8<WGAttrCtlEnum::Default_>,
+        2>>;
+};
+template <>
+struct LegacyCShuffleEpilogueWarpGemm<fp8_t, 32, 32, 16>
+{
+    using type = WarpGemmImpl<WarpGemmAttributeMfma<
+        WarpGemmAttributeMfmaImpl_f32_32x32x16_fp8_fp8<WGAttrCtlEnum::Default_>>>;
+};
+template <>
+struct LegacyCShuffleEpilogueWarpGemm<fp8_t, 32, 32, 32>
+{
+    using type = WarpGemmImpl<WarpGemmAttributeMfmaIterateK<
+        WarpGemmAttributeMfmaImpl_f32_32x32x16_fp8_fp8<WGAttrCtlEnum::Default_>,
+        2>>;
+};
+#endif // USE_NEW_UNIFIED_FRAMEWORK
+
+template <typename MfmaType, index_t MPerXdl, index_t NPerXdl, index_t KPerXdl>
+using LegacyCShuffleEpilogueWarpGemm_t =
+    typename LegacyCShuffleEpilogueWarpGemm<MfmaType, MPerXdl, NPerXdl, KPerXdl>::type;
+
 // Simple test kernel to invoke the CShuffleEpilogue
 template <typename Problem, index_t M, index_t N, ScaleType Scale>
 __global__ void
@@ -36,8 +108,15 @@ test_cshuffle_epilogue_kernel(const typename Problem::AccDataType* __restrict__ 
                               float* m_scale,
                               float* n_scale)
 {
-    using Epilogue    = CShuffleEpilogue<Problem>;
-    using AccDataType = typename Epilogue::AccDataType;
+    // For the wave32-divergent configs, force the epilogue's warp gemm to the legacy wave64 type
+    // so the unified-framework kernel emits the same GPU ASM as the legacy framework (see
+    // LegacyCShuffleEpilogueWarpGemm). Resolves to void -> normal dispatcher for every other case.
+    using CWarpGemmOverride = LegacyCShuffleEpilogueWarpGemm_t<typename Problem::AsDataType,
+                                                               Problem::MPerXdl,
+                                                               Problem::NPerXdl,
+                                                               Problem::KPerXdl>;
+    using Epilogue          = CShuffleEpilogue<Problem, void, CWarpGemmOverride>;
+    using AccDataType       = typename Epilogue::AccDataType;
 
     static_assert(Problem::kMPerBlock <= M && Problem::kNPerBlock <= N,
                   "Block size must fit in tensor dimensions");
@@ -45,14 +124,9 @@ test_cshuffle_epilogue_kernel(const typename Problem::AccDataType* __restrict__ 
     // Allocate shared memory for epilogue
     __shared__ char smem[Epilogue::GetSmemSize()];
 
-    // Create accumulator tile with GEMM accumulator distribution (matches BlockGemm)
-    using WG = ck_tile::WarpGemmDispatcher<typename Epilogue::ATypeToUse,
-                                           typename Epilogue::BTypeToUse,
-                                           typename Problem::AccDataType,
-                                           Problem::MPerXdl,
-                                           Problem::NPerXdl,
-                                           Problem::KPerXdl,
-                                           Problem::isCTransposed>;
+    // Create accumulator tile with GEMM accumulator distribution (matches BlockGemm). Use the
+    // epilogue's own warp gemm so the accumulator layout stays consistent with the override above.
+    using WG = typename Epilogue::WG;
 
     constexpr index_t MIterPerWarp = Problem::kMPerBlock / (Problem::MWave * Problem::MPerXdl);
     constexpr index_t NIterPerWarp = Problem::kNPerBlock / (Problem::NWave * Problem::NPerXdl);

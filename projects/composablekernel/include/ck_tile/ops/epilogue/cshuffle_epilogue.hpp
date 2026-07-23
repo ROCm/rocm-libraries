@@ -76,7 +76,7 @@ struct CShuffleEpilogueProblem
                   "The size of DsDataType and DsLayout should be the same");
 };
 
-template <typename Problem_, typename Policy_ = void>
+template <typename Problem_, typename Policy_ = void, typename CWarpGemmOverride_ = void>
 struct CShuffleEpilogue
 {
     using Problem          = remove_cvref_t<Problem_>;
@@ -305,13 +305,21 @@ struct CShuffleEpilogue
     static constexpr index_t MPerIterationShuffle = std::get<0>(MNPerIterationShuffle);
     static constexpr index_t NPerIterationShuffle = std::get<1>(MNPerIterationShuffle);
 
-    using WG = WarpGemmDispatcher<ATypeToUse,
-                                  BTypeToUse,
-                                  AccDataType,
-                                  MPerXdl,
-                                  NPerXdl,
-                                  KPerXdl,
-                                  isCTransposed>;
+    // Warp-gemm selection. Normally the shared WarpGemmDispatcher picks the warp gemm. The
+    // optional CWarpGemmOverride_ escape hatch pins it to a caller-supplied type instead; it
+    // exists so the cshuffle epilogue *tests* can force the legacy wave64 MFMA C-accumulator
+    // layout on wave32 targets, where the unified and legacy dispatchers otherwise select
+    // different (but equally never-executed) C layouts. Left void by all production code, which
+    // is therefore completely unaffected.
+    using WG = std::conditional_t<std::is_void_v<CWarpGemmOverride_>,
+                                  WarpGemmDispatcher<ATypeToUse,
+                                                     BTypeToUse,
+                                                     AccDataType,
+                                                     MPerXdl,
+                                                     NPerXdl,
+                                                     KPerXdl,
+                                                     isCTransposed>,
+                                  CWarpGemmOverride_>;
 
     using CWarpDstr         = typename WG::CWarpDstr;
     using CWarpTensor       = typename WG::CWarpTensor;
