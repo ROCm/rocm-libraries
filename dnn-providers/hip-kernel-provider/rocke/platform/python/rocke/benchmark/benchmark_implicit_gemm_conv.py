@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Tile/pipeline sweep benchmark for implicit-GEMM forward convolution (gfx950).
+"""Tile/pipeline sweep benchmark for implicit-GEMM forward convolution (gfx950, gfx1250).
 
 Builds every valid combination of tile / warp / pipeline / epilogue parameters,
 runs each on GPU, and reports the best configuration ranked by TFLOPS.
@@ -214,7 +214,7 @@ def main() -> int:
     parser.add_argument(
         "--arch",
         default="gfx950",
-        help="gfx target (gfx942, gfx950, ...) (default: gfx950)",
+        help="gfx target (gfx942, gfx950, gfx1250, ...) (default: gfx950)",
     )
     parser.add_argument(
         "--dtype",
@@ -443,6 +443,27 @@ def _run_sweep(
     vec_a, vec_b, vec_c = _get_vector_sizes(args.C, args.K, dtype)
     sig = conv_args_signature(dtype)
 
+    _mma_family = "wmma" if target.wave_size == 32 else "mma"
+
+    # Early check: does the target have any MMA atom for this dtype?
+    # A wave32/WMMA target may lack an atom for a given dtype (e.g. a future
+    # target without fp32 WMMA), so bail with a clear message rather than
+    # silently sweeping everything and reporting "No valid configurations".
+    if target.mma.select_largest_k(
+        family=_mma_family,
+        a_dtype=dtype,
+        b_dtype=dtype,
+        c_dtype="fp32",
+        m=16,
+        n=16,
+    ) is None:
+        print(
+            f"error: {arch} has no {dtype} MMA atom — "
+            f"{dtype} convolution is not supported on this target.",
+            file=sys.stderr,
+        )
+        return 2
+
     combos = list(
         itertools.product(
             _TILE_MN,
@@ -495,6 +516,7 @@ def _run_sweep(
         epilogue,
     ) in combos:
         atom = target.mma.select_largest_k(
+            family=_mma_family,
             a_dtype=dtype,
             b_dtype=dtype,
             c_dtype="fp32",
@@ -519,6 +541,7 @@ def _run_sweep(
             warp_tile_m=warp_tile_mn,
             warp_tile_n=warp_tile_mn,
             warp_tile_k=warp_tile_k,
+            wave_size=target.wave_size,
             pipeline=pipeline,
             epilogue=epilogue,
             groups=p.groups,
@@ -527,7 +550,7 @@ def _run_sweep(
             vector_size_c=vec_c,
         )
 
-        ok, reason = is_valid_spec_for_problem(spec, problem, arch)
+        ok, _ = is_valid_spec_for_problem(spec, problem, arch)
         if not ok:
             n_skipped += 1
             continue

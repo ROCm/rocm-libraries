@@ -582,13 +582,14 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         )
 
     # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
-    # 16x16x16 atom with the simple ``mem`` pipeline + ``default`` epilogue and
-    # synchronous descriptor-driven loads. The richer MFMA-shaped paths
-    # (compv3/compv4 scheduler interleave, cshuffle LDS-staged C, async DMA,
-    # K-unroll, chiplet swizzle, grouped conv) are gated off until ported.
+    # 16x16x16 atom (gfx11/gfx12) or 16x16x32 atom (gfx1250) with the simple
+    # ``mem`` pipeline + ``default`` epilogue and synchronous descriptor-driven
+    # loads. The richer MFMA-shaped paths (compv3/compv4 scheduler interleave,
+    # cshuffle LDS-staged C, async DMA, K-unroll, chiplet swizzle, grouped conv)
+    # are gated off until ported.
     if family == "wmma":
-        if atom != (16, 16, 16):
-            return False, f"WMMA conv supports only 16x16x16 (got {atom}) on {arch}"
+        if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
+            return False, f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}"
         if spec.pipeline != "mem":
             return False, (
                 f"WMMA conv supports only the 'mem' pipeline "
