@@ -11190,9 +11190,14 @@ class KernelWriterAssembly(KernelWriter):
             if halfRowsA == halfRowsB:
               imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows"))
             else:
+              # gfx1250 s_cselect_b32 permits only one inline literal, but both halfRows
+              # values are immediates (e.g. 208 and 128) -> "only one unique literal operand"
+              # assembler error. Materialize A into the dst first (SMovB32 leaves SCC intact),
+              # then cselect against the single B literal: hr = parity ? B : hr(=A).
+              imod.middle.add(SMovB32(sgpr(hr), halfRowsA, "halfRows = A (default; keep cselect to one literal)"))
               with self.allocTmpSgpr(1, tag="tdmSplitDim1Parity") as waveIdTmp:
                 self._emitTdmWaveParitySCC(imod.middle, kernel, waveIdTmp.idx)
-              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, halfRowsA, "halfRows = parity ? B : A"))
+              imod.middle.add(SCSelectB32(sgpr(hr), halfRowsB, sgpr(hr), "halfRows = parity ? B : A"))
             imod.middle.add(SLShiftRightB32(sgpr(h0), hex(16), sgpr(f"{group1}+2"), "H0 = dim1 lo"))
             imod.middle.add(SLShiftLeftB32(sgpr(h1), hex(16), sgpr(f"{group1}+3"), "H0 hi << 16"))
             imod.middle.add(SOrB32(sgpr(h0), sgpr(h0), sgpr(h1), "H0 = full dim1"))
