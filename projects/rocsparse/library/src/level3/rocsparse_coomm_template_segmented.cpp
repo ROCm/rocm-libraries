@@ -166,57 +166,57 @@ namespace rocsparse
 // Full main + remainder launch sequence for one B orientation, parameterized by
 // the segmented block dimension (COOMMNN_DIM) so that the same code drives both
 // the wave64 (256) and the RDNA/wave32 (128) tuned instantiations.
-#define LAUNCH_COOMMNN_SEGMENTED(COOMMNN_DIM, TRANSB)                              \
-    {                                                                             \
-        I main      = 0;                                                          \
-        I remainder = 0;                                                          \
-        if(n >= 8)                                                                \
-        {                                                                         \
-            remainder = n % 8;                                                    \
-            main      = n - remainder;                                            \
-            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 8, LOOPS, TRANSB);  \
-        }                                                                         \
-        else if(n >= 4)                                                           \
-        {                                                                         \
-            remainder = n % 4;                                                    \
-            main      = n - remainder;                                            \
-            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 4, LOOPS, TRANSB);  \
-        }                                                                         \
-        else if(n >= 2)                                                           \
-        {                                                                         \
-            remainder = n % 2;                                                    \
-            main      = n - remainder;                                            \
-            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 2, LOOPS, TRANSB);  \
-        }                                                                         \
-        else if(n >= 1)                                                           \
-        {                                                                         \
-            remainder = n % 1;                                                    \
-            main      = n - remainder;                                            \
-            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 1, LOOPS, TRANSB);  \
-        }                                                                         \
-        else                                                                      \
-        {                                                                         \
-            remainder = n;                                                        \
-        }                                                                         \
-        if(remainder > 0)                                                         \
-        {                                                                         \
-            if(remainder <= 1)                                                    \
-            {                                                                     \
+#define LAUNCH_COOMMNN_SEGMENTED(COOMMNN_DIM, TRANSB)                                     \
+    {                                                                                     \
+        I main      = 0;                                                                  \
+        I remainder = 0;                                                                  \
+        if(n >= 8)                                                                        \
+        {                                                                                 \
+            remainder = n % 8;                                                            \
+            main      = n - remainder;                                                    \
+            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 8, LOOPS, TRANSB);          \
+        }                                                                                 \
+        else if(n >= 4)                                                                   \
+        {                                                                                 \
+            remainder = n % 4;                                                            \
+            main      = n - remainder;                                                    \
+            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 4, LOOPS, TRANSB);          \
+        }                                                                                 \
+        else if(n >= 2)                                                                   \
+        {                                                                                 \
+            remainder = n % 2;                                                            \
+            main      = n - remainder;                                                    \
+            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 2, LOOPS, TRANSB);          \
+        }                                                                                 \
+        else if(n >= 1)                                                                   \
+        {                                                                                 \
+            remainder = n % 1;                                                            \
+            main      = n - remainder;                                                    \
+            LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, 1, LOOPS, TRANSB);          \
+        }                                                                                 \
+        else                                                                              \
+        {                                                                                 \
+            remainder = n;                                                                \
+        }                                                                                 \
+        if(remainder > 0)                                                                 \
+        {                                                                                 \
+            if(remainder <= 1)                                                            \
+            {                                                                             \
                 LAUNCH_COOMMNN_SEGMENTED_REMAINDER_KERNEL(COOMMNN_DIM, 1, LOOPS, TRANSB); \
-            }                                                                     \
-            else if(remainder <= 2)                                               \
-            {                                                                     \
+            }                                                                             \
+            else if(remainder <= 2)                                                       \
+            {                                                                             \
                 LAUNCH_COOMMNN_SEGMENTED_REMAINDER_KERNEL(COOMMNN_DIM, 2, LOOPS, TRANSB); \
-            }                                                                     \
-            else if(remainder <= 4)                                               \
-            {                                                                     \
+            }                                                                             \
+            else if(remainder <= 4)                                                       \
+            {                                                                             \
                 LAUNCH_COOMMNN_SEGMENTED_REMAINDER_KERNEL(COOMMNN_DIM, 4, LOOPS, TRANSB); \
-            }                                                                     \
-            else if(remainder <= 8)                                               \
-            {                                                                     \
+            }                                                                             \
+            else if(remainder <= 8)                                                       \
+            {                                                                             \
                 LAUNCH_COOMMNN_SEGMENTED_REMAINDER_KERNEL(COOMMNN_DIM, 8, LOOPS, TRANSB); \
-            }                                                                     \
-        }                                                                         \
+            }                                                                             \
+        }                                                                                 \
     }
 
     template <typename T, typename I, typename A, typename B, typename C>
