@@ -199,13 +199,14 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // SwPrefetchInsertionPass handles multiple functions directly.
     pm.addPass(createFlattenCalleesPass(module.getFunctions()));
 
-    // gfx1250 hardware-entrypoint prologue: `global_wb SCOPE:SCOPE_CU` + `v_nop`.
-    // global_wb makes the first VMEM instruction non-clause-bound (it is a VMEM
-    // op that ignores EXEC); v_nop is a safe first VALU instruction. Runs after
-    // flatten (so the entry's first instruction is the kernel's first) and
-    // before SW-prefetch insertion so the prefetch pass anchors its byte layout
-    // on the final entry (prologue included) and its CP-boundary coverage stays
-    // gap-free.
+    // gfx1250 hardware-entrypoint prologue:
+    // `global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT` + `v_nop`.
+    // global_prefetch_b8 makes the first VMEM instruction non-clause-bound (it
+    // is a VMEM op that ignores EXEC); v_nop is a safe first VALU instruction.
+    // Runs after flatten (so the entry's first instruction is the kernel's
+    // first) and before SW-prefetch insertion so the prefetch pass anchors
+    // its byte layout on the final entry (prologue included) and its
+    // CP-boundary coverage stays gap-free.
     pm.addPass(createInsertInitialUnclausedVmemPass());
 
     if (moduleOptions.EnableSwPrefetchInsertion) {

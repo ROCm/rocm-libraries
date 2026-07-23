@@ -47,28 +47,33 @@ class InsertInitialUnclausedVmemPass : public Pass {
 
         // Both opcodes exist on gfx1250; guard defensively so a missing
         // descriptor no-ops instead of passing nullptr into create().
-        const HwInstDesc* wbDesc = getMCIDByUOp(GFX::global_wb, archId);
+        const HwInstDesc* prefetchDesc = getMCIDByUOp(GFX::global_prefetch_b8, archId);
         const HwInstDesc* nopDesc = getMCIDByUOp(GFX::v_nop, archId);
-        assert(wbDesc && nopDesc && "global_wb/v_nop unavailable on gfx1250");
-        if (!wbDesc || !nopDesc) return preserveCFGAnalyses();
+        assert(prefetchDesc && nopDesc && "global_prefetch_b8/v_nop unavailable on gfx1250");
+        if (!prefetchDesc || !nopDesc) return preserveCFGAnalyses();
 
         for (BasicBlock& bb : func) {
             for (auto it = bb.begin(); it != bb.end(); ++it) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                 if (!inst || isPseudoInst(inst)) continue;
 
-                // First real instruction found: prepend `global_wb SCOPE:SCOPE_CU`
-                // then `v_nop` so the emitted order is WB, NOP, <first inst>.
+                // First real instruction found: prepend
+                // `global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT`
+                // then `v_nop` so the emitted order is PREFETCH, NOP, <first inst>.
                 AsmIRBuilder irBuilder(bb, archId);
                 IRBase* insertBefore = it.getNodePtr();
 
-                StinkyInstruction* wb = irBuilder.create(wbDesc, insertBefore);
-                wb->addModifier<CacheScopeModifiers>(CacheScopeModifiers(MUBUFScope::SCOPE_CU));
+                StinkyInstruction* prefetch = irBuilder.create(prefetchDesc, insertBefore);
+                prefetch->addSrcReg(StinkyRegister(RegType::V, 0, 1));
+                prefetch->addSrcReg(StinkyRegister(RegType::S, 0, 2));
+                prefetch->addModifier<GLOBALModifiers>(
+                    GLOBALModifiers(/*offset=*/0, TemporalHint::TH_RT, MUBUFScope::SCOPE_SE));
 
                 irBuilder.create(nopDesc, insertBefore);
 
-                PASS_DEBUG(std::cerr << "[InsertInitialUnclausedVmemPass] inserted global_wb/v_nop "
-                                     << "prologue in bb=\"" << bb.getLabel() << "\"\n");
+                PASS_DEBUG(std::cerr << "[InsertInitialUnclausedVmemPass] inserted "
+                                     << "global_prefetch_b8/v_nop prologue in bb=\"" << bb.getLabel()
+                                     << "\"\n");
                 return preserveCFGAnalyses();
             }
         }
