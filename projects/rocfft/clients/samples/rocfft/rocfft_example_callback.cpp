@@ -20,6 +20,8 @@
 * THE SOFTWARE.
 *******************************************************************************/
 
+#ifndef __SPIRV__
+
 #include <iostream>
 #ifndef _WIN32
 #include "rocfft/rocfft.h"
@@ -199,3 +201,5 @@ int main()
     return 0;
 #endif
 }
+
+#endif

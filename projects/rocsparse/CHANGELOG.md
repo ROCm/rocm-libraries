@@ -7,6 +7,11 @@ Documentation for rocSPARSE is available at
 
 ### Added
 * Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
+* Added CSC format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
+* Added CSC format support to `rocsparse_spsm` and `rocsparse_sptrsm`.
+
+### Changed
+* `rocsparse_spmm` with CSR/CSC and the default algorithm (`rocsparse_spmm_alg_default` or `rocsparse_spmm_alg_csr`) now automatically selects a load-balanced (nnz-split) kernel for strongly skewed matrices (those containing a single very long row for CSR, or column for transposed CSC). Behavior is unchanged for non-skewed matrices and for explicit algorithm choices (`rocsparse_spmm_alg_csr_row_split`, `rocsparse_spmm_alg_csr_nnz_split`, `rocsparse_spmm_alg_csr_merge_path`).
 
 ### Resolved issues
 * Fixed an issue with `rocsparse_spmm`, which produced incorrect results for the Blocked ELL sparse format.

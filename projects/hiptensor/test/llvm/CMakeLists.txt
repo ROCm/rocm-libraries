@@ -97,7 +97,14 @@ set_target_properties(${LIBRARY_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(${LIBRARY_NAME} PRIVATE ${HIPTENSOR_LLVM_LIBS})
 target_include_directories(${LIBRARY_NAME} PRIVATE ${HIPTENSOR_LLVM_INCLUDES})
 target_include_directories(${LIBRARY_NAME} INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_options(${LIBRARY_NAME} PRIVATE -fno-rtti ${CLANG_DRIVER_MODE})
+# MSVC STL headers (<memory>, <functional>) use typeid internally, which requires
+# RTTI. LLVM is built with RTTI off, so -fno-rtti is used elsewhere for ABI
+# compatibility, but on Windows it must be enabled to compile against the MSVC STL.
+if(WIN32)
+    target_compile_options(${LIBRARY_NAME} PRIVATE -frtti ${CLANG_DRIVER_MODE})
+else()
+    target_compile_options(${LIBRARY_NAME} PRIVATE -fno-rtti ${CLANG_DRIVER_MODE})
+endif()
 target_link_options(${LIBRARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
 
 if(WIN32)

@@ -470,6 +470,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
 
     /* math.* */
     "math.exp2",
+    "math.exp2_fast",
     "math.log2",
     "math.rcp",
     "math.rcp_fast",
@@ -675,6 +676,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
 
     /* math.* */
     /* math.exp2     */ true,
+    /* math.exp2_fast*/ true,
     /* math.log2     */ true,
     /* math.rcp      */ true,
     /* math.rcp_fast */ true,

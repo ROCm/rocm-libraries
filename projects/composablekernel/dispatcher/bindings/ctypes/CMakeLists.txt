@@ -9,6 +9,7 @@
 #
 # Targets:
 #   - dispatcher_gemm_lib      : GEMM dispatcher library
+#   - dispatcher_mx_gemm_lib   : MX-GEMM (microscaling) dispatcher library (gfx950)
 #   - dispatcher_conv_lib      : Convolution dispatcher library (forward + bwd_data)
 #   - dispatcher_conv_bwdw_lib : Convolution backward weight library
 #   - gpu_helper               : GPU helper executable for Python
@@ -69,6 +70,81 @@ else()
         ${PROJECT_SOURCE_DIR}/dispatcher/include
     )
     target_link_libraries(dispatcher_gemm_lib PRIVATE hip::device)
+endif()
+
+# =============================================================================
+# MX-GEMM ctypes Library (microscaling GEMM, gfx950/MI350 only)
+# =============================================================================
+#
+# Force-includes a generated mx_gemm kernel header (SelectedKernel/KERNEL_NAME/
+# MxGemmHostArgs/ScaleType/...). The lib also includes the Old-TE common helper
+# (common/utils.hpp) for the free-function is_row_major(Layout), so add the
+# tile_engine/ops include roots.
+
+set(MX_GEMM_TE_INCLUDE_DIRS
+    ${PROJECT_SOURCE_DIR}/tile_engine/ops
+    ${PROJECT_SOURCE_DIR}/tile_engine/ops/gemm
+    ${PROJECT_SOURCE_DIR}/tile_engine/ops/gemm/mx_gemm
+)
+
+# Resolve the configured GPU target GENERICALLY -- do NOT hardcode/default the
+# arch to gfx950. mx_gemm is gfx950-only (it calls the gfx950-only
+# preShuffleScaleBuffer_gfx950 helper), and that requirement is enforced IN THE
+# SOURCE: mx_gemm_ctypes_lib.cpp #errors if GFX_ARCH is unset and static_asserts
+# GFX_ARCH == "gfx950" (plus a runtime device guard). Here we simply pass the
+# real build target through as -DGFX_ARCH and only wire up the target when the
+# build actually targets gfx950, so a gfx942/other dispatcher build is neither
+# broken by the static_assert nor silently built for an unsupported arch.
+if(DEFINED GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "")
+    string(REPLACE ";" " " _mx_gpu_targets_space "${GPU_TARGETS}")
+    string(REPLACE " " ";" _mx_gpu_targets_list "${_mx_gpu_targets_space}")
+    list(GET _mx_gpu_targets_list 0 MX_GEMM_GPU_TARGET)
+elseif(DEFINED CK_TILE_GEMM_GPU_TARGET AND NOT CK_TILE_GEMM_GPU_TARGET STREQUAL "")
+    set(MX_GEMM_GPU_TARGET "${CK_TILE_GEMM_GPU_TARGET}")
+else()
+    set(MX_GEMM_GPU_TARGET "")
+endif()
+
+if(NOT MX_GEMM_GPU_TARGET STREQUAL "gfx950")
+    message(STATUS
+        "MX-GEMM ctypes lib is gfx950-only; skipping for GPU target "
+        "'${MX_GEMM_GPU_TARGET}' (configure with GPU_TARGETS=gfx950 to enable).")
+else()
+    file(GLOB MX_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/mx_gemm_*.hpp")
+    if(MX_GEMM_KERNEL_HEADERS)
+        list(GET MX_GEMM_KERNEL_HEADERS 0 MX_GEMM_KERNEL_HEADER)
+        message(STATUS "Found MX-GEMM kernel for ctypes lib: ${MX_GEMM_KERNEL_HEADER}")
+
+        add_ctypes_library(dispatcher_mx_gemm_lib
+            mx_gemm_ctypes_lib.cpp
+            KERNEL_HEADER ${MX_GEMM_KERNEL_HEADER}
+        )
+        target_include_directories(dispatcher_mx_gemm_lib PRIVATE ${MX_GEMM_TE_INCLUDE_DIRS})
+        # The generated header only exports SelectedKernel/KERNEL_NAME/ScaleType/...
+        # under this define. Pass the resolved build target through as -DGFX_ARCH
+        # (the source #errors if unset and static_asserts it is gfx950).
+        target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE
+            CK_TILE_SINGLE_KERNEL_INCLUDE
+            GFX_ARCH="${MX_GEMM_GPU_TARGET}"
+        )
+    else()
+        message(STATUS "No MX-GEMM kernel found for ctypes lib - building without kernel")
+        add_library(dispatcher_mx_gemm_lib SHARED mx_gemm_ctypes_lib.cpp)
+        target_include_directories(dispatcher_mx_gemm_lib PRIVATE
+            ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_SOURCE_DIR}/dispatcher/include
+            ${MX_GEMM_TE_INCLUDE_DIRS}
+        )
+        target_link_libraries(dispatcher_mx_gemm_lib PRIVATE hip::device)
+        # Pass the resolved build target through as -DGFX_ARCH (the source #errors
+        # if unset and static_asserts it is gfx950).
+        target_compile_definitions(dispatcher_mx_gemm_lib PRIVATE
+            GFX_ARCH="${MX_GEMM_GPU_TARGET}")
+        set_target_properties(dispatcher_mx_gemm_lib PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            CXX_STANDARD 17
+        )
+    endif()
 endif()
 
 # =============================================================================
@@ -149,6 +225,52 @@ else()
     )
     target_link_libraries(dispatcher_conv_bwdw_lib PRIVATE hip::device)
     set_target_properties(dispatcher_conv_bwdw_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
+# GroupedGemm BQuant ctypes Library
+# =============================================================================
+
+file(GLOB BQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_bquant_*.hpp")
+if(BQUANT_GEMM_KERNEL_HEADERS)
+    list(GET BQUANT_GEMM_KERNEL_HEADERS 0 BQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found BQuant GEMM kernel for ctypes lib: ${BQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_grouped_gemm_bquant_lib
+        grouped_gemm_bquant_ctypes_lib.cpp
+        KERNEL_HEADER ${BQUANT_GEMM_KERNEL_HEADER}
+    )
+    # Resolve a single GFX arch string from CMAKE_HIP_ARCHITECTURES if available,
+    # falling back to the cache variable CK_TILE_BQUANT_GFX_ARCH (default gfx942).
+    # The Python build path always passes -DGFX_ARCH=... explicitly via hipcc, so
+    # this default only affects builds driven through CMake directly.
+    if(NOT DEFINED CK_TILE_BQUANT_GFX_ARCH OR CK_TILE_BQUANT_GFX_ARCH STREQUAL "")
+        if(CMAKE_HIP_ARCHITECTURES)
+            list(GET CMAKE_HIP_ARCHITECTURES 0 _bquant_gfx_arch)
+        else()
+            set(_bquant_gfx_arch "gfx942")
+        endif()
+        set(CK_TILE_BQUANT_GFX_ARCH "${_bquant_gfx_arch}" CACHE STRING
+            "GFX arch for the CMake-built BQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
+    endif()
+    message(STATUS "BQuant ctypes lib GFX_ARCH: ${CK_TILE_BQUANT_GFX_ARCH}")
+
+    target_compile_definitions(dispatcher_grouped_gemm_bquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="${CK_TILE_BQUANT_GFX_ARCH}"
+    )
+else()
+    message(STATUS "No BQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_grouped_gemm_bquant_lib SHARED grouped_gemm_bquant_ctypes_lib.cpp)
+    target_include_directories(dispatcher_grouped_gemm_bquant_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_grouped_gemm_bquant_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_grouped_gemm_bquant_lib PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         CXX_STANDARD 17
     )
