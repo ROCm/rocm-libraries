@@ -109,7 +109,6 @@ from ._conv_implicit_gemm_common import (
     ConvDataSpec,
     ConvProblem,
     _apply_accumulator_epilogue,
-    _choose_load_vec_for,
     _emit_frag_smem_load,
     _emit_mfma,
     _emit_smem_load,
@@ -791,15 +790,15 @@ def build_implicit_gemm_conv_wgrad(
     ]
 
     threads = spec.block_size
-    _auto_load_vec = _choose_load_vec_for(
-        block_m, block_n, block_k, threads, spec.data.dtype_a
-    )
-    load_vec_a = (
-        spec.vector_size_a if spec.vector_size_a is not None else _auto_load_vec
-    )
-    load_vec_b = (
-        spec.vector_size_b if spec.vector_size_b is not None else _auto_load_vec
-    )
+    # A (dY, NHWK) and B (X, NHWC) are loaded along the K_wg (reduction) axis by
+    # CoalescedTileLoader.  In NHWK the stride between adjacent K_wg positions is K
+    # (= output channels); in NHWC it is C (= input channels).  Neither is 1, so
+    # buffer_load_vN would read consecutive *channel* values at the same spatial
+    # position rather than the intended next spatial position.  Force vec=1 for both
+    # operands regardless of what the auto-picker or the caller requests.
+    # TODO: Enable vec size large than 1
+    load_vec_a = 1
+    load_vec_b = 1
 
     # dY descriptor: (k_wg_red, k_out=m_wg) → NHWK offset
     # k_wg_red is the K-loop reduction index (= output position m_fwd).
@@ -827,7 +826,6 @@ def build_implicit_gemm_conv_wgrad(
 
     def x_descriptor(b_: IRBuilder, row: Value, col: Value):
         # B-tile layout: row = tile-local N index (filter+chan), col = tile-local K index (output pos).
-        # Mirrors the forward b_descriptor: row → N-axis, col → K-axis.
         k_val = b_.add(block_n_off_v, row)  # N_wg: filter+channel position
         m_val = b_.add(
             k_off_capture[0], col
@@ -854,7 +852,6 @@ def build_implicit_gemm_conv_wgrad(
     else:
         a_loader = None
         b_loader = None
-        # A tile: (block_m rows = K-channels, block_k cols = K_wg reduction slice)
         a_sync_loader = CoalescedTileLoader(
             tile_rows=block_m,
             tile_cols=block_k,
@@ -862,11 +859,6 @@ def build_implicit_gemm_conv_wgrad(
             load_vec=load_vec_a,
             elem_dtype=ir_dtype_a,
         )
-        # B tile: (block_n rows = N_wg filter+chan, block_k cols = K_wg reduction slice)
-        # Note: the B loader iterates over rows=N_wg and cols=K_wg. The descriptor
-        # callback maps (row=k_off+..., col=block_n_off+...) → NHWC, so the row/col
-        # roles are swapped vs the forward B loader. CoalescedTileLoader is row-major
-        # and doesn't care about semantics; the descriptor closure handles the mapping.
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
             tile_cols=block_k,

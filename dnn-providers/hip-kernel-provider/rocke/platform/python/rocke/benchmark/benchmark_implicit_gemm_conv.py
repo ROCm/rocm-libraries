@@ -124,6 +124,14 @@ def _grid_for_spec(spec, p):
     return (gx, gy, p.groups)
 
 
+def _grid_for_wgrad_spec(spec, split_k: int):
+    """Derive launch grid from wgrad spec and split-K degree."""
+    tile_m, tile_n = spec.tile_m, spec.tile_n
+    gx = (spec.wg_N + tile_n - 1) // tile_n
+    gy = (spec.wg_M + tile_m - 1) // tile_m
+    return (gx, gy, split_k)
+
+
 def _verify_kernel(
     *,
     rt,
@@ -183,13 +191,13 @@ def _verify_kernel(
 
         dump_dir = pathlib.Path(dump_fail)
         dump_dir.mkdir(parents=True, exist_ok=True)
-        diff = out_f32.sub(ref_out).abs()
+        diff = out_f32.sub(ref_out)
 
         def _save(name, t):
             arr = t.cpu().numpy()
             np.savetxt(
                 dump_dir / f"{kernel_name}_{name}.txt",
-                arr.reshape(-1, arr.shape[-1] if arr.ndim > 1 else 1),
+                arr.flatten(),
                 fmt="%.6f",
             )
 
@@ -376,11 +384,16 @@ def main() -> int:
     )
     parser.add_argument(
         "--debug-init",
-        action="store_true",
+        nargs="?",
+        const=1.0,
+        default=None,
+        type=float,
         dest="debug_init",
+        metavar="VALUE",
         help=(
-            "initialise X and dY (wgrad) / A and B (fwd) to all-ones instead of "
-            "random. With ones the expected dW[k,y,x,c] = N * valid_spatial_count(y,x) "
+            "initialise X and dY (wgrad) / A and B (fwd) to a constant value "
+            "instead of random. Defaults to 1.0 when given without a value. "
+            "With ones the expected dW[k,y,x,c] = N * valid_spatial_count(y,x) "
             "— a simple integer pattern easy to verify by eye or compare exactly."
         ),
     )
@@ -608,8 +621,8 @@ def _run_sweep(
 
     def _make(*shape):
         return (
-            torch.ones(*shape)
-            if args.debug_init
+            torch.full(shape, args.debug_init)
+            if args.debug_init is not None
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
@@ -897,8 +910,8 @@ def _run_wgrad_sweep(
 
     def _make(*shape):
         return (
-            torch.ones(*shape)
-            if args.debug_init
+            torch.full(shape, args.debug_init)
+            if args.debug_init is not None
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
@@ -1055,13 +1068,7 @@ def _run_wgrad_sweep(
             kernel_name=artifact.kernel_name,
             signature=sig,
         )
-        wg_M = spec.wg_M
-        wg_N = spec.wg_N
-        grid = (
-            (wg_N + tile_n - 1) // tile_n,
-            (wg_M + tile_m - 1) // tile_m,
-            resolved_split_k,  # z-axis: one CTA per K-slice
-        )
+        grid = _grid_for_wgrad_spec(spec, resolved_split_k)
         block = (spec.block_size, 1, 1)
         stream = 0
 
