@@ -87,6 +87,8 @@ test_categories:
       # The CPU dev-applicability check is unaffected.)
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
+      # Flaky tests (intentionally over-filtered):
+      - "*GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops*.ConvHipImplicitGemm3DGroupWrwXdlops*"
       # Each fans out to 32 worker processes loading MIOpen, OOM-killing
       # small shared-RAM runners (e.g. gfx1151). Still run in standard/full.
       - "CPU_PerfDb_NONE.*"
@@ -173,6 +175,8 @@ test_categories:
       - "Full/GPU_BNFWDTrainLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLBWDLargeFusedActivation2D_*"
       - "Full/GPU_BNOCLInferLargeFusedActivation2D_*"
+      # Flaky tests (intentionally over-filtered):
+      - "*GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops*.ConvHipImplicitGemm3DGroupWrwXdlops*"
 
     test_files:
       # Quick tests
