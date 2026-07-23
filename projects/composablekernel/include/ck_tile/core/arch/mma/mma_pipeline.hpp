@@ -86,13 +86,15 @@ struct MmaPipelineBase
                                                                typename Derived::AWarpTensor> &&
                       detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
                                                                typename Derived::BWarpTensor>);
-        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale)
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale &&
+                     MmaOpTraits<typename Derived::MmaOp>::IsMfma)
         {
-            auto identity_scale = Derived::kIdentityScale;
-            exec<Params...>(a, b, c, identity_scale, identity_scale);
+            // GFX950 MFMA with (0,0) scale args
+            exec<Params...>(a, b, c, 0, 0);
         }
         else
         {
+            // GFX1250 WMMA with no scale args
             exec<Params...>(a, b, c);
         }
     }
@@ -111,10 +113,10 @@ struct MmaPipelineBase
         {
             c.get_thread_buffer()[i] = typename Derived::CDataType{0};
         }
-        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale)
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale &&
+                     MmaOpTraits<typename Derived::MmaOp>::IsMfma)
         {
-            auto identity_scale = Derived::kIdentityScale;
-            exec<Params...>(a, b, c, identity_scale, identity_scale);
+            exec<Params...>(a, b, c, 0, 0);
         }
         else
         {
@@ -129,8 +131,11 @@ struct MmaPipelineBase
               typename CTensor,
               typename ScaleADataType,
               typename ScaleBDataType>
-    CK_TILE_DEVICE static decltype(auto)
-    exec(ATensor& a, BTensor& b, CTensor& accum, ScaleADataType& scale_A, ScaleBDataType& scale_B)
+    CK_TILE_DEVICE static decltype(auto) exec(ATensor& a,
+                                              BTensor& b,
+                                              CTensor& accum,
+                                              const ScaleADataType& scale_A,
+                                              const ScaleBDataType& scale_B)
     {
         static_assert(MmaOpTraits<typename Derived::MmaOp>::IsScale,
                       "This exec variant is intended for scale policy structs");

@@ -97,6 +97,16 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         std::conditional_t<CTranspose, typename MmaOp::ADataType, typename MmaOp::BDataType>;
     using CDataType = typename MmaOp::CDataType;
 
+    // Unscaled MmaOp (when scale factors cannot be 0, e.g. gfx1250 WMMA)
+    using UnscaledMmaOp = typename MmaDefaultSelector<typename MmaOp::ADataType,
+                                                      typename MmaOp::BDataType,
+                                                      typename MmaOp::CDataType,
+                                                      MmaOp::kM,
+                                                      MmaOp::kN,
+                                                      MmaOp::kK,
+                                                      CompilerTarget,
+                                                      MmaOpFamily::DENSE>::SelectedOp;
+
     // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
     // iteration!)
     constexpr static index_t kM = WaveTileM;
@@ -176,13 +186,6 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     // Expose kCMLane for some callers (e.g. gemm_quant block policies)
     static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
 
-    // Scale intrinsics have no "no-scale" opcode.
-    // Packed e8m0_t, bias 127 = 0x7F => 2^(127-127) = 1 for each byte.
-    // For architectures with a wider scale operand, e.g. gfx1250 scale16: 8 packed bytes
-    // For architectures with a narrower scale operand, e.g. gfx950 scale8: 4 packed bytes
-    // Since each byte is 0x7F, implicit narrowing to 4 bytes is still correct.
-    static constexpr int64_t kIdentityScale = 0x7F7F7F7F7F7F7F7Fll;
-
     // Unsupported MmaOps with nonTrivial AttrNumAccess / Swizzle lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
@@ -241,8 +244,11 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
               typename CTensor,
               typename ScaleADataType,
               typename ScaleBDataType>
-    CK_TILE_DEVICE static void
-    execImpl(ATensor& a, BTensor& b, CTensor& c, ScaleADataType& scale_A, ScaleBDataType& scale_B)
+    CK_TILE_DEVICE static void execImpl(ATensor& a,
+                                        BTensor& b,
+                                        CTensor& c,
+                                        const ScaleADataType& scale_A,
+                                        const ScaleBDataType& scale_B)
     {
         // Thread_buffer types allow us to select the ext_vectors for individual MmaOp calls.
         using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
@@ -285,6 +291,97 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                                                             c_buf.at(bm * FragsN + bn),
                                                             scale_A,
                                                             scale_B);
+                    }
+                }
+            }
+        }
+        else
+        {
+            static_assert(false, "Invalid accumulation policy");
+        }
+    }
+
+    // No-scale execImpl() without explicit scale args.
+    // If no dense specialisation found => fallback to MmaOp with identity scale = 127
+    template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
+    CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
+    {
+        using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
+        using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
+        using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
+
+        auto& a_buf = reinterpret_cast<const AThreadBufType&>(a);
+        auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);
+        auto& c_buf = reinterpret_cast<CThreadBufType&>(c);
+
+        if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
+        {
+            static_assert(
+                std::is_same_v<typename UnscaledMmaOp::AVecType, typename MmaOp::AVecType> &&
+                    std::is_same_v<typename UnscaledMmaOp::BVecType, typename MmaOp::BVecType> &&
+                    std::is_same_v<typename UnscaledMmaOp::CVecType, typename MmaOp::CVecType>,
+                "UnscaledMmaOp vector layout must match MmaOp's for the fragments to alias "
+                "correctly");
+        }
+
+        if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
+        {
+            for(uint32_t bm = 0u; bm < FragsM; ++bm)
+            {
+                for(uint32_t bn = 0u; bn < FragsN; ++bn)
+                {
+                    for(uint32_t bk = 0u; bk < FragsK; ++bk)
+                    {
+                        if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
+                        {
+                            // UnscaledMmaOp::exec is not templated on Params (no op_sel/reuse
+                            // dependency for a plain unscaled op), unlike MmaOp::exec below.
+                            c_buf.at(bm * FragsN + bn) =
+                                UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                    b_buf.at(bn * FragsK + bk),
+                                                    c_buf.at(bm * FragsN + bn));
+                        }
+                        else
+                        {
+                            constexpr int32_t identity_scale = 0x7F7F7F7F;
+                            c_buf.at(bm * FragsN + bn) =
+                                MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                                b_buf.at(bn * FragsK + bk),
+                                                                c_buf.at(bm * FragsN + bn),
+                                                                identity_scale,
+                                                                identity_scale);
+                        }
+                    }
+                }
+            }
+        }
+        else if constexpr(AccumPolicy == MmaAccumPolicy::COL_MAJOR)
+        {
+            for(uint32_t bn = 0u; bn < FragsN; ++bn)
+            {
+                for(uint32_t bm = 0u; bm < FragsM; ++bm)
+                {
+                    for(uint32_t bk = 0u; bk < FragsK; ++bk)
+                    {
+                        if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
+                        {
+                            // UnscaledMmaOp::exec is not templated on Params (no op_sel/reuse
+                            // dependency for a plain unscaled op), unlike MmaOp::exec below.
+                            c_buf.at(bm * FragsN + bn) =
+                                UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                    b_buf.at(bn * FragsK + bk),
+                                                    c_buf.at(bm * FragsN + bn));
+                        }
+                        else
+                        {
+                            constexpr int32_t identity_scale = 0x7F7F7F7F;
+                            c_buf.at(bm * FragsN + bn) =
+                                MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                                b_buf.at(bn * FragsK + bk),
+                                                                c_buf.at(bm * FragsN + bn),
+                                                                identity_scale,
+                                                                identity_scale);
+                        }
                     }
                 }
             }
