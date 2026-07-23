@@ -50,7 +50,7 @@ mode. We aim to beat that on the same shape.
 
 Shared dataclasses and low-level helpers live in
 :mod:`._conv_implicit_gemm_common` (underscore-prefixed, internal).
-This module re-exports them all so existing callers see no change.
+This module re-exports the shared helpers to keep existing callers stable.
 """
 
 from __future__ import annotations
