@@ -122,37 +122,148 @@ def get_git_origin_url(repo_path="."):
     return None
 
 
+def _run_git(args):
+    """Run a git command; return (returncode, stdout_stripped, stderr_stripped)."""
+    try:
+        p = subprocess.run(args, capture_output=True, text=True)
+        return p.returncode, p.stdout.strip(), p.stderr.strip()
+    except Exception as e:  # noqa: BLE001
+        return 1, "", f"{type(e).__name__}: {e}"
+
+
+def _dump_git_state(g):
+    """EXPERIMENTAL/DEBUG: dump everything about the checkout so we can see what refs are
+    available to compute a base from on the TheRock CI runner. Remove once the right
+    strategy is known."""
+    print("=" * 78)
+    print("DAPPER DEBUG: git state (source_dir git dir)")
+    print("=" * 78)
+    probes = [
+        ("cwd/source_dir", g[2]),
+        ("toplevel", g + ["rev-parse", "--show-toplevel"]),
+        ("git-dir", g + ["rev-parse", "--git-dir"]),
+        ("is-shallow", g + ["rev-parse", "--is-shallow-repository"]),
+        ("HEAD", g + ["rev-parse", "HEAD"]),
+        ("HEAD+parents", g + ["rev-list", "--parents", "-n", "1", "HEAD"]),
+        ("HEAD log -5", g + ["log", "--oneline", "-5", "HEAD"]),
+        ("remotes", g + ["remote", "-v"]),
+        ("branch -a", g + ["branch", "-a"]),
+        ("branch -r", g + ["branch", "-r"]),
+        (
+            "for-each-ref",
+            g + ["for-each-ref", "--format=%(objectname:short) %(refname)"],
+        ),
+        ("tags", g + ["tag", "--list"]),
+        ("FETCH_HEAD", g + ["rev-parse", "--verify", "-q", "FETCH_HEAD"]),
+        ("remote config", g + ["config", "--get-regexp", r"^remote\."]),
+    ]
+    for label, cmd in probes:
+        if isinstance(cmd, str):
+            print(f"--- {label}: {cmd}")
+            continue
+        rc, out, err = _run_git(cmd)
+        print(f"--- {label} (rc={rc}) ---")
+        if out:
+            print(out)
+        elif err:
+            print(f"[stderr] {err}")
+        else:
+            print("(empty)")
+    print("=" * 78)
+
+
 def resolve_base_sha(source_dir, base_ref):
     """Determine the base commit for the impact diff, robust to CI checkouts.
 
-    CI frequently builds a MERGE of the PR into its target branch -- e.g. TheRock checks
-    out the PR merged into develop -- and the base_ref (origin/develop) is often NOT a
-    fetched ref there, so `git merge-base HEAD origin/develop` fails and dapper can't tell
-    what changed. When HEAD is such a merge commit, use the merge-base of its two parents
-    (the fork point). That is order-independent -- CI may merge in either direction, so we
-    must NOT assume which parent is develop -- and it is fail-safe: diff base..HEAD is
-    guaranteed to contain all of the PR's changes (dapper must never under-select). With a
-    rebased PR the fork point is recent, so the extra develop delta is small.
+    EXPERIMENTAL/DEBUG version: dumps the full git state and tries a battery of strategies
+    until it finds a commit that shares history with HEAD (a merge-base). This exists
+    because TheRock's checkout has neither `origin/develop` as a ref nor a merge commit at
+    HEAD, so earlier attempts fell back to entire_category. Once we see the debug dump from
+    a real TheRock run we can trim this down to the one strategy that works.
 
-    Otherwise (a normal branch tip, e.g. native MIOpen-CI) use merge-base(HEAD, base_ref)
-    when base_ref resolves. Returns None if nothing works, so the caller fails open to
-    entire_category rather than crashing.
+    Order: (1) if HEAD is a merge, fork-point of its parents; (2) merge-base(HEAD, ref) for
+    a battery of already-present candidate refs; (3) fetch develop (progressively deeper)
+    and retry. Returns None only if everything fails (caller fails open to entire_category).
     """
     g = ["git", "-C", source_dir]
-    parents = get_git_sha(g + ["rev-list", "--parents", "-n", "1", "HEAD"])
-    if parents and len(parents.split()) >= 3:  # HEAD + 2+ parents => merge commit
-        toks = parents.split()
-        base = get_git_sha(g + ["merge-base", toks[1], toks[2]])
-        if base:
-            print(f"    base: HEAD is a merge; merge-base of parents = {base[:12]}")
-            return base
-    if get_git_sha(g + ["rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}"]):
-        base = get_git_sha(g + ["merge-base", "HEAD", base_ref])
-        if base:
-            print(f"    base: merge-base(HEAD, {base_ref}) = {base[:12]}")
-            return base
+    _dump_git_state(g)
+
+    def try_merge_base(ref, why):
+        rc, sha, _ = _run_git(g + ["rev-parse", "--verify", "-q", f"{ref}^{{commit}}"])
+        if rc != 0 or not sha:
+            print(f"DAPPER base [{why}] ref='{ref}': does not resolve -- skip")
+            return None
+        rc, mb, err = _run_git(g + ["merge-base", "HEAD", ref])
+        if rc == 0 and mb:
+            print(
+                f"DAPPER base [{why}] ref='{ref}' ({sha[:12]}) -> merge-base {mb[:12]}  OK"
+            )
+            return mb
+        print(f"DAPPER base [{why}] ref='{ref}' ({sha[:12]}): NO merge-base ({err})")
+        return None
+
+    # (1) HEAD is a merge commit -> order-independent fork point of its parents.
+    rc, parents, _ = _run_git(g + ["rev-list", "--parents", "-n", "1", "HEAD"])
+    toks = parents.split() if parents else []
+    if len(toks) >= 3:
+        rc, mb, _ = _run_git(g + ["merge-base", toks[1], toks[2]])
+        if rc == 0 and mb:
+            print(
+                f"DAPPER base [merge-fork] parents {toks[1][:12]},{toks[2][:12]} -> {mb[:12]}  OK"
+            )
+            return mb
+
+    # (2) battery of candidate refs already present in the checkout.
+    candidates = [
+        base_ref,
+        "origin/develop",
+        "refs/remotes/origin/develop",
+        "develop",
+        "refs/heads/develop",
+        "origin/HEAD",
+        "origin/main",
+        "main",
+        "origin/master",
+        "master",
+    ]
+    rc, refs, _ = _run_git(g + ["for-each-ref", "--format=%(refname)"])
+    for r in refs.splitlines() if refs else []:
+        if r.rsplit("/", 1)[-1] in ("develop", "main", "master"):
+            candidates.append(r)
+    seen, tried = set(), []
+    for ref in candidates:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        tried.append(ref)
+        mb = try_merge_base(ref, "local-ref")
+        if mb:
+            return mb
+
+    # (3) develop is not present locally -> fetch it (progressively deeper) and retry.
+    fetches = [
+        (g + ["fetch", "--no-tags", "origin", "develop"], "fetch develop"),
+        (
+            g + ["fetch", "--no-tags", "--deepen=5000", "origin", "develop"],
+            "fetch deepen",
+        ),
+        (
+            g + ["fetch", "--no-tags", "--unshallow", "origin", "develop"],
+            "fetch unshallow",
+        ),
+    ]
+    for cmd, why in fetches:
+        print(f"DAPPER base: {why}: {' '.join(cmd)}")
+        rc, out, err = _run_git(cmd)
+        print(f"  -> rc={rc} {(err or out)[:400]}")
+        for ref in ("FETCH_HEAD", "origin/develop"):
+            mb = try_merge_base(ref, why)
+            if mb:
+                return mb
+
     print(
-        f"    base: unresolved (base_ref '{base_ref}' absent and HEAD is not a merge)"
+        f"DAPPER base: ALL strategies failed (tried refs: {tried} + fetch). "
+        "Returning None -> entire_category fallback."
     )
     return None
 
