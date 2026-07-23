@@ -280,6 +280,43 @@ function(add_gtest_fwd_tuning_quick)
     add_fmha_quick_category_test(
         test_ck_tile_fmha_fwd_tuning_quick ${quick_test_target} ${quick_cases}
     )
+
+    # The asymmetric 192x128 QK/V head dimensions are representative of
+    # multi-latent-attention decode. Reuse the d256 padded instances above.
+    add_fmha_quick_category_test(
+        test_ck_tile_fmha_mla_quick
+        ${quick_test_target}
+        "TestCkTileFmhaFwd/General.FmhaFwdFp16/112"
+        "TestCkTileFmhaFwd/General.FmhaFwdFp16/119"
+    )
+endfunction()
+
+function(add_gtest_fwd_sink_quick)
+    set(quick_targets ${SUPPORTED_GPU_TARGETS})
+    list(FILTER quick_targets INCLUDE REGEX "gfx9|gfx1[12]")
+
+    set(quick_instance_target tile_fmha_fwd_sink_quick_instances)
+    set(quick_test_target test_ck_tile_fmha_fwd_sink_quick_bin)
+    set(quick_codegen_filter
+        "fmha_fwd_d128_fp16_*_nlogits_nbias_*mask_lse_ndropout_nskip_nqscale_ntrload_sink*"
+    )
+    add_fmha_quick_codegen(
+        ${quick_instance_target} ${FMHA_FWD_INSTANCES} "fwd" "128"
+        "${quick_codegen_filter}" ${quick_targets}
+    )
+    add_fmha_quick_executable(
+        ${quick_test_target} test_fmha_fwd.cpp FmhaFwdFp16
+        ${quick_instance_target}
+    )
+    target_compile_definitions(
+        ${quick_test_target} PRIVATE CK_TILE_FMHA_FWD_SINK_QUICK_TESTS=1
+    )
+    add_fmha_quick_category_test(
+        test_ck_tile_fmha_fwd_sink_quick
+        ${quick_test_target}
+        "TestCkTileFmhaFwdSinkQuick.StreamLlmMaskBatch"
+        "TestCkTileFmhaFwdSinkQuick.LearnedSinkGroup"
+    )
 endfunction()
 
 function(add_gtest_fwd_fp8_quick)
@@ -342,6 +379,17 @@ function(add_gtest_bwd_tuning_quick)
     add_fmha_quick_category_test(
         test_ck_tile_fmha_bwd_tuning_quick ${quick_test_target} ${quick_cases}
     )
+
+    # Sink-gradient uses the same backward kernels; select group-mode d64/d128
+    # regression cases without expanding the generated source graph.
+    add_fmha_quick_category_test(
+        test_ck_tile_fmha_bwd_sink_quick
+        ${quick_test_target}
+        "TestCkTileFmhaBwd/SinkGradGroupMode.FmhaBwdFp16/5"
+        "TestCkTileFmhaBwd/SinkGradGroupMode.FmhaBwdFp16/7"
+        "TestCkTileFmhaBwd/SinkGradGroupMode.FmhaBwdFp16/10"
+        "TestCkTileFmhaBwd/SinkGradGroupMode.FmhaBwdFp16/12"
+    )
 endfunction()
 
 
@@ -351,6 +399,7 @@ add_custom_target(${TEST_NAME} DEPENDS ${TEST_NAME}_fwd ${TEST_NAME}_bwd)
 add_gtest_fwd_quick()
 add_gtest_fwd_tuning_quick()
 add_gtest_fwd_fp8_quick()
+add_gtest_fwd_sink_quick()
 add_gtest_bwd_tuning_quick()
 
 # Umbrella target to build and run all ck_tile fmha tests

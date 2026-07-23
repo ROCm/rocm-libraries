@@ -41,6 +41,25 @@ TYPED_TEST_SUITE(TestCkTileGemmBQuant, BlockScaleTypesQuick);
 
 TYPED_TEST(TestCkTileGemmBQuant, BlockScaleMx) { this->run_test_with_validation(256, 256, 256); }
 
+using BQuantDimensionTypesQuick = ::testing::Types<std::tuple<RowMajor,
+                                                              ColumnMajor,
+                                                              RowMajor,
+                                                              ColumnMajor,
+                                                              FP8,
+                                                              FP8,
+                                                              float,
+                                                              Half,
+                                                              BQuantGrouped,
+                                                              GemmConfigBase,
+                                                              GroupSize2D>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmBQuantDimension, BQuantDimensionTypesQuick);
+
+TYPED_TEST(TestCkTileGemmBQuantDimension, DimensionQuant)
+{
+    this->run_test_with_validation(256, 256, 256);
+}
+
 using PreshuffleTypesQuick = ::testing::Types<std::tuple<RowMajor,
                                                          ColumnMajor,
                                                          RowMajor,
@@ -67,6 +86,84 @@ using PreshuffleTypesQuick = ::testing::Types<std::tuple<RowMajor,
 TYPED_TEST_SUITE(TestCkTileGemmPreshuffleBBQuant, PreshuffleTypesQuick);
 
 TYPED_TEST(TestCkTileGemmPreshuffleBBQuant, PreshuffleB)
+{
+    this->run_test_with_validation(256, 256, 256);
+}
+
+using AQuantTypesQuick = ::testing::Types<std::tuple<RowMajor,
+                                                     ColumnMajor,
+                                                     RowMajor,
+                                                     RowMajor,
+                                                     FP8,
+                                                     FP8,
+                                                     float,
+                                                     Half,
+                                                     AQuantGrouped,
+                                                     GemmConfigBase,
+                                                     GroupSize1D_128>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmAQuant, AQuantTypesQuick);
+
+TYPED_TEST(TestCkTileGemmAQuant, DimensionQuant)
+{
+    this->run_test_with_validation(256, 256, 256);
+}
+
+using ABQuantTypesQuick = ::testing::Types<std::tuple<RowMajor,
+                                                      ColumnMajor,
+                                                      RowMajor,
+                                                      RowMajor,
+                                                      FP8,
+                                                      FP8,
+                                                      float,
+                                                      Half,
+                                                      ABQuantGrouped,
+                                                      GemmConfigTransposeC,
+                                                      GroupSize1D_128,
+                                                      GroupSize2D,
+                                                      ColumnMajor>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmABQuant, ABQuantTypesQuick);
+
+TYPED_TEST(TestCkTileGemmABQuant, DimensionQuant)
+{
+    this->run_test_with_validation(256, 256, 256);
+}
+
+using RowColQuantTypesQuick = ::testing::Types<std::tuple<RowMajor,
+                                                          ColumnMajor,
+                                                          RowMajor,
+                                                          RowMajor,
+                                                          FP8,
+                                                          FP8,
+                                                          float,
+                                                          Half,
+                                                          RowColQuant,
+                                                          GemmConfigBase,
+                                                          GroupSize1D_128>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmRowColQuant, RowColQuantTypesQuick);
+
+TYPED_TEST(TestCkTileGemmRowColQuant, DimensionQuant)
+{
+    this->run_test_with_validation(256, 256, 256);
+}
+
+using TensorQuantTypesQuick = ::testing::Types<std::tuple<RowMajor,
+                                                          ColumnMajor,
+                                                          RowMajor,
+                                                          RowMajor,
+                                                          FP8,
+                                                          FP8,
+                                                          float,
+                                                          Half,
+                                                          TensorQuant,
+                                                          GemmConfigBase,
+                                                          GroupSize1D_128>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmTensorQuant, TensorQuantTypesQuick);
+
+TYPED_TEST(TestCkTileGemmTensorQuant, DimensionQuant)
 {
     this->run_test_with_validation(256, 256, 256);
 }

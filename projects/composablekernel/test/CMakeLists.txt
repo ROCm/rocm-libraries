@@ -60,27 +60,51 @@ set(REGRESSION_TESTS
 # entries are filtered aliases of larger kernel tests; the standard entries
 # are complete lightweight executables.
 set(CK_TILE_CTEST_QUICK_TESTS
+    test_ck_tile_bf16
+    test_ck_tile_fp8
+    test_ck_tile_pk_int4
+    test_ck_tile_tf32
+    test_ck_tile_elementwise_1d
     test_ck_tile_gemm_quick
     test_ck_tile_gemm_block_scale_quick
     test_ck_tile_mx_gemm_quick
     test_ck_tile_batched_gemm_quick
+    test_ck_tile_batched_contraction_basic_quick
+    test_ck_tile_batched_contraction_multidim_quick
     test_ck_tile_grouped_gemm_quick
+    test_ck_tile_grouped_gemm_preshuffle_quick
+    test_ck_tile_grouped_gemm_quant_quick
     test_ck_tile_grouped_conv_quick
+    test_ck_tile_grouped_conv_fwd_quick
+    test_ck_tile_grouped_conv_bwd_data_quick
+    test_ck_tile_grouped_conv_bwd_weight_quick
+    test_ck_tile_flatmm_fp16_quick
+    test_ck_tile_flatmm_fp8_persistent_quick
+    test_ck_tile_streamk_fp16_quick
+    test_ck_tile_streamk_bf16_persistent_quick
+    test_ck_tile_streamk_fp8_quick
     test_ck_tile_fmha_quick
     test_ck_tile_fmha_fwd_tuning_quick
     test_ck_tile_fmha_fwd_fp8_quick
     test_ck_tile_fmha_bwd_tuning_quick
+    test_ck_tile_fmha_mla_quick
+    test_ck_tile_fmha_fwd_sink_quick
+    test_ck_tile_fmha_bwd_sink_quick
+    test_ck_tile_jenga_sparse_attn_quick
+    test_ck_tile_vsa_sparse_attn_quick
+    test_ck_tile_sageattn_batch_quick
+    test_ck_tile_sageattn_group_quick
     test_ck_tile_moe_quick
+    test_ck_tile_topk_softmax_fp16
+    test_ck_tile_topk_softmax_bf16
+    test_ck_tile_moe_smoothquant_fp16_fp8_quick
+    test_ck_tile_moe_smoothquant_bf16_int8_quick
     test_ck_tile_pooling_quick
 )
 set(CK_TILE_CTEST_STANDARD_TESTS
-    test_ck_tile_bf16
-    test_ck_tile_fp8
-    test_ck_tile_pk_int4
     test_ck_tile_tuple_apply
     test_atomic
     test_ck_tile_reduce2d
-    test_ck_tile_elementwise_1d
     test_ck_tile_batched_transpose
 )
 set(CK_TILE_CTEST_CATEGORY_TESTS

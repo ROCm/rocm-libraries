@@ -80,11 +80,18 @@ add_subdirectory(pooling)
 add_subdirectory(grouped_conv)
 add_subdirectory(load_and_convert_tile)
 add_subdirectory(multicast_load)
+add_subdirectory(quick_examples)
 
-# Compile only the executable targets used by the quick aliases. This is kept
+# Compile only the executable targets used by quick tests. This is kept
 # separate from execution so CPU-only builders can produce the test payload
-# before a GPU job runs CTest.
+# before a GPU job runs CTest. Direct quick tests and filtered aliases are both
+# included; duplicate backing executables are collapsed.
 get_property(_ck_tile_quick_targets GLOBAL PROPERTY CK_TILE_CTEST_ALIAS_TARGETS)
+foreach(test_name IN LISTS CK_TILE_CTEST_QUICK_TESTS)
+    if(TARGET "${test_name}")
+        list(APPEND _ck_tile_quick_targets "${test_name}")
+    endif()
+endforeach()
 if(_ck_tile_quick_targets)
     list(REMOVE_DUPLICATES _ck_tile_quick_targets)
     add_custom_target(ck_tile_quick_build DEPENDS ${_ck_tile_quick_targets})
@@ -99,7 +106,7 @@ if(COMMAND apply_ctest_category_labels)
     set(CK_TILE_INSTALLED_CTEST_TESTS "")
     set(_ck_tile_installed_test_lines "")
 
-    foreach(test_name IN LISTS CK_TILE_CTEST_STANDARD_TESTS)
+    foreach(test_name IN LISTS CK_TILE_CTEST_CATEGORY_TESTS)
         if(TARGET "${test_name}")
             list(APPEND _ck_tile_installed_test_lines
                 "add_test(\"${test_name}\" \"../${test_name}${CMAKE_EXECUTABLE_SUFFIX}\")"

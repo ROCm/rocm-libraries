@@ -32,6 +32,11 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     # gemm_block_scale/test_gemm_quant_abquant_splitk_*).
     add_gtest_executable(test_ck_tile_grouped_gemm_quant_abquant_splitk_smoke test_grouped_gemm_quant_abquant_splitk_smoke.cpp)
     target_compile_options(test_ck_tile_grouped_gemm_quant_abquant_splitk_smoke PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+    add_ck_tile_category_test(
+        test_ck_tile_grouped_gemm_quant_quick
+        test_ck_tile_grouped_gemm_quant_abquant_splitk_smoke
+        "--gtest_filter=GroupedABQuantSplitKSmoke.*"
+    )
 
     # Collect all test targets for umbrella label
     set(CK_TILE_GROUPED_GEMM_QUANT_TEST_TARGETS
@@ -57,4 +62,3 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         COMMENT "Running all ck_tile grouped_gemm_quant tests..."
     )
 endif()
-

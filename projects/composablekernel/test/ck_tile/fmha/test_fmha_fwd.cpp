@@ -335,6 +335,92 @@ TEST_P(General, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
+#ifdef CK_TILE_FMHA_FWD_SINK_QUICK_TESTS
+TEST(TestCkTileFmhaFwdSinkQuick, StreamLlmMaskBatch)
+{
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                               1,
+                                               2,
+                                               1,
+                                               {256},
+                                               {256},
+                                               128,
+                                               128,
+                                               0,
+                                               {-1},
+                                               {-1},
+                                               {},
+                                               {},
+                                               0,
+                                               false,
+                                               false,
+                                               0,
+                                               0,
+                                               true,
+                                               true,
+                                               0,
+                                               false,
+                                               "n",
+                                               0.0f,
+                                               0,
+                                               0,
+                                               false,
+                                               "t:2,0,2",
+                                               "n",
+                                               true,
+                                               1,
+                                               "uf",
+                                               123456,
+                                               1,
+                                               0,
+                                               0,
+                                               stream_config);
+    CHECK_RESULT(result);
+}
+
+TEST(TestCkTileFmhaFwdSinkQuick, LearnedSinkGroup)
+{
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::group,
+                                               2,
+                                               4,
+                                               2,
+                                               {192, 256},
+                                               {256, 192},
+                                               128,
+                                               128,
+                                               0,
+                                               {-1},
+                                               {-1},
+                                               {},
+                                               {},
+                                               0,
+                                               true,
+                                               true,
+                                               0,
+                                               0,
+                                               true,
+                                               true,
+                                               0,
+                                               false,
+                                               "n",
+                                               0.0f,
+                                               0,
+                                               0,
+                                               false,
+                                               "0",
+                                               "n",
+                                               true,
+                                               1,
+                                               "uf",
+                                               123456,
+                                               1,
+                                               1,
+                                               0,
+                                               stream_config);
+    CHECK_RESULT(result);
+}
+#endif
+
 // ---------------------------------------------------------------
 // Negative tests: padding not supported with appendkv/splitkv/pagedkv
 // ---------------------------------------------------------------

@@ -10,5 +10,10 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     if(NOT WIN32) #TODO: Figure out why this fails
         add_gtest_executable(test_ck_tile_grouped_gemm_preshuffle test_grouped_gemm_preshuffle.cpp)
         target_compile_options(test_ck_tile_grouped_gemm_preshuffle PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+        add_ck_tile_category_test(
+            test_ck_tile_grouped_gemm_preshuffle_quick
+            test_ck_tile_grouped_gemm_preshuffle
+            "--gtest_filter=TestCkTileGroupedGemmPreshuffle/0.VariedDimensions:TestCkTileGroupedGemmPreshuffle/4.PrefillVariant:TestCkTileGroupedGemmPreshuffle/8.kPadKTrue"
+        )
     endif()
 endif()
