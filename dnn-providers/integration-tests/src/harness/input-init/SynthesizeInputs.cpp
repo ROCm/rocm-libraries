@@ -170,7 +170,14 @@ void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_obje
     {
         return;
     }
-    config.setDefault(a->scale_tensor_uid(), FillSpec::structured());
+    // Fill the block scale with a small, positive, bounded range. STRUCTURED (a
+    // domain-aware fill) is the intended kind but is an unimplemented stub, which makes
+    // every block-scale-dequantize graph skip; FREE stands in for it. [0.5, 2.0] stays
+    // positive and modest so dequantized products remain within FP16 range, and is
+    // valid for any scale type (for the UE8M0 scales the MX tests use it discretizes to
+    // {0.5, 1.0, 2.0}). Restore FillSpec::structured() once implemented.
+    // config.setDefault(a->scale_tensor_uid(), FillSpec::structured());
+    config.setDefault(a->scale_tensor_uid(), FillSpec::free(0.5f, 2.0f));
 }
 
 // ── SDPA ─────────────────────────────────────────────────────────────────────
