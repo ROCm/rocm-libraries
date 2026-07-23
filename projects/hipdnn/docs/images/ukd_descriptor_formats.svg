@@ -15,7 +15,7 @@
   <text x="30" y="94"  font-family="Consolas, monospace" font-size="11" fill="#2a9d8f">matchers[]          &#8594; UMD set (shared)</text>
   <text x="30" y="110" font-family="Consolas, monospace" font-size="11" fill="#4a72c4">engine              &#8594; one UED</text>
   <text x="30" y="126" font-family="Consolas, monospace" font-size="11" fill="#3f9159">heuristic           &#8594; one UHD</text>
-  <text x="30" y="142" font-family="Consolas, monospace" font-size="11" fill="#8e5bc4">dispatch            &#8594; one UDD (promoted)</text>
+  <text x="30" y="142" font-family="Consolas, monospace" font-size="11" fill="#8e5bc4">dispatch            &#8594; one UDD</text>
   <text x="30" y="160" font-family="Consolas, monospace" font-size="11" fill="#555">kernelDescriptors[] : [ UKD, UKD, ... ]</text>
 
   <!-- UKD #1 (detailed, the reference source) -->
@@ -63,7 +63,7 @@
   <text x="800" y="268" font-family="Consolas, monospace" font-size="11">criteria {...}</text>
   <text x="636" y="288" font-size="10" fill="#2a9d8f">a kernel applies iff all of its KDP's matchers pass</text>
 
-  <!-- UDD (promoted to KDP level) -->
+  <!-- UDD (one per KDP) -->
   <rect x="620" y="308" width="365" height="120" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="636" y="330" font-family="Consolas, monospace" font-size="13" fill="#8e5bc4" font-weight="600">UDD  dispatch  (one per KDP, shared)</text>
   <text x="636" y="352" font-family="Consolas, monospace" font-size="11">id</text>

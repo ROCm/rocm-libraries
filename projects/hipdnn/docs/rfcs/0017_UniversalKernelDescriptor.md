@@ -488,8 +488,8 @@ Its bound `$y` dims feed the fused kernel's launch formulas exactly as the singl
 ## 6. Dispatch and Workspace
 
 The second hard problem is dispatching a matched kernel with no bespoke code. The dispatch ABI lives
-in a **UDD (Universal Dispatch Descriptor)**, referenced by ID and **promoted to the KDP level**: one
-UDD per pack, shared by every child kernel. A UDD holds one or more **Launches**, each a dispatch step
+in a **UDD (Universal Dispatch Descriptor)**, referenced by ID: one UDD per KDP, shared by every child
+kernel. A UDD holds one or more **Launches**, each a dispatch step
 (grid, block, shared memory, workspace, and argument signature); a kernel's source fills a Launch's slot
 to run it. A single-kernel UDD has one Launch, shown below; a multi-launch UDD has several run in order
 ([Section 13](#13-multiple-kernels-and-composition)). Because the launch ABI is written once here, every
