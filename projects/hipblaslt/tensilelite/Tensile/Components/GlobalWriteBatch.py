@@ -1377,6 +1377,10 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
     storeCode = Module("GroupLoadStore")
+    # collect the 16bit-subtile scalar-fallback store blocks so they can be emitted out
+    # of line at the end of this batch's store code instead of inline between the paired
+    # dwordx4 store (the common path) and its merge label.
+    subtileScalarFallback = Module("subtile_scalar_fallback")
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
@@ -1853,12 +1857,12 @@ class GlobalWriteBatchWriter:
                                                  comment=f"only d0={tt0-1} valid -> scalar fallback"))
                 tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
                 storeCodeModule.add(tmpStoreCode)
-                storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
-                                            comment="skip scalar fallback"))
-                storeCodeModule.add(fallbackLabel)
-                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-                storeCodeModule.add(tmpFallbackCode)
                 storeCodeModule.add(afterPairedLabel)
+                subtileScalarFallback.add(fallbackLabel)
+                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                subtileScalarFallback.add(tmpFallbackCode)
+                subtileScalarFallback.add(SBranch(labelName=afterPairedLabel.getLabelName(),
+                                                comment=f"return from scalar fallback (tt0={tt0})"))
               else:
                 tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
                 storeCodeModule.add(tmpStoreCode)
@@ -1956,6 +1960,18 @@ class GlobalWriteBatchWriter:
 
     # Close the last N-group OOB skip label (if any) opened by _emitSubtileOobGuard.
     self._finalizeSubtileOobGuards(storeCode if self.kernel["GroupLoadStore"] else module)
+    # Emit the 16bit-subtile scalar-fallback blocks out of line, after all of this
+    # batch's store code. The fallback handles the partial case where only the lower
+    # M-block is valid; each block branches back to its own per-iteration
+    # afterPairedLabel.
+    if len(subtileScalarFallback.items()):
+      scalarFallbackTarget = storeCode if self.kernel["GroupLoadStore"] else module
+      scalarFallbackEndLabel = Label(self.parentWriter.labels.getNameInc("subtile_scalar_fallback_end"),
+                                     "end of out-of-line scalar fallback")
+      scalarFallbackTarget.add(SBranch(labelName=scalarFallbackEndLabel.getLabelName(),
+                                       comment="skip over out-of-line scalar fallback"))
+      scalarFallbackTarget.add(subtileScalarFallback)
+      scalarFallbackTarget.add(scalarFallbackEndLabel)
     if self.kernel["ProblemType"]["StochasticRounding"]:
       self.parentWriter.vgprPool.checkIn(vgprRND)
 
