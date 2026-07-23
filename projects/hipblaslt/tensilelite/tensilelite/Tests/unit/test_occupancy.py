@@ -45,7 +45,11 @@ def _init_rocisa(isa):
 
 
 def _make_writer(ri, isa):
-    """Minimal KernelWriterAssembly stub with rocisa caps wired into states."""
+    """Minimal KernelWriterAssembly stub with rocisa caps wired into states.
+
+    isa must match the ISA *ri* was initialized with: getVgprOccupancy reads
+    states.version to select the legacy gfx1250 model.
+    """
     kw = object.__new__(KernelWriterAssembly)
     kw.states = SimpleNamespace(
         archCaps=ri.getArchCaps(),
@@ -303,6 +307,14 @@ def test_non_double_branch_uses_half_physical():
     _stub_regcaps(kw, PhysicalMaxVgpr=1536)  # gfx1151 wave64: //2 = 768, gran 12
     # 768 // (ceil(64/12)*12 = 72) = 10 (capped by MaxWavesPerSimd=10)
     assert kw.getVgprOccupancy(numThreads=256, vgprs=64, doubleVgpr=False) == 10
+
+
+def test_gfx1250_keeps_legacy_maxvgpr_occupancy():
+    """gfx1250 is guarded onto the legacy MaxVgpr*2 model (unchanged by this PR)."""
+    kw = _make_writer(_init_rocisa((12, 5, 0)), (12, 5, 0))  # MaxVgpr=1024
+    # legacy: totalVgprs = MaxVgpr*2 = 2048, gran 8 -> 2048 // (ceil(300/8)*8=304) = 6
+    # (the per-SIMD path would divide 1024 by gran-16 aligned 304 -> 3)
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=300, doubleVgpr=True) == 6
 
 
 @pytest.mark.parametrize(
