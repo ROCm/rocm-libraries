@@ -262,6 +262,29 @@ TEST_F(HwInstDescTest, WMMA_F32_16x16x16_F16) {
 }
 
 // ---------------------------------------------------------------------------
+// VOP3P packed math: v_pk_*_f32 — must carry IF_VALU from the VOP3P format
+// default. These instructions set no per-instruction IF_VALU (only
+// IF_Commutative), so the flag comes solely from the format. InsertWaitAluPass
+// relies on IF_VALU (isVectorALU/classifyEvent) to stamp packed-math VGPR
+// writes on the va_vdst scoreboard; without it the following VMEM consumer
+// would get no s_wait_alu.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, VOP3P_VPkMulF32_IsVALU) {
+    auto* desc = getDescByMnemonic("v_pk_mul_f32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3P);
+    EXPECT_EQ(desc->unit, ExecUnit::VALU);
+    EXPECT_TRUE(desc->has(IF_VALU));
+}
+
+TEST_F(HwInstDescTest, VOP3P_VPkAddF32_IsVALU) {
+    auto* desc = getDescByMnemonic("v_pk_add_f32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3P);
+    EXPECT_TRUE(desc->has(IF_VALU));
+}
+
+// ---------------------------------------------------------------------------
 // SOPP_BRANCH: s_branch — branch unit, label operand
 // ---------------------------------------------------------------------------
 TEST_F(HwInstDescTest, SOPP_SBranch) {
@@ -275,6 +298,18 @@ TEST_F(HwInstDescTest, SOPP_SBranch) {
     ASSERT_EQ(fields.size(), 1u);
     EXPECT_EQ(fields[0].encodeField, EncodeField::simm16);
     EXPECT_EQ(fields[0].fieldType, FieldType::label);
+}
+
+// S_SWAPPC_B64: call site (LLVM-style IF_Call), not IF_Branch / IF_IndirectBranch.
+TEST_F(HwInstDescTest, SOP1_SSwappcB64) {
+    auto* desc = getDescByMnemonic("s_swappc_b64");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP1);
+    EXPECT_EQ(desc->unit, ExecUnit::SALU);
+    EXPECT_TRUE(desc->has(IF_Call));
+    EXPECT_TRUE(desc->has(IF_HasSideEffect));
+    EXPECT_FALSE(desc->has(IF_Branch));
+    EXPECT_FALSE(desc->has(IF_IndirectBranch));
 }
 
 // ---------------------------------------------------------------------------

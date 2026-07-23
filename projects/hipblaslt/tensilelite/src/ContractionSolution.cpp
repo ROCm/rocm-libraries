@@ -310,10 +310,16 @@ namespace TensileLite
         }
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility push(default)
+#endif
     template void
         setDeviceUserArgs<float>(std::vector<ContractionSolution::Problem> const& problems,
                                  ContractionSolution::GroupedInputs const&        inputs,
                                  DeviceUserArguments<float>*                      args);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility pop
+#endif
 
     PerfModel perf;
 
@@ -755,14 +761,20 @@ namespace TensileLite
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
-			if(gsu > 1)
-			{
-				std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
-						  << "setting GSU to 1." << std::endl;
-				gsu = 1;
-			}
+            if(sizeMapping.streamK != 3 && sizeMapping.streamK != 4 && sizeMapping.streamK != 5)
+            {
+                throw std::runtime_error("Stream-K modes 1 and 2 are no longer supported; "
+                                         "use StreamK=3, 4, or 5");
+            }
 
-            // Dynamic Stream-K uses a different kernel argument layout from Stream-K 1/2/3.
+            if(gsu > 1)
+            {
+                std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
+                          << "setting GSU to 1." << std::endl;
+                gsu = 1;
+            }
+
+            // Dynamic Stream-K uses a different kernel argument layout from Stream-K 3.
             if(sizeMapping.streamK == 4)
             {
                 AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
@@ -917,56 +929,48 @@ namespace TensileLite
                     args.template append<uint32_t>("totalIters", totalIters);
                 }
 
-                if(sizeMapping.streamK == 1) // Basic SK
+                // Stream-K 3 uses the two-tile ABI.
+                if(sk.reduction == origami::reduction_t::parallel)
                 {
-                    uint32_t itersPerWave = CeilDivide(static_cast<uint32_t>(totalIters),
-                                                       static_cast<uint32_t>(numWorkGroups.x));
-                    args.template append<uint32_t>("SKItersPerWG", itersPerWave);
+                    uint32_t skSplit
+                        = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
+                    uint32_t skItersPerWG = itersPerTile / skSplit;
+
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skTiles", skSplit);
                 }
-                else if(sizeMapping.streamK >= 2) // Two-tile SK
+                else
                 {
-                    if(sk.reduction == origami::reduction_t::parallel)
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                    assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+                    int fullTiles = pAMDGPU->skFullTiles;
+
+                    bool bigEnough = tiles > sk.grid;
+                    // skTiles is number of Stream-K tiles to complete
+                    // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
+                    // followed by an even number of data-parllel tiles.
+                    // If total tiles is evenly divisble by grid size,
+                    // then no Stream-K tiles are needed, all data-parallel
+                    // Force-DP-only mode is a persistent DP-only use of StreamK=3. Setting
+                    // skTiles to zero makes every output tile stay in the DP region.
+                    bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
+                    uint32_t skTiles = forceDPOnly ? 0 : sk.grid;
+                    // If not evenly divisible, determine number of Stream-K tiles
+                    if(!forceDPOnly && tiles % sk.grid != 0)
                     {
-                        uint32_t skSplit
-                            = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
-                        uint32_t skItersPerWG = itersPerTile / skSplit;
-
-                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                        args.template append<uint32_t>("skGrid", sk.grid);
-                        args.template append<uint32_t>("skTiles", skSplit);
+                        // Number of data-parallel tiles on each workgroup would be:
+                        // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
+                        skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
+                        // Cap Stream-K tiles at total number of tiles in case of large multiplier
+                        skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
                     }
-                    else
-                    {
-                        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-                        assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                        int fullTiles = pAMDGPU->skFullTiles;
 
-                        bool bigEnough = tiles > sk.grid;
-                        // skTiles is number of Stream-K tiles to complete
-                        // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
-                        // followed by an even number of data-parllel tiles.
-                        // If total tiles is evenly divisble by grid size,
-                        // then no Stream-K tiles are needed, all data-parallel
-                        // Force-DP-only mode is a persistent DP-only use of StreamK=3. Setting
-                        // skTiles to zero makes every output tile stay in the DP region.
-                        bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
-                        uint32_t skTiles = forceDPOnly ? 0 : sk.grid;
-                        // If not evenly divisible, determine number of Stream-K tiles
-                        if(!forceDPOnly && tiles % sk.grid != 0)
-                        {
-                            // Number of data-parallel tiles on each workgroup would be:
-                            // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
-                            skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                            // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                            skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
-                        }
+                    uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
 
-                        uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
-
-                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                        args.template append<uint32_t>("skGrid", sk.grid);
-                        args.template append<uint32_t>("skTiles", skTiles);
-                    }
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skTiles", skTiles);
                 }
             }
         }
@@ -1183,6 +1187,8 @@ namespace TensileLite
                     origami::problem_t origami_problem = {
                         .size  = {sizes[0], sizes[1], sizes[3]},
                         .batch = sizes[2],
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1290,6 +1296,8 @@ namespace TensileLite
                     origami::problem_t origami_problem = {
                         .size    = {sizes[0], sizes[1], sizes[3]},
                         .batch   = sizes[2],
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
                         .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
                         .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
@@ -3766,6 +3774,8 @@ namespace TensileLite
             origami::problem_t origami_problem = {
                 .size  = {x, y, z},
                 .batch = batch,
+                // CU budget hint; 0 = use all CUs.
+                .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
             };
             origami::config_t origami_config = {
                 .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3849,11 +3859,14 @@ namespace TensileLite
                 origami::problem_t origami_problem = {
                     .size  = {x, y, z},
                     .batch = batchSz,
+                    // CU budget hint; 0 = use all CUs.
+                    .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
                 };
                 origami::config_t origami_config = {
                     .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
                            static_cast<size_t>(sizeMapping.macroTile.y),
                            static_cast<size_t>(sizeMapping.depthU)},
+                    .occupancy = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
                 };
 
                 hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
@@ -3961,9 +3974,24 @@ namespace TensileLite
                     hip::HipAMDGPU const* hipAMDGPU
                         = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
+                    // Fold both CU budgets into origami_problem.num_cus (the single
+                    // source of truth select_grid_size derives its budget from).
+                    // smCountTarget and skMaxCUs each use 0 to mean "no cap"; take the
+                    // tighter (minimum) positive cap so the analytical path honors both.
+                    auto   smt       = problem.getParams().smCountTarget(); // int, 0 = no cap
+                    auto   skm       = pAMDGPU->skMaxCUs;                   // int, 0 = no cap
+                    size_t budget    = 0;                                  // 0 = use all CUs
+                    if(smt > 0)
+                        budget = static_cast<size_t>(smt);
+                    if(skm > 0)
+                        budget = (budget == 0) ? static_cast<size_t>(skm)
+                                               : std::min(budget, static_cast<size_t>(skm));
+
                     origami::problem_t origami_problem = {
                         .size        = {x, y, z},
                         .batch       = batch,
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus     = budget,
                         .a_transpose = problem.transA() ? origami::transpose_t::T
                                                         : origami::transpose_t::N,
                         .b_transpose = problem.transB() ? origami::transpose_t::T
@@ -3999,8 +4027,7 @@ namespace TensileLite
                         origami_problem,
                         *(hipAMDGPU->analyticalHardware),
                         origami_config,
-                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid),
-                        pAMDGPU->skMaxCUs);
+                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
                 }
             }
             // Limit the CUs Stream-K is launched on either max or the specified,
