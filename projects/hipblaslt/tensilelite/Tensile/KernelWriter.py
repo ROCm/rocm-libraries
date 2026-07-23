@@ -4961,20 +4961,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ripo = self._buildRocIsaPassOptions(kernel)
     return rocIsaPass(moduleKernelBody, ripo)
 
-  @staticmethod
-  def _subtileStinkyWaitcntOverrides():
+  def _subtileStinkyTofuOverrides(self):
     """Subtile ST options: matrix reuse + mode2 wait-alu, no GR/LR waitcnt.
 
     Python LogicalScheduler owns cluster barriers and instruction scheduling
     (SIA=3). ST runs at OptLevel 0 with EnableESM2 (matrix reuse + mode2
     wait-alu) but without GR/LR waitcnt insertion, so it does not strip
-    tensilelite's hand-rolled s_waitcnt.
+    tensilelite's hand-rolled s_waitcnt. VGPR-MSB insertion and software
+    (instruction) prefetch are force-enabled here so they always run on the
+    subtile path.
     """
-    return {
+    overrides = {
       "EnableESM2": True,
       "EnableWaitCntInsertion": False,
       "ClusterBarrier": False,
     }
+
+    # Force VGPR-MSB insertion using the probed toolchain encoding so it does
+    # not rely on the backend's comgr auto-probe (None=0, Msb8=1, Msb16=2).
+    if self.states.asmCaps["HasVgprMSB"]:
+      overrides["VgprMsbMode"] = 2 if self.states.asmCaps["HasVgprMSB16"] else 1
+
+    # Force software (instruction) prefetch on, but only when a real scratch
+    # SGPR is reserved: SwPrefetchInsertionPass needs a valid SGPR to use.
+    if int(self.sgprs.get("SwPrefetchScratch", -1)) != -1:
+      overrides["EnableSwPrefetchInsertion"] = True
+
+    return overrides
 
   def _buildStinkyTofuModuleOptions(self, kernel, stinky_opt_level, option_overrides=None):
     options = {"OptLevel": stinky_opt_level,
@@ -5417,9 +5430,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
     self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
-    waitcnt_overrides = self._subtileStinkyWaitcntOverrides()
+    overrides = self._subtileStinkyTofuOverrides()
     st_asm = self._runStinkyTofuPipeline(
-      kernel, moduleKernelBody, fs, 0, option_overrides=waitcnt_overrides)
+      kernel, moduleKernelBody, fs, 0, option_overrides=overrides)
     if st_asm is not None:
       return (error, st_asm)
 

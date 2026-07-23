@@ -18,13 +18,33 @@ GFX1250_ISA = (12, 5, 0)
 
 
 def test_subtile_stinky_waitcnt_overrides():
-    """Subtile ST overrides: matrix reuse + mode2 wait-alu, no GR/LR waitcnt."""
+    """Subtile ST overrides: matrix reuse + mode2 wait-alu, no GR/LR waitcnt,
+    plus force-enabled VGPR-MSB and software (instruction) prefetch."""
     from Tensile.KernelWriter import KernelWriter
 
-    overrides = KernelWriter._subtileStinkyWaitcntOverrides()
+    kw = MagicMock()
+    kw.states.asmCaps = {"HasVgprMSB": True, "HasVgprMSB16": True}
+    kw.sgprs = {"SwPrefetchScratch": 5}
+
+    overrides = KernelWriter._subtileStinkyTofuOverrides(kw)
     assert overrides["EnableESM2"] is True
     assert overrides["EnableWaitCntInsertion"] is False
     assert overrides["ClusterBarrier"] is False
+    assert overrides["VgprMsbMode"] == 2
+    assert overrides["EnableSwPrefetchInsertion"] is True
+
+
+def test_subtile_stinky_overrides_msb8_and_no_prefetch_scratch():
+    """MSB falls back to the 8-bit form; prefetch is not forced without scratch."""
+    from Tensile.KernelWriter import KernelWriter
+
+    kw = MagicMock()
+    kw.states.asmCaps = {"HasVgprMSB": True, "HasVgprMSB16": False}
+    kw.sgprs = {}
+
+    overrides = KernelWriter._subtileStinkyTofuOverrides(kw)
+    assert overrides["VgprMsbMode"] == 1
+    assert "EnableSwPrefetchInsertion" not in overrides
 
 
 def test_build_stinky_options_opt0_default_disables_waitcnt():
@@ -67,6 +87,8 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
     kw.states = MagicMock()
     kw.states.version = GFX1250_ISA
     kw.states.overflowedResources = 0
+    kw.states.asmCaps = {"HasVgprMSB": True, "HasVgprMSB16": True}
+    kw.sgprs = {"SwPrefetchScratch": 5}
 
     module_kernel_body = MagicMock()
     fs = MagicMock()
@@ -93,9 +115,9 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
     passResult = kw._runRocIsaPassOnKernelBody(kernel, module_kernel_body)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
     kw.updateOccupancyFromMaxVgpr(kernel, module_kernel_body, passResult.maxVgpr)
-    waitcnt_overrides = KernelWriter._subtileStinkyWaitcntOverrides()
+    overrides = KernelWriter._subtileStinkyTofuOverrides(kw)
     st_asm = kw._runStinkyTofuPipeline(
-        kernel, module_kernel_body, fs, 0, option_overrides=waitcnt_overrides)
+        kernel, module_kernel_body, fs, 0, option_overrides=overrides)
     assert st_asm == "stinky_asm_output"
 
     assert captured["opt_level"] == 0
