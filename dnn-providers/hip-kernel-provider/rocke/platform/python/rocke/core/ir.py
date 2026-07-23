@@ -1224,12 +1224,26 @@ class IRBuilder:
         return self.select(mask, loaded, other)
 
     def global_store(
-        self, ptr: Value, idx: Value, value: Value, *, align: int = 1
+        self,
+        ptr: Value,
+        idx: Value,
+        value: Value,
+        *,
+        align: int = 1,
+        nontemporal: bool = False,
     ) -> None:
+        """Scalar global store. ``nontemporal=True`` attaches ``!nontemporal``
+        so the AMDGPU backend streams the store (SLC/no-allocate) instead of
+        allocating a cache line -- for write-once/never-reread outputs that
+        would otherwise evict reused data from the cache."""
         self._op(
             "memref.global_store_typed",
             [ptr, idx, value],
-            attrs={"elem_type": value.type.name, "align": int(align)},
+            attrs={
+                "elem_type": value.type.name,
+                "align": int(align),
+                "nontemporal": bool(nontemporal),
+            },
         )
 
     def global_load_vN_f16(
@@ -1246,6 +1260,7 @@ class IRBuilder:
         n: int,
         *,
         align: Optional[int] = None,
+        nontemporal: bool = False,
     ) -> Value:
         """Vectorised global load of N consecutive values.
 
@@ -1293,6 +1308,7 @@ class IRBuilder:
                 "elem_type": dtype.name,
                 "vec": n,
                 "align": int(align or (n * elem_bytes)),
+                "nontemporal": bool(nontemporal),
             },
             result_name_hint=f"gv{n}",
         ).result

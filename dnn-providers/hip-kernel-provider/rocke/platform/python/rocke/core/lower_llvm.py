@@ -890,6 +890,10 @@ class _Lowerer:
         # ``global_atomic_add_f32`` instruction instead of a
         # compare-and-swap retry loop.
         self._needs_fp_atomic_md: bool = False
+        # opt-in ``!nontemporal !2`` metadata for streaming (cache-bypass) global
+        # loads/stores -- see the ``nontemporal`` attr on global_store_typed /
+        # global_load_vN. AMDGPU maps it to the SLC/streaming cache policy.
+        self._needs_nontemporal_md: bool = False
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
         self._blocks: List[_Block] = [_Block("entry")]
@@ -1794,12 +1798,17 @@ class _Lowerer:
         elem_ty = _llvm_type(val.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
+        nt = ""
+        if op.attrs.get("nontemporal"):
+            self._needs_nontemporal_md = True
+            nt = ", !nontemporal !2"
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
         self._current().emit(
-            f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, align {align}"
+            f"  store {elem_ty} {self._operand(val)}, ptr addrspace(1) {gep}, "
+            f"align {align}{nt}"
         )
 
     def _op_memref_global_atomic_add(self, op: Op) -> None:
@@ -1883,9 +1892,13 @@ class _Lowerer:
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         align = int(op.attrs.get("align", vec * 2))
+        nt = ""
+        if op.attrs.get("nontemporal"):
+            self._needs_nontemporal_md = True
+            nt = ", !nontemporal !2"
         self._current().emit(
             f"  {op.result.name} = load <{vec} x {elem_ty}>, ptr addrspace(1) {gep}, "
-            f"align {align}"
+            f"align {align}{nt}"
         )
 
     def _op_tile_smem_store(self, op: Op) -> None:
@@ -4570,6 +4583,11 @@ class _Lowerer:
         # ``_op_memref_global_atomic_add``).
         if self._needs_fp_atomic_md:
             out.append("!1 = !{}")
+            out.append("")
+        # Non-temporal (streaming / cache-bypass) marker for gated global
+        # loads/stores (``!nontemporal !2``); ``i32 1`` is LLVM's canonical NT tag.
+        if self._needs_nontemporal_md:
+            out.append("!2 = !{i32 1}")
             out.append("")
         return "\n".join(out)
 

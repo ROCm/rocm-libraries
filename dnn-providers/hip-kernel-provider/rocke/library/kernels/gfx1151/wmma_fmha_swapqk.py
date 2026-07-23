@@ -253,6 +253,15 @@ class SwapQKCfg:
     # beat LDS): on this APU the cache-resident global Q re-read is free (hidden by
     # pingpong), while LDS staging breaks the clause/pipeline structure -- vmcnt(0)
     # drains EXPLODE 20->77 and instr 1215->1689. L1-hit >= LDS here.
+    #
+    # RE-CONFIRMED at MQ2 (per-wave slab, per-wave s_waitcnt -- NO block barrier,
+    # each wave stages+reads only Q_lds[wave_id]): still a 3x dead-end at every L
+    # (L2048 16.9->6.0, L16K 16.1->5.5). The barrier was never the issue -- the
+    # per-K-tile ds_read breaks the WMMA operand clause + adds lgkmcnt waits, and
+    # (unlike o_nt) Q is NOT a MALL-pressure source: it is ~8 KB/q-block and
+    # L1-resident, so it never competed with the 32 MB-MALL KV -> staging it in
+    # LDS relieves nothing and only adds overhead. o_nt (stream write-once O, 8
+    # MB/head in MALL) helps precisely because O DID contend; Q does not.
     q_lds: bool = False
     # kv_lds: PROTOTYPE (large-L / DRAM-bound regime). Keep the ENTIRE swapqk
     # architecture (transposed QK, in-lane softmax, register P-transpose, dual,
@@ -326,6 +335,20 @@ class SwapQKCfg:
     # + vmcnt tracking that inline-asm d16 loads cannot match. Kept OFF; the
     # current path is the coarse (correct) one for reference only.
     d16hi: bool = False
+    # o_nt / q_nt: streaming (non-temporal, cache-bypass) global O-store / Q-load.
+    # LARGE-Sq MALL-residency levers (idea 1 / idea 2). At L>=8K the per-head KV
+    # (4-16 MB) is the reused working set we WANT resident in the 32 MB MALL, but
+    # the write-once O output (up to 8 MB/head @ L32K, never re-read) allocates
+    # MALL lines and EVICTS KV -- dropping the KV hit rate (the measured cause of
+    # the sub-ceiling L16K/32K throughput). ``o_nt`` marks the O epilogue store
+    # ``!nontemporal`` so it streams past MALL (no allocate), leaving the full
+    # 32 MB for KV. ``q_nt`` does the same for the Q-fragment load -- an
+    # EXPERIMENT knob: Q is re-read every K-tile (reused), so streaming it should
+    # HURT, confirming the "keep reused data cached, stream write-once data"
+    # separation. KV (K load + V gather) is ALWAYS left default-cached. Pair with
+    # the head-chunked launch (concurrent working set <= MALL) for large Sq.
+    o_nt: bool = False
+    q_nt: bool = False
     name: str = "wmma_fmha_swapqk"
 
     @property
@@ -367,6 +390,8 @@ class SwapQKCfg:
             f"qb{self.q_block}",
             "of16" if self.o_f16 else "of32",
             "d16hi" if self.d16hi else "d16lo",
+            "ont" if self.o_nt else "oct",
+            "qnt" if self.q_nt else "qct",
             f"iglp{self.iglp}" if self.iglp >= 0 else "noiglp",
         )
 
@@ -673,34 +698,48 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
                 WmmaTensor(atom, "b", b.vector_mul(qf.value, scale_vec), arch)
             )
 
-    # q_lds: stage this wave's 16 pre-scaled query rows into LDS once.
+    # q_lds: stage this wave's MQ*16 PRE-SCALED query rows into a PER-WAVE LDS
+    # slab once, then the QK re-reads Q from LDS instead of re-fetching it from
+    # global every K-tile. Because each wave stages + reads ONLY its own slab
+    # (Q_lds[wave_id]), the publish is a per-wave ``s_waitcnt(lgkmcnt=0)`` -- NO
+    # cross-wave block barrier (nothing to serialize the waves / fight pingpong).
+    # MQ-aware: group g's 16 rows live at Q_lds[wave_id, g*16 : g*16+16].
     Q_lds = None
     if cfg.q_lds:
         _QPAD = 8  # f16 bank-pad on the d-row (QK reads consecutive query rows)
         Q_lds = make_lds_view(
             b,
             dtype=dtype_ir,
-            shape=(W, 16, hs),
-            strides=(16 * (hs + _QPAD), hs + _QPAD, 1),
+            shape=(W, MQ * 16, hs),
+            strides=(MQ * 16 * (hs + _QPAD), hs + _QPAD, 1),
             name_hint="Qsh",
         )
         _sf16 = b.cast_f32_to(scale_log2, F16)
         _sv8 = b.zero_vec(dtype_ir, 8)
         for _i in range(8):
             _sv8 = b.vec_insert(_sv8, _sf16, _i)
-        _chunks = (16 * hs) // (wave * 8)  # vec8 chunks per lane (D%16==0 -> even)
-        for _i in range(_chunks):
-            _c = b.add(lane, b.const_i32(_i * wave))
-            _base = b.mul(_c, b.const_i32(8))
-            _row = b.div(_base, b.const_i32(hs))
-            _colc = b.mod(_base, b.const_i32(hs))
-            _v8 = Q_view.load_vec(b, [head, b.add(q_token_base, _row), _colc], n=8)
-            Q_lds.store_vec(b, [wave_id, _row, _colc], b.vector_mul(_v8, _sv8), 8)
+        _chunks = (16 * hs) // (wave * 8)  # vec8 chunks/lane per 16-row group
+        for _g in range(MQ):
+            for _i in range(_chunks):
+                _c = b.add(lane, b.const_i32(_i * wave))
+                _base = b.mul(_c, b.const_i32(8))
+                _row = b.div(_base, b.const_i32(hs))
+                _colc = b.mod(_base, b.const_i32(hs))
+                _v8 = Q_view.load_vec(
+                    b, [head, b.add(q_token_base_g[_g], _row), _colc], n=8
+                )
+                Q_lds.store_vec(
+                    b,
+                    [wave_id, b.add(b.const_i32(_g * 16), _row), _colc],
+                    b.vector_mul(_v8, _sv8),
+                    8,
+                )
         b.s_waitcnt(lgkmcnt=0)  # intra-wave: this wave reads only its own Q_lds slab
 
-    def q_lds_read(d):
-        lo = Q_lds.load_vec(b, [wave_id, col, b.const_i32(d * 16)], n=8)
-        hi = Q_lds.load_vec(b, [wave_id, col, b.const_i32(d * 16 + 8)], n=8)
+    def q_lds_read(d, g=0):
+        row = b.add(b.const_i32(g * 16), col)
+        lo = Q_lds.load_vec(b, [wave_id, row, b.const_i32(d * 16)], n=8)
+        hi = Q_lds.load_vec(b, [wave_id, row, b.const_i32(d * 16 + 8)], n=8)
         return WmmaTensor(atom, "b", b.vec_concat(lo, hi), arch)
 
     # ---- kv_lds: cooperative K/V tile staging in shared LDS (large-L prototype) ----
@@ -787,7 +826,14 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
                     q_tile = q_lds_read(d)
                 else:
                     q_tile = load_wmma_tile(
-                        b, qwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
+                        b,
+                        qwin,
+                        atom,
+                        lane,
+                        role="b",
+                        k_offset=d * 16,
+                        lead=[c0],
+                        nontemporal=cfg.q_nt,
                     )
                 acc_ilp[d % ilp] = wmma_mma(b, k_tile, q_tile, acc_ilp[d % ilp])
             sc = acc_ilp[0]
@@ -847,15 +893,19 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
                         b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
                     )
                     for g in range(MQ):
-                        q_tile = load_wmma_tile(
-                            b,
-                            qwin_g[g],
-                            atom,
-                            lane,
-                            role="b",
-                            k_offset=d * 16,
-                            lead=[c0],
-                        )
+                        if cfg.q_lds:
+                            q_tile = q_lds_read(d, g)
+                        else:
+                            q_tile = load_wmma_tile(
+                                b,
+                                qwin_g[g],
+                                atom,
+                                lane,
+                                role="b",
+                                k_offset=d * 16,
+                                lead=[c0],
+                                nontemporal=cfg.q_nt,
+                            )
                         acc[g][d % ilp] = wmma_mma(b, k_tile, q_tile, acc[g][d % ilp])
                 for g in range(MQ):
                     sc = acc[g][0]
@@ -867,7 +917,7 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             if pingpong:
                 b.s_setprio(0)
 
-            # ---- per-group online softmax (eager) + register P-transpose ----
+            # ---- per-group online softmax + register P-transpose ----
             p_tiles = [None] * MQ
             alpha_vec = [None] * MQ
             m_new = [None] * MQ
@@ -879,7 +929,9 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
                     row = []
                     for i in range(c_frag):
                         kv_rel, q_rel = subs[g][ns].coord(b, lane, i)
-                        s_i = b.fmul(subs[g][ns].slot(b, i), scale_log2)
+                        s_i = subs[g][ns].slot(b, i)
+                        if not cfg.q_lds:  # else scale pre-baked into the LDS Q
+                            s_i = b.fmul(s_i, scale_log2)
                         s_i = apply_attention_mask(
                             b,
                             s_i,
@@ -1010,6 +1062,7 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
                     lead=[c0],
                     align=2,
                     transform=_rescale,
+                    nontemporal=cfg.o_nt,
                 )
         b.ret()
         return b.kernel
@@ -1268,6 +1321,7 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             lead=[c0],
             align=2,
             transform=_rescale,
+            nontemporal=cfg.o_nt,
         )
     b.ret()
     return b.kernel
