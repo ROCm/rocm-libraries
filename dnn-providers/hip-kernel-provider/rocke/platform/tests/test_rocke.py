@@ -25,17 +25,16 @@ from unittest.mock import patch, Mock
 import pytest
 
 from rocke import (
-    F16,
-    I16,
     BF16,
-    I64,
-    F32,
-    I8,
-    I32,
-    I64,
+    BF8E5M2,
+    F16,
     F32,
     FP8E4M3,
-    BF8E5M2,
+    I8,
+    I16,
+    I32,
+    F32,
+    I64,
     IRBuilder,
     PtrType,
     TensorDescriptor,
@@ -206,18 +205,6 @@ class TestCoreIR(unittest.TestCase):
         b.s_waitcnt(vmcnt=16, lgkmcnt=16)
         ll = lower_kernel_to_llvm(b.kernel)
         self.assertIn("call void @llvm.amdgcn.s.waitcnt(i32 20336)", ll)
-
-    # def test_global_load_i8(self):
-    #     b = IRBuilder("test_global_load_i8")
-    #     X = b.param("X", PtrType(I8, "global"))
-    #     tid = b.thread_id_x()
-    #     b.global_load_i8(X, tid)
-    #     ll = lower_kernel_to_llvm(b.kernel)
-    #     # Check GEP instruction
-    #     self.assertIn("getelementptr inbounds i8, ptr addrspace(1)", ll)
-    #     # Check load instruction with correct type, address space, and alignment
-    #     self.assertIn("load i8, ptr addrspace(1)", ll)
-    #     self.assertIn("align 1", ll)
 
     def test_global_load_typed_wrappers(self):
         """Test all typed global_load_* wrappers lower correctly."""
