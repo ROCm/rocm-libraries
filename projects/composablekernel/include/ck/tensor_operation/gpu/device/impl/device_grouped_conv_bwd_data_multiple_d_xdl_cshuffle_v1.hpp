@@ -564,6 +564,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                                 7,
                                                 1>;
     using NonGroupedGridwiseGemm64 = NonGroupedGridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
+    using NonGroupedGridwiseGemm32 = NonGroupedGridwiseGemmBase<math::max(NXdlPerWave32, 1)>;
 
     // Flat descriptor type aliases for group_count=1 fast path.
     // Derived from the _Packed() methods in ConvToGemmBwdDataTransform.
@@ -1300,6 +1301,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
 
         template <typename GridwiseGemm,
                   typename GridwiseGemmCTranspose,
+                  typename NonGroupedGridwiseGemm,
                   InMemoryDataOperationEnum ElementOp>
         float RunMultiDGemm(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
@@ -1515,13 +1517,13 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                         const auto& flat_c      = arg.flat_c_container_[flat_idx];
                         const index_t padded_K0 = flat_a.GetLength(I0);
                         const bool flat_desc_has_main_loop =
-                            NonGroupedGridwiseGemm64::CalculateHasMainKBlockLoop(padded_K0 * AK1);
+                            NonGroupedGridwiseGemm::CalculateHasMainKBlockLoop(padded_K0 * AK1);
                         const index_t flat_grid_size =
-                            NonGroupedGridwiseGemm64::Block2CTileMap::CalculateGridSize(
+                            NonGroupedGridwiseGemm::Block2CTileMap::CalculateGridSize(
                                 flat_c.GetLength(I0), flat_c.GetLength(I1));
                         if(flat_desc_has_main_loop)
                         {
-                            const auto kernel = kernel_gemm_xdlops_v2r3<NonGroupedGridwiseGemm64,
+                            const auto kernel = kernel_gemm_xdlops_v2r3<NonGroupedGridwiseGemm,
                                                                         ABDataType,
                                                                         EDataType,
                                                                         FlatAGridDesc_K0_M_K1,
@@ -1543,7 +1545,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                         }
                         else
                         {
-                            const auto kernel = kernel_gemm_xdlops_v2r3<NonGroupedGridwiseGemm64,
+                            const auto kernel = kernel_gemm_xdlops_v2r3<NonGroupedGridwiseGemm,
                                                                         ABDataType,
                                                                         EDataType,
                                                                         FlatAGridDesc_K0_M_K1,
@@ -1589,7 +1591,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
             return ave_time;
         }
 
-        template <typename GridwiseGemm, typename GridwiseGemmCTranspose>
+        template <typename GridwiseGemm, typename GridwiseGemmCTranspose, typename NonGroupedGridwiseGemm>
         float RunImp(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
             float ave_time = 0;
@@ -1683,6 +1685,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                     ave_time +=
                         RunMultiDGemm<GridwiseGemm,
                                       GridwiseGemmCTranspose,
+                                      NonGroupedGridwiseGemm,
                                       InMemoryDataOperationEnum::AtomicAdd>(arg, stream_config);
                 }
             }
@@ -1690,6 +1693,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
             {
                 ave_time += RunMultiDGemm<GridwiseGemm,
                                           GridwiseGemmCTranspose,
+                                          NonGroupedGridwiseGemm,
                                           InMemoryDataOperationEnum::Set>(arg, stream_config);
             }
 
@@ -1742,22 +1746,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         }
         float Run(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            if(get_warp_size() == 64)
-            {
-                if constexpr(NXdlPerWave64 > 0)
-                {
-                    return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64>(arg, stream_config);
-                }
-                else
-                {
-                    return 0;
-                }
-            }
-            else
+            // if(get_warp_size() == 64)
+            // {
+            //     if constexpr(NXdlPerWave64 > 0)
+            //     {
+            //         return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64, NonGroupedGridwiseGemm64>(arg, stream_config);
+            //     }
+            //     else
+            //     {
+            //         return 0;
+            //     }
+            // }
+            // else
             {
                 if constexpr(NXdlPerWave32 > 0)
                 {
-                    return RunImp<GridwiseGemm32, GridwiseGemmCTranspose32>(arg, stream_config);
+                    return RunImp<GridwiseGemm32, GridwiseGemmCTranspose32, NonGroupedGridwiseGemm32>(arg, stream_config);
                 }
                 else
                 {
@@ -1808,10 +1812,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         // template on RDNA to avoid launching MFMA kernels on hardware that
         // does not implement those intrinsics. The corresponding WMMA path
         // lives in device_grouped_conv_bwd_data_multiple_d_wmma_cshuffle.hpp.
-        if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
-        {
-            return false;
-        }
+        // if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+        // {
+        //     return false;
+        // }
         if(!is_bf16_atomic_supported() && std::is_same_v<EDataType, ck::bhalf_t> &&
            arg.k_batch_ > 1)
         {

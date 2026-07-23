@@ -50,7 +50,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_data_xdl_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -146,14 +146,14 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         }
         else
         {
-            if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+            if constexpr(HasMainKBlockLoop || NoMainKBlockLoop)
             {
                 GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                           BGridDesc_BK0_N_BK1,
-                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                           true,
-                                           EGlobalMemoryDataOperation,
-                                           TailNum>(
+                                        BGridDesc_BK0_N_BK1,
+                                        EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                        HasMainKBlockLoop,
+                                        EGlobalMemoryDataOperation,
+                                        TailNum>(
                     karg.p_a_grid + a_batch_offset,
                     karg.p_b_grid + b_batch_offset,
                     karg.p_c_grid + e_batch_offset,
@@ -168,23 +168,46 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             }
             else
             {
-                GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
-                                           BGridDesc_BK0_N_BK1,
-                                           EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                           false,
-                                           EGlobalMemoryDataOperation,
-                                           TailNum>(
-                    karg.p_a_grid + a_batch_offset,
-                    karg.p_b_grid + b_batch_offset,
-                    karg.p_c_grid + e_batch_offset,
-                    p_shared,
-                    karg,
-                    gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
-                    gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
-                    gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                    k_idx,
-                    gridDim.z,
-                    blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                if(gemm_kernel_args[group_id].HasMainKBlockLoop_)
+                {
+                    GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                                            BGridDesc_BK0_N_BK1,
+                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                            true,
+                                            EGlobalMemoryDataOperation,
+                                            TailNum>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared,
+                        karg,
+                        gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
+                        gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
+                else
+                {
+                    GridwiseGemm::template Run<AGridDesc_AK0_M_AK1,
+                                            BGridDesc_BK0_N_BK1,
+                                            EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                            false,
+                                            EGlobalMemoryDataOperation,
+                                            TailNum>(
+                        karg.p_a_grid + a_batch_offset,
+                        karg.p_b_grid + b_batch_offset,
+                        karg.p_c_grid + e_batch_offset,
+                        p_shared,
+                        karg,
+                        gemm_kernel_args[group_id].a_grid_desc_ak0_m_ak1_,
+                        gemm_kernel_args[group_id].b_grid_desc_bk0_n_bk1_,
+                        gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                        k_idx,
+                        gridDim.z,
+                        blockIdx.x - gemm_kernel_args[group_id].BlockStart_);
+                }
             }
         }
     }
@@ -914,27 +937,27 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 arg.Print();
             }
 
-            if(get_warp_size() == 64)
-            {
-                if constexpr(MXdlPerWave64 > 0)
-                {
-                    if(arg.k_batch_ > 1)
-                    {
-                        if constexpr(IsSplitKSupported)
-                        {
-                            ave_time +=
-                                RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::AtomicAdd>(
-                                    arg, stream_config);
-                        }
-                    }
-                    else
-                    {
-                        ave_time += RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::Set>(
-                            arg, stream_config);
-                    }
-                }
-            }
-            else
+            // if(get_warp_size() == 64)
+            // {
+            //     if constexpr(MXdlPerWave64 > 0)
+            //     {
+            //         if(arg.k_batch_ > 1)
+            //         {
+            //             if constexpr(IsSplitKSupported)
+            //             {
+            //                 ave_time +=
+            //                     RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::AtomicAdd>(
+            //                         arg, stream_config);
+            //             }
+            //         }
+            //         else
+            //         {
+            //             ave_time += RunMultiDGemm<GridwiseGemm64, InMemoryDataOperationEnum::Set>(
+            //                 arg, stream_config);
+            //         }
+            //     }
+            // }
+            // else
             {
                 if constexpr(MXdlPerWave32 > 0)
                 {
