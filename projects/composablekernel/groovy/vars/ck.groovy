@@ -1284,7 +1284,8 @@ def getPytorchTestsCmds() {
 def getAiterTestsCmds() {
     return [
         // Pre-compile FlyDSL MoE AOT cache before the tests.
-        "cd /home/jenkins/workspace/aiter && python3 aiter/aot/flydsl/moe.py",
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/moe.py",
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_mha.py",
@@ -1447,8 +1448,11 @@ def runTileEngineGemmTests(String arch, String compiler) {
                 -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
                 -D BATCHED_GEMM_DATATYPE="fp16" \
                 -D BATCHED_GEMM_LAYOUT="rcr" \
+                -D CONTRACTION_MULTI_ABD_DATATYPE="fp16" \
+                -D CONTRACTION_MULTI_ABD_LAYOUT="rcr" \
+                -D CONTRACTION_MULTI_ABD_CONFIG_FILE="smoke_ci_config.json" \
                 -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all && \
+            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all benchmark_contraction_multi_abd_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
@@ -1475,8 +1479,11 @@ def runTileEngineGemmTests(String arch, String compiler) {
                 -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
                 -D MX_GEMM_DATATYPE="fp4;fp8" \
                 -D MX_GEMM_LAYOUT="rcr" \
+                -D CONTRACTION_MULTI_ABD_DATATYPE="fp16" \
+                -D CONTRACTION_MULTI_ABD_LAYOUT="rcr" \
+                -D CONTRACTION_MULTI_ABD_CONFIG_FILE="smoke_ci_config.json" \
                 -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
+            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_contraction_multi_abd_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
@@ -1545,6 +1552,6 @@ def runBuildInstancesOnly(String compiler) {
                 -DCMAKE_CXX_COMPILER="${compiler}" \
                 -DCMAKE_HIP_COMPILER="${compiler}" \
                 -DGPU_ARCHS="gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic" \
-                -D CMAKE_BUILD_TYPE=Release .. && ninja -j64"""
+                -D CMAKE_BUILD_TYPE=Release .. && ninja -j${nthreads()}"""
     )
 }

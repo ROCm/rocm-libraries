@@ -214,6 +214,8 @@ public:
             return false;
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 
