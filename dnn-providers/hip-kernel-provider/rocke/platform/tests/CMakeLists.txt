@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # By-layer C++ test registration for the rocKE engine. Included via
-# add_subdirectory(tests) from the top-level rocKE/CMakeLists.txt. All targets
+# add_subdirectory(tests) from the top-level rocke/platform/CMakeLists.txt. All targets
 # link the engine archive rocke_core (built by the parent). Paths are relative to
 # this file (tests/), keeping the tree copy-able.
 
@@ -34,6 +34,27 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_ir_serialize_roundtrip)
+  endif()
+
+  # Host unit test for the IR-layer MMA frag-length / accumulator-dtype tables
+  # that rocke_b_mma consults to size a tile.mma result vector.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/mma_frag_ssot.cpp")
+    add_executable(rocke_mma_frag_ssot core/mma_frag_ssot.cpp)
+    target_link_libraries(rocke_mma_frag_ssot PRIVATE rocke_core)
+    if(UNIX)
+      target_link_libraries(rocke_mma_frag_ssot PRIVATE m)
+    endif()
+    add_test(NAME rocke_mma_frag_ssot
+             COMMAND rocke_mma_frag_ssot)
+    set_tests_properties(rocke_mma_frag_ssot
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_mma_frag_ssot)
+    set_target_properties(rocke_mma_frag_ssot
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_mma_frag_ssot
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_mma_frag_ssot)
   endif()
 
   # --- instances layer --------------------------------------------------------

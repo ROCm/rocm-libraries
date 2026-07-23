@@ -2,6 +2,13 @@
 # Time-based test organization for CI/CD pipeline efficiency
 # This file defines test categories by execution time and criticality
 
+# Some information is not available at configure time. For example, the
+# list of all gtest fixtures must be extracted from the binaries. Defining
+# 'gtest_runner' informs CMake to have the target run the given script
+# of running the gtest command directly.
+# The path is relative to ${PROJECT_SOURCE_DIR}.
+gtest_runner: scripts/run_miopen_gtest.py
+
 # Common comprehensive patterns - used by both standard and comprehensive
 # Standard applies exclude list to filter out slower tests
 # Comprehensive runs all patterns without exclusion
@@ -15,9 +22,12 @@ positive_patterns: &positive_patterns
   - "*/GPU_BNActivInfer_*"
   - "*/GPU_BNOCLInfer*_*"
   - "*/GPU_bn_infer*_*"
+  - "*/GPU_bn_activ_infer_*"
+  - "*/GPU_bn_fwd_infer_*"
   - "CPU_*"
   - "*/CPU_*"
   - "*/GPU_Cat_*"
+  - "*/GPU_CTC*"
   - "*/GPU_ConvBiasActiv*"
   - "*/GPU_Conv*"
   - "*/GPU_conv*"
@@ -51,6 +61,7 @@ positive_patterns: &positive_patterns
   - "*/GPU_Op4dTensorGenericTest_*"
   - "*/GPU_TernaryTensorOps_*"
   - "*/GPU_unaryTensorOps_*"
+  - "*/GPU_TensorTrans_*"
   - "*/GPU_Transformers*"
   - "*/GPU_TunaNetTest_*"
   - "*/GPU_UnitTestActivationDescriptor_*"
@@ -68,30 +79,27 @@ test_categories:
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*"
+      # Run the entire Smoke instantiation tier. Suites are kept fast at the
+      # source level (each heavy suite is split Smoke/Standard/Full).
+      - "Smoke/*"
+      # Also run the unprefixed CPU tests (framework / DB / solver-logic checks
+      # that carry no size-tier prefix). They need no GPU and are fast.
+      - "CPU_*"
 
     exclude:
       - "*/GPU_MIOpenDriver*"
+      # ALMIOPEN-2206: HIPRTC fails to compile miopen_conv3d_depthwise_fwd.cpp
+      # ('hip/hip_runtime.h' not found). Re-enable once fixed. (Only FP16 and
+      # BFP16 GPU variants of this solver exist; there is no FP32 GPU variant.
+      # The CPU dev-applicability check is unaffected.)
+      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
+      # Each fans out to 32 worker processes loading MIOpen, OOM-killing
+      # small shared-RAM runners (e.g. gfx1151). Still run in standard/full.
+      - "CPU_PerfDb_NONE.*"
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
-
-    test_files:
-      - "gtest/smoke_*.cpp"
-      - "gtest/unit_ActivationDescriptor.cpp"
-      - "gtest/unit_TensorDescriptor.cpp"
-      - "gtest/unit_FinInterface.cpp"
-      - "gtest/unit_lib_env_var.cpp"
-      - "gtest/gtest_activation.cpp"
-      - "handle_test.cpp"
-      - "gtest/handle_hip_device.cpp"
-      - "gtest/tensor_api.cpp"
-      - "gtest/tensor_test.cpp"
-      - "gtest/log.cpp"
-      - "gtest/log_test.cpp"
-      - "gtest/test_errors.cpp"
-      - "gtest/pooling2d_asymmetric.cpp"
 
     labels:
       - "quick"
@@ -100,6 +108,8 @@ test_categories:
 
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
+    enable_dapper: "False"
+    dapper_json_file: ""
     test_patterns: *positive_patterns
 
     exclude:
@@ -107,6 +117,21 @@ test_categories:
       - "*DeepBench*"
       - "*MIOpenTestConv*"
       - "Full/GPU_Reduce_FP64*"
+      # Tiered suites: the complete (Full) cross product runs only in
+      # comprehensive/full. The Smoke + Standard instantiations still run here.
+      - "Full/GPU_Reduce_FP32*"
+      - "Full/GPU_Reduce_FP16*"
+      - "Full/GPU_bn_activ_infer_*"
+      - "Full/GPU_bn_fwd_infer_*"
+      - "Full/GPU_TensorTrans_*"
+      - "Full/GPU_ConvBiasActivInfer_*"
+      - "Full/CPU_WSuperTensor_*"
+      - "Full/GPU_CTC_*"
+      # Only FP32 is tiered (Smoke+Standard); FP16/FP64 are Full-only and stay
+      # in standard for dtype coverage.
+      - "Full/GPU_TernaryTensorOps_FP32*"
+      - "Full/GPU_UnitTestConvSolverFFTFwd_*"
+      - "Full/GPU_UnitTestConvSolverFFTBwd_*"
       - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
       - "Full/GPU_Lrn_FP32*"
       - "Full/GPU_Lrn_FP16*"
@@ -348,8 +373,7 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "Full/GPU_Softmax_FP32*"  # 24 min
   - "Full/GPU_Softmax_BFP16*"  # 13 min
   - "Full/GPU_Softmax_FP16*" # 11.5 min
-  - "Smoke/GPU_Reduce_FP32*"  # 6.5 min
-  - "Smoke/GPU_Reduce_FP16*"  # 4.5 min
+  - "*GPU_GemmWrwUniversal_LargeMemory_*"  # aborts the test process on gfx1151
 
 exclude_gpu:
   exclude_gpu_gfx120X:

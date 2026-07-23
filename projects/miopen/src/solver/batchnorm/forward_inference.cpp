@@ -47,7 +47,7 @@ bool BnFwdInference::IsApplicable(const ExecutionContext&,
         return false;
     if(!bn_problem.Is2D())
         return false;
-    if(!IsOCLInferTypeValid(bn_problem))
+    if(!IsInferTypeValid(bn_problem))
         return false;
 
     int activ_mode = bn_problem.GetActivationDesc().GetMode();
