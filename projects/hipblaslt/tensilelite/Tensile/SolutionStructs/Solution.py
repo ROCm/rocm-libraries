@@ -1874,10 +1874,17 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  f"{_name}={_val} must be a power of two (LraTileAssignment vectorStaticRemainder fast path)")
           return
-      if state["UseSubtileImpl"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
+      # Odd MIWaveTile under UseSubtileImpl produces an out-of-bounds global
+      # address at runtime (empirically hard-wedges gfx1250: e.g. bf16
+      # MT128x272x256 with MIWaveTile=[2,17] triggers "illegal memory access"
+      # and poisons the GPU for the rest of the run). The MX path already
+      # forbade this; the subtile addressing (LraTileAssignment / global store
+      # edge handling) is shared, so the same hazard applies to non-MX. Reject
+      # odd MIWaveTile for all UseSubtileImpl kernels, not just MX.
+      if state["UseSubtileImpl"]:
         if state["MIWaveTile"][0] % 2 != 0 or state["MIWaveTile"][1] % 2 != 0:
           reject(state, printRejectionReason,
-                 "UseSubtileImpl=1 with MX datatype requires even MIWaveTile, got [%d, %d]"
+                 "UseSubtileImpl=1 requires even MIWaveTile, got [%d, %d]"
                  % (state["MIWaveTile"][0], state["MIWaveTile"][1]))
           return
       if isaInfoMap[isa].asmCaps["HasMFMA"]:
