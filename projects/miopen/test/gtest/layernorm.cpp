@@ -26,6 +26,7 @@
 
 #include "layernorm.hpp"
 
+// dapper test: dummy touch to trigger selective gtest filtering for PR #9617
 namespace layernorm {
 
 struct GPU_LayerNormTest_FP32 : LayerNormFwdTest<float>
