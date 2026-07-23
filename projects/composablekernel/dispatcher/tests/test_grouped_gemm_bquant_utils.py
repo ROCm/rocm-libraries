@@ -578,3 +578,149 @@ class TestNameUniqueness:
         configs = self._make_configs()
         names = [c.name for c in configs]
         assert len(names) == len(set(names)), f"Duplicate names: {[n for n in names if names.count(n) > 1]}"
+
+
+# =============================================================================
+# Codegen GroupSizeK — generated headers must export the quantization group size
+# =============================================================================
+
+
+class TestCodegenGroupSizeK:
+
+    def _generate_header(self, quant_group_k=128):
+        """Generate a kernel header string via the codegen and return it."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codegen"))
+        from unified_grouped_gemm_bquant_codegen import (
+            BQuantKernelHeaderGenerator,
+            BQuantKernelSpec,
+            BQuantTileConfig,
+        )
+        tile = BQuantTileConfig(
+            tile_m=16, tile_n=64, tile_k=256,
+            warp_m=1, warp_n=4, warp_k=1,
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        )
+        spec = BQuantKernelSpec(
+            variant_key="fp8",
+            layout="rcr",
+            pipeline="compv3",
+            epilogue="cshuffle",
+            scheduler="intrawave",
+            tile=tile,
+            quant_group_m=1,
+            quant_group_n=1,
+            quant_group_k=quant_group_k,
+        )
+        gen = BQuantKernelHeaderGenerator()
+        return gen.generate(spec)
+
+    def test_group_size_k_emitted_in_struct(self):
+        header = self._generate_header(quant_group_k=128)
+        assert "static constexpr ck_tile::index_t GroupSizeK = 128;" in header, (
+            "GroupSizeK is missing from the generated SelectedKernel struct. "
+            "gemm_bquant_benchmark_single.cpp references SelectedKernel::GroupSizeK "
+            "and will fail to compile without it."
+        )
+
+    def test_group_size_k_matches_config(self):
+        for gk in (64, 128, 256):
+            header = self._generate_header(quant_group_k=gk)
+            expected = f"static constexpr ck_tile::index_t GroupSizeK = {gk};"
+            assert expected in header, (
+                f"Expected '{expected}' in generated header for quant_group_k={gk}"
+            )
+
+    def test_group_size_k_exported_in_single_kernel_include(self):
+        header = self._generate_header(quant_group_k=128)
+        # The CK_TILE_SINGLE_KERNEL_INCLUDE block must also export GroupSizeK
+        # so force-include users see it at global scope.
+        assert "constexpr ck_tile::index_t GroupSizeK = " in header, (
+            "GroupSizeK is not exported in the CK_TILE_SINGLE_KERNEL_INCLUDE block"
+        )
+
+
+# =============================================================================
+# expand_bquant_sweep — JSON config -> BQuantKernelConfig list
+# =============================================================================
+
+
+class TestExpandBquantSweep:
+
+    def _write_config(self, tmp_path, config_dict):
+        import json as _json
+        p = tmp_path / "test_config.json"
+        p.write_text(_json.dumps(config_dict))
+        return str(p)
+
+    def test_basic_expansion(self, tmp_path):
+        from grouped_gemm_bquant_utils import expand_bquant_sweep
+        cfg = {
+            "variant_keys": ["fp8", "bf8"],
+            "layouts": ["rcr"],
+            "pipeline": "compv3",
+            "epilogue": "cshuffle",
+            "scheduler": "intrawave",
+            "tile_configs": [
+                {"tile_m": 128, "tile_n": 128, "tile_k": 128,
+                 "warp_m": 2, "warp_n": 2, "warp_k": 1,
+                 "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16}
+            ],
+            "quant_groups": [
+                {"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}
+            ],
+        }
+        p = self._write_config(tmp_path, cfg)
+        configs = expand_bquant_sweep(p, gfx_arch="gfx950")
+        assert len(configs) == 2  # fp8 + bf8
+        names = {c.name for c in configs}
+        assert any("fp8" in n for n in names)
+        assert any("bf8" in n for n in names)
+
+    def test_deduplication(self, tmp_path):
+        from grouped_gemm_bquant_utils import expand_bquant_sweep
+        # Two identical configs should collapse to one
+        tile = {"tile_m": 128, "tile_n": 128, "tile_k": 128,
+                "warp_m": 2, "warp_n": 2, "warp_k": 1,
+                "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16}
+        cfg = {
+            "variant_keys": ["fp8"],
+            "layouts": ["rcr"],
+            "pipeline": "compv3",
+            "epilogue": "cshuffle",
+            "scheduler": "intrawave",
+            "tile_configs": [tile, tile],  # duplicate
+            "quant_groups": [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}],
+        }
+        p = self._write_config(tmp_path, cfg)
+        configs = expand_bquant_sweep(p)
+        assert len(configs) == 1
+
+    def test_name_matches_kernel_config_name(self, tmp_path):
+        from grouped_gemm_bquant_utils import expand_bquant_sweep, BQuantKernelConfig
+        cfg = {
+            "variant_keys": ["fp8"],
+            "layouts": ["rcr"],
+            "pipeline": "compv3",
+            "epilogue": "cshuffle",
+            "scheduler": "intrawave",
+            "tile_configs": [
+                {"tile_m": 128, "tile_n": 128, "tile_k": 128,
+                 "warp_m": 2, "warp_n": 2, "warp_k": 1,
+                 "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16}
+            ],
+            "quant_groups": [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}],
+        }
+        p = self._write_config(tmp_path, cfg)
+        configs = expand_bquant_sweep(p)
+        assert len(configs) == 1
+        # The name produced by expand_bquant_sweep must equal what a manually
+        # constructed BQuantKernelConfig would produce.
+        manual = BQuantKernelConfig(
+            variant_key="fp8", layout="rcr",
+            pipeline="compv3", epilogue="cshuffle", scheduler="intrawave",
+            tile_m=128, tile_n=128, tile_k=128,
+            warp_m=2, warp_n=2, warp_k=1,
+            warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+            quant_group_m=1, quant_group_n=1, quant_group_k=128,
+        )
+        assert configs[0].name == manual.name

@@ -288,7 +288,10 @@ class BQuantDispatcherLib:
         import numpy as np
 
         A   = np.ascontiguousarray(A)
-        B   = np.ascontiguousarray(B)
+        # Kernel BLayout is ColumnMajor (rcr): B[k,n] lives at offset n*K+k.
+        # Supply column-major bytes for 2-D B; ascontiguousarray would force
+        # row-major and silently transpose. Packed 1-D B (fp4) stays as-is.
+        B   = np.asfortranarray(B) if B.ndim == 2 else np.ascontiguousarray(B)
         BQ  = np.ascontiguousarray(BQ)
         C   = np.ascontiguousarray(C)
 
@@ -398,6 +401,21 @@ class BQuantGpuGemmRunner:
                 f"for kernel {self.kernel_name}"
             )
 
+        # permute_n epilogue writes C with N-columns riffled into r groups
+        # (r = tile_n / warp_tile_n / warp_n). Undo it so the caller gets logical C.
+        _name = self.kernel_name
+        if 'permute_n' in _name:
+            import re as _re
+            _m = _re.search(r'_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_(\d+)x(\d+)x(\d+)_', _name)
+            if _m:
+                _tile_n = int(_m.group(2)); _warp_n = int(_m.group(5)); _wt_n = int(_m.group(8))
+                _r = _tile_n // _wt_n // _warp_n
+                if _r > 1 and (N % _r) == 0:
+                    _half = N // _r
+                    _logical = [(c % _r) * _half + (c // _r) for c in range(N)]
+                    _Cp = np.empty_like(C)
+                    _Cp[:, _logical] = C
+                    C = _Cp
         return BQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)
 
 
@@ -470,6 +488,13 @@ def _generate_bquant_kernel(
     return hpp
 
 
+def _get_dispatcher_static_lib() -> Optional[Path]:
+    """Return libck_tile_dispatcher.a from the CMake build directory, or None."""
+    dispatcher_root = _CTYPES_LIB_SRC.parent.parent.parent
+    static_lib = dispatcher_root / "build" / "libck_tile_dispatcher.a"
+    return static_lib if static_lib.exists() else None
+
+
 def _compile_bquant_kernel(
     hpp_path: Path,
     so_path: Path,
@@ -478,46 +503,94 @@ def _compile_bquant_kernel(
     extra_include_dirs: Optional[List[str]] = None,
 ) -> bool:
     """
-    Compile a generated .hpp into a .so via hipcc.
+    Compile a generated .hpp into a .so via hipcc (compile then link).
+
+    Two-step build:
+      1. Compile to a .o object file.
+      2. Link the .o into a shared .so (no dispatcher static lib needed;
+         the BQuant ctypes lib does not use the registry or dispatcher).
+
     Returns True on success.
     """
     ck_include = _get_ck_include_dir()
+    static_lib = _get_dispatcher_static_lib()
 
-    cmd = [hipcc] + _HIPCC_BASE_FLAGS + [
-        f"--offload-arch={gfx_arch}",
-        f"-DGFX_ARCH=\"{gfx_arch}\"",
-        f"-include", str(hpp_path),
-        str(_CTYPES_LIB_SRC),
-        "-o", str(so_path),
-    ]
+    # -- Step 1: compile to object file --------------------------------------
+    obj_path = so_path.with_suffix(".o")
+
+    # Arch-specific defines: gfx950 uses OCP fp8 (not FNUZ) and native MX support.
+    # These mirror the CMakeLists.txt definitions that are normally injected by CMake
+    # but are absent in the standalone hipcc build path.
+    arch_defines = []
+    if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
+    if "gfx950" in gfx_arch:
+        arch_defines += ["-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX950_SUPPORT"]
+
+    compile_cmd = [hipcc, "-c", "-fPIC", "-O3", "-std=c++17",
+                   "-DCK_TILE_SINGLE_KERNEL_INCLUDE", "-w",
+                   f"--offload-arch={gfx_arch}",
+                   f"-DGFX_ARCH=\"{gfx_arch}\"",
+                   *arch_defines,
+                   "-include", str(hpp_path),
+                   str(_CTYPES_LIB_SRC),
+                   "-o", str(obj_path)]
 
     if ck_include:
-        cmd += [f"-I{ck_include}"]
+        compile_cmd += [f"-I{ck_include}"]
 
-    # Dispatcher include
-    dispatcher_include = _CTYPES_LIB_SRC.parent.parent.parent / "dispatcher" / "include"
-    if dispatcher_include.is_dir():
-        cmd += [f"-I{dispatcher_include}"]
+    # NOTE: dispatcher/include is intentionally excluded here.
+    # It pulls in generated_tile_backend.hpp which instantiates
+    # SelectedKernel::launch(GemmHostArgs&), conflicting with the BQuant
+    # kernel's launch(QuantGemmHostArgs&). The BQuant ctypes lib only needs
+    # the main CK include path (ck_tile/host/tensor_shuffle_utils.hpp lives there).
 
     if extra_include_dirs:
         for d in extra_include_dirs:
-            cmd += [f"-I{d}"]
+            compile_cmd += [f"-I{d}"]
 
-    log.debug("Compiling %s:\n  %s", so_path.name, " ".join(cmd))
+    log.debug("Compiling %s:\n  %s", so_path.name, " ".join(compile_cmd))
 
     try:
         result = subprocess.run(
-            cmd,
+            compile_cmd,
             capture_output=True, text=True, timeout=600,
         )
         if result.returncode != 0:
             log.error("Compile failed for %s:\n%s", so_path.name, result.stderr[-2000:])
             return False
-        return True
     except subprocess.TimeoutExpired:
         log.error("Compile timed out for %s", so_path.name)
         return False
 
+    # -- Step 2: link into shared library ------------------------------------
+    link_cmd = [hipcc, "-shared", "-fPIC",
+                f"--offload-arch={gfx_arch}", "--hip-link",
+                str(obj_path)]
+
+    if static_lib:
+        link_cmd += [str(static_lib)]
+
+    link_cmd += ["-o", str(so_path)]
+
+    log.debug("Linking %s:\n  %s", so_path.name, " ".join(link_cmd))
+
+    try:
+        result = subprocess.run(
+            link_cmd,
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            log.error("Link failed for %s:\n%s", so_path.name, result.stderr[-2000:])
+            obj_path.unlink(missing_ok=True)
+            return False
+    except subprocess.TimeoutExpired:
+        log.error("Link timed out for %s", so_path.name)
+        obj_path.unlink(missing_ok=True)
+        return False
+
+    obj_path.unlink(missing_ok=True)
+    return True
 
 # =============================================================================
 # setup_multiple_bquant_dispatchers — build pipeline
@@ -622,6 +695,95 @@ def setup_multiple_bquant_dispatchers(
 
 
 # =============================================================================
+# Sweep expansion: JSON config → list of BQuantKernelConfig
+# =============================================================================
+
+
+def expand_bquant_sweep(
+    config_path: str,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> List["BQuantKernelConfig"]:
+    """Expand a BQuant JSON sweep config into a list of BQuantKernelConfig objects.
+
+    The JSON format mirrors unified_grouped_gemm_bquant_codegen.py's _build_specs
+    so the same config files work for both codegen and Python utils. Every valid
+    (variant, layout, tile, quant_group) combination produces one BQuantKernelConfig;
+    duplicates (by .name) are collapsed.
+
+    JSON schema:
+      variant_keys:       list of dtype variants, e.g. ["fp8", "bf8"]
+      layouts:            list of layout strings, e.g. ["rcr"]
+      pipeline:           pipeline name, e.g. "compv3"
+      epilogue:           epilogue name, e.g. "cshuffle"
+      scheduler:          scheduler name, e.g. "intrawave"
+      tile_configs:       list of {tile_m, tile_n, tile_k, warp_m, warp_n, warp_k,
+                                   warp_tile_m, warp_tile_n, warp_tile_k}
+      quant_groups:       list of {quant_group_m, quant_group_n, quant_group_k}
+      pad_m/pad_n/pad_k:  bool
+      block_size:         int (default 256)
+      k_block_per_cu:     int (default 1)
+      double_smem_buffer: bool (default false)
+      preshuffle_b:       bool (default false)
+      preshuffle_bquant:  bool (default false)
+    """
+    import itertools
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    pipeline          = cfg.get("pipeline", "compv3")
+    epilogue          = cfg.get("epilogue", "cshuffle")
+    scheduler         = cfg.get("scheduler", "intrawave")
+    pad_m             = cfg.get("pad_m", False)
+    pad_n             = cfg.get("pad_n", False)
+    pad_k             = cfg.get("pad_k", True)
+    block_size        = cfg.get("block_size", 256)
+    k_block_per_cu    = cfg.get("k_block_per_cu", 1)
+    double_smem_buffer = cfg.get("double_smem_buffer", False)
+    preshuffle_b      = cfg.get("preshuffle_b", False)
+    preshuffle_bquant = cfg.get("preshuffle_bquant", False)
+
+    configs: List[BQuantKernelConfig] = []
+    seen: set = set()
+
+    for variant_key, layout, tile_dict, qg in itertools.product(
+        cfg.get("variant_keys", ["fp8"]),
+        cfg.get("layouts", ["rcr"]),
+        cfg.get("tile_configs", []),
+        cfg.get("quant_groups", [{"quant_group_m": 1, "quant_group_n": 1, "quant_group_k": 128}]),
+    ):
+        c = BQuantKernelConfig(
+            variant_key=variant_key,
+            layout=layout,
+            pipeline=pipeline,
+            epilogue=epilogue,
+            scheduler=scheduler,
+            tile_m=tile_dict["tile_m"],
+            tile_n=tile_dict["tile_n"],
+            tile_k=tile_dict["tile_k"],
+            warp_m=tile_dict["warp_m"],
+            warp_n=tile_dict["warp_n"],
+            warp_k=tile_dict["warp_k"],
+            warp_tile_m=tile_dict["warp_tile_m"],
+            warp_tile_n=tile_dict["warp_tile_n"],
+            warp_tile_k=tile_dict["warp_tile_k"],
+            quant_group_m=qg.get("quant_group_m", 1),
+            quant_group_n=qg.get("quant_group_n", 1),
+            quant_group_k=qg.get("quant_group_k", 128),
+            preshuffle_b=preshuffle_b,
+            preshuffle_bquant=preshuffle_bquant,
+            double_smem_buffer=double_smem_buffer,
+            k_block_per_cu=k_block_per_cu,
+            gfx_arch=gfx_arch,
+        )
+        if c.name not in seen:
+            seen.add(c.name)
+            configs.append(c)
+
+    return configs
+
+
+# =============================================================================
 # Convenience: default fp8 config (matches GemmConfigQuantDecode<fp8_t>)
 # =============================================================================
 
@@ -631,7 +793,11 @@ def default_fp8_config(
     quant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> BQuantKernelConfig:
-    """Return the default fp8 BQuant config (tile = 16x64x256, warp = 1x4x1)."""
+    """Return the default fp8 BQuant config (tile = 16x64x256, warp = 1x4x1).
+
+    WarpTileK=128: on gfx950 get_k_warp_tile<fp8_t, M_Warp_Tile=16>() returns 128
+    (is_8bit_float=true, M_Warp_Tile!=32 → K_warp=128). Using 16 causes zero output.
+    """
     return BQuantKernelConfig(
         variant_key="fp8",
         layout="rcr",
@@ -640,7 +806,7 @@ def default_fp8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
@@ -653,7 +819,10 @@ def default_bf8_config(
     quant_group_n: int = 1,
     gfx_arch: str = _DEFAULT_GFX_ARCH,
 ) -> BQuantKernelConfig:
-    """Return the default bf8 BQuant config (tile = 16x64x256, warp = 1x4x1)."""
+    """Return the default bf8 BQuant config (tile = 16x64x256, warp = 1x4x1).
+
+    WarpTileK=128: on gfx950 get_k_warp_tile<bf8_t, M_Warp_Tile=16>() returns 128.
+    """
     return BQuantKernelConfig(
         variant_key="bf8",
         layout="rcr",
@@ -662,7 +831,7 @@ def default_bf8_config(
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
