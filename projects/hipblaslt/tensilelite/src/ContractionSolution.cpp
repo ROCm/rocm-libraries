@@ -1898,7 +1898,9 @@ namespace TensileLite
         // The HIP driver rejects a cluster launch whose grid is not divisible by
         // clusterDim, so round up. The extra padded WGs early-exit in the kernel
         // prologue; their WAVEDONE decrements the barrier's live member count.
-        if(enableCluster)
+        // Stream-K has its own cluster-aware 1-D grid (sk.grid) and WG-id decode,
+        // so leave it untouched.
+        if(enableCluster && sizeMapping.streamK == 0)
         {
             rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
             rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);

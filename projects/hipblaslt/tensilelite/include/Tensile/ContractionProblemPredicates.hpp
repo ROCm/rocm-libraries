@@ -3115,47 +3115,6 @@ namespace TensileLite
                         problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
                 }
             };
-
-            struct ClusterDimCheck
-                : public Predicate_CRTP<ClusterDimCheck, ContractionProblemGemm>
-            {
-                enum
-                {
-                    HasIndex = false,
-                    HasValue = true
-                };
-                size_t             index;
-                std::array<int, 5> value;
-
-                ClusterDimCheck() = default;
-                ClusterDimCheck(size_t index, std::array<int, 5> value)
-                    : index(index)
-                    , value(value)
-                {
-                }
-
-                static std::string Type()
-                {
-                    return "ClusterDimCheck";
-                }
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    // The grid is padded to a multiple of ClusterDim and padded
-                    // work-groups early-exit in the kernel prologue, so non-multiple
-                    // WG counts are supported and never need rejecting here.
-                    return true;
-                }
-                virtual bool debugEval(ContractionProblemGemm const& problem,
-                                       std::ostream&                 stream) const override
-                {
-                    bool rv = (*this)(problem);
-                    stream << *this << ": " << rv
-                           << " (grid padded to a multiple of ClusterDim; padded work-groups"
-                              " early-exit, so non-multiple sizes are always accepted)"
-                           << std::endl;
-                    return rv;
-                }
-            };
         } // namespace Contraction
 
         /**
