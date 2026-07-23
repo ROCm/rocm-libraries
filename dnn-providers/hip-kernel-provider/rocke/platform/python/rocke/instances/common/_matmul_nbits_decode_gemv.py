@@ -83,11 +83,9 @@ def build_decode_gemv_matmul_nbits(
                 scale = b.global_load(Sp, b.add(b_scale_base, kgrp), scale_t)
                 scale_f32 = b.cast_to_f32(scale)
                 k_even = b.mul(j, c2)
-                a_lo = b.cast_to_f32(
-                    b.global_load_f16(A, b.add(a_row_base, k_even), align=1)
-                )
+                a_lo = b.cast_to_f32(b.global_load_f16(A, b.add(a_row_base, k_even)))
                 a_hi = b.cast_to_f32(
-                    b.global_load_f16(A, b.add(a_row_base, b.add(k_even, c1)), align=1)
+                    b.global_load_f16(A, b.add(a_row_base, b.add(k_even, c1)))
                 )
                 prod = b.fadd(
                     b.fmul(a_lo, b.fmul(lo, scale_f32)),

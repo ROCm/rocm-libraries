@@ -266,16 +266,16 @@ rocke_kernel_def_t* rocke_build_decode_gemv_matmul_nbits(
                 /* k_even = b.mul(j, c2) */
                 k_even = rocke_b_mul(b, j, c2);
 
-                /* a_lo = b.cast_to_f32(b.global_load_f16(A, b.add(a_row_base, k_even)), align = 1) */
+                /* a_lo = b.cast_to_f32(b.global_load_f16(A, b.add(a_row_base, k_even))) */
                 a_lo = rocke_b_cast_to_f32(
-                    b, rocke_b_global_load_f16(b, A, rocke_b_add(b, a_row_base, k_even), 1));
+                    b, rocke_b_global_load_f16(b, A, rocke_b_add(b, a_row_base, k_even), 0));
 
                 /* a_hi = b.cast_to_f32(
-                       b.global_load_f16(A, b.add(a_row_base, b.add(k_even, c1))), align = 1) */
+                       b.global_load_f16(A, b.add(a_row_base, b.add(k_even, c1)))) */
                 a_hi = rocke_b_cast_to_f32(
                     b,
                     rocke_b_global_load_f16(
-                        b, A, rocke_b_add(b, a_row_base, rocke_b_add(b, k_even, c1)), 1));
+                        b, A, rocke_b_add(b, a_row_base, rocke_b_add(b, k_even, c1)), 0));
 
                 /* prod = b.fadd(
                        b.fmul(a_lo, b.fmul(lo, scale_f32)),
