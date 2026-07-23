@@ -6,7 +6,11 @@
 # additional build configurations that MIOpen must support but TheRock CI does
 # not exercise: the HIPNOGPU backend (used for offline kernel tuning without
 # GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
-# no-CK UBSan debug build, and gtest binary naming convention validation.
+# no-CK UBSan debug build, gtest binary naming convention validation, the
+# public/private split wrapper build (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON), and the
+# flag-off byte-equivalence gate (RFC 0001): a MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF
+# build must keep libMIOpen.so's public ABI identical to the pre-wrapper
+# baseline.
 
 name: "Component CI: MIOpen"
 
@@ -83,6 +87,41 @@ jobs:
               -DGPU_TARGETS="gfx942"
             build_target: --target install --target all
 
+          # Builds the public/private split (wrapper + libMIOpen_private.so) to
+          # exercise the MIOPEN_ENABLE_HIPDNN_WRAPPER=ON path: the compile-time
+          # -include rename must apply cleanly across every private TU and the
+          # wrapper must link against the private library.
+          - name: MIOpen Flag-On Wrapper Build-Only
+            job_id: flag-on-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target MIOpen
+
+          # Flag-off byte-equivalence gate (RFC 0001, ALMIOPEN-2341). Builds the
+          # default (MIOPEN_ENABLE_HIPDNN_WRAPPER=OFF) single libMIOpen.so and
+          # asserts its public ABI matches the committed pre-wrapper baseline
+          # (SONAME, exported public C API symbol set, no _impl leakage, no
+          # dependency on libMIOpen_private).
+          - name: MIOpen Flag-Off Byte-Equivalence
+            job_id: byte-equivalence
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_ENABLE_HIPDNN_WRAPPER=OFF
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target MIOpen
+
     runs-on: azure-linux-scale-rocm
     steps:
       - name: Runner health status
@@ -147,6 +186,16 @@ jobs:
 
       - name: Build
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
+
+      - name: Flag-off byte-equivalence check
+        if: matrix.job_id == 'byte-equivalence'
+        run: |
+          lib=$(find build -name 'libMIOpen.so.1.0' | head -1)
+          test -n "$lib" || { echo "libMIOpen.so.1.0 not found under build/"; exit 1; }
+          echo "Checking $lib against committed baseline"
+          projects/miopen/script/check_byte_equivalence.sh check \
+            "$lib" \
+            projects/miopen/test/byte_equivalence/public_symbols.baseline
 
       - name: Configure Tuna Fin
         if: matrix.job_id == 'tuna-fin-build'

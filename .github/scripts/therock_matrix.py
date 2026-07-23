@@ -214,7 +214,16 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
 # Injected options are appended last, after every default and merged-in option,
 # so injecting a value that contradicts a default wins (cmake takes the last -D
 # for a given name).
-LABEL_GATED_CMAKE_OPTIONS = {}
+LABEL_GATED_CMAKE_OPTIONS = {
+    # Builds MIOpen as the public wrapper + private implementation pair instead
+    # of the single default library. The flag-off build is byte-equivalent to the
+    # pre-wrapper one, so this label is the only way to exercise the flag-on
+    # configuration in the superbuild.
+    "ci:miopen-hipdnn-wrapper": {
+        "project": "miopen",
+        "cmake_options": ["-DTHEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON"],
+    },
+}
 
 
 def validate_label_gated_cmake_options(gated_options=None):
