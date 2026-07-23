@@ -29,8 +29,18 @@ from copy import deepcopy
 import pytest
 
 import config_harness as _ch
+import rocisa
 
-pytestmark = pytest.mark.unit
+# These gfx1250 guards require rocisa to be built with the StinkyTofu backend
+# (only compiled when GPU_TARGETS contains gfx1250). On a build without it the
+# SIA=4 solutions are rejected up front, so skip rather than fail.
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        not rocisa.hasStinkyTofuBackend(),
+        reason="requires rocisa built with the StinkyTofu backend (gfx1250 build)",
+    ),
+]
 
 _ARCH = "gfx1250"
 
