@@ -315,15 +315,12 @@ across packs. A validated study of MIOpen CK convolution and rocKE SDPA applicab
 thousand concrete kernels collapse to a handful of shared matcher shapes, with tile and vector constants
 carried as matcher *parameters* rather than new matchers.
 
-**Criteria are expressions, not flat token lists.** A criterion is a nested `{"op": [args]}` tree:
-built-in operators (`and`, `or`, `!`, the comparisons, `in`, `all`, and arithmetic `+`/`*`/`%`), custom
-short-hand (`divisible`, and the pattern-binding `shape`/`rank`), and custom operations
-(registry-resolved native predicates like `hipdnn.same_head_dim`, the escape hatch below). Nesting is
-first-class: an `or` inside an `and`, or an `all` whose per-element test is itself a tree, e.g.
-`{"all": [{"var": "$w.filter_spatial"}, {"==": [{"var": ""}, 1]}]}` (every filter dim is 1). A
-left-hand side may itself be an expression, not just a raw field. Leaves are literals or
-`{"var": "<field>"}`; equality is strict and typed, so a dtype string never quietly matches an enum.
-(In prose, `f(a, b)` abbreviates the wire form `{"f": [a, b]}`.)
+**Criteria are expressions, not flat token lists.** A criterion is a nested `{"op": [args]}` tree over
+the fields the pattern binds, built from logical operators (`and`, `or`, `!`), comparisons (`==`, `!=`,
+`<`, `in`), a per-element `all`, and arithmetic (`+`, `*`, `%`), plus a few custom short-hands
+(`divisible`, and the pattern-binding `shape`/`rank`) and registry-resolved custom operations for checks
+the built-ins cannot express (the escape hatch below). Operators nest to any depth, and a left-hand side
+can itself be a computed expression rather than a raw field. Leaves are literals or `{"var": "<field>"}`.
 
 **The hipDNN schema declares the fields an expression may reference**, so an author sees the whole
 vocabulary up front and the interpreter fails closed on anything undeclared. The fields fall in five
