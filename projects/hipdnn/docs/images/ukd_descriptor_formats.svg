@@ -80,26 +80,26 @@
   <text x="636" y="484" font-size="11" fill="#555">compiled artifact + entry point</text>
   <text x="636" y="504" font-size="11" fill="#8e5bc4">Launch = a kernel's source + the KDP's shared UDD</text>
 
-  <!-- ===================== REFERENCE ARROWS (labels above each path) ===================== -->
-  <!-- KDP matchers[] -> UMD -->
-  <path d="M360 94 C 470 130, 540 210, 620 244" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
-  <text x="498" y="150" text-anchor="middle" font-size="11" fill="#555">matchers</text>
-
+  <!-- ===================== REFERENCE ARROWS (straight across, label above each) ===================== -->
   <!-- KDP engine -> UED -->
-  <path d="M360 110 C 470 100, 545 92, 620 88" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
-  <text x="500" y="92" text-anchor="middle" font-size="11" fill="#555">engine</text>
+  <text x="489" y="82" text-anchor="middle" font-size="11" fill="#555">engine</text>
+  <line x1="360" y1="88" x2="617" y2="88" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
 
   <!-- KDP heuristic -> UHD -->
-  <path d="M360 126 C 470 150, 545 162, 620 164" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
-  <text x="505" y="180" text-anchor="middle" font-size="11" fill="#555">heuristic</text>
+  <text x="489" y="158" text-anchor="middle" font-size="11" fill="#555">heuristic</text>
+  <line x1="360" y1="164" x2="617" y2="164" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
+
+  <!-- KDP matchers[] -> UMD -->
+  <text x="489" y="246" text-anchor="middle" font-size="11" fill="#555">matchers</text>
+  <line x1="360" y1="252" x2="617" y2="252" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
 
   <!-- KDP dispatch -> UDD -->
-  <path d="M360 142 C 470 230, 540 330, 620 348" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
-  <text x="470" y="270" text-anchor="middle" font-size="11" fill="#555">dispatch (1)</text>
+  <text x="489" y="362" text-anchor="middle" font-size="11" fill="#555">dispatch (1)</text>
+  <line x1="360" y1="368" x2="617" y2="368" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
 
   <!-- UKD kernel_source -> kernel source card -->
-  <path d="M345 230 C 480 360, 540 470, 620 478" fill="none" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
-  <text x="470" y="445" text-anchor="middle" font-size="11" fill="#555">source</text>
+  <text x="489" y="473" text-anchor="middle" font-size="11" fill="#555">source</text>
+  <line x1="360" y1="479" x2="617" y2="479" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
 
   <!-- CAPTION -->
   <text x="500" y="576" text-anchor="middle" font-size="12" fill="#555">The KDP binds the matchers, engine, heuristic, and the one UDD; each child UKD adds only its source. Everything is by ID.</text>
