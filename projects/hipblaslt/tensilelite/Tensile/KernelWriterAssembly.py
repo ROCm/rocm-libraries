@@ -8123,7 +8123,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         if (kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel'):
-          module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
+          module.add(self.longBranchScc0(label=gsuLabel, posNeg=1, comment="branch if GSU != 1 (long)"))
       if kernel["ProblemType"]["SupportUserArgs"]:
         extReadEpilogueLabel    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
         extReadEpilogueLabelEnd = Label(label=self.labels.getNameInc("LoadExternalEpilogueStructEnd"), comment="")
@@ -13581,7 +13581,7 @@ class KernelWriterAssembly(KernelWriter):
         with self.allocTmpSgpr(1, tag="localSplitUGlobalWriteIndices_tmpSgprGSU") as tmpSgprGSU:
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
-        module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
+        module.add(self.longBranchScc0(label=gsuLabel, posNeg=1, comment="branch if GSU != 1 (long)"))
       if kernel["ProblemType"]["UseE"]:
         self.vgprs.addrE = self.vgprPool.checkOut(2, 'addrE')
         module.add(VMovB32( \
@@ -13761,7 +13761,7 @@ class KernelWriterAssembly(KernelWriter):
         with self.allocTmpSgpr(1, tag="notLocalSplitUGlobalWriteIndices_tmpSgprGSU") as tmpSgprGSU:
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
-        module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
+        module.add(self.longBranchScc0(label=gsuLabel, posNeg=1, comment="branch if GSU != 1 (long)"))
       if kernel["ProblemType"]["UseE"]:
         self.vgprs.addrE = self.vgprPool.checkOut(2, 'addrE')
         module.add(VMovB32( \
@@ -14991,22 +14991,24 @@ class KernelWriterAssembly(KernelWriter):
           gsu0ReturnLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred_Return"), comment="")
         # Keep original GSU check unchanged — falls through to GSU0, branches to gsuLabel for GSU1
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-        module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="Branch to stream-k store code"))
+        # Long branch: store code target can exceed simm16 (16-bit) reach for large-N tiles
+        # (e.g. MT128x400..464), which otherwise fails to assemble ("branch size exceeds simm16").
+        # Executed once per kernel outside the main loop, so the extra sgpr ops are perf-free.
+        module.add(self.longBranchScc0(label=gsuLabel, posNeg=1, comment="Branch to stream-k store code (long)"))
         sSkt = self.acquireStreamKConstSgpr(kernel, "skTiles")
         if self.isStreamKConstantsToVgprEnabled(kernel):
           module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(self.states.skConstVgprs["skTiles"])))
         module.add(SCmpEQU32(src0=sgpr(sSkt), src1=1, comment="split == 1 ?"))
         self.releaseStreamKConstSgpr(sSkt)
-        # TODO May need long branch??
-        module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if split == 1"))
+        module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="branch if split == 1 (long)"))
       else:
         with self.allocTmpSgpr(1, tag="globalWriteElements_tmpSgprGSU") as tmpSgprGSU:
           module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
           module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
-        if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
-          module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="long branch if GSU == 1"))
-        else:
-          module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
+        # Always long: for large-N tiles (e.g. MT128x496, MT512x208) the GSU1 label
+        # exceeds simm16 reach even on the plain path, failing to assemble. Once-per-kernel
+        # GSU dispatch branch (not in a loop), so the extra sgpr ops are perf-free.
+        module.add(self.longBranchScc1(label=gsuLabel, posNeg=1, comment="branch if GSU == 1 (long)"))
 
     gsuLimitRange = range(0, gsuLimit) # generate GSU1 and GSUM label
     for gsuLimitIdx in gsuLimitRange:
