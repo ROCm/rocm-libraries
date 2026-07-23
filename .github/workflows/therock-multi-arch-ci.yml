@@ -111,9 +111,10 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # HARDCODED: Use prebuilt compiler-runtime from known good TheRock run
+      # HARDCODED: Use prebuilt stages from known good TheRock run
+      # rocm-libraries only affects math-libs, so we can reuse all other stages
       # TODO(geomin12): Make dynamic once automatic baseline selection works
-      prebuilt_stages: ${{ inputs.prebuilt_stages || 'compiler-runtime' }}
+      prebuilt_stages: ${{ inputs.prebuilt_stages || 'compiler-runtime,runtime-tests,comm-libs,storage-libs,debug-tools,dc-tools-core,media-libs,profiler-apps' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '29947789954' }}
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
       stage_reuse_baseline_repository: "ROCm/TheRock"
