@@ -327,28 +327,11 @@ endif()
 if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source
         conv/heuristics/lgbm_pick.cpp
-        conv/heuristics/lgbm_metadata.cpp)
-    file(GLOB LGBM_RANK_SRCS conv/heuristics/lgbm_models/rank/*.c)
-    list(APPEND MIOpen_Source ${LGBM_RANK_SRCS})
-    # Generated C: silence machine-generated warnings, and rename every
-    # exported symbol with an lgbm_rank_ prefix. The prefixing keeps these
-    # generic Treelite names (predict, quantize, predict_unit0..7, the
-    # metadata accessors, the is_categorical global) out of MIOpen's global
-    # namespace. (v10 is rank-only; the applicability model was dropped in v4.)
-    set(LGBM_EXPORT_SYMS
-        predict postprocess quantize
-        predict_unit0 predict_unit1 predict_unit2 predict_unit3
-        predict_unit4 predict_unit5 predict_unit6 predict_unit7
-        get_num_target get_num_class get_num_feature
-        get_threshold_type get_leaf_output_type
-        is_categorical)
-    set(LGBM_RANK_DEFS "-w")
-    foreach(sym ${LGBM_EXPORT_SYMS})
-        list(APPEND LGBM_RANK_DEFS "-D${sym}=lgbm_rank_${sym}")
-    endforeach()
-    set_source_files_properties(${LGBM_RANK_SRCS} PROPERTIES
-        COMPILE_OPTIONS "${LGBM_RANK_DEFS}"
-        MIOPEN_SKIP_TIDY ON) # machine-generated Treelite C; not lintable
+        conv/heuristics/lgbm_metadata.cpp
+        conv/heuristics/lgbm_forest.cpp)
+    # The rank model ships as its native LightGBM text dump
+    # (kernels/lgbm_rank_model.txt, installed with the other model assets
+    # below) and is walked at runtime by lgbm_forest.cpp -- no generated C.
 
     # Perf-config picker: one Treelite-compiled lambdarank model PER tuneable
     # solver, under lgbm_pcfg_models/<solver_name>/. Each package exports the same
@@ -1014,9 +997,17 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         kernels/*.model
         kernels/lgbm_model_meta.json
         kernels/lgbm_pcfg_model_meta.json
-        kernels/lgbm_pcfg_catalog.json)
+        kernels/lgbm_pcfg_catalog.json
+        kernels/lgbm_rank_model.txt)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
+    endif()
+    # Test-only golden-vector fixture for the LGBM forest walker parity gate
+    # (test/gtest/lgbm_picker.cpp). Copied next to the model assets so the test
+    # finds it via GetSystemDbPath(), but NOT installed into the package.
+    if(BUILD_TESTING)
+        configure_file("kernels/lgbm_rank_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_rank_golden.json" COPYONLY)
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)

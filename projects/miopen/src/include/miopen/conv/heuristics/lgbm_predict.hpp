@@ -7,25 +7,18 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
-// Mirrors the `union Entry` Treelite emits in lgbm_models/rank/header.h.
-// We can't include that header directly from C++ (it defines its own
-// `predict` symbol with C linkage), so we declare the wrapper + a matching
-// union here. The TUs that compile the generated C are built with
-// -Dpredict=lgbm_rank_predict to expose a distinct symbol name.
-//
-// v5: rank-only. The applicability model was dropped in v4.
-extern "C" {
-
+// One feature cell fed to the LightGBM forest walker (lgbm_forest.hpp). The
+// layout mirrors the `union Entry` LightGBM/Treelite use: `missing == -1`
+// marks an absent/NaN feature; otherwise the value -- a real number, or a
+// categorical code cast to double -- lives in `fvalue`. (`qvalue` is the
+// legacy quantized slot; unused by the text-model walker but kept so callers
+// that still set it compile unchanged.)
 union LgbmEntry
 {
     int missing;
     double fvalue;
     int qvalue;
 };
-
-void lgbm_rank_predict(union LgbmEntry* data, int pred_margin, double* result);
-
-} // extern "C"
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 #endif // GUARD_MIOPEN_CONV_HEURISTICS_LGBM_PREDICT_HPP

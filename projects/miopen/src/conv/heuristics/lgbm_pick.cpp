@@ -7,6 +7,7 @@
 #include <miopen/conv/heuristics/lgbm_pick.hpp>
 #include <miopen/conv/heuristics/lgbm_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_predict.hpp>
+#include <miopen/conv/heuristics/lgbm_forest.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures, ConvDirection
 
 #include <miopen/conv/problem_description.hpp>
@@ -348,13 +349,18 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
         std::size_t idx;
         bool demote; // naive fallback that should sink below non-naive solvers
     };
+    const auto& forest = LgbmForest::GetRank();
+    if(!forest.IsReady())
+    {
+        MIOPEN_LOG_I2("lgbm: abstain (rank model unavailable)");
+        return {};
+    }
     std::vector<Scored> scored;
     scored.reserve(solvers.size());
     for(std::size_t i = 0; i < solvers.size(); ++i)
     {
         SetCategorical(row[kIdxSolverName], meta.SolverCode(solvers[i]));
-        double s = 0.0;
-        lgbm_rank_predict(row.data(), /*pred_margin=*/0, &s);
+        const double s = forest.Score(row.data(), row.size());
         scored.push_back({s, i, guard_naive && meta.IsNaiveFallback(solvers[i])});
     }
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) {
@@ -393,6 +399,10 @@ int ScoreCandidateMatrixForTest(const std::vector<std::vector<double>>& candidat
     if(!meta.IsReady() || candidate_rows.empty())
         return -1;
 
+    const auto& forest = LgbmForest::GetRank();
+    if(!forest.IsReady())
+        return -1;
+
     double best_score = -std::numeric_limits<double>::infinity();
     int best          = -1;
     std::array<LgbmEntry, kNumFeatures> row{};
@@ -402,8 +412,7 @@ int ScoreCandidateMatrixForTest(const std::vector<std::vector<double>>& candidat
             return -1;
         for(int i = 0; i < kNumFeatures; ++i)
             SetNumeric(row[i], candidate_rows[c][i]);
-        double s = 0.0;
-        lgbm_rank_predict(row.data(), /*pred_margin=*/0, &s);
+        const double s = forest.Score(row.data(), row.size());
         if(s > best_score)
         {
             best_score = s;
