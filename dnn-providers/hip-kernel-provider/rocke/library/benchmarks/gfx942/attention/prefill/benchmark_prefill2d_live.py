@@ -1002,9 +1002,7 @@ def main() -> int:
         rs = buckets[b]
         dtype_label, sw_label = b
         tri_spds = [
-            r["best_speedup_vs_triton"]
-            for r in rs
-            if r.get("best_speedup_vs_triton")
+            r["best_speedup_vs_triton"] for r in rs if r.get("best_speedup_vs_triton")
         ]
         aot_spds = [
             r["best_speedup_vs_aoTriton"]

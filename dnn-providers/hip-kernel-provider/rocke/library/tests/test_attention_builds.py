@@ -1404,9 +1404,50 @@ class TestAttentionHelpers(unittest.TestCase):
 
             # Decode (q==1) routes to the 3D path, not the 2D spec builder; the
             # cohort gate must still exclude it.
-            self.assertFalse(
-                au._enable_gfx942_sink_prefill_tuned(_mk(max_seqlen_q=1))
+            self.assertFalse(au._enable_gfx942_sink_prefill_tuned(_mk(max_seqlen_q=1)))
+
+    def test_gfx950_sink_prefill_wpe3_cohort(self):
+        """gfx950 full-causal bf16 sink prefill selects waves_per_eu=3 (occupancy
+        hint only, output-preserving); SWA, non-sink, decode, and other shapes
+        keep the shipped waves_per_eu=2.
+        """
+        import kernels.common.attention_unified as au
+
+        def _mk(**overrides):
+            base = dict(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
             )
+            base.update(overrides)
+            return UnifiedAttentionProblem(**base)
+
+        with _patch_resolved_arch("gfx950"):
+            cohort = _mk()
+            self.assertTrue(au._enable_gfx950_sink_prefill_wpe3(cohort))
+            self.assertEqual(au._select_2d_waves_per_eu(cohort), 3)
+
+            # Near-miss shapes must NOT hit the wpe=3 cohort.
+            for label, p in (
+                ("swa", _mk(sliding_window=128)),
+                ("no_sinks", _mk(use_sinks=False)),
+                ("bs32", _mk(block_size=32)),
+            ):
+                with self.subTest(near_miss=label):
+                    self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p))
+            # Decode (q==1) routes to 3D; gate must still exclude it.
+            self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_mk(max_seqlen_q=1)))
+            # gfx942 must not hit the gfx950 gate.
+            with _patch_resolved_arch("gfx942"):
+                self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_mk()))
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry

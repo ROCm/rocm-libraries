@@ -962,9 +962,7 @@ def main() -> int:
     for b in sorted(buckets):
         rs = buckets[b]
         tri_spds = [
-            r["best_speedup_vs_triton"]
-            for r in rs
-            if r.get("best_speedup_vs_triton")
+            r["best_speedup_vs_triton"] for r in rs if r.get("best_speedup_vs_triton")
         ]
         aot_spds = [
             r["best_speedup_vs_aoTriton"]
@@ -989,7 +987,9 @@ def main() -> int:
         fly_part = (
             f"  vs_fly={_gm(fly_spds):.3f}x (n={len(fly_spds)})" if fly_spds else ""
         )
-        print(f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}")
+        print(
+            f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}"
+        )
     print("\n=== per-variant geomean (correct shapes only) ===")
     for v in args.variants:
         sp = [
