@@ -14,8 +14,8 @@
   <!-- Authoring box -->
   <rect x="20" y="36" width="250" height="140" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="36" y="62" font-size="12" fill="#333">descriptor files:</text>
-  <text x="36" y="84" font-family="Consolas, monospace" font-size="12">  KDP (many UKDs)</text>
-  <text x="36" y="106" font-family="Consolas, monospace" font-size="12">  UMD  UDD  UED  UHD</text>
+  <text x="36" y="84" font-family="Consolas, monospace" font-size="12">  KDP: matchers+eng+heur</text>
+  <text x="36" y="106" font-family="Consolas, monospace" font-size="12">       +UDD + kernel vector</text>
   <text x="36" y="128" font-family="Consolas, monospace" font-size="12">kernel sources / &lt;arch&gt;</text>
 
   <!-- Build-time box -->
@@ -32,8 +32,8 @@
   <text x="775" y="62" text-anchor="middle" font-size="12">hip-kernel-provider</text>
   <rect x="668" y="76" width="214" height="86" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1"/>
   <text x="775" y="98" text-anchor="middle" font-weight="600" font-size="12">Generic engine</text>
-  <text x="682" y="120" font-family="Consolas, monospace" font-size="11">UED → engines</text>
-  <text x="682" y="138" font-family="Consolas, monospace" font-size="11">KDP → UKDs → plan-builders</text>
+  <text x="682" y="120" font-family="Consolas, monospace" font-size="11">load KDPs → build engines</text>
+  <text x="682" y="138" font-family="Consolas, monospace" font-size="11">match: shared, cached, early-exit</text>
   <text x="682" y="156" font-family="Consolas, monospace" font-size="11">UHD → kernel-selector</text>
 
   <!-- arrows across top row -->

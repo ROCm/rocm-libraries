@@ -42,7 +42,7 @@
   <rect x="495" y="192" width="165" height="72" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="577" y="217" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">UDD</text>
   <text x="577" y="238" text-anchor="middle" font-size="10" fill="#555">dispatch descriptor</text>
-  <text x="577" y="252" text-anchor="middle" font-size="10" fill="#555">(unchanged)</text>
+  <text x="577" y="252" text-anchor="middle" font-size="10" fill="#555">(the KDP's, shared)</text>
 
   <!-- AOT source kinds (today) -->
   <text x="90" y="330" font-size="12" fill="#555">today</text>
@@ -54,7 +54,7 @@
     <text x="190" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">hsaco</text>
 
     <rect x="240" y="345" width="80" height="28" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
-    <text x="280" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">hiprtc</text>
+    <text x="280" y="364" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#222">hip</text>
   </g>
   <text x="190" y="393" text-anchor="middle" font-size="10" fill="#555">AOT source kinds</text>
 

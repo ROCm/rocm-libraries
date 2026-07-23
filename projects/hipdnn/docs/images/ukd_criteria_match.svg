@@ -8,7 +8,7 @@
 
   <!-- Stage titles -->
   <text x="135" y="40" text-anchor="middle" font-weight="600">Live graph</text>
-  <text x="485" y="40" text-anchor="middle" font-weight="600">UMD: Match Descriptor (declarative)</text>
+  <text x="485" y="40" text-anchor="middle" font-weight="600">UMD matcher: pattern + criteria expression</text>
   <text x="800" y="40" text-anchor="middle" font-weight="600">Bound variables</text>
 
   <!-- STAGE 1: Live graph container -->
@@ -45,14 +45,18 @@
 
   <!-- STAGE 2: criteria box (amber) -->
   <rect x="330" y="55" width="310" height="290" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="345" y="85" font-family="Consolas, monospace" font-size="11">op: sdpa_fwd</text>
-  <text x="345" y="105" font-family="Consolas, monospace" font-size="11">operands: { Q:$q, K:$k, V:$v }</text>
-  <text x="345" y="125" font-family="Consolas, monospace" font-size="11">results:  { O:$o }</text>
-  <text x="345" y="150" font-family="Consolas, monospace" font-size="11">constraints:</text>
-  <text x="345" y="170" font-family="Consolas, monospace" font-size="11">  $q.dtype ∈ {BF16}</text>
-  <text x="345" y="190" font-family="Consolas, monospace" font-size="11">  $q.shape = [b, h, sq, d]</text>
-  <text x="345" y="210" font-family="Consolas, monospace" font-size="11">  same_head_dim($q,$k,$v)</text>
-  <text x="345" y="230" font-family="Consolas, monospace" font-size="11">  head_size == 128</text>
+  <text x="345" y="82"  font-family="Consolas, monospace" font-size="11">nodes:  op sdpa_fwd</text>
+  <text x="345" y="100" font-family="Consolas, monospace" font-size="11">  operands { Q:$q, K:$k, V:$v }</text>
+  <text x="345" y="118" font-family="Consolas, monospace" font-size="11">  results  { O:$o }</text>
+  <text x="345" y="142" font-family="Consolas, monospace" font-size="11" fill="#8a6d1f">criteria (expression tree):</text>
+  <text x="345" y="162" font-family="Consolas, monospace" font-size="11">{"and": [</text>
+  <text x="345" y="180" font-family="Consolas, monospace" font-size="11">  {"in": [$q.dtype, ["BFLOAT16"]]},</text>
+  <text x="345" y="198" font-family="Consolas, monospace" font-size="11">  {"shape": [$q, [b, h, sq, d]]},</text>
+  <text x="345" y="216" font-family="Consolas, monospace" font-size="11">  {"==": [$sdpa_fwd.head_size, 128]},</text>
+  <text x="345" y="234" font-family="Consolas, monospace" font-size="11">  {"hipdnn.same_head_dim": [$q,$k,$v]}</text>
+  <text x="345" y="252" font-family="Consolas, monospace" font-size="11">]}</text>
+  <text x="345" y="276" font-family="Consolas, monospace" font-size="10" fill="#555">fields: Tensor · Graph · Attrs · $kernel · $device</text>
+  <text x="345" y="296" font-size="10" fill="#8a6d1f">one matcher of the KDP's set, run once, memoized</text>
 
   <!-- Arrow Stage2 -> Stage3 (bind) -->
   <line x1="645" y1="200" x2="695" y2="200" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCM)"/>
@@ -68,5 +72,5 @@
   <text x="715" y="220" font-family="Consolas, monospace" font-size="11">  (bound dims)</text>
 
   <!-- Caption -->
-  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The same match that accepts a graph also binds the handles that launch and workspace formulas reference.</text>
+  <text x="460" y="395" text-anchor="middle" font-style="italic" fill="#444">The same matcher that accepts a graph also binds the handles that launch and workspace formulas reference.</text>
 </svg>

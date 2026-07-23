@@ -36,12 +36,10 @@
 
   <!-- Cell 1A: kernel-source / build+runtime -->
   <rect x="175" y="116" width="250" height="184" rx="8" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5"/>
-  <rect x="235" y="140" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
-  <text x="300" y="160" text-anchor="middle" font-family="Consolas, monospace" fill="#333">kpack</text>
-  <rect x="235" y="180" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
-  <text x="300" y="200" text-anchor="middle" font-family="Consolas, monospace" fill="#333">hsaco</text>
-  <rect x="235" y="220" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
-  <text x="300" y="240" text-anchor="middle" font-family="Consolas, monospace" fill="#333">hiprtc</text>
+  <rect x="235" y="150" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="300" y="170" text-anchor="middle" font-family="Consolas, monospace" fill="#333">kpack</text>
+  <rect x="235" y="196" width="130" height="30" rx="5" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
+  <text x="300" y="216" text-anchor="middle" font-family="Consolas, monospace" fill="#333">hsaco</text>
 
   <!-- Cell 1B: kernel-source / build-only -->
   <rect x="435" y="116" width="250" height="184" rx="8" fill="#ffffff" stroke="#7f8a99" stroke-width="1.5"/>
