@@ -673,6 +673,31 @@ public:
                                  const RoPE_backward_attributes&),
                                 std::shared_ptr<Tensor_attributes>)
 
+    // FP8 version
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8,
+                                (const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const SDPA_fp8_attributes&),
+                                std::array<std::shared_ptr<Tensor_attributes>, 4>)
+
+    // MXFP8 version
+    HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8,
+                                (const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const std::shared_ptr<Tensor_attributes>&,
+                                 const SDPA_fp8_attributes&),
+                                std::array<std::shared_ptr<Tensor_attributes>, 3>)
+
     HIPDNN_CUDNN_SHIM_FAIL_NODE(sdpa_fp8_backward,
                                 (const std::shared_ptr<Tensor_attributes>&,
                                  const std::shared_ptr<Tensor_attributes>&,
