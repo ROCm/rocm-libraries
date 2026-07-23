@@ -120,6 +120,30 @@ bool mergeFrontier(Frontier& a, const Frontier& b) {
     return changed;
 }
 
+/// Per-path backward-scan state. `frontier` is the open deferrable groups. `workingS`
+/// is the still-urgent subset of the trigger's drained set S: a load is urgent iff its
+/// token is in `workingS`, and crossing a wait removes that wait's drained tokens from
+/// `workingS` (those loads are already drained on this path, so they can no longer be
+/// co-resident with a deferrable load below). A token in the original S but no longer
+/// in `workingS` is neither urgent nor deferrable — it is ignored.
+struct ScanState {
+    Frontier frontier;
+    std::vector<int> workingS;
+};
+
+/// Merge `b` into `a`: union frontiers and union `workingS` (a token stays urgent if
+/// undrained on ANY incoming path). Returns true if `a` grew (either component), so the
+/// worklist re-processes.
+bool mergeScanState(ScanState& a, const ScanState& b) {
+    bool changed = mergeFrontier(a.frontier, b.frontier);
+    std::vector<int> w = unionTokens(a.workingS, b.workingS);
+    if (w != a.workingS) {
+        a.workingS = std::move(w);
+        changed = true;
+    }
+    return changed;
+}
+
 class TDMLoadWaveSyncPass : public StinkyInstPass {
    public:
     static char ID;
@@ -136,32 +160,34 @@ class TDMLoadWaveSyncPass : public StinkyInstPass {
 
     /// Result of scanning one block body backward.
     struct BodyResult {
-        Frontier residual;      // groups still open at the block top (propagate to preds)
-        bool terminated = false;  // an urgent load ended the flow (do not propagate)
+        ScanState residual;       // state at the block top (propagate to preds)
+        bool terminated = false;  // the flow ended in this block (do not propagate)
     };
 
-    /// Scan instructions [0, endIdx) of `bb` in reverse (backward) starting from
-    /// frontier `F`, using the wait's drained token set `drained` to classify loads:
-    /// a tensor_load is URGENT iff any token is in `drained`, DEFERRABLE otherwise.
-    ///   - Urgent load: it is the boundary. Plant a barrier before every open
-    ///     group's anchor (unless one already sits in the gap) and terminate.
-    ///   - Deferrable load: it is earlier than, and on the path of, every open
-    ///     group, so collapse them into a single group anchored here; its tokens
-    ///     join deferSeen and barrierInGap resets (any barrier seen was intra-group).
-    ///   - Barrier with groups open: mark barrierInGap (a split may already exist)
-    ///     and remember its wait half as the gap witness.
-    /// Instructions are gathered forward into a vector and walked by index: the
-    /// intrusive-list end() iterator is not safely decrementable.
+    /// Scan instructions [0, endIdx) of `bb` in reverse (backward) from `st`. `S` is the
+    /// trigger's full drained set (fixed); `st.workingS` is the still-urgent subset that
+    /// shrinks as waits are crossed. Classify each tensor_load by its tokens:
+    ///   - token in `st.workingS`         -> URGENT: it is the boundary. Plant a barrier
+    ///     before every open group's anchor (unless one already sits in the gap) and end.
+    ///   - token not in `S`               -> DEFERRABLE: collapse the open groups into one
+    ///     anchored here; its tokens join deferSeen and barrierInGap resets.
+    ///   - token in `S` but not workingS  -> already drained on this path; ignore it.
+    /// Crossing an s_wait_tensorcnt removes its drained tokens from `workingS`; when
+    /// `workingS` empties, nothing further back can be urgent so the flow ends. A barrier
+    /// with groups open marks barrierInGap and witnesses its wait half.
+    /// Instructions are gathered forward into a vector and walked by index (intrusive-list
+    /// end() is not safely decrementable).
     ///
     /// `out` collects (anchor, tokens) for barriers to insert; `tagsOut` collects
     /// (anchor, existing barrier) for pre-existing barriers already at a split. Both
     /// are keyed by anchor so a tag whose anchor also got an insertion can be dropped.
     /// `anchorWait` records the wait that motivated each anchor, for the barrier comment.
     BodyResult scanBody(BasicBlock& bb, size_t endIdx, StinkyInstruction* waitInst,
-                        const std::vector<int>& drained, Frontier F,
+                        const std::vector<int>& S, ScanState st,
                         std::vector<std::pair<StinkyInstruction*, std::vector<int>>>& out,
                         std::vector<std::pair<StinkyInstruction*, StinkyInstruction*>>& tagsOut,
                         std::unordered_map<StinkyInstruction*, StinkyInstruction*>& anchorWait) {
+        Frontier& F = st.frontier;
         std::vector<StinkyInstruction*> insts;
         insts.reserve(endIdx);
         size_t seen = 0;
@@ -172,11 +198,17 @@ class TDMLoadWaveSyncPass : public StinkyInstPass {
             StinkyInstruction* inst = insts[i];
             if (inst == nullptr) continue;
             if (!isTensorLoad(*inst)) {
-                // A wait draining an overlapping set already separates the urgent group
-                // from anything below it, so end this path with no boundary. A disjoint
-                // drain is not a boundary and is skipped.
+                // Crossing a wait drains its tokens: remove them from workingS. Once
+                // workingS empties, no urgent load remains further back, so end the flow.
                 if (inst->is(InstFlag::IF_WaitTensorCnt)) {
-                    if (anyTokenIn(drainedSetForWait(inst), drained)) return {Frontier{}, true};
+                    const std::vector<int> ws = drainedSetForWait(inst);
+                    if (!ws.empty()) {
+                        std::vector<int> next;
+                        for (int t : st.workingS)
+                            if (std::find(ws.begin(), ws.end(), t) == ws.end()) next.push_back(t);
+                        st.workingS = std::move(next);
+                        if (st.workingS.empty()) return {ScanState{}, true};
+                    }
                 }
                 if (!F.empty() && isBarrier(*inst)) {
                     // Witness the wait half (backward-first); the classic comment is there.
@@ -189,7 +221,7 @@ class TDMLoadWaveSyncPass : public StinkyInstPass {
                 continue;
             }
             std::vector<int> toks = tdmTokens(*inst);
-            if (anyTokenIn(toks, drained)) {
+            if (anyTokenIn(toks, st.workingS)) {  // URGENT: boundary
                 for (auto& [anchor, e] : F) {
                     if (!e.barrierInGap)
                         out.emplace_back(anchor, unionTokens(toks, e.deferSeen));
@@ -199,14 +231,16 @@ class TDMLoadWaveSyncPass : public StinkyInstPass {
                         continue;
                     anchorWait.emplace(anchor, waitInst);  // for the comment's S
                 }
-                return {Frontier{}, true};
+                return {ScanState{}, true};
             }
+            if (anyTokenIn(toks, S)) continue;  // in S but already drained on this path
+            // DEFERRABLE: collapse the open groups into one anchored here.
             std::vector<int> merged = toks;
             for (auto& [anchor, e] : F) merged = unionTokens(merged, e.deferSeen);
             F.clear();
             F.emplace(inst, DeferEntry{std::move(merged), false, nullptr});
         }
-        return {std::move(F), false};
+        return {std::move(st), false};
     }
 
     /// The drained (urgent) token set S for a tensorcnt wait.
@@ -277,26 +311,26 @@ class TDMLoadWaveSyncPass : public StinkyInstPass {
                 std::vector<int> drained = drainedSetForWait(waitInst);
                 if (drained.empty()) continue;  // no classifiable urgent set
 
-                // Seed: scan this block above the wait. If the boundary is here the
-                // flow terminates; otherwise propagate the open frontier to preds.
-                BodyResult seed = scanBody(bb, idx, waitInst, drained, Frontier{}, pending,
-                                           pendingTags, anchorWait);
+                // Seed: scan this block above the wait, starting with workingS = S. If
+                // the boundary is here the flow terminates; otherwise propagate to preds.
+                BodyResult seed = scanBody(bb, idx, waitInst, drained, ScanState{{}, drained},
+                                           pending, pendingTags, anchorWait);
                 if (seed.terminated) continue;
 
-                // Backward worklist over blocks. bot[B] is the frontier arriving at
+                // Backward worklist over blocks. bot[B] is the ScanState arriving at
                 // B's bottom (merged across successors toward the wait); a block is
-                // (re)queued only when that frontier grows, which bounds the work by
-                // the lattice height (monotone union) — the loop back-edge included.
+                // (re)queued only when that state grows, which bounds the work by the
+                // lattice height (monotone union) — the loop back-edge included.
                 // Predecessors are scanned without re-checking shouldProcessBasicBlock
                 // (only the trigger block is filtered), so a barrier can land in a
                 // predecessor the filter would exclude — assumes a kernel-scope filter
                 // that accepts all blocks, as the backend registers this pass with.
-                std::map<BasicBlock*, Frontier> bot;
+                std::map<BasicBlock*, ScanState> bot;
                 std::deque<BasicBlock*> worklist;
-                auto propagate = [&](BasicBlock& from, const Frontier& residual) {
+                auto propagate = [&](BasicBlock& from, const ScanState& residual) {
                     for (BasicBlock* pred : from.getPredecessors()) {
                         const bool created = bot.find(pred) == bot.end();
-                        const bool grew = mergeFrontier(bot[pred], residual);
+                        const bool grew = mergeScanState(bot[pred], residual);
                         if (created || grew) worklist.push_back(pred);
                     }
                 };

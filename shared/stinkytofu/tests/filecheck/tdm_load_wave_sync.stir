@@ -36,7 +36,11 @@
 #           over-suppress),
 #        19 separate intervening same-S drain (flat, no loop) stops the scan -> no barrier,
 #        20 diamond nested in a loop: per-arm barriers where the split straddles the
-#           back-edge and both arms merge at the shared loop header.
+#           back-edge and both arms merge at the shared loop header,
+#        21 multi-token drained S with a partial-drain wait on one merge arm: tok0
+#           drained on that arm is excluded from the join barrier,
+#        22 partial-drain arm leaves a DIFFERENT urgent token in flight: crossing a wait
+#           shrinks the urgent set by only its drained tokens, so a survivor still splits.
 
 # --- Case 1: insertion ---
 # Stream: A(tok0); B(tok0); C(tok1); s_wait_tensorcnt; ds_load(tok0 anchor). The
@@ -730,4 +734,98 @@ st.func @tdm_load_wave_sync_diamond_in_loop() {
   "st.s_cbranch_scc1"("header", SCC1)
   Successors: ^header, ^exit
 ^exit:
+}
+
+# --- Case 21: multi-token drained S with a partial-drain wait on one merge arm ---
+# ^entry issues urgent A(tok0), then forks. ^left holds a wait that drains only [0];
+# ^right issues B(tok1). They merge into ^join which issues deferrable C(tok2) and the
+# trigger wait, whose drained S = [0,1] (union across arms). Scanning back from the
+# trigger with workingS = {0,1}:
+#   - ^right arm: C(tok2) deferrable, then B(tok1) urgent -> boundary, contributes {1}.
+#   - ^left arm: C(tok2) deferrable, then the wait draining [0] shrinks workingS to {1};
+#     no tok1 load exists on this arm, so it reaches the top with no urgent found and
+#     contributes nothing. A(tok0) is drained on this path, so it is NOT urgent here.
+# One barrier before C tagged [1,2] (not [0,1,2]): tok0 is excluded because it was
+# drained on the only arm that reaches it.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_merge_partial_drain
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [1]
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [1,2]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: s_wait_tensorcnt
+# Exactly one barrier; tok0 is not pulled in from the drained ^left path.
+# CHECK-NOT: s_barrier_signal
+
+st.func @tdm_load_wave_sync_merge_partial_drain() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 0 }, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^join
+^join:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0,1] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0,1] } }
+}
+
+# --- Case 22: partial-drain arm leaves a DIFFERENT urgent token in flight ---
+# Like Case 21 but ^entry issues TWO urgent loads, A(tok0) then E(tok3); the trigger's
+# drained S = [0,1,3]. On the ^left arm the wait drains only tok0 (tlcnt=1 keeps the
+# newest, E), so after crossing it the still-urgent set shrinks {0,1,3} -> {1,3}: A is
+# gone but E(tok3) is STILL in flight and co-resident with the deferrable C(tok2). So:
+#   - ^right arm: C(tok2) deferrable, then B(tok1) urgent -> contributes {1}.
+#   - ^left arm: C(tok2) deferrable, cross the wait (drop tok0), reach E(tok3) which is
+#     still urgent (3 in workingS) -> contributes {3}. tok0 is NOT pulled in (drained).
+# Merged join barrier before C = [1,2,3] (NOT [0,1,2,3]: tok0 was drained on ^left; and
+# NOT [1,2]: tok3 stays urgent there). A separate barrier [0,3] is planted by the ^left
+# wait's own trigger, before E. Guards the shrinking-workingS rule: crossing a wait
+# removes only ITS drained tokens, leaving other in-flight urgent tokens live.
+#
+# CHECK-LABEL: @tdm_load_wave_sync_merge_partial_drain_survivor
+# ^left wait's own barrier, before E(tok3).
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [0,3]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [0,3]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [3]
+# Join barrier before the deferrable C(tok2): [1,2,3], tok0 excluded, tok3 kept.
+# CHECK: s_barrier_signal
+# CHECK-SAME: tokens = [1,2,3]
+# CHECK-NEXT: s_barrier_wait
+# CHECK-SAME: tokens = [1,2,3]
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-SAME: tokens = [2]
+# CHECK: s_wait_tensorcnt
+
+st.func @tdm_load_wave_sync_merge_partial_drain_survivor() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[32:35], s[36:43]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [3] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0] } }
+  Successors: ^join
+^right:
+  "st.tensor_load_to_lds"(s[8:11], s[12:19]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  Successors: ^join
+^join:
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  "st.s_wait_tensorcnt"() { issueCycles = 1, latencyCycles = 1, mod.swaittensorcnt = { tlcnt = 1 }, mod.memtoken = { tokens = [0,1,3] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0,1,3] } }
 }
