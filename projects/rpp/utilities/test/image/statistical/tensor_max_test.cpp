@@ -85,5 +85,10 @@ INSTANTIATE_TEST_SUITE_P(
     Image_Statistical, TensorMaxTest,
     ::testing::ValuesIn(make_configs({DType::U8, DType::F16, DType::F32, DType::I8},
                                      {Layout::PKD3, Layout::PLN3, Layout::PLN1},
-                                     {Roi::Full, Roi::Partial})),
+                                     {Roi::Full, Roi::Partial},
+                                     // Large enough that the stage-1 partial-reduction buffer is
+                                     // >= 8 elements/image: smaller images (e.g. the default
+                                     // 2x36x48) underflow the tensor_max HIP stage-2 reduction
+                                     // index and fault with an illegal access.
+                                     {{2, 160, 160}})),
     config_param_name);

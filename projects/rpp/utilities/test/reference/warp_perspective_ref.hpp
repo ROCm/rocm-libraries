@@ -5,13 +5,12 @@
 
 #include "framework/config_param.hpp"
 #include "framework/geometric.hpp"
-#include "framework/tensor_setup.hpp"
 
 namespace rpptest {
 
 // Independent host golden model for rppt_warp_perspective, derived from the op's definition (a
-// projective image warp), NOT from the RPP kernel. Used as the reference for both backends so kernel
-// bugs surface as diffs.
+// projective image warp), NOT from the RPP kernel. Used as the reference for both backends so
+// kernel bugs surface as diffs.
 //
 // perspectiveTensor holds 9 values per image, the row-major 3x3 matrix M = [m0 m1 m2; m3 m4 m5;
 // m6 m7 m8]. A warp is an inverse mapping: for each output pixel the matrix gives the SOURCE
@@ -21,10 +20,10 @@ namespace rpptest {
 //     srcY = (m3*outX + m4*outY + m5) / w
 // the projective generalization of the remap contract output(x,y) = input(mapx(x,y), mapy(x,y)).
 // The output index (outX,outY) is origin-based and the source coordinate is absolute (full-image
-// frame): RPP's warp ignores the ROI offset for the mapping and uses the ROI only to size the output
-// and bound the valid-source rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is black.
-// Output pixel centers are at integer indices; sampling/interpolation/border/quantize are handled by
-// geometric_reference() (shared with warp_affine).
+// frame): RPP's warp ignores the ROI offset for the mapping and uses the ROI only to size the
+// output and bound the valid-source rectangle [x0,x0+w) x [y0,y0+h), outside which the sample is
+// black. Output pixel centers are at integer indices; sampling/interpolation/border/quantize are
+// handled by geometric_reference() (shared with warp_affine).
 //
 // NOTE (semantics assumption): the public header does not document the matrix direction or the
 // mapping frame. The destination->source direction and absolute-frame / origin-based output
@@ -32,16 +31,16 @@ namespace rpptest {
 // via pure-translation cases) since the two share the same geometric machinery.
 template <typename T>
 void warp_perspective_reference(const T* src, T* dst, const RpptDesc& d, DType dt,
-                               const RpptROI* roi, RpptRoiType roiType,
-                               const Rpp32f* perspectiveTensor, RpptInterpolationType interp) {
-    geometric_reference<T>(
-        src, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
-        [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
-            const Rpp32f* m = perspectiveTensor + static_cast<std::size_t>(n) * 9;
-            const double w = m[6] * ox + m[7] * oy + m[8];
-            sx = (m[0] * ox + m[1] * oy + m[2]) / w;
-            sy = (m[3] * ox + m[4] * oy + m[5]) / w;
-        });
+                                const RpptROI* roi, RpptRoiType roiType,
+                                const Rpp32f* perspectiveTensor, RpptInterpolationType interp) {
+    geometric_reference<T>(src, dst, d, dt, roi, roiType, roi_out_sizes(d, roi, roiType), interp,
+                           [&](Rpp32u n, double ox, double oy, double& sx, double& sy) {
+                               const Rpp32f* m =
+                                   perspectiveTensor + static_cast<std::size_t>(n) * 9;
+                               const double w = m[6] * ox + m[7] * oy + m[8];
+                               sx = (m[0] * ox + m[1] * oy + m[2]) / w;
+                               sy = (m[3] * ox + m[4] * oy + m[5]) / w;
+                           });
 }
 
 }  // namespace rpptest
