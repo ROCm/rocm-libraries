@@ -1,11 +1,12 @@
 #ifndef RPP_TEST_REDUCTION_H
 #define RPP_TEST_REDUCTION_H
 
+#include <gtest/gtest.h>
 #include <rpp/rpp.h>
 
 #include <cmath>
 #include <cstddef>
-#include <iostream>
+#include <sstream>
 #include <vector>
 
 #include "framework/tensor_setup.hpp"
@@ -52,24 +53,30 @@ void for_each_roi_value(const T* src, const RpptDesc& d, const RpptROI* roi, Rpp
                     });
 }
 
-// Compares a typed reduction output array against a double-valued golden within tolerance,
-// printing the first few mismatches with their flat index. TOut is the op's output element type
+// Compares a typed reduction output array against a double-valued golden within tolerance.
+// Returns a rich GTest AssertionResult: on failure it reports the total mismatch count and lists
+// the first few offending slots (flat index, actual, golden, diff, tol) so the failure is
+// self-describing in both the console and the XML report. TOut is the op's output element type
 // (e.g. Rpp64u for U8 sum, Rpp8u for U8 min, Rpp32f for mean/stddev).
 template <typename TOut>
-bool compare_reduction(const TOut* actual, const std::vector<double>& golden, double tol) {
-    bool ok = true;
-    int shown = 0;
+::testing::AssertionResult compare_reduction(const TOut* actual, const std::vector<double>& golden,
+                                             double tol) {
+    constexpr std::size_t maxShown = 10;
+    std::size_t mismatches = 0;
+    std::ostringstream details;
     for (std::size_t i = 0; i < golden.size(); ++i) {
         const double a = to_double(actual[i]);
         const double diff = std::fabs(a - golden[i]);
-        if (!(diff <= tol)) {
-            ok = false;
-            if (shown++ < 10)
-                std::cerr << "  reduction mismatch at [" << i << "]: actual=" << a
-                          << " golden=" << golden[i] << " diff=" << diff << " tol=" << tol << "\n";
-        }
+        if (diff <= tol) continue;
+        if (mismatches < maxShown)
+            details << "\n  [" << i << "] actual=" << a << " golden=" << golden[i]
+                    << " diff=" << diff << " tol=" << tol;
+        ++mismatches;
     }
-    return ok;
+    if (mismatches == 0) return ::testing::AssertionSuccess();
+    if (mismatches > maxShown) details << "\n  ... (" << (mismatches - maxShown) << " more)";
+    return ::testing::AssertionFailure() << mismatches << " of " << golden.size()
+                                         << " reduction values exceeded tolerance:" << details.str();
 }
 
 }  // namespace rpptest
