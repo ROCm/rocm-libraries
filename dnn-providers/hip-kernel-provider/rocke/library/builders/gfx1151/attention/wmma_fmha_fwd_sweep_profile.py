@@ -114,20 +114,45 @@ def _profile_command(args: argparse.Namespace, variant: str) -> list[str]:
     return cmd + ["--", *_benchmark_command(args, variant)]
 
 
-def _run(
-    cmd: Sequence[str], *, allow_regression: bool = False
-) -> subprocess.CompletedProcess:
+def _run(cmd: Sequence[str]) -> subprocess.CompletedProcess:
     proc = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         env=os.environ.copy(),
     )
-    valid = (0, 1) if allow_regression else (0,)
-    if proc.returncode not in valid:
+    if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip()
         raise RuntimeError(f"command failed ({proc.returncode}): {detail[-2000:]}")
     return proc
+
+
+def _run_profile(cmd: Sequence[str]) -> dict:
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    try:
+        result = json.loads(proc.stdout)
+    except (json.JSONDecodeError, TypeError) as exc:
+        detail = proc.stderr.strip() or proc.stdout.strip()
+        raise RuntimeError(
+            f"profile command failed ({proc.returncode}): {detail[-2000:]}"
+        ) from exc
+
+    record = result.get("record") if isinstance(result, dict) else None
+    selfcheck = result.get("selfcheck") if isinstance(result, dict) else None
+    if not isinstance(record, dict) or not isinstance(selfcheck, dict):
+        raise RuntimeError("profile command did not emit the expected JSON record")
+
+    verdict = selfcheck.get("verdict")
+    if proc.returncode == 0 or (proc.returncode == 1 and verdict == "regressed"):
+        return result
+
+    detail = proc.stderr.strip() or proc.stdout.strip()
+    raise RuntimeError(f"profile command failed ({proc.returncode}): {detail[-2000:]}")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -187,8 +212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"[sweep] winner: {winner.name}")
 
     for row in ranked[: args.shortlist]:
-        proc = _run(_profile_command(args, row.config_name), allow_regression=True)
-        result = json.loads(proc.stdout)
+        result = _run_profile(_profile_command(args, row.config_name))
         record = result["record"]
         verdict = result["selfcheck"].get("verdict", "unknown")
         wall = record.get("wall", {})

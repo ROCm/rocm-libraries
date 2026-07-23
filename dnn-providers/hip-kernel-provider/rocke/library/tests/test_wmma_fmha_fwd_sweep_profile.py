@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import unittest
+from unittest import mock
 
 from builders.gfx1151.attention import wmma_fmha_fwd_sweep_profile as subject
 
@@ -47,6 +49,37 @@ class TestWmmaFmhaFwdSweepProfile(unittest.TestCase):
         self.assertEqual(shape["variant"], "vgather")
         self.assertEqual(shape["kv_heads"], 2)
         self.assertEqual(cmd[cmd.index("--cache") + 1], "/tmp/cache")
+
+    def test_profile_exit_one_accepted_only_for_regression(self):
+        payload = {
+            "record": {"wall": {"ms_median": 1.0}},
+            "selfcheck": {"verdict": "regressed"},
+        }
+        proc = subprocess.CompletedProcess(
+            args=["profile"], returncode=1, stdout=json.dumps(payload), stderr=""
+        )
+        with mock.patch.object(subject.subprocess, "run", return_value=proc):
+            self.assertEqual(subject._run_profile(["profile"]), payload)
+
+    def test_profile_exit_one_genuine_failure_rejected(self):
+        proc = subprocess.CompletedProcess(
+            args=["profile"], returncode=1, stdout="", stderr="launch failed"
+        )
+        with mock.patch.object(subject.subprocess, "run", return_value=proc):
+            with self.assertRaisesRegex(RuntimeError, "launch failed"):
+                subject._run_profile(["profile"])
+
+    def test_profile_exit_one_non_regression_json_rejected(self):
+        payload = {
+            "record": {"wall": {"ms_median": 1.0}},
+            "selfcheck": {"verdict": "within_noise"},
+        }
+        proc = subprocess.CompletedProcess(
+            args=["profile"], returncode=1, stdout=json.dumps(payload), stderr=""
+        )
+        with mock.patch.object(subject.subprocess, "run", return_value=proc):
+            with self.assertRaisesRegex(RuntimeError, "profile command failed"):
+                subject._run_profile(["profile"])
 
 
 if __name__ == "__main__":
