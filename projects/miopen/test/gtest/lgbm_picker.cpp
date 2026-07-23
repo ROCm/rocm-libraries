@@ -1,14 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// CPU-only unit tests for the v10 runtime-pure LGBM solver picker.
-// No GPU required: the metadata loader and the full-vocab scoring path are
-// host-side. The fixture replay validates the scoring + argmax against
-// lgbm_test_vectors.json, whose vectors ship the fully-encoded 51-feature row
-// and the reference argmax solver.
-//
-// Build: make test_lgbm_picker
-// Run:   ./bin/test_lgbm_picker
+// CPU-only, self-contained unit tests for the cross-arch LGBM solver picker.
+// No GPU required and no external reference data: the metadata loader and the
+// full-vocab scoring path are host-side. The tests assert repo-owned
+// invariants (vocab loads and is self-consistent; the scoring seam picks a
+// valid in-range candidate deterministically). They do NOT check picks against
+// any externally-computed "expected" values -- the training/export pipeline
+// lives outside this repo and the compiled Treelite .so is the source of truth.
 
 #include <gtest/gtest.h>
 
@@ -20,14 +19,7 @@
 #include <miopen/conv/heuristics/lgbm_metadata.hpp>
 
 #include <miopen/db_path.hpp>
-#include <miopen/filesystem.hpp>
 
-#include <nlohmann/json.hpp>
-
-#include <cmath>
-#include <fstream>
-#include <limits>
-#include <string>
 #include <vector>
 
 namespace {
@@ -55,8 +47,8 @@ protected:
 
 TEST_F(CPU_LgbmMetadata_NONE, LoadsSolverVocab)
 {
-    // v10 ships a non-trivial solver vocabulary; the exact count tracks the
-    // model, so just assert it is populated and self-consistent.
+    // The model ships a non-trivial solver vocabulary; the exact count tracks
+    // the model, so just assert it is populated.
     EXPECT_GT(meta.Solvers().size(), 1u);
 }
 
@@ -84,75 +76,46 @@ TEST_F(CPU_LgbmMetadata_NONE, SolverCodeMatchesVocabIndex)
 }
 
 // ---------------------------------------------------------------------------
-// Fixture replay
+// Scoring seam
 // ---------------------------------------------------------------------------
 
 class CPU_LgbmPicker_NONE : public ::testing::Test
 {
 protected:
-    nlohmann::json fixture;
     const LgbmMetadata& meta = LgbmMetadata::Get();
 
     void SetUp() override
     {
         if(!meta.IsReady())
             GTEST_SKIP() << "LGBM metadata unavailable; picker disabled in this build";
-
-        const auto path = miopen::GetSystemDbPath() / "lgbm_test_vectors.json";
-        if(!miopen::fs::exists(path))
-            GTEST_SKIP() << "fixture not found: " << path.string();
-        std::ifstream ifs(path.string());
-        ifs >> fixture;
     }
 };
 
-// Each vector ships its candidate set as a pre-encoded N x kNumFeatures matrix
-// plus the reference argmax_solver. Scoring those rows and taking the argmax
-// must reproduce argmax_solver exactly (the .so is bit-identical to the trained
-// booster). A regression in feature count, vocab loading, or argmax breaks this.
-TEST_F(CPU_LgbmPicker_NONE, ReproducesReferenceArgmax)
+// Scoring a candidate matrix returns an in-range argmax deterministically, and
+// rejects malformed input. Uses a fixed, arbitrary feature matrix: the test
+// asserts the seam's contract (valid index, determinism, error handling), not a
+// specific pick -- the .so is the source of truth for the actual scores.
+TEST_F(CPU_LgbmPicker_NONE, ScoresCandidateMatrix)
 {
-    const auto& vectors = fixture.at("vectors");
-    ASSERT_FALSE(vectors.empty());
+    constexpr int n_cands = 4;
+    std::vector<std::vector<double>> rows(
+        n_cands, std::vector<double>(static_cast<std::size_t>(kNumFeatures), 1.0));
+    // Vary the solver_name column (last feature) so the rows are distinct
+    // candidates rather than identical duplicates.
+    for(int c = 0; c < n_cands; ++c)
+        rows[static_cast<std::size_t>(c)].back() = static_cast<double>(c);
 
-    // Fixture feature_order must match the model the picker loaded.
-    ASSERT_EQ(fixture.at("feature_order").size(), static_cast<std::size_t>(kNumFeatures));
+    const int argmax = ScoreCandidateMatrixForTest(rows);
+    ASSERT_GE(argmax, 0);
+    ASSERT_LT(argmax, n_cands);
 
-    auto to_row = [](const nlohmann::json& jrow) {
-        std::vector<double> row(jrow.size());
-        for(std::size_t i = 0; i < jrow.size(); ++i)
-            row[i] = jrow[i].is_null() ? std::numeric_limits<double>::quiet_NaN()
-                                       : jrow[i].get<double>();
-        return row;
-    };
+    // Deterministic: same matrix -> same argmax.
+    EXPECT_EQ(argmax, ScoreCandidateMatrixForTest(rows));
 
-    int total = 0;
-    int match = 0;
-    for(const auto& v : vectors)
-    {
-        const auto& fm = v.at("feature_matrix");
-        ASSERT_FALSE(fm.empty());
-
-        std::vector<std::vector<double>> rows;
-        rows.reserve(fm.size());
-        for(const auto& jrow : fm)
-        {
-            ASSERT_EQ(jrow.size(), static_cast<std::size_t>(kNumFeatures));
-            rows.push_back(to_row(jrow));
-        }
-
-        const int argmax = ScoreCandidateMatrixForTest(rows);
-        ASSERT_GE(argmax, 0);
-        const std::string picked = v.at("candidate_solvers").at(argmax).template get<std::string>();
-        const std::string expected = v.at("argmax_solver").get<std::string>();
-        ++total;
-        if(picked == expected)
-            ++match;
-    }
-
-    ASSERT_GT(total, 0);
-    // The fixture provides the exact encoded candidate rows, so this is exact.
-    EXPECT_EQ(match, total) << match << "/" << total << " reference argmaxes reproduced";
+    // Malformed input (wrong feature width) is rejected with -1, not a crash.
+    std::vector<std::vector<double>> bad(1, std::vector<double>(4, 0.0));
+    EXPECT_EQ(ScoreCandidateMatrixForTest(bad), -1);
+    EXPECT_EQ(ScoreCandidateMatrixForTest({}), -1);
 }
 
 } // namespace

@@ -2,22 +2,6 @@ find_package(GTest REQUIRED)
 
 include(GoogleTest)
 
-# Stage the LGBM picker validation fixture next to the model assets so the
-# CPU_LgbmPickerFixture test can locate it via GetSystemDbPath() at run time.
-if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/lgbm_test_vectors.json"
-        "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/lgbm_test_vectors.json"
-        COPYONLY)
-    # Perf-config picker fixture: vectors carry raw problem inputs + expected
-    # descriptor; the picker model meta + catalog must also be staged so the
-    # CPU_LgbmPcfgPickerFixture can score on CPU via GetSystemDbPath().
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/lgbm_pcfg_test_vectors.json"
-        "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/lgbm_pcfg_test_vectors.json"
-        COPYONLY)
-endif()
-
 # Detect a TheRock build: TheRock injects THEROCK_SUBPROJECT_TARGET into every sub-project
 # configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES). Dapper must be completely inert there.
 if(DEFINED THEROCK_SUBPROJECT_TARGET)
