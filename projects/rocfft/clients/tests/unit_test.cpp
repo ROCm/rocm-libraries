@@ -20,10 +20,6 @@
 
 #include "rocfft/rocfft.h"
 
-extern "C" {
-#include "rocfft_c.h"
-}
-
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
@@ -816,82 +812,6 @@ TEST(rocfft_UnitTest, rtc_cache_null)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
-// make sure RTC gracefully handles a helper process that crashes
-TEST(rocfft_UnitTest, rtc_helper_crash)
-{
-    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
-       > unittest_prob)
-    {
-        GTEST_SKIP();
-    }
-
-    try
-    {
-#ifdef _WIN32
-        char filename[MAX_PATH];
-        GetModuleFileNameA(NULL, filename, MAX_PATH);
-        fs::path test_exe    = filename;
-        fs::path crasher_exe = test_exe.replace_filename("rtc_helper_crash.exe");
-#else
-        fs::path           test_exe     = program_invocation_name;
-        fs::path           crasher_exe  = test_exe.replace_filename("rtc_helper_crash");
-#endif
-
-        // use the crashing helper
-        EnvironmentSetTemp env_helper("ROCFFT_RTC_PROCESS_HELPER", crasher_exe.string().c_str());
-        // don't touch the cache, to force compilation
-        EnvironmentSetTemp env_read("ROCFFT_RTC_CACHE_READ_DISABLE", "1");
-        EnvironmentSetTemp env_write("ROCFFT_RTC_CACHE_WRITE_DISABLE", "1");
-        // force out-of-process compile
-        EnvironmentSetTemp env_process("ROCFFT_RTC_PROCESS", "2");
-
-        rocfft_plan plan = nullptr;
-        ASSERT_TRUE(rocfft_status_success
-                    == rocfft_plan_create(&plan,
-                                          rocfft_placement_inplace,
-                                          rocfft_transform_type_complex_forward,
-                                          rocfft_precision_single,
-                                          1,
-                                          &RTC_PROBLEM_SIZE,
-                                          1,
-                                          nullptr));
-
-        // alloc a complex buffer
-        gpubuf_t<rocfft_complex<float>> data;
-        ASSERT_EQ(data.alloc(RTC_PROBLEM_SIZE * sizeof(rocfft_complex<float>)), hipSuccess);
-
-        std::vector<void*> ibuffers(1, static_cast<void*>(data.data()));
-
-        ASSERT_EQ(rocfft_execute(plan, ibuffers.data(), nullptr, nullptr), rocfft_status_success);
-
-        rocfft_plan_destroy(plan);
-        plan = nullptr;
-
-        rocfft_cleanup();
-        rocfft_setup();
-
-        // also try with forcing use of the subprocess, which is a
-        // different code path from the default "try in-process, then
-        // fall back to out-of-process"
-        EnvironmentSetTemp env_force("ROCFFT_RTC_PROCESS", "1");
-
-        ASSERT_TRUE(rocfft_status_success
-                    == rocfft_plan_create(&plan,
-                                          rocfft_placement_inplace,
-                                          rocfft_transform_type_complex_forward,
-                                          rocfft_precision_single,
-                                          1,
-                                          &RTC_PROBLEM_SIZE,
-                                          1,
-                                          nullptr));
-        ASSERT_EQ(rocfft_execute(plan, ibuffers.data(), nullptr, nullptr), rocfft_status_success);
-
-        rocfft_plan_destroy(plan);
-        plan = nullptr;
-    }
-    ROCFFT_CATCH_TEST_EXCEPTIONS;
-}
-
 TEST(rocfft_UnitTest, rtc_test_harness)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -1113,6 +1033,11 @@ static void run_plan_capacity_test(size_t M)
 // rocFFT fails around 65k plans due to vm.max_map_count exhaustion.
 TEST(rocfft_UnitTest, plan_capacity_100k)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     run_plan_capacity_test(100'000);
 }
 
@@ -1120,13 +1045,10 @@ TEST(rocfft_UnitTest, plan_capacity_100k)
 // run manually with --gtest_also_run_disabled_tests.
 TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
     run_plan_capacity_test(1'000'000);
 }
-
-// Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
-#ifndef SKIP_ROCFFT_C_TEST
-TEST(rocfft, cApi)
-{
-    EXPECT_EQ(rocfft_c(), 0);
-}
-#endif

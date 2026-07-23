@@ -191,6 +191,11 @@ if(BUILD_WITH_CSC_TRSV)
   target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_CSC_TRSV)
 endif()
 
+# CSC triangular solve support (rocsparse_spsm / rocsparse_sptrsm)
+if(BUILD_WITH_CSC_TRSM)
+  target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_CSC_TRSM)
+endif()
+
 # Target properties
 
 # Offload compression ?
