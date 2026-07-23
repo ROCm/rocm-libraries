@@ -5,6 +5,15 @@ Documentation for hipBLAS is available at
 
 ## hipBLAS 3.6.0
 
+### Added
+
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched forms of `gemv`, `ger`, `geru`, `gerc`, `symv`, `hemv`, `sbmv`, `spmv` and `syr` via `hipblasSetBatchAlphaStride` and/or and `hipblasSetBatchBetaStride` (device pointer mode).
+* Per-batch `alpha` (scalar vector) API support for Level 1 batched and strided-batched forms of `axpy`, `scal` and their `_ex` forms through `hipblasSetBatchAlphaStride` when `hipblasHandle_t` is in mode `HIPBLAS_POINTER_MODE_DEVICE`.
+
+### Resolved issues
+
+* PyTorch users can avoid user constraint based memory allocation failures (`HIPBLAS_STATUS_ALLOC_FAILED`) by exporting `HIPBLAS_WORKSPACE_CONFIG=:0:0` to allow rocBLAS managed memory to grow automatically.
+
 ## hipBLAS 3.5.0 for ROCm 7.14
 
 ### Added
@@ -40,6 +49,7 @@ Documentation for hipBLAS is available at
 ## hipBLAS 3.2.0 for ROCm 7.2
 
 ### Resolved issues
+
 * Corrected client memory use counts for the `HIPBLAS_CLIENT_RAM_GB_LIMIT` environment variable.
 * Fix to avoid false Clang static analysis warnings.
 
