@@ -1669,6 +1669,39 @@ def _is_power_of_two(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
 
 
+# --- Warp-configuration gate (parity with Old-TE) --------------------------
+# Old-TE's gemm_validation_utils.validate_warp_configuration restricts the
+# warps-per-block triple (wave_m/n/k) to WARP_SUPPORTED_COMBINATIONS[arch].
+# expand_sweep must apply the SAME gate or the bridge emits wave configs Old-TE
+# never generates (product != 4 on CDNA), diverging the two instance sets.
+_WARP_SUPPORTED_COMBINATIONS_FALLBACK = {
+    "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
+    "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
+    "gfx950": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
+    "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
+}
+
+
+def _warp_supported_table():
+    """Canonical WARP_SUPPORTED_COMBINATIONS from gemm_validation_utils, with a
+    hardcoded fallback so the bridge never silently skips the gate."""
+    try:
+        from gemm_validation_utils import WARP_SUPPORTED_COMBINATIONS as _t
+        return _t
+    except Exception:  # pragma: no cover - fallback keeps the gate active
+        return _WARP_SUPPORTED_COMBINATIONS_FALLBACK
+
+
+def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> bool:
+    """True iff [wave_m, wave_n, wave_k] is an allowed warps-per-block triple
+    for ``arch`` (mirrors Old-TE validate_warp_configuration). Unknown arch =>
+    permissive (matches Old-TE's log-and-allow behavior)."""
+    allowed = _warp_supported_table().get(arch)
+    if not allowed:
+        return True
+    return [wave_m, wave_n, wave_k] in allowed
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
@@ -1902,6 +1935,10 @@ def expand_sweep(
         m_div = wm * wtm
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
+            continue
+        # Parity gate: only emit warps-per-block triples Old-TE allows
+        # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
+        if not _warp_config_supported(wm, wn, wk, arch):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
             tm // m_div, tn // n_div, wtm, wtn
