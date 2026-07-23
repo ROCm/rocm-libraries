@@ -235,9 +235,15 @@ class KernelWriterAssembly(KernelWriter):
     multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
     maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
 
-    totalVgprs = self.states.regCaps["PhysicalMaxVgpr"]//2 if not doubleVgpr else self.states.regCaps["PhysicalMaxVgpr"]
-    # The per-SIMD VGPR file splits into 64 allocation blocks.
-    vgprAllocateAligned = totalVgprs // 64
+    if self.states.version[0] == 12 and self.states.version[1] == 5:
+      # gfx1250: keep the legacy MaxVgpr*2 occupancy model pending its own
+      # benchmarking.
+      totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+      vgprAllocateAligned = 4 if not doubleVgpr else 8
+    else:
+      totalVgprs = self.states.regCaps["PhysicalMaxVgpr"]//2 if not doubleVgpr else self.states.regCaps["PhysicalMaxVgpr"]
+      # The per-SIMD VGPR file splits into 64 allocation blocks.
+      vgprAllocateAligned = totalVgprs // 64
     vgprsAligned = int(ceil(vgprs/vgprAllocateAligned))*vgprAllocateAligned
     vgprsAligned *= multiplier
 
