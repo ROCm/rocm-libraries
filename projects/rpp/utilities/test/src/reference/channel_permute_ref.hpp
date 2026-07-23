@@ -1,0 +1,34 @@
+#ifndef RPP_TEST_CHANNEL_PERMUTE_REF_H
+#define RPP_TEST_CHANNEL_PERMUTE_REF_H
+
+#include <rpp/rpp.h>
+
+#include <cstddef>
+
+#include "framework/tensor_setup.hpp"
+
+namespace rpptest {
+
+// Independent host golden model for rppt_channel_permute, derived from the op's definition (a
+// per-image reordering of the 3 channels: output channel i takes source channel perm[i]), NOT
+// from the RPP kernel. Used as the reference for both backends so kernel bugs surface as diffs.
+//
+// channel_permute is a pure data-exchange op: it only moves whole channel values around, with no
+// arithmetic, rounding, or clamping, so the result is bit-exact for U8/I8/F16/F32 alike. The
+// permutation tensor holds n contiguous triples (perm[n*3 + 0..2], each in 0..2); a rotation like
+// {2,0,1} distinguishes this convention from its inverse (source channel c -> output perm[c]).
+template <typename T>
+void channel_permute_reference(const T* src, T* dst, const RpptDesc& d, const Rpp32u* perm,
+                               const RpptROI* roi, RpptRoiType roiType) {
+    for_each_roi_pixel(
+        d, roi, roiType, [&](Rpp32u n, Rpp32u, Rpp32u, std::size_t srcPix, std::size_t dstPix) {
+            for (Rpp32u c = 0; c < d.c; ++c) {
+                const Rpp32u srcC = perm[n * 3 + c];
+                dst[dstPix + c * d.strides.cStride] = src[srcPix + srcC * d.strides.cStride];
+            }
+        });
+}
+
+}  // namespace rpptest
+
+#endif  // RPP_TEST_CHANNEL_PERMUTE_REF_H

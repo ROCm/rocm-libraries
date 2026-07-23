@@ -49,6 +49,7 @@ add_executable(rpp_tests
     src/tests/image/bitwise/bitwise_xor_test.cpp
     src/tests/image/bitwise/bitwise_not_test.cpp
     src/tests/image/data_exchange/copy_test.cpp
+    src/tests/image/data_exchange/channel_permute_test.cpp
     src/tests/image/geometric/crop_test.cpp
     src/tests/image/geometric/resize_test.cpp
     src/tests/image/geometric/warp_affine_test.cpp
