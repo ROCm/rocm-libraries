@@ -449,6 +449,28 @@ class WgradConvSpec:
         layout.validate()
         return layout
 
+    @staticmethod
+    def default_vector_sizes(
+        C: int, K: int, dtype: str, split_k: int = 1
+    ) -> "Tuple[int, int, int]":
+        """Return ``(vec_a, vec_b, vec_c)`` for a wgrad problem.
+
+        Wgrad memory layout:
+          A (dY):  NHWK → last dim K → vec_a
+          B (X):   NHWC → last dim C → vec_b
+          D (dW):  KYXC → last dim C → vec_c
+
+        When ``split_k > 1`` the epilogue is ``default`` (direct scalar store),
+        which does not support vec_c > 1, so vec_c is forced to 1.
+        """
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+
+        def _vec(n: int) -> int:
+            return next(v for v in sizes if n % v == 0)
+
+        vec_c = 1 if split_k > 1 else _vec(C)
+        return _vec(K), _vec(C), vec_c
+
 
 # ---------------------------------------------------------------------
 # Arch-aware spec validation
@@ -1237,20 +1259,6 @@ def _emit_wgrad_split_k_epilogue(
         else:
             _emit_single_packed_atomic(c_m, c_n, val_f32)
 
-    def _emit_pair_packed_atomics(
-        c_m: Value, c_n0: Value, c_n1: Value, v0_f32: Value, v1_f32: Value
-    ) -> None:
-        """Issue two single-element packed atomics for an adjacent pair.
-
-        Using ``_emit_single_packed_atomic`` for each element guarantees
-        correct 4-byte alignment regardless of the lane's N-position parity:
-        the parity snap inside ``_emit_single_packed_atomic`` rounds the
-        element index down to an even position and places the value in the
-        correct slot of the ``<2 x dtype>`` vector.
-        """
-        _emit_single_packed_atomic(c_m, c_n0, v0_f32)
-        _emit_single_packed_atomic(c_m, c_n1, v1_f32)
-
     flat = 0
     for mi in range(mfmas_m):
         atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
@@ -1267,33 +1275,18 @@ def _emit_wgrad_split_k_epilogue(
                     c_n = b.add(atom_n_base, cols[i])
                     _emit_scalar_atomic(c_m, c_n, b.vec_extract(acc, i))
             else:
-                # bf16 / fp16: use packed <2 x dtype> atomics for pairs of slots
-                # that share the same MFMA row (same rows[i]) and are at
-                # adjacent N-positions (cols[i]+1 == cols[i+1]).
-                # Any pair that crosses a row boundary or is non-adjacent falls
-                # back to _emit_single_packed_atomic.
-                i = 0
-                while i < c_per_lane:
-                    same_row = (i + 1 < c_per_lane) and (i // kc_m1) == (
-                        (i + 1) // kc_m1
-                    )
-                    if same_row:
-                        c_m_i = b.add(atom_m_base, rows[i])
-                        c_n_i = b.add(atom_n_base, cols[i])
-                        c_n_i1 = b.add(atom_n_base, cols[i + 1])
-                        _emit_pair_packed_atomics(
-                            c_m_i,
-                            c_n_i,
-                            c_n_i1,
-                            b.vec_extract(acc, i),
-                            b.vec_extract(acc, i + 1),
-                        )
-                        i += 2
-                    else:
-                        c_m_i = b.add(atom_m_base, rows[i])
-                        c_n_i = b.add(atom_n_base, cols[i])
-                        _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
-                        i += 1
+                # bf16 / fp16: one _emit_single_packed_atomic per acc slot.
+                # A packed <2 x dtype> atomic requires the two elements to be at
+                # the same row (same c_m) AND adjacent N-columns.  For MFMA atoms
+                # the C-fragment layout assigns one *row* position per slot
+                # (rows[i] = m_blk * kc_m1 + i%kc_m1), so consecutive slots i and
+                # i+1 always have rows[i] != rows[i+1].  Attempting to pair them
+                # under the same c_m silently writes both values to the wrong row
+                # (the row of slot i only).  Use one atomic per slot instead.
+                for i in range(c_per_lane):
+                    c_m_i = b.add(atom_m_base, rows[i])
+                    c_n_i = b.add(atom_n_base, cols[i])
+                    _emit_single_packed_atomic(c_m_i, c_n_i, b.vec_extract(acc, i))
 
 
 def _emit_wgrad_direct_epilogue(
@@ -1410,6 +1403,11 @@ def _emit_wgrad_cshuffle_epilogue(
     _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
+    else:
+        _, __, vec_c = WgradConvSpec.default_vector_sizes(
+            spec.problem.C, spec.problem.K, spec.data.dtype_d, split_k=spec.split_k
+        )
+        _cshuffle_kwargs["max_store_vec"] = vec_c
     CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
         b,
         accs=accs,

@@ -303,6 +303,23 @@ class ImplicitGemmConvSpec:
         layout.validate()
         return layout
 
+    @staticmethod
+    def default_vector_sizes(C: int, K: int, dtype: str) -> "Tuple[int, int, int]":
+        """Return ``(vec_a, vec_b, vec_c)`` for a forward-pass problem.
+
+        Forward pass memory layout:
+          A (input):  NHWC → last dim C → vec_a
+          B (filter): KYXC → last dim C → vec_b
+          D (output): NHWK → last dim K → vec_c
+        """
+        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
+
+        def _vec(n: int) -> int:
+            return next(v for v in sizes if n % v == 0)
+
+        vec_c = _vec(C)
+        return vec_c, vec_c, _vec(K)
+
 
 # ---------------------------------------------------------------------
 # Arch-aware spec validation
@@ -907,13 +924,17 @@ def build_implicit_gemm_conv(
     ]
 
     threads = spec.block_size
-    _auto_load_vec = _choose_load_vec(spec)
-    load_vec_a = (
-        spec.vector_size_a if spec.vector_size_a is not None else _auto_load_vec
+    _def_vec_a, _def_vec_b, _ = ImplicitGemmConvSpec.default_vector_sizes(
+        p.C, p.K, spec.data.dtype_a
     )
-    load_vec_b = (
-        spec.vector_size_b if spec.vector_size_b is not None else _auto_load_vec
-    )
+    # Clamp the C/K-derived default by the tile-geometry safe maximum so that the
+    # CoalescedTileLoader's (tile_rows * tile_cols / vec) % block_size == 0 invariant
+    # is always satisfied (e.g. when tile_n is small relative to block_size).
+    _tile_vec = _choose_load_vec(spec)
+    _def_vec_a = min(_def_vec_a, _tile_vec)
+    _def_vec_b = min(_def_vec_b, _tile_vec)
+    load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _def_vec_a
+    load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _def_vec_b
     # ``CoalescedTileLoader`` derives ``vecs_per_thread`` /
     # ``cols_per_vec`` internally from ``(tile_rows, tile_cols,
     # block_size, load_vec)`` and re-emits the per-iter constants
@@ -1534,6 +1555,11 @@ def _emit_cshuffle_epilogue(
     _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
+    else:
+        _, __, vec_c = ImplicitGemmConvSpec.default_vector_sizes(
+            p.C, p.K, spec.data.dtype_d
+        )
+        _cshuffle_kwargs["max_store_vec"] = vec_c
     CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
         b,
         accs=accs,

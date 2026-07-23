@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import os
+import random
 import sys
 from dataclasses import dataclass
 from typing import List
@@ -89,31 +90,6 @@ class Result:
 # ---------------------------------------------------------------------------
 
 
-def _get_vector_sizes(C: int, K: int, dtype: str):
-    def _vec(n: int) -> int:
-        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
-        return next(v for v in sizes if n % v == 0)
-
-    vec_c = _vec(C)
-    return vec_c, vec_c, _vec(K)
-
-
-def _get_vector_sizes_wgrad(C: int, K: int, dtype: str):
-    """Per-operand vector widths for the wgrad direction.
-
-    Last memory dimension of each wgrad operand:
-      A = dY  NHWK  → last dim K  → vec_a
-      B = X   NHWC  → last dim C  → vec_b
-      D = dW  KYXC  → last dim C  → vec_c
-    """
-
-    def _vec(n: int) -> int:
-        sizes = [8, 4, 2, 1] if dtype != "fp32" else [4, 2, 1]
-        return next(v for v in sizes if n % v == 0)
-
-    return _vec(K), _vec(C), _vec(C)
-
-
 def _grid_for_spec(spec, p):
     """Derive launch grid from spec and problem."""
     M = p.M
@@ -130,6 +106,13 @@ def _grid_for_wgrad_spec(spec, split_k: int):
     gx = (spec.wg_N + tile_n - 1) // tile_n
     gy = (spec.wg_M + tile_m - 1) // tile_m
     return (gx, gy, split_k)
+
+
+def _sample_combos(combos: list, frac: float, seed: int) -> list:
+    """Return a random subset of *combos* of size ceil(frac * len(combos))."""
+    n = max(1, round(len(combos) * frac))
+    rng = random.Random(seed)
+    return rng.sample(combos, min(n, len(combos)))
 
 
 def _verify_kernel(
@@ -365,6 +348,22 @@ def main() -> int:
     )
     parser.add_argument(
         "--iters", type=int, default=10, help="timed iterations (default: 10)"
+    )
+    parser.add_argument(
+        "--sample",
+        type=float,
+        default=None,
+        metavar="FRAC",
+        help=(
+            "randomly sample FRAC of the candidate combinations before sweeping "
+            "(e.g. 0.1 for ~10%%). Uses a fixed seed (--seed) for reproducibility."
+        ),
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="RNG seed used by --sample (default: 0)",
     )
     parser.add_argument(
         "--verify",
@@ -640,7 +639,6 @@ def _run_sweep(
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = _get_vector_sizes(args.C, args.K, dtype)
     sig = conv_args_signature(dtype)
 
     combos = list(
@@ -655,6 +653,15 @@ def _run_sweep(
             _EPILOGUES,
         )
     )
+
+    if args.sample is not None:
+        total = len(combos)
+        combos = _sample_combos(combos, args.sample, args.seed)
+        print(
+            f"Sampling {len(combos)}/{total} combinations "
+            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            flush=True,
+        )
 
     print(
         f"Sweeping {len(combos)} combinations for {arch} {dtype} {p.short()} ...",
@@ -721,9 +728,6 @@ def _run_sweep(
             pipeline=pipeline,
             epilogue=epilogue,
             groups=p.groups,
-            vector_size_a=vec_a,
-            vector_size_b=vec_b,
-            vector_size_c=vec_c,
         )
 
         ok, reason = is_valid_spec_for_problem(spec, problem, arch)
@@ -930,7 +934,6 @@ def _run_wgrad_sweep(
     bytes_xfer = float(dY_t.nbytes + X_t.nbytes + dW_t.nbytes)
     flop = float(p.flops)
 
-    vec_a, vec_b, vec_c = _get_vector_sizes_wgrad(p.C, p.K, dtype)
     sig = conv_args_signature(dtype)
 
     # split_k degrees to sweep:
@@ -952,6 +955,15 @@ def _run_wgrad_sweep(
             split_k_values,
         )
     )
+
+    if args.sample is not None:
+        total = len(combos)
+        combos = _sample_combos(combos, args.sample, args.seed)
+        print(
+            f"Sampling {len(combos)}/{total} wgrad combinations "
+            f"({args.sample*100:.0f}%, seed={args.seed}).",
+            flush=True,
+        )
 
     _spk_label = {0: "sweep", -1: "auto(CK)"}.get(args.split_k, str(args.split_k))
     print(
@@ -1044,9 +1056,6 @@ def _run_wgrad_sweep(
             pipeline=pipeline,
             epilogue=epilogue,
             split_k=resolved_split_k,
-            vector_size_a=vec_a,
-            vector_size_b=vec_b,
-            vector_size_c=vec_c,
         )
 
         ok, reason = is_valid_wgrad_spec(spec, arch)

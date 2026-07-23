@@ -491,6 +491,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "memref.global_atomic_add",
     "memref.global_atomic_add_f32",
     "memref.global_atomic_add_pk_bf16",
+    "memref.global_atomic_add_pk_f16",
     "memref.cooperative_global_store",
 
     /* vector.* */
@@ -696,6 +697,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_atomic_add            */ false,
     /* global_atomic_add_f32        */ false,
     /* global_atomic_add_pk_bf16    */ false,
+    /* global_atomic_add_pk_f16     */ false,
     /* cooperative_global_store     */ false,
 
     /* vector.* */
