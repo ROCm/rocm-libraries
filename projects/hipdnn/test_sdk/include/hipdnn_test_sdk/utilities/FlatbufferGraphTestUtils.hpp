@@ -2215,16 +2215,16 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidSdpaFwdGraph(const std::vector<int64_t>& qDims = {2, 8, 16, 64},
-                            const std::vector<int64_t>& qStrides = {8192, 1024, 64, 1},
-                            const std::vector<int64_t>& kDims = {2, 8, 16, 64},
-                            const std::vector<int64_t>& kStrides = {8192, 1024, 64, 1},
-                            const std::vector<int64_t>& vDims = {2, 8, 16, 64},
-                            const std::vector<int64_t>& vStrides = {8192, 1024, 64, 1},
-                            const std::vector<int64_t>& oDims = {2, 8, 16, 64},
-                            const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
-                            hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+    createValidSdpaFwdGraph(const std::vector<int64_t>& qDims,
+                            const std::vector<int64_t>& qStrides,
+                            const std::vector<int64_t>& kDims,
+                            const std::vector<int64_t>& kStrides,
+                            const std::vector<int64_t>& vDims,
+                            const std::vector<int64_t>& vStrides,
+                            const std::vector<int64_t>& oDims,
+                            const std::vector<int64_t>& oStrides,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
                             bool withAttnMask = false,
                             bool withScale = false,
                             bool withStats = false,
@@ -2241,19 +2241,19 @@ inline flatbuffers::FlatBufferBuilder
 
     const auto qUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, qUid, "q", dataType, &qStrides, &qDims));
+        builder, qUid, "q", inputDataType, &qStrides, &qDims));
 
     const auto kUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, kUid, "k", dataType, &kStrides, &kDims));
+        builder, kUid, "k", inputDataType, &kStrides, &kDims));
 
     const auto vUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, vUid, "v", dataType, &vStrides, &vDims));
+        builder, vUid, "v", inputDataType, &vStrides, &vDims));
 
     const auto oUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, oUid, "o", dataType, &oStrides, &oDims));
+        builder, oUid, "o", inputDataType, &oStrides, &oDims));
 
     flatbuffers::Optional<int64_t> attnMaskUid = flatbuffers::nullopt;
     if(withAttnMask)
@@ -2265,7 +2265,7 @@ inline flatbuffers::FlatBufferBuilder
         const auto maskUid = uid++;
         tensorAttributes.push_back(
             hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, maskUid, "attn_mask", dataType, &attnMaskStrides, &attnMaskDims));
+                builder, maskUid, "attn_mask", inputDataType, &attnMaskStrides, &attnMaskDims));
         attnMaskUid = flatbuffers::Optional<int64_t>(maskUid);
     }
 
@@ -2346,7 +2346,7 @@ inline flatbuffers::FlatBufferBuilder
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "sdpa_fwd",
-        dataType,
+        computeDataType,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes,
         sdpaAttributes.Union()));
 
@@ -2362,6 +2362,45 @@ inline flatbuffers::FlatBufferBuilder
         overrideShapeEnabled);
     builder.Finish(graphOffset);
     return builder;
+}
+
+// Deprecated function without separate compute data type specification for backwards compatibility
+inline flatbuffers::FlatBufferBuilder
+    createValidSdpaFwdGraph(const std::vector<int64_t>& qDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& qStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& kDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& kStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& vDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& vStrides = {8192, 1024, 64, 1},
+                            const std::vector<int64_t>& oDims = {2, 8, 16, 64},
+                            const std::vector<int64_t>& oStrides = {8192, 1024, 64, 1},
+                            hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                            bool withAttnMask = false,
+                            bool withScale = false,
+                            bool withStats = false,
+                            bool alibiMask = false,
+                            bool paddingMask = false,
+                            bool causalMask = false,
+                            bool overrideShapeEnabled = false)
+{
+    return createValidSdpaFwdGraph(qDims,
+                                   qStrides,
+                                   kDims,
+                                   kStrides,
+                                   vDims,
+                                   vStrides,
+                                   oDims,
+                                   oStrides,
+                                   dataType,
+                                   dataType,
+                                   withAttnMask,
+                                   withScale,
+                                   withStats,
+                                   alibiMask,
+                                   paddingMask,
+                                   causalMask,
+                                   overrideShapeEnabled);
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
