@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2Engine: hipDNN IEngine plugin wrapping our V7 Flash-Attention 2 kernel
@@ -44,7 +44,7 @@ public:
         return hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME;
     }
 
-    // id() returns the fixed constant — no per-instance ID needed
+    // id() returns the fixed constant -- no per-instance ID needed
     int64_t id() const override
     {
         return hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_ID;

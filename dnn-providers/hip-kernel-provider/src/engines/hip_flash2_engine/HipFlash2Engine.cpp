@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "HipFlash2Engine.hpp"
@@ -51,7 +51,7 @@ size_t HipFlash2Engine::getMaxWorkspaceSize(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
 {
-    // Flash-Attention 2 V7 uses only registers and LDS — no external workspace.
+    // Flash-Attention 2 V7 uses only registers and LDS -- no external workspace.
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))

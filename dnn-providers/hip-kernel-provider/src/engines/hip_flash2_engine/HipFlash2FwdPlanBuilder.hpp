@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2FwdPlanBuilder: IPlanBuilder for Flash-Attention 2 V7 forward pass.
@@ -14,7 +14,7 @@ namespace hip_flash2_engine
 {
 
 // =============================================================================
-// Flash2FwdParams — extracted from the hipDNN graph at buildPlan() time.
+// Flash2FwdParams -- extracted from the hipDNN graph at buildPlan() time.
 // Holds everything execute() needs to dispatch the kernel.
 // =============================================================================
 struct Flash2FwdParams
@@ -25,7 +25,7 @@ struct Flash2FwdParams
     int64_t vUid = 0;
     int64_t oUid = 0;
 
-    // Attention geometry — BHSD layout: [B, H, S, D]
+    // Attention geometry -- BHSD layout: [B, H, S, D]
     int batch = 1;
     int num_heads_q = 32;
     int num_heads_k = 32; // GQA: num_heads_q / num_heads_k = gqa_ratio
@@ -33,13 +33,13 @@ struct Flash2FwdParams
     int seq_len_kv = 2048;
     int head_dim = 128; // head_dim_qk (== head_dim_v for our kernel)
 
-    // Attention scale (0 → use 1/sqrt(head_dim) at runtime)
+    // Attention scale (0 -> use 1/sqrt(head_dim) at runtime)
     float attn_scale = 0.0f;
 
     // Causal mask flag
     bool causal = false;
 
-    // Strides (in elements, not bytes) — BHSD: dim0=B, dim1=H, dim2=S, dim3=D
+    // Strides (in elements, not bytes) -- BHSD: dim0=B, dim1=H, dim2=S, dim3=D
     int64_t q_stride_batch = 0;
     int64_t q_stride_head = 0;
     int64_t q_stride_seq = 0;

@@ -1,10 +1,10 @@
 // bench_hipdnn_sdpa.cpp
 // Standalone benchmark comparing our Flash2 V7 kernel against hipDNN's ASM SDPA engine.
-// Compiles WITHOUT the full hipDNN build — uses our kernel directly.
+// Compiles WITHOUT the full hipDNN build -- uses our kernel directly.
 //
 // Your colleague's benchmark scenario:
-//   graph->set_io_data_type(HALF)       ← FP16: our engine handles this
-//   graph->set_io_data_type(BFLOAT16)   ← BF16: ASM SDPA engine handles this
+//   graph->set_io_data_type(HALF)       <- FP16: our engine handles this
+//   graph->set_io_data_type(BFLOAT16)   <- BF16: ASM SDPA engine handles this
 //
 // Usage:
 //   hipcc -O3 --offload-arch=gfx942 -std=c++17 -I/opt/rocm/include \
@@ -167,14 +167,14 @@ int main()
     srand(42);
     hipDeviceProp_t prop;
     hipGetDeviceProperties(&prop, 0);
-    printf("=== hipDNN SDPA — Flash2 V7 Engine Benchmark ===\n");
+    printf("=== hipDNN SDPA -- Flash2 V7 Engine Benchmark ===\n");
     printf("GPU: %s  arch=%s  CUs=%d  HBM=%.0fGB\n\n",
            prop.name,
            prop.gcnArchName,
            prop.multiProcessorCount,
            prop.totalGlobalMem / 1e9);
     printf("This benchmark validates our hipDNN HIP Flash2 engine:\n");
-    printf("  - graph->set_io_data_type(HALF) → dispatches to our engine\n");
+    printf("  - graph->set_io_data_type(HALF) -> dispatches to our engine\n");
     printf("  - Correctness: MaxErr vs CPU FP32 reference\n");
     printf("  - Performance: TFLOPS\n\n");
 
@@ -200,7 +200,7 @@ int main()
 
         if(!applicable)
         {
-            printf("%-*s  [SKIP — dispatch to ASM/other engine for this shape]\n", W, c.label);
+            printf("%-*s  [SKIP -- dispatch to ASM/other engine for this shape]\n", W, c.label);
             continue;
         }
 
@@ -286,6 +286,6 @@ int main()
     printf("%s\n", std::string(75, '=').c_str());
     printf("\nTarget: >70 TFLOPS for causal prefill seq>=2048 on MI300X/MI325X\n");
     printf("This kernel is the HIP Flash2 Engine for hipDNN SDPA (FP16 path).\n");
-    printf("BF16 inputs → dispatched to existing ASM SDPA engine (not shown here).\n");
+    printf("BF16 inputs -> dispatched to existing ASM SDPA engine (not shown here).\n");
     return 0;
 }

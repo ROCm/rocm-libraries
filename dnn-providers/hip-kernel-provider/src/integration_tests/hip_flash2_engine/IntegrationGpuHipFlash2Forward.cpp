@@ -1,7 +1,7 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Integration tests for HipFlash2Engine — FP16 Flash-Attention 2 SDPA.
+// Integration tests for HipFlash2Engine -- FP16 Flash-Attention 2 SDPA.
 //
 // These tests verify correctness of the HipFlash2FwdPlan kernel against
 // a CPU FP32 reference across the shapes validated on MI300X, MI325X,
@@ -38,7 +38,7 @@ struct Flash2TestConfig
 static std::vector<Flash2TestConfig> getTestConfigs()
 {
     return {
-        // MHA causal — shapes validated on MI300X/MI325X/MI355X
+        // MHA causal -- shapes validated on MI300X/MI325X/MI355X
         {1, 32, 32, 512, 512, 128, true, "MHA_seq512_D128_causal"},
         {1, 32, 32, 1024, 1024, 128, true, "MHA_seq1024_D128_causal"},
         {1, 32, 32, 2048, 2048, 128, true, "MHA_seq2048_D128_causal"},
@@ -52,7 +52,7 @@ static std::vector<Flash2TestConfig> getTestConfigs()
         {1, 32, 32, 2048, 2048, 64, true, "MHA_seq2048_D64_causal"},
         {1, 32, 32, 4096, 4096, 64, true, "MHA_seq4096_D64_causal"},
 
-        // GQA (grouped query attention) — 4 query heads per KV head
+        // GQA (grouped query attention) -- 4 query heads per KV head
         {1, 32, 8, 2048, 2048, 128, true, "GQA4_seq2048_D128_causal"},
         {1, 32, 8, 4096, 4096, 128, true, "GQA4_seq4096_D128_causal"},
 

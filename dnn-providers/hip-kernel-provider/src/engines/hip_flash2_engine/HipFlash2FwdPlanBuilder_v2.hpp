@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2FwdPlanBuilder: Full IPlanBuilder<Handle,Settings,Context>
@@ -27,7 +27,7 @@ namespace hip_flash2_engine
 /**
  * @brief Plan builder for Flash-Attention 2 V7 forward pass.
  *
- * Checks applicability (FP16, gfx942/gfx950, head_dim ∈ {64,128},
+ * Checks applicability (FP16, gfx942/gfx950, head_dim in {64,128},
  * no dropout/alibi/group-batch), extracts SDPA graph parameters,
  * loads the arch-specific precompiled .co, and stores a HipFlash2FwdPlan
  * in the execution context.
@@ -35,7 +35,7 @@ namespace hip_flash2_engine
 class HipFlash2FwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>
 {
 public:
-    // ── IPlanBuilder interface ────────────────────────────────────────────────
+    // -- IPlanBuilder interface ------------------------------------------------
 
     bool isApplicable(
         const Handle& handle,

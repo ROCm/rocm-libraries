@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for HipFlash2Engine following the asm_sdpa_engine pattern.
@@ -34,11 +34,11 @@ protected:
     }
 };
 
-// ── isApplicable tests ────────────────────────────────────────────────────────
+// -- isApplicable tests --------------------------------------------------------
 
 TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForNonSdpaGraph)
 {
-    // Batchnorm graph — HipFlash2Engine should reject it
+    // Batchnorm graph -- HipFlash2Engine should reject it
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -54,7 +54,7 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsTrueForFP16SdpaGraphOnGfx942)
     if(arch != "gfx942" && arch != "gfx950")
         GTEST_SKIP() << "HipFlash2Engine requires gfx942 or gfx950, got: " << arch;
 
-    // FP16 SDPA graph — should be accepted
+    // FP16 SDPA graph -- should be accepted
     const std::vector<int64_t> dims{1, 32, 2048, 128}; // {batch, heads, seq, D}
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
@@ -126,7 +126,7 @@ TEST_F(TestHipFlash2Engine, IsApplicableReturnsFalseForUnsupportedHeadDim)
     EXPECT_FALSE(_engine->isApplicable(_handle, graph));
 }
 
-// ── ID and name tests ─────────────────────────────────────────────────────────
+// -- ID and name tests ---------------------------------------------------------
 
 TEST_F(TestHipFlash2Engine, StaticIdMatchesEngineId)
 {
@@ -145,7 +145,7 @@ TEST_F(TestHipFlash2Engine, EngineIdIsUniqueFromAsmSdpa)
     EXPECT_NE(HipFlash2Engine::staticId(), hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID);
 }
 
-// ── Workspace tests ───────────────────────────────────────────────────────────
+// -- Workspace tests -----------------------------------------------------------
 
 TEST_F(TestHipFlash2Engine, MaxWorkspaceSizeIsZero)
 {

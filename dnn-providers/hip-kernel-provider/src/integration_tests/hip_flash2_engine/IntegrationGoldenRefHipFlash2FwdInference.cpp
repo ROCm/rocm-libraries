@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // Integration tests for HipFlash2Engine (FP16 SDPA forward pass).
@@ -30,7 +30,7 @@ public:
     }
 };
 
-// MHA FP16 causal seq=2048 D=128 — validated on MI300X/MI325X/MI355X
+// MHA FP16 causal seq=2048 D=128 -- validated on MI300X/MI325X/MI355X
 class TestCpuHipFlash2FwdFP16Hd128CausalMha : public TestCpuHipFlash2FwdGoldenReference<half>
 {
 };

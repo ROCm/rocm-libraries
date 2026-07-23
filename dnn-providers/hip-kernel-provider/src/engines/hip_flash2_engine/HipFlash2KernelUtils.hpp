@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // Kernel loading and launch utilities for the Flash-Attention 2 V7 engine.
@@ -18,7 +18,7 @@ namespace hip_flash2_engine
 {
 
 // =============================================================================
-// HipModuleGuard — RAII wrapper for hipModule_t
+// HipModuleGuard -- RAII wrapper for hipModule_t
 // =============================================================================
 class HipModuleGuard
 {
@@ -93,7 +93,7 @@ private:
 };
 
 // =============================================================================
-// loadKernelModule — load .co and get named function
+// loadKernelModule -- load .co and get named function
 // =============================================================================
 inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
                                                       const char* funcName)
@@ -115,14 +115,14 @@ inline std::optional<HipModuleGuard> loadKernelModule(const std::string& coPath,
     {
         HIPDNN_PLUGIN_LOG_ERROR("HipFlash2: hipModuleGetFunction('"
                                 << funcName << "'): " << hipGetErrorString(err));
-        return std::nullopt; // guard destructs → hipModuleUnload
+        return std::nullopt; // guard destructs -> hipModuleUnload
     }
     guard.setFunction(func);
     return guard;
 }
 
 // =============================================================================
-// Flash2KernelArgs — argument struct passed to the kernel via
+// Flash2KernelArgs -- argument struct passed to the kernel via
 // HIP_LAUNCH_PARAM_BUFFER_POINTER/SIZE (matches the kernel's parameter order)
 // =============================================================================
 struct Flash2KernelArgs
@@ -144,7 +144,7 @@ struct Flash2KernelArgs
     float scale = 0.0f;
     int causal = 0; // bool as int
 
-    // Strides (in elements, not bytes) — BHSD layout [B, H, S, D]
+    // Strides (in elements, not bytes) -- BHSD layout [B, H, S, D]
     int q_stride_batch = 0;
     int q_stride_head = 0;
     int q_stride_seq = 0;
@@ -160,7 +160,7 @@ struct Flash2KernelArgs
 };
 
 // =============================================================================
-// launchFlash2Kernel — wrapper around hipModuleLaunchKernel
+// launchFlash2Kernel -- wrapper around hipModuleLaunchKernel
 // =============================================================================
 inline bool launchFlash2Kernel(hipFunction_t func,
                                Flash2KernelArgs& args,
@@ -224,7 +224,7 @@ inline const char* flash2KernelName(int headDim)
 }
 
 // =============================================================================
-// .co path helper — selects gfx942 or gfx950 based on device string
+// .co path helper -- selects gfx942 or gfx950 based on device string
 // =============================================================================
 // flash2CoPath: resolve the directory containing the precompiled .co files.
 //

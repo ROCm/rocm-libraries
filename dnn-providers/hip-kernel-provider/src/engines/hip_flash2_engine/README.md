@@ -1,7 +1,7 @@
-# HipFlash2Engine — Flash-Attention 2 FP16 SDPA Engine
+# HipFlash2Engine -- Flash-Attention 2 FP16 SDPA Engine
 
 Flash-Attention 2 V7 implemented as a hipDNN `IEngine` plugin for FP16 SDPA on
-gfx942 (MI300X/MI325X). gfx950 (MI355X) support is in progress — see Known Issues.
+gfx942 (MI300X/MI325X). gfx950 (MI355X) support is in progress -- see Known Issues.
 
 ## Performance
 
@@ -9,10 +9,10 @@ Measured on real hardware, FP16, seq=4096 causal D=128:
 
 | GPU | Config | TFLOPS | vs unfused |
 |-----|--------|:---:|:---:|
-| MI300X | MHA seq=4096 causal D=128 | 71.27 | **+8.1×** |
-| MI325X | MHA seq=4096 causal D=128 | **78.98** | **+8.1×** |
-| MI325X | GQA4 seq=4096 causal D=128 | 78.16 | **+8.1×** |
-| MI325X | MHA seq=2048 causal D=64 | 87.85 | **+7.1×** |
+| MI300X | MHA seq=4096 causal D=128 | 71.27 | **+8.1x** |
+| MI325X | MHA seq=4096 causal D=128 | **78.98** | **+8.1x** |
+| MI325X | GQA4 seq=4096 causal D=128 | 78.16 | **+8.1x** |
+| MI325X | MHA seq=2048 causal D=64 | 87.85 | **+7.1x** |
 
 Correctness: 9/9 shapes PASS, MaxErr < 0.002 vs CPU FP32 reference (gfx942).
 
@@ -21,7 +21,7 @@ Correctness: 9/9 shapes PASS, MaxErr < 0.002 vs CPU FP32 reference (gfx942).
 Enable with the CMake option (off by default):
 
 ```bash
-cmake -DENABLE_HIP_FLASH2_ENGINE=OFF ..   # default — disabled
+cmake -DENABLE_HIP_FLASH2_ENGINE=OFF ..   # default -- disabled
 cmake -DENABLE_HIP_FLASH2_ENGINE=ON  ..   # enable for development
 ```
 

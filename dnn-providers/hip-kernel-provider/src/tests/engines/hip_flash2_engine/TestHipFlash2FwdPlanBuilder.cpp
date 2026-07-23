@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // Unit tests for HipFlash2FwdPlanBuilder.
@@ -25,7 +25,7 @@ protected:
     HipFlash2FwdPlanBuilder _builder;
 };
 
-// ── isApplicable: valid cases ─────────────────────────────────────────────────
+// -- isApplicable: valid cases -------------------------------------------------
 
 TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16MHACausal)
 {
@@ -133,7 +133,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, AcceptsFP16GQA)
     EXPECT_TRUE(_builder.isApplicable(_handle, graph));
 }
 
-// ── isApplicable: rejection cases ────────────────────────────────────────────
+// -- isApplicable: rejection cases --------------------------------------------
 
 TEST_F(TestHipFlash2FwdPlanBuilder, RejectsBF16)
 {
@@ -188,7 +188,7 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsShortSequenceDecodeLength)
     if(arch != "gfx942" && arch != "gfx950")
         GTEST_SKIP();
 
-    // seq_q=1 means decode — should use batched GEMM, not Flash2
+    // seq_q=1 means decode -- should use batched GEMM, not Flash2
     const std::vector<int64_t> qDims{1, 32, 1, 128};
     const std::vector<int64_t> kvDims{1, 32, 2048, 128};
     const auto qStrides = hipdnn_data_sdk::utilities::generateStrides(qDims);

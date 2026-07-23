@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright ?? Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
 // HipFlash2FwdPlan: IPlan implementation that executes Flash-Attention 2 V7.
@@ -36,10 +36,10 @@ public:
     HipFlash2FwdPlan(HipFlash2FwdPlan&&) noexcept = default;
     HipFlash2FwdPlan& operator=(HipFlash2FwdPlan&&) noexcept = default;
 
-    /// Flash-Attention 2 V7 uses only registers and LDS — no external workspace.
+    /// Flash-Attention 2 V7 uses only registers and LDS -- no external workspace.
     size_t getWorkspaceSize(const Handle& handle) const override;
 
-    /// Map device buffers by UID → pointer, fill Flash2KernelArgs, launch kernel.
+    /// Map device buffers by UID -> pointer, fill Flash2KernelArgs, launch kernel.
     void execute(const Handle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
