@@ -14,7 +14,7 @@ rocBLAS documentation is available at
 
 ### Upcoming changes
 
-* Deprecated the `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable. It should no longer be required to disable only batched use of hipBLASLt due to optimizations. This env control is planned for removal in a future release.
+* Deprecated the `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable. It is no longer required to disable only batched use of hipBLASLt due to optimizations. This env control is planned for removal in a future release.
 
 ## rocBLAS 5.5.0 for ROCm 7.14
 
