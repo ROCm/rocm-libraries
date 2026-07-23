@@ -68,6 +68,54 @@ TEST(TestSdpaFwdPlan, ExecutePlan)
         cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor));
 }
 
+TEST(TestSdpaFwdPlan, ExecutePlanWithRuntimeScaleFromPack)
+{
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
+
+    const unsigned int seed = getGlobalTestSeed();
+    SdpaFwdTensorBundle<float> planTensorBundle(qDims, kDims, vDims, seed);
+    SdpaFwdTensorBundle<float> directTensorBundle(qDims, kDims, vDims, seed);
+
+    // Pure runtime pass-by-value scale delivered through the variant pack.
+    float scaleHostValue = 0.25f;
+    auto graphTuple = buildSdpaFwdGraph(planTensorBundle,
+                                        DataType::FLOAT,
+                                        /*causalMask=*/false,
+                                        /*causalMaskBottomRight=*/false,
+                                        /*leftBound=*/std::nullopt,
+                                        /*rightBound=*/std::nullopt,
+                                        hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
+                                        /*alibiMask=*/false,
+                                        /*runtimeScaleHostPtr=*/&scaleHostValue);
+    auto& graph = std::get<0>(graphTuple);
+    auto& variantPack = std::get<1>(graphTuple);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
+    ASSERT_TRUE(nodeAttributes->scale_tensor_uid().has_value());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        builder;
+    auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    builtPlan->execute(variantPack);
+
+    // Direct reference with the same explicit scale value.
+    CpuFpReferenceSdpa::forward<float, float, float, float>(directTensorBundle.qTensor,
+                                                            directTensorBundle.kTensor,
+                                                            directTensorBundle.vTensor,
+                                                            directTensorBundle.oTensor,
+                                                            scaleHostValue);
+
+    const float tolerance = 1e-5f;
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.oTensor, planTensorBundle.oTensor));
+}
+
 TEST(TestSdpaFwdPlan, ExecutePlanWithCausalMask)
 {
     // [B=1, H=2, Sq=4, Skv=4, D=8] with causal mask

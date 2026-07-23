@@ -29,6 +29,7 @@ subtree_to_project_map = {
     "projects/rocsolver": "solver",
     "projects/rocsparse": "sparse",
     "projects/rocthrust": "prim",
+    "projects/rocalution": "rocalution",
     "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
@@ -143,6 +144,15 @@ additional_options = {
     "rocwmma": {
         "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
         "projects_to_test": ["rocwmma"],
+        "project_to_add": "blas",
+    },
+    "rocalution": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ROCALUTION=ON",
+            "-DTHEROCK_ENABLE_SPARSE=ON",
+            "-DTHEROCK_ENABLE_RAND=ON",
+        ],
+        "projects_to_test": ["rocalution"],
         "project_to_add": "blas",
     },
     # rocRoller is built under the BLAS umbrella but only tested when its own
