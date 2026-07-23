@@ -20,7 +20,7 @@
 7. [The Shared Expression Language](#7-the-shared-expression-language)
 8. [Layout and Stride-Order Constraints](#8-layout-and-stride-order-constraints)
 9. [Native-Predicate Escape Hatch](#9-native-predicate-escape-hatch)
-10. [Composite Constraints (Deferred, Forward-Compatible)](#10-composite-constraints-deferred-forward-compatible)
+10. [Composite Constraints](#10-composite-constraints)
 11. [The Matcher: Compilation, Indexing, and Caching](#11-the-matcher-compilation-indexing-and-caching)
 12. [Static Matcher (Sketch)](#12-static-matcher-sketch)
 13. [Arbitration](#13-arbitration)
@@ -51,12 +51,13 @@ A UMD has two parts, unchanged in intent from
 
 1. A **structural pattern**: named operation nodes and their named operand and result edges. Because
    hipDNN op graphs are DAGs, the pattern is an explicit node-and-edge graph, not a nested expression.
-2. A **constraint list** attached to those nodes and edges. Constraints implicitly AND together.
+2. A **constraint expression** over the pattern's bound variables: one JsonLogic boolean, typically an
+   `and` of the individual tests.
 
 This document turns that frame into a concrete format and a concrete matcher. It specifies the pattern
 and constraint schema, the standard formula that auto-binds every tensor and attribute of a matched op,
-a shared expression language (used here for boolean constraints and reused by the UDD for dispatch
-formulas), the layout representation as a stride-order index array, the native-predicate escape hatch,
+JsonLogic as the shared expression language (boolean constraints here, dispatch formulas in the UDD),
+the layout representation as a stride-order index array, the native-predicate escape hatch,
 deterministic arbitration, and the compile-once matcher with its indexing and caching. The static
 (compile-time) matcher is sketched as options, not fully designed, in this iteration.
 
@@ -66,11 +67,11 @@ deterministic arbitration, and the compile-once matcher with its indexing and ca
 |---|---|---|
 | Structural pattern: op nodes, named operand/result edges, single-op and bounded fused subgraphs | Yes ([§4](#4-structural-pattern)) | None |
 | Auto-binding of every operand/result tensor, its dims and strides, and every op attribute | Yes ([§5](#5-symbol-binding-and-the-auto-binding-formula)) | None |
-| Constraints: opcode, dtype (exact/one_of/relation), shape/rank, symbolic-dim unification, layout, packing, attribute, use-count, cross-tensor relation, optional operand, device/arch | Yes ([§6](#6-constraint-vocabulary)) | None |
-| Shared expression language: arithmetic value core (UDD-shared) plus a boolean predicate layer (UMD) | Yes ([§7](#7-the-shared-expression-language)) | New operators as needed |
+| Constraints as one JsonLogic expression: opcode, dtype (exact/set/relation), shape/rank, symbolic-dim unification, layout, packing, attribute, use-count, cross-tensor relation, optional operand, device/arch | Yes ([§6](#6-constraint-vocabulary)) | None |
+| JsonLogic as the shared expression language (UMD boolean + UDD value), `$`-variable convention | Yes ([§7](#7-the-shared-expression-language)) | New operators as needed |
 | Layout as a stride-order index array, with named aliases | Yes ([§8](#8-layout-and-stride-order-constraints)) | None |
 | Native-predicate escape hatch, registry-resolved | Yes ([§9](#9-native-predicate-escape-hatch)) | None |
-| Composite constraints: `(A AND B) OR C` as one constraint | Forward-compatible schema only ([§10](#10-composite-constraints-deferred-forward-compatible)) | Evaluation semantics |
+| Composite constraints: `(A AND B) OR C` as one constraint, via JsonLogic `and`/`or`/`!`/`if` | Yes ([§10](#10-composite-constraints)) | None |
 | Compile-once matcher, root-opcode index, per-plan match cache | Yes ([§11](#11-the-matcher-compilation-indexing-and-caching)) | None |
 | Static (compile-time / AOT-lowered) matcher | Options sketched ([§12](#12-static-matcher-sketch)) | Full design |
 | General N-ary commutative matching, unbounded variable-length chains | None | JIT follow-up ([RFC 0017 §8.3](0017_UniversalKernelDescriptor.md#83-future-jit-and-normalized-providers)) |
@@ -98,7 +99,7 @@ hand-coded check kind maps to a UMD construct or, where it needs real C++, to a 
 | Cross-tensor dim relation, head count `k.dims[1] == v.dims[1]` (`SdpaFwdPlanBuilder.cpp:251`) | symbolic-dim unification ([§5](#5-symbol-binding-and-the-auto-binding-formula)) |
 | Packed-tensor and supported-layout gates (`ApplicabilityChecks.cpp:65,77`) | packing and layout constraints ([§8](#8-layout-and-stride-order-constraints)) |
 | Consistent-layout across tensors (`ApplicabilityChecks.cpp:106`) | cross-tensor layout relation ([§8](#8-layout-and-stride-order-constraints)) |
-| Head dim `one_of {64,128,192}` (`SdpaBwdPlanBuilder.cpp:597`) | `one_of` on a bound dim ([§7](#7-the-shared-expression-language)) |
+| Head dim `one_of {64,128,192}` (`SdpaBwdPlanBuilder.cpp:597`) | `{"in": ["$head_dim", [64, 128, 192]]}` ([§7](#7-the-shared-expression-language)) |
 | GQA divisibility `nhead_q % nhead_k == 0 && nhead_k != 0` (`SdpaBwdPlanBuilder.cpp:548`) | expression predicate, or a native predicate if fail-closed overflow matters ([§9](#9-native-predicate-escape-hatch)) |
 | uint32 byte-stride-overflow guard (`SdpaFwdPlanBuilder.cpp:294`, `SdpaPlanUtils.hpp:159`) | **native predicate** ([§9](#9-native-predicate-escape-hatch)) |
 | Kernel-name-key / CSV-registry table lookups (`SdpaFwdPlanBuilder.cpp:287`, three in `SdpaBwdPlanBuilder.cpp:660`) | **native predicate** (or removed once the KDP names the code object directly) ([§9](#9-native-predicate-escape-hatch)) |
@@ -173,7 +174,7 @@ variables (`$q`, `$conv_out`).
     {"kind": "op", "id": "$root", "op": "sdpa_fwd",
      "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
   ],
-  "constraints": [ /* Section 6 */ ]
+  "constraints": { /* Section 6: one JsonLogic boolean expression */ }
 }
 ```
 
@@ -212,14 +213,18 @@ UKD. Legality (that the fused intermediates have no consumer outside the pattern
     {"kind": "op", "id": "$act",  "op": "pointwise_relu",
      "operands": {"A": "$bias_out"},               "results": {"Y": "$y"}}
   ],
-  "constraints": [
-    {"on": "$x",   "dtype": {"one_of": ["FLOAT16"]}, "layout": [0, 3, 1, 2]},
-    {"on": "$y",   "dtype": {"one_of": ["FLOAT16"]}, "layout": [0, 3, 1, 2],
-     "shape": ["$batch", "$out_h", "$out_w", "$out_channels"]},
-    {"on": "$bias", "shape": ["$out_channels"]},
-    {"on": "$conv_out", "use_count": 1},
-    {"on": "$bias_out", "use_count": 1}
-  ]
+  "bindings": [
+    {"on": "$y",    "shape": ["$batch", "$out_h", "$out_w", "$out_channels"]},
+    {"on": "$bias", "shape": ["$out_channels"]}   // unifies $out_channels with $y's last dim
+  ],
+  "constraints": {"and": [
+    {"==": ["$x.dtype", "FLOAT16"]},
+    {"==": ["$x.stride_order", [0, 3, 1, 2]]},
+    {"==": ["$y.dtype", "FLOAT16"]},
+    {"==": ["$y.stride_order", [0, 3, 1, 2]]},
+    {"==": ["$conv_out.use_count", 1]},   // intermediates private to the subgraph
+    {"==": ["$bias_out.use_count", 1]}
+  ]}
 }
 ```
 
@@ -247,29 +252,43 @@ operand or result variable, the matcher, using the op-schema registry, automatic
   is `$q.dims[0]`, `$q3` is `$q.dims[3]`).
 - Each **stride**, addressable as `$q.strides[i]`.
 - Derived tensor facts: `$q.rank`, `$q.dtype`, `$q.stride_order` ([§8](#8-layout-and-stride-order-constraints)),
-  `$q.is_virtual`.
+  `$q.is_virtual`, `$q.is_packed`, `$q.use_count` (consumers inside the pattern) and
+  `$q.external_use_count` (consumers outside it), and, for an optional operand role, `$q.present`.
 
 When a pattern names a node, the matcher auto-binds every scalar attribute of that op, addressable as
 `$root.<attr>` (for example `$root.causal_mask`, `$root.dropout_probability`). Optional attributes carry
-a presence flag, `$root.<attr>.present`.
+a presence flag, `$root.<attr>.present`. The GPU is bound as `$device` with `$device.arch`
+([§3](#3-the-matchers-input-hipdnns-graph-model)), resolved from the stream, not the graph.
 
 **A `$` marks a bound symbol.** Every reference to a bound symbol carries a leading `$`: tensor handles
 (`$q`), their dims, strides, and derived facts (`$q0`, `$q.dims[2]`, `$q.rank`), named shape symbols
-(`$head_size`), and the node handle and its attributes (`$root`, `$root.causal_mask`). Tokens without a
-`$` are literals: numbers, enum values (`"BFLOAT16"`, `"gfx942"`), attribute-name keys, layout aliases,
-opcodes, and keywords (`device`, `one_of`, `any`). The same token then reads identically wherever it
-appears, in a `shape` list, an `expr` string, or a native-predicate argument.
+(`$head_size`), the node handle and its attributes (`$root`, `$root.causal_mask`), and the device
+(`$device.arch`). Tokens without a `$` are literals: numbers, enum values (`"BFLOAT16"`, `"gfx942"`),
+opcodes, and layout aliases. This is exactly the JsonLogic variable rule of
+[§7](#7-the-shared-expression-language): a `$`-string is a variable, everything else is a literal. The
+same token reads identically wherever it appears — a `bindings` `shape` list, a constraint expression,
+or a native-predicate argument.
 
-Authors therefore get a complete, uniform symbol table for free and never hand-declare each field. Two
-optional forms add friendly names and cross-tensor unification on top:
+Authors therefore get a complete, uniform symbol table for free and never hand-declare each field. A
+separate top-level **`bindings`** list adds friendly names and cross-tensor unification on top; it holds
+naming directives, not boolean tests, so it stays out of the `constraints` expression (which is pure
+JsonLogic, [§6](#6-constraint-vocabulary)):
 
-- **Named shape dims.** A `shape` list names a tensor's dims: `"shape": ["$batch", "$num_heads",
-  "$seqlen_q", "$head_size"]` binds those four symbols to `$q`'s dims. Reusing a name across tensors
-  **unifies** it: writing `$head_size` on both `$q` and `$k` requires `$q3 == $k3` and binds one symbol,
-  replacing the hand-coded `k.dims[1] == v.dims[1]` relation. A dim position may be left anonymous with
-  `"_"`.
-- **Named attributes.** Rarely needed, since `$root.<attr>` already reads them, but a constraint may
-  alias one for reuse in formulas.
+```jsonc
+"bindings": [
+  {"on": "$q", "shape": ["$batch", "$num_heads", "$seqlen_q", "$head_size"]},
+  {"on": "$k", "shape": ["$batch", "$kv_heads",  "$seqlen_k", "$head_size"]}
+]
+```
+
+- **Named shape dims.** A `shape` list names a tensor's dims and requires its rank to equal the list
+  length, so it doubles as a rank check. Reusing a name across tensors **unifies** it: writing
+  `$head_size` on both `$q` and `$k` binds one symbol and requires `$q.dims[3] == $k.dims[3]`, which the
+  matcher enforces as the implied JsonLogic equality — replacing the hand-coded `k.dims[1] == v.dims[1]`
+  relation. A dim position may be left anonymous with `"_"`. The same relation may instead be written
+  explicitly as a sub-expression of `constraints`; the `bindings` name is the sugar.
+- **Named attributes.** Rarely needed, since `$root.<attr>` already reads them, but a `bindings` entry
+  may alias one for reuse in formulas.
 
 Symbol names are unique within a UMD across tensors, nodes, and named dims; a match/dispatch pair is
 validated so that unification is consistent (a name bound to two different concrete values fails the
@@ -281,29 +300,35 @@ match, not the load).
 
 ## 6. Constraint Vocabulary
 
-Constraints attach to a target (`on`) and implicitly AND together. The target is a bound tensor
-variable (`$q`), a pattern node id (`root`), or the special `device`. The vocabulary is fixed to what
-the hand-written checks of [§2](#2-what-the-umd-replaces) express, so no check needs code that a
-constraint cannot state (the residue goes to a native predicate, [§9](#9-native-predicate-escape-hatch)).
+The `constraints` field is a **single JsonLogic boolean expression** evaluated over the bound symbol
+table ([§5](#5-symbol-binding-and-the-auto-binding-formula), [§7](#7-the-shared-expression-language)).
+It is normally an `and` of the individual tests, and reaches for `or` / `!` / `if` wherever a real
+disjunction is needed ([§10](#10-composite-constraints)) — there is no list and no per-entry wrapper.
+The table below is not a set of constraint *kinds* (there are none); it is the set of hand-written
+checks ([§2](#2-what-the-umd-replaces)) and the JsonLogic sub-expression that expresses each, so no
+check needs code a JsonLogic expression cannot state. The one residue is a **native predicate**, itself
+a JsonLogic operation resolved from the provider registry ([§9](#9-native-predicate-escape-hatch)), so
+it composes inside the same expression as any built-in operator.
 
-| Constraint | Form | Lowers from |
+| Hand-written check | JsonLogic `expr` | Lowers from |
 |---|---|---|
-| **Opcode** | node `op`: exact, `one_of`, `any` | node attribute-type gate |
-| **Dtype (exact / set)** | `{"on": "$q", "dtype": {"one_of": ["BFLOAT16", "FP8_E4M3"]}}` | `validateDataTypeIsSupported`, `validateFixedDataType` |
-| **Dtype (relation)** | `{"on": "$k", "dtype": {"same_as": "$q"}}` | `validateConsistentDataTypes`, `q == k == v` |
-| **Rank** | `{"on": "$q", "rank": 4}` | `validateDimensionCount`, rank == 4 |
-| **Shape (exact / symbolic)** | `{"on": "$q", "shape": [1, "$num_heads", "_", "$head_size"]}` (int = exact, name = bind/unify, `_` = any) | dim reads and cross-tensor dim relations |
-| **Layout** | `{"on": "$q", "layout": [0, 1, 2, 3]}` (stride-order index array, [§8](#8-layout-and-stride-order-constraints)) | `validateSupportedLayout` |
-| **Packing** | `{"on": "$q", "packed": true}` | `validatePackedTensors` |
-| **Cross-tensor layout** | `{"consistent_layout": ["$x", "$y", "$scale"]}` | `validateConsistentLayouts` |
-| **Attribute (value)** | `{"on": "$root", "attr": {"causal_mask": {"equals": false}, "dropout_probability": {"absent_or": {"equals": 0.0}}}}` | per-attr value gates |
-| **Attribute (one_of / relation)** | `{"on": "$root", "attr": {"head_dim": {"one_of": [64, 128, 192]}}}` | `head_dim in {...}` |
-| **Optional operand present/absent** | `{"on": "$attn_mask", "present": false}` | `attn_mask_tensor_uid()` absent gate |
-| **Virtual tensor** | `{"on": "$conv_out", "virtual": true}` | fusion tensor-virtuality gates |
-| **Use-count / exclusivity** | `{"on": "$conv_out", "use_count": 1}` or `{"on": "$bias_out", "no_external_consumer": true}` | fusion legality checks |
-| **Cross-tensor / expression** | `{"expr": "$q1 == $k2"}`, `{"expr": "$q0 <= 128"}` ([§7](#7-the-shared-expression-language)) | arithmetic and comparison gates |
-| **Device / arch** | `{"on": "device", "arch": {"one_of": ["gfx942", "gfx950"]}}` | `getDeviceString` arch gate |
-| **Native predicate** | `{"kind": "native_predicate", "name": "hipdnn.strides_fit_u32", "args": ["$q", "$k", "$v", "$o"]}` ([§9](#9-native-predicate-escape-hatch)) | overflow guards, table lookups, derived-shape relations |
+| **Opcode** | in the pattern node `op` (exact, `one_of`, `any`), not a constraint | node attribute-type gate |
+| **Dtype (exact / set)** | `{"==": ["$q.dtype", "BFLOAT16"]}` / `{"in": ["$q.dtype", ["BFLOAT16", "FP8_E4M3"]]}` | `validateDataTypeIsSupported`, `validateFixedDataType` |
+| **Dtype (relation)** | `{"==": ["$k.dtype", "$q.dtype"]}` | `validateConsistentDataTypes`, `q == k == v` |
+| **Rank** | `{"==": ["$q.rank", 4]}` | `validateDimensionCount`, rank == 4 |
+| **Shape (exact)** | `{"==": ["$q.dims[0]", 1]}` | dim reads |
+| **Shape (symbolic / unify)** | name dims in `bindings` ([§5](#5-symbol-binding-and-the-auto-binding-formula)); relate with `{"==": ["$q.dims[1]", "$k.dims[1]"]}` | cross-tensor dim relations |
+| **Layout** | `{"==": ["$q.stride_order", [0, 1, 2, 3]]}` ([§8](#8-layout-and-stride-order-constraints)) | `validateSupportedLayout` |
+| **Packing** | `{"==": ["$q.is_packed", true]}` | `validatePackedTensors` |
+| **Cross-tensor layout** | `{"==": ["$x.stride_order", "$y.stride_order"]}` (per pair) | `validateConsistentLayouts` |
+| **Attribute (value)** | `{"==": ["$root.causal_mask", false]}`; absent-or `{"or": [{"!": "$root.dropout_probability.present"}, {"==": ["$root.dropout_probability", 0.0]}]}` | per-attr value gates |
+| **Attribute (one_of)** | `{"in": ["$root.head_dim", [64, 128, 192]]}` | `head_dim in {...}` |
+| **Optional operand present/absent** | `{"!": "$attn_mask.present"}` (absent) / `"$bias.present"` (present) | `attn_mask_tensor_uid()` absent gate |
+| **Virtual tensor** | `{"==": ["$conv_out.is_virtual", true]}` | fusion tensor-virtuality gates |
+| **Use-count / exclusivity** | `{"==": ["$conv_out.use_count", 1]}` / `{"==": ["$bias_out.external_use_count", 0]}` | fusion legality checks |
+| **Cross-tensor / arithmetic** | `{"==": ["$q.dims[1]", "$k.dims[2]"]}`, `{"<=": ["$q.dims[0]", 128]}`, `{"==": [{"%": ["$nhead_q", "$nhead_k"]}, 0]}` | arithmetic and comparison gates |
+| **Device / arch** | `{"in": ["$device.arch", ["gfx942", "gfx950"]]}` | `getDeviceString` arch gate |
+| **Native predicate** | `{"hipdnn.strides_fit_u32": ["$q", "$k", "$v", "$o"]}` ([§9](#9-native-predicate-escape-hatch)) | overflow guards, table lookups, derived-shape relations |
 
 The `device` constraint gates *applicability* at match time; the per-architecture `kpack` manifest
 ([RFC 0017 §10](0017_UniversalKernelDescriptor.md#10-packaging-and-delivery)) gates *loadability* at
@@ -313,88 +338,60 @@ install and load. Both must agree for a kernel to run.
 
 ## 7. The Shared Expression Language
 
-The UMD needs boolean predicates over bound values (`$q1 == $k2`, `$q0 <= 128`, `$q0 one_of {64,128,256}`,
-`$nhead_q % $nhead_k == 0`). The UDD needs integer-valued formulas over the same bound values for grid,
-block, shared memory, and workspace (`ceil_div($seqlen_q, 16)`,
-[RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). These are the same language
-at two layers, and this RFC defines it once so the two subsystems cannot drift.
+Every UMD constraint and every UDD dispatch formula is a **JsonLogic** expression. JsonLogic is a
+small, well-specified JSON expression format — an operator object `{"op": [args...]}` whose arguments
+are themselves expressions or literals — so descriptors stay pure data and one parser, validator, and
+interpreter serve both subsystems. This RFC pins JsonLogic as the concrete form RFC 0017 §5/§6 left to
+the follow-ups; the UDD follow-up adopts the same core.
 
-**Layering.**
+**The `$`-variable convention.** Stock JsonLogic reads a bound value with `{"var": "path"}`. This RFC
+replaces that with a single rule: **any string that begins with `$` is a variable reference**, and its
+remainder is a path into the bound symbol table ([§5](#5-symbol-binding-and-the-auto-binding-formula)) —
+`"$q"`, `"$q.dims[3]"`, `"$q.rank"`, `"$q.dtype"`, `"$q.stride_order"`, `"$root.causal_mask"`,
+`"$device.arch"`, `"$head_size"`. Every other JSON scalar is a literal: numbers (`128`), booleans
+(`false`), and non-`$` strings (`"BFLOAT16"`, `"gfx942"`). There is no ambiguity, so no `{"var": ...}`
+wrapper is used or accepted. The same token reads identically wherever it appears: inside a constraint
+expression, a native-predicate argument, or a UDD formula.
 
-- **Value core (shared with the UDD).** Literals (int, float, string/enum, array), symbol references,
-  tensor and attribute accessors, and arithmetic. The value core is exactly what the UDD RFC consumes;
-  that RFC references this section rather than redefining it.
-- **Predicate layer (UMD-only).** Comparison, set membership, and, in a later iteration, boolean
-  composition ([§10](#10-composite-constraints-deferred-forward-compatible)) over value-core
-  expressions, producing a boolean. A UMD constraint's `expr` is a predicate-layer expression.
+**Two uses, one language.**
 
-**Canonical AST.** The stored form is the nested object form already used in RFC 0017 §6, so the two
-subsystems share one parser, one validator, and one interpreter:
+- **Constraints (UMD).** A boolean-valued expression. The comparison operators `==`, `!=`, `<`, `<=`,
+  `>`, `>=`, the membership operator `in`, and the boolean operators `and`, `or`, `!`, `!!`, `if`
+  cover the surveyed checks ([§2](#2-what-the-umd-replaces)). A constraint that does not evaluate to a
+  boolean is a compile error.
+- **Dispatch formulas (UDD).** A value-valued expression for grid, block, shared memory, and workspace
+  ([RFC 0017 §6](0017_UniversalKernelDescriptor.md#6-dispatch-and-workspace)). It uses the arithmetic
+  operators below and yields a number.
 
-```jsonc
-// value core
-{"op": "ceil_div", "args": [{"sym": "$seqlen_q"}, 16]}
-{"op": "mod", "args": [{"dim": "$q", "axis": 1}, {"dim": "$k", "axis": 1}]}
-
-// predicate layer (UMD)
-{"op": "eq", "args": [{"dim": "$q", "axis": 1}, {"dim": "$k", "axis": 2}]}   // $q1 == $k2
-{"op": "one_of", "args": [{"dim": "$q", "axis": 0}, [64, 128, 256]]}          // $q0 in {64,128,256}
-```
-
-**Authoring sugar.** A UMD `expr` may be written as a light infix string that compiles to the AST, so
-the AICK-1698 examples are literal:
-
-```
-$q0 == 64
-$q1 == $k2
-$w1 == $x1
-$q0 <= 128
-$q0 one_of {64, 128, 256}
-stride_order($q) == [0, 1, 2, 3]
-$nhead_q % $nhead_k == 0
-```
-
-In a UMD these are `expr` constraints ([§6](#6-constraint-vocabulary)); the infix string and the AST
-form are interchangeable and compile to the same tree:
+**Operators.** Native JsonLogic: `== != < <= > >=`, `in`, `and or ! !! if`, `+ - * / % min max`.
+Value-core extensions registered as JsonLogic operations for the arithmetic hipDNN needs: `ceil_div`,
+`abs`, `pow`, `log2`, `rsqrt`. Adding an operator is additive
+([§14](#14-serialization-and-versioning)). There are no constraint *kinds*: the whole `constraints`
+field is one JsonLogic expression, and even the native-predicate escape hatch is a registered JsonLogic
+operation ([§9](#9-native-predicate-escape-hatch)), not a distinct clause.
 
 ```jsonc
-"constraints": [
-  {"expr": "$q0 == 64"},                          // dim equality
-  {"expr": "$q1 == $k2"},                         // cross-tensor dim relation
-  {"expr": "$q0 <= 128"},                         // range bound
-  {"expr": "$q0 one_of {64, 128, 256}"},          // set membership
-  {"expr": "$nhead_q % $nhead_k == 0"},           // divisibility
-  {"expr": "stride_order($q) == [0, 1, 2, 3]"},   // layout via stride order
+// constraints (boolean): each line is a sub-expression of the single top-level constraints expression
+{"==": ["$q.dims[0]", 64]}                                  // dim equality
+{"==": ["$q.dims[1]", "$k.dims[2]"]}                        // cross-tensor dim relation
+{"<=": ["$q.dims[0]", 128]}                                 // range bound
+{"in": ["$q.dims[0]", [64, 128, 256]]}                      // set membership
+{"==": [{"%": ["$nhead_q", "$nhead_k"]}, 0]}                // divisibility
+{"==": ["$q.stride_order", [0, 1, 2, 3]]}                   // layout via stride order
+{"or": [{"!": "$attn_mask.present"},
+        {"==": ["$attn_mask.dtype", "$q.dtype"]}]}          // composition (§10)
 
-  // the infix string is sugar; the equivalent AST form is accepted too
-  {"expr": {"op": "eq", "args": [{"dim": "$q", "axis": 1}, {"dim": "$k", "axis": 2}]}}  // == "$q1 == $k2"
-]
+// dispatch formulas (value), reused by the UDD
+{"ceil_div": ["$seqlen_q", 16]}
+{"*": [{"rsqrt": ["$head_size"]}, 1.4426950408889634]}
 ```
-
-Grammar (EBNF, value core plus predicate layer):
-
-```
-predicate   = comparison | membership
-comparison  = value ("==" | "!=" | "<" | "<=" | ">" | ">=") value
-membership  = value "one_of" "{" value ("," value)* "}"
-value       = term (("+" | "-" | "*" | "/" | "%") term)*
-term        = number | symbol | call | array | "(" value ")"
-symbol      = "$" ident ("." ident | "[" number "]")*      // $q0, $q.dims[2], $root.causal_mask
-call        = ident "(" (value ("," value)*)? ")"          // ceil_div($seqlen_q, 16), stride_order($q)
-array       = "[" (value ("," value)*)? "]"
-```
-
-**Operators.** Value core: `+ - * / %`, `ceil_div`, `min`, `max`, `abs`, `pow`, `log2`, `rsqrt`.
-Predicate layer: `== != < <= > >=`, `one_of`. Booleans combine only by the implicit top-level AND in
-this iteration; explicit `and`/`or`/`not` are reserved for composite constraints
-([§10](#10-composite-constraints-deferred-forward-compatible)).
 
 **Evaluation is a safe, bounded interpreter.** It fails closed on an unknown symbol, an out-of-range
-axis, a type error, or an invalid operation, and never executes arbitrary code. Integer arithmetic
-uses checked-width integers and fails closed on overflow rather than wrapping
-([§15](#15-security-and-hostile-input)). The interpreter is bounded in recursion depth and step count.
-Because the language is dependency-free and hand-written (no third-party parser), it is small enough to
-audit and to lower into the static matcher ([§12](#12-static-matcher-sketch)).
+axis, a type error, a non-boolean constraint result, or an invalid operation, and never executes
+arbitrary code. Integer arithmetic uses checked-width integers and fails closed on overflow rather than
+wrapping ([§15](#15-security-and-hostile-input)). The interpreter is bounded in recursion depth and step
+count. Because JsonLogic is tiny and the evaluator is hand-written (no third-party parser), it is small
+enough to audit and to lower into the static matcher ([§12](#12-static-matcher-sketch)).
 
 ---
 
@@ -407,40 +404,44 @@ fastest-varying. This is the shape a matcher can check directly against `strides
 `TensorDescriptor` already precomputes `strideOrder` (`ApplicabilityChecks.cpp:17`).
 
 ```jsonc
-{"on": "$q", "layout": [0, 1, 2, 3]}   // fully packed, natural order (BHSD for a rank-4 SDPA tensor)
-{"on": "$x", "layout": [0, 3, 1, 2]}   // NHWC over an NCHW logical dim order
+{"==": ["$q.stride_order", [0, 1, 2, 3]]}   // packed, natural order (BHSD, rank-4)
+{"==": ["$x.stride_order", [0, 3, 1, 2]]}   // NHWC over an NCHW logical dim order
 ```
 
 - The array is a permutation of `0..rank-1`. Entry `k` names the logical dimension that occupies stride
   position `k`, so `[0,1,2,3]` is descending-stride packed and `[0,3,1,2]` places the channel dim last
   (NHWC). The `axis` used everywhere else (dims, strides, `args_signature`) indexes the logical
   dimension order, independent of this physical layout, consistent with RFC 0017 §6.
-- **Named aliases** are provided for the common cases and expand to arrays at compile time:
+- **Named aliases** are provided for the common cases and expand to the array literal at compile time,
+  so `{"==": ["$q.stride_order", "nhwc"]}` compiles to a comparison against `[0, 3, 1, 2]`:
   `"nchw" -> [0,1,2,3]`, `"nhwc" -> [0,3,1,2]`, `"ncdhw"`, `"ndhwc"`, `"bhsd" -> [0,1,2,3]`,
-  `"contiguous"` (identity permutation for the tensor's rank). Aliases keep authoring readable while
-  the array remains the single canonical form. The set of aliases matches the layouts
-  `validateSupportedLayout` accepts today (`ApplicabilityChecks.cpp:77`).
-- **Cross-tensor consistency** uses `consistent_layout` ([§6](#6-constraint-vocabulary)), lowering
-  `validateConsistentLayouts`; layout-agnostic tensors (rank-1 scalars, pass-by-value) are skipped as
-  they are today.
-- **Packing** is a separate `packed` constraint, since a supported stride order does not imply the
-  tensor is gap-free; it lowers `validatePackedTensors`.
-- The stride-order array is also available to expressions as `stride_order($q)`, so
-  `stride_order(q) == [0,1,2,3]` from AICK-1698 is expressible directly.
+  `"contiguous"` (identity permutation for the tensor's rank). The array remains the single canonical
+  form. The alias set matches the layouts `validateSupportedLayout` accepts today
+  (`ApplicabilityChecks.cpp:77`).
+- **Cross-tensor consistency** is a JsonLogic equality between stride orders,
+  `{"==": ["$x.stride_order", "$y.stride_order"]}` (one per pair, joined by the top-level `and`), lowering `validateConsistentLayouts`;
+  layout-agnostic tensors (rank-1 scalars, pass-by-value) are skipped as they are today.
+- **Packing** is the separate derived fact `$q.is_packed` (`{"==": ["$q.is_packed", true]}`), since a
+  supported stride order does not imply the tensor is gap-free; it lowers `validatePackedTensors`.
+- `$q.stride_order` is an ordinary bound value ([§5](#5-symbol-binding-and-the-auto-binding-formula)),
+  so the `stride_order(q) == [0,1,2,3]` gate from AICK-1698 is expressible directly.
 
 ---
 
 ## 9. Native-Predicate Escape Hatch
 
-Some checks cannot be stated declaratively: they need real C++. A UMD constraint may name a **native
-predicate** resolved from a provider-internal registry.
+Some checks cannot be stated with the built-in operators: they need real C++. The UMD exposes them as a
+**native predicate** — a JsonLogic operation resolved from a provider-internal registry and invoked by
+its registered (namespaced) name as the operator key, so it nests inside the `constraints` expression
+exactly like a built-in operator and negates with `!`:
 
 ```jsonc
-{"kind": "native_predicate", "name": "hipdnn.strides_fit_u32", "args": ["$q", "$k", "$v", "$o"], "negated": false}
+{"hipdnn.strides_fit_u32": ["$q", "$k", "$v", "$o"]}         // a registered boolean operation
+{"!": {"hipdnn.sdpa_mask_consistent": ["$root"]}}            // negated inside the same tree
 ```
 
-The descriptor carries only a symbol name and a typed argument list drawn from bound variables, never
-inline code. Predicates take explicit arguments, not the whole graph, so they stay auditable and
+The descriptor carries only the operation name and a typed argument list drawn from bound variables,
+never inline code. Predicates take explicit arguments, not the whole graph, so they stay auditable and
 reusable. Both the build-time and drop-in paths resolve predicates from the same registry: a file that
 names only shipped predicates loads identically either way, and a file naming a predicate the running
 provider does not ship fails to resolve on the drop-in path. The registry a provider ships is therefore
@@ -477,26 +478,23 @@ provider.
 
 ---
 
-## 10. Composite Constraints (Deferred, Forward-Compatible)
+## 10. Composite Constraints
 
-All constraints AND together, which covers every hand-written check surveyed
-([§2](#2-what-the-umd-replaces)). AICK-1698 anticipates a later need for a single constraint that is a
-boolean combination, for example `(A AND B) OR C`. This iteration does not evaluate boolean composition
-beyond the top-level AND, but reserves a forward-compatible shape so adding it is additive and does not
-change existing descriptors:
+The `constraints` field is a single JsonLogic expression, and JsonLogic supplies boolean composition
+natively, so `(A AND B) OR C` is stated directly in the one tree with no extra mechanism:
 
 ```jsonc
-// reserved shape, not evaluated in v1
-{"any_of": [                                  // OR
-  {"all_of": [{"expr": "q0 == 64"}, {"expr": "q1 == k2"}]},   // (A AND B)
-  {"expr": "q0 == 128"}                        // OR C
-]}
+"constraints":
+  {"or": [
+    {"and": [{"==": ["$q.dims[0]", 64]}, {"==": ["$q.dims[1]", "$k.dims[2]"]}]},  // (A AND B)
+    {"==": ["$q.dims[0]", 128]}                                                    // OR C
+  ]}
 ```
 
-A v1 matcher rejects a UMD that uses `any_of` / `all_of` with a clear "composite constraints not
-supported by this runtime version" error ([§14](#14-serialization-and-versioning)), rather than
-silently ignoring it. The predicate-layer grammar ([§7](#7-the-shared-expression-language)) already
-reserves `and` / `or` / `not` for the same reason. General N-ary commutative matching and unbounded
+`and`, `or`, `!`, and `if` compose the same comparison, membership, and native-predicate
+([§9](#9-native-predicate-escape-hatch)) tests used everywhere else, so the deferral and reserved-shape
+workaround of earlier drafts is gone: composition is day-one. A UMD whose tests all conjoin simply makes
+the top-level expression an `and`, the common case. General N-ary commutative matching and unbounded
 chains remain deferred to the JIT follow-up, as in RFC 0017 §5.
 
 ---
@@ -505,29 +503,21 @@ chains remain deferred to the JIT follow-up, as in RFC 0017 §5.
 
 A UMD is authored as text and **compiled once** into an in-memory matcher structure at provider load
 (or, for the drop-in path, when the bundle is scanned). Compilation resolves op-schema roles, expands
-layout aliases, parses expressions to AST, validates that every referenced symbol is bound, and orders
-the constraints for early-out. The compiled form, not the text, is what runs against live graphs.
+layout aliases, parses the constraints expression to an AST, and validates that every referenced symbol
+is bound. The compiled form, not the text, is what runs against live graphs.
 
 **Root-opcode indexing.** The compiled matchers are indexed by the root node's opcode, so match cost
 does not grow linearly with the number of descriptors: a graph whose root op is `sdpa_fwd` only
-consults UMDs rooted at `sdpa_fwd`. This is the index RFC 0017 §14 calls for. Per-candidate cost
-(constraint, predicate, and expression evaluation) is separate and is bounded by the ordering below,
-not by the index.
+consults UMDs rooted at `sdpa_fwd`. This is the index RFC 0017 §14 calls for. Per-candidate cost (one
+pass over the constraints expression) is separate from the index and bounded by short-circuit
+evaluation.
 
-**Prioritized, early-out constraint ordering (AICK-1698).** Within a candidate, constraints run
-cheapest-and-most-selective first so a non-match is rejected as early as possible. The compiler assigns
-a static cost/selectivity order, roughly:
-
-1. Node count and opcode (already narrowed by the index, but confirmed).
-2. Attribute equality and `one_of` (scalar reads).
-3. Rank and dtype (single tensor-field reads).
-4. Shape, symbolic-dim unification, and layout/stride-order (vector reads).
-5. Cross-tensor relations and expressions.
-6. Native predicates (opaque, potentially the most expensive), last.
-
-Authors do not order constraints; the compiler does, from the constraint kind. The relative order is a
-matcher-internal detail, not part of the descriptor contract, so it can be tuned without a schema
-change.
+**Short-circuit evaluation.** The constraints expression evaluates with normal JsonLogic
+short-circuiting: an `and` stops at its first false sub-expression, an `or` at its first true one, so a
+non-match is rejected as early as the author's structure allows. The author orders the tree; the
+compiler may hoist a cheap, highly selective sub-expression (a scalar attribute or dtype read) ahead of
+an expensive one (a native predicate) as an internal optimization, but this never changes the result,
+only when a decision is reached.
 
 **Per-plan caching (AICK-1698).** Matching runs at plan-build time. The result (the chosen UMD, the
 bound symbol table, and the arbitration outcome) is cached on the compiled plan and reused for
@@ -536,7 +526,7 @@ workspace queries and execution, so the same graph is not re-matched across the
 (`AsmSdpaEngine.cpp:66,87`). The compiled matcher itself is built once and shared across plans; only
 the per-graph binding result is per-plan.
 
-**Device gating short-circuits.** The `device.arch` constraint is evaluated once per graph, before
+**Device gating short-circuits.** The `$device.arch` sub-expression is evaluated once per graph, before
 per-candidate work, since arch is constant for the stream.
 
 ![Compile-once pipeline: text UMD to constraint IR to a root-opcode-indexed matcher, with a per-plan bind cache](../images/umd_matcher_pipeline.svg)
@@ -599,8 +589,8 @@ hazard.
 
 ## 14. Serialization and Versioning
 
-- **Authoring form.** Human-readable, diffable JSONC (the examples here), including the infix `expr`
-  sugar of [§7](#7-the-shared-expression-language).
+- **Authoring form.** Human-readable, diffable JSONC (the examples here): the JsonLogic constraint
+  expressions of [§7](#7-the-shared-expression-language) with the `$`-variable convention.
 - **Compiled form.** The compact binary the matcher runs ([§11](#11-the-matcher-compilation-indexing-and-caching)),
   whose concrete bytes are defined with the KDP/packaging follow-up
   ([RFC 0017 §12.2](0017_UniversalKernelDescriptor.md#122-follow-up-rfcs)); this RFC defines the schema
@@ -609,10 +599,9 @@ hazard.
   mandatory `name` for diagnostics. A UMD whose schema version is newer than the runtime understands is
   refused with a clear error, never silently reinterpreted, matching
   [RFC 0017 §4](0017_UniversalKernelDescriptor.md#4-descriptor-formats).
-- **Additive evolution.** New constraint kinds, operators, layout aliases, and the composite forms of
-  [§10](#10-composite-constraints-deferred-forward-compatible) are additive within `v1` where they do
-  not change the meaning of an existing descriptor; anything that would reinterpret existing fields
-  bumps the version.
+- **Additive evolution.** New JsonLogic operators, native predicates, and layout aliases are additive
+  within `v1` where they do not change the meaning of an existing descriptor; anything that would
+  reinterpret existing fields bumps the version.
 - **Identity.** UMD ids are unique within the UMD kind; a match id and an engine id may collide as
   strings because references are typed by field (a UKD's `match` versus `engine`). A colliding drop-in
   id is logged and ignored rather than taking down the provider ([RFC 0017 §14](0017_UniversalKernelDescriptor.md#14-risks)).
@@ -647,8 +636,8 @@ Because matching is data-driven, it is inspectable, and the tooling is a first-c
 ([RFC 0017 §9](0017_UniversalKernelDescriptor.md#9-observability-and-diagnostics)). For the UMD the
 provider surfaces:
 
-- **A why-not trace.** For a graph and a candidate UMD, the first constraint that failed and why (the
-  concrete values compared), so an author can see exactly which gate declined.
+- **A why-not trace.** For a graph and a candidate UMD, the sub-expression of `constraints` that
+  evaluated false and why (the concrete values compared), so an author can see exactly which test declined.
 - **A binding view.** For a successful match, the full bound symbol table (tensors, dims, strides,
   attributes) as the UDD will see it.
 - **An arbitration trace.** Which UKDs matched, how the UHD scored them, and where a tie fell to
@@ -677,9 +666,9 @@ UMD-specific coverage:
   ([§19](#19-worked-example-sdpa-forward)) is the first target.
 - **Static/runtime parity.** The parity oracle of [§12](#12-static-matcher-sketch): the same UMD and
   graph must decide identically on the interpreted and any lowered matcher.
-- **Expression-language conformance.** A table-driven suite over the value core and predicate layer,
-  including the AICK-1698 examples and the fail-closed cases (overflow, unknown symbol, bad axis),
-  shared with the UDD RFC's expression tests since the language is shared.
+- **Expression-language conformance.** A table-driven suite over the JsonLogic operator set (boolean
+  and value forms), including the AICK-1698 examples and the fail-closed cases (overflow, unknown
+  symbol, bad axis), shared with the UDD RFC's expression tests since the language is shared.
 - **Fuzzing.** The corpus and fuzzer of [§15](#15-security-and-hostile-input).
 - **Match overhead.** Plan-time match cost is measured against the hand-written baseline as
   benchmarking matures (`tools/dnn-benchmarking`, [RFC 0013](0013_Autotune.md)); the compiled matcher,
@@ -707,7 +696,7 @@ lowering. The kernel-table lookups dissolve into the KDP as described in
 ## 19. Worked Example: SDPA Forward
 
 The SDPA-forward check collapses into one UMD. Compared to the hand-written builder
-(`SdpaFwdPlanBuilder.cpp:167-296`), each C++ gate becomes a field, and only the two genuinely
+(`SdpaFwdPlanBuilder.cpp:167-296`), each C++ gate becomes a sub-expression, and only the two genuinely
 non-declarative gates (uint32 stride fit, mask self-consistency) remain as native predicates. Note
 `$head_size` is bound from `$q`'s dim, not read as an attribute
 ([§3](#3-the-matchers-input-hipdnns-graph-model)).
@@ -721,38 +710,39 @@ non-declarative gates (uint32 stride fit, mask self-consistency) remain as nativ
     {"kind": "op", "id": "$root", "op": "sdpa_fwd",
      "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
   ],
-  "constraints": [
-    {"on": "device", "arch": {"one_of": ["gfx942", "gfx950"]}},   // getDeviceString gate
-
-    // dtype: $q == $k == $v (relation), $o supported (set)
-    {"on": "$q", "dtype": {"one_of": ["BFLOAT16", "FP8_E4M3"]}},
-    {"on": "$k", "dtype": {"same_as": "$q"}},
-    {"on": "$v", "dtype": {"same_as": "$q"}},
-
-    // rank 4 and dim binding; head_size and head count unify across q/k/v
+  "bindings": [
+    // rank 4 and dim naming; $head_size and $kv_heads unify across q/k/v (implied ==)
     {"on": "$q", "shape": ["$batch", "$num_heads", "$seqlen_q", "$head_size"]},
     {"on": "$k", "shape": ["$batch", "$kv_heads",  "$seqlen_k", "$head_size"]},
-    {"on": "$v", "shape": ["$batch", "$kv_heads",  "$seqlen_k", "$head_size"]},  // $k1 == $v1 via $kv_heads
-    {"on": "$o", "rank": 4},
-    {"expr": "$head_size == 128"},
+    {"on": "$v", "shape": ["$batch", "$kv_heads",  "$seqlen_k", "$head_size"]}
+  ],
+  "constraints": {"and": [
+    {"in": ["$device.arch", ["gfx942", "gfx950"]]},                 // getDeviceString gate
+
+    // dtype: $q == $k == $v (relation), $q in the supported set
+    {"in": ["$q.dtype", ["BFLOAT16", "FP8_E4M3"]]},
+    {"==": ["$k.dtype", "$q.dtype"]},
+    {"==": ["$v.dtype", "$q.dtype"]},
+
+    // rank 4 on the un-named output, and the head-dim gate
+    {"==": ["$o.rank", 4]},
+    {"==": ["$head_size", 128]},
 
     // attribute gates: no dropout, no alibi/padding mask, no stats output
-    {"on": "$root", "attr": {
-      "dropout_probability": {"absent_or": {"equals": 0.0}},
-      "alibi_mask":   {"equals": false},
-      "padding_mask": {"equals": false},
-      "generate_stats": {"absent_or": {"equals": false}}
-    }},
+    {"or": [{"!": "$root.dropout_probability.present"}, {"==": ["$root.dropout_probability", 0.0]}]},
+    {"==": ["$root.alibi_mask",   false]},
+    {"==": ["$root.padding_mask", false]},
+    {"or": [{"!": "$root.generate_stats.present"}, {"==": ["$root.generate_stats", false]}]},
 
-    // optional operands that this kernel does not support must be absent
-    {"on": "$attn_mask",   "present": false},
-    {"on": "$page_table_k","present": false},
-    {"on": "$page_table_v","present": false},
+    // optional operands this kernel does not support must be absent
+    {"!": "$attn_mask.present"},
+    {"!": "$page_table_k.present"},
+    {"!": "$page_table_v.present"},
 
-    // escape hatches: the two checks that need real C++
-    {"kind": "native_predicate", "name": "hipdnn.sdpa_mask_consistent", "args": ["$root"]},
-    {"kind": "native_predicate", "name": "hipdnn.strides_fit_u32",      "args": ["$q", "$k", "$v", "$o"]}
-  ]
+    // escape hatches: the two checks that need real C++, as registered JsonLogic operations
+    {"hipdnn.sdpa_mask_consistent": ["$root"]},
+    {"hipdnn.strides_fit_u32":      ["$q", "$k", "$v", "$o"]}
+  ]}
 }
 ```
 
@@ -766,9 +756,9 @@ Mapping to the hand-written code:
 | dropout / alibi / padding / stats gates (:205-224) | `attr` constraints |
 | `attn_mask` / `page_table_*` absent (:209-215) | optional-operand `present: false` |
 | rank == 4 (:231-247) | `shape` (rank 4) |
-| `q == k == v` dtype (:244) | `dtype.same_as` |
+| `q == k == v` dtype (:244) | `{"==": ["$k.dtype", "$q.dtype"]}` |
 | `k.dims[1] == v.dims[1]` head count (:251) | `$kv_heads` shape unification |
-| head dim == 128 | `expr: $head_size == 128` |
+| head dim == 128 | `{"==": ["$head_size", 128]}` |
 | `getMaskType` throw-on-contradiction (:276) | `hipdnn.sdpa_mask_consistent` predicate |
 | `wouldFwdByteStridesFitUint32` (:294) | `hipdnn.strides_fit_u32` predicate |
 | `getKernelNameKey` table lookup (:287) | dissolves into the KDP's Launch ([§9](#9-native-predicate-escape-hatch)) |
@@ -785,15 +775,16 @@ every auto-bound dim/stride) are exactly what the paired UDD's grid and argument
   schema ([§3](#3-the-matchers-input-hipdnns-graph-model)). If it drifts from the graph definitions,
   bindings are wrong. Mitigation: generate it from the same schema, and fail closed on an unknown op or
   role rather than binding a wrong field.
-- **Expression language sharing.** The value core is shared with the UDD ([§7](#7-the-shared-expression-language)).
+- **Expression language sharing.** JsonLogic is shared with the UDD ([§7](#7-the-shared-expression-language)).
   A change made for one subsystem can affect the other. Mitigation: one parser/validator/interpreter,
-  a shared conformance suite, and a clear layer split (UDD uses the value core only).
+  a shared conformance suite, and a clear split (constraints are boolean JsonLogic, dispatch formulas
+  are value JsonLogic).
 - **Predicate registry as contract.** Native predicates are part of the published provider contract
   ([§9](#9-native-predicate-escape-hatch)); a drop-in naming an unshipped predicate fails to resolve.
   Mitigation: version and document the shipped predicate set; fail closed with a clear diagnostic.
-- **Match overhead.** Per-candidate constraint and predicate evaluation is unbounded by the root-opcode
-  index ([§11](#11-the-matcher-compilation-indexing-and-caching)). Mitigation: early-out ordering,
-  per-plan caching, and the overhead test of [§17](#17-testing-and-performance).
+- **Match overhead.** Per-candidate evaluation of the constraints expression is unbounded by the
+  root-opcode index ([§11](#11-the-matcher-compilation-indexing-and-caching)). Mitigation: short-circuit
+  evaluation, per-plan caching, and the overhead test of [§17](#17-testing-and-performance).
 - **Static-matcher parity.** A lowered matcher that diverges from the interpreter is a silent
   correctness bug ([§12](#12-static-matcher-sketch)). Mitigation: the interpreter is the oracle and the
   parity test gates any lowering.
@@ -802,9 +793,9 @@ every auto-bound dim/stride) are exactly what the paired UDD's grid and argument
 
 ## 21. Open Questions
 
-1. **Expression language home.** This RFC defines the shared value core; the UDD RFC references it.
-   Confirm this split with the UDD RFC rather than each defining its own, and decide where the shared
-   conformance suite lives.
+1. **Expression language home.** This RFC pins JsonLogic as the shared expression language and defines
+   it here because the UMD needs it first; the UDD follow-up references this section. Confirm the split
+   rather than each subsystem defining its own, and decide where the shared conformance suite lives.
 2. **GQA divisibility.** Express `nhead_q % nhead_k == 0` with the `%` operator
    ([§7](#7-the-shared-expression-language)) or centralize it as a native predicate for uniform
    fail-closed zero-guarding ([§9](#9-native-predicate-escape-hatch))?
@@ -813,8 +804,6 @@ every auto-bound dim/stride) are exactly what the paired UDD's grid and argument
 4. **Feature-vector overlap.** The bound symbol table overlaps the feature vector a UHD consumes
    ([RFC 0017 §15 Q4](0017_UniversalKernelDescriptor.md#15-open-questions)); should the UMD's bindings
    be the canonical feature source for kernel selection?
-5. **Composite timing.** When composite constraints ([§10](#10-composite-constraints-deferred-forward-compatible))
-   are needed, do they land before or after the first engines are migrated?
 
 ---
 
@@ -840,8 +829,8 @@ The design borrows established ideas; none is a dependency. These informed the U
   across kernels by ID.
 - **Structural pattern:** the op nodes and the named operand/result edges of a UMD; edges are implicit
   through shared pattern variables ([§4](#4-structural-pattern)).
-- **Constraint:** a condition attached to a bound tensor, a node, or `device`; constraints implicitly
-  AND ([§6](#6-constraint-vocabulary)).
+- **Constraint expression:** the single JsonLogic boolean a UMD evaluates over its bound symbol table,
+  typically an `and` of the individual tests ([§6](#6-constraint-vocabulary)).
 - **Symbol lifecycle:** a name is declared in the UMD, bound when the graph matches, and used by the UDD
   ([§5](#5-symbol-binding-and-the-auto-binding-formula)).
 - **Auto-binding formula:** the standard scheme that binds every operand/result tensor, its dims and
@@ -850,16 +839,16 @@ The design borrows established ideas; none is a dependency. These informed the U
 - **Op-schema registry:** the generated table mapping each op type to its operand/result UID fields and
   attributes, letting the matcher reconstruct edges and auto-bind
   ([§3](#3-the-matchers-input-hipdnns-graph-model)).
-- **Value core / predicate layer:** the two layers of the shared expression language; the value core
-  (arithmetic, shared with the UDD) yields numbers, the predicate layer (comparison, membership) yields
-  booleans ([§7](#7-the-shared-expression-language)).
+- **JsonLogic:** the shared expression language; boolean-valued expressions are UMD constraints and
+  value-valued expressions are UDD dispatch formulas, both over one `$`-variable symbol table with one
+  evaluator ([§7](#7-the-shared-expression-language)).
 - **Stride-order layout:** layout represented as an array of dimension indexes giving stride order,
   since tensors carry no layout enum ([§8](#8-layout-and-stride-order-constraints)).
-- **Native predicate:** the escape hatch; a registry-resolved check a UMD names for logic it cannot
-  state declaratively, carried as a symbol name and typed arguments, never inline code
-  ([§9](#9-native-predicate-escape-hatch)).
-- **Composite constraint:** a single constraint that is a boolean combination of sub-constraints;
-  schema reserved, evaluation deferred ([§10](#10-composite-constraints-deferred-forward-compatible)).
+- **Native predicate:** the escape hatch; a registry-resolved JsonLogic operation a UMD invokes by name
+  for logic it cannot state with built-in operators, carried as an operation name and typed arguments,
+  never inline code ([§9](#9-native-predicate-escape-hatch)).
+- **Composite constraint:** any boolean combination of tests within the one `constraints` expression,
+  written directly with JsonLogic `and` / `or` / `!` / `if` ([§10](#10-composite-constraints)).
 - **Arbitration:** the deterministic resolution when several UKDs match: UHD score, then `priority`,
   then stable `id` ([§13](#13-arbitration)).
 - **Root-opcode index:** the index of compiled matchers by root opcode that keeps match cost sublinear
