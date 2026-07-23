@@ -38,8 +38,9 @@ extern "C" {
 *  \details
 *  \p rocsparse_spscale_buffer_size returns the size in bytes of the temporary storage buffer
 *  required by \ref rocsparse_spscale(). The same buffer is passed to \ref rocsparse_spscale().
-*  For the currently supported formats no additional workspace is required and \p buffer_size
-*  is set to zero; the routine is provided for interface consistency and forward compatibility.
+*  For the currently supported formats no additional workspace is required and
+*  \p buffer_size_in_bytes is set to zero; the routine is provided for interface consistency and
+*  forward compatibility.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -47,25 +48,27 @@ extern "C" {
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
-*  alpha        scalar \f$\alpha\f$.
-*  @param[in]
 *  mat_A        sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  mat_C        sparse matrix \f$C\f$ descriptor.
 *  @param[out]
-*  buffer_size  number of bytes of the temporary storage buffer.
+*  buffer_size_in_bytes  number of bytes of the temporary storage buffer.
+*  @param[out]
+*  p_error      error descriptor created if the returned status is not
+*               \ref rocsparse_status_success. A null pointer can be passed if an error
+*               descriptor is not required.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p alpha, \p mat_A, \p mat_C or \p buffer_size
+*  \retval rocsparse_status_invalid_pointer \p mat_A, \p mat_C or \p buffer_size_in_bytes
 *          pointer is invalid.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spscale_buffer_size(rocsparse_handle            handle,
-                                               const void*                 alpha,
                                                rocsparse_const_spmat_descr mat_A,
                                                rocsparse_spmat_descr       mat_C,
-                                               size_t*                     buffer_size);
+                                               size_t*                     buffer_size_in_bytes,
+                                               rocsparse_error*            p_error);
 
 /*! \ingroup generic_module
 *  \brief Sparse matrix scaling.
@@ -117,10 +120,14 @@ rocsparse_status rocsparse_spscale_buffer_size(rocsparse_handle            handl
 *  @param[out]
 *  mat_C        sparse matrix \f$C\f$ descriptor.
 *  @param[in]
-*  buffer_size  number of bytes of the temporary storage buffer, as returned by
+*  buffer_size_in_bytes  number of bytes of the temporary storage buffer, as returned by
 *               \ref rocsparse_spscale_buffer_size.
 *  @param[in]
 *  temp_buffer  temporary storage buffer allocated by the user.
+*  @param[out]
+*  p_error      error descriptor created if the returned status is not
+*               \ref rocsparse_status_success. A null pointer can be passed if an error
+*               descriptor is not required.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -133,8 +140,9 @@ rocsparse_status rocsparse_spscale(rocsparse_handle            handle,
                                    const void*                 alpha,
                                    rocsparse_const_spmat_descr mat_A,
                                    rocsparse_spmat_descr       mat_C,
-                                   size_t                      buffer_size,
-                                   void*                       temp_buffer);
+                                   size_t                      buffer_size_in_bytes,
+                                   void*                       temp_buffer,
+                                   rocsparse_error*            p_error);
 
 #ifdef __cplusplus
 }

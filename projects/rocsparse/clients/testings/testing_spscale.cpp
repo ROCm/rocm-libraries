@@ -62,17 +62,31 @@ void testing_spscale_bad_arg(const Arguments& arg)
     rocsparse_spmat_descr mat_A = local_A;
     rocsparse_spmat_descr mat_C = local_C;
 
-    size_t  local_buffer_size = 0;
-    size_t* buffer_size       = &local_buffer_size;
-    void*   temp_buffer       = (void*)0x4;
+    size_t  local_buffer_size    = 0;
+    size_t* buffer_size_in_bytes = &local_buffer_size;
+    void*   temp_buffer          = (void*)0x4;
 
-    // Buffer size: all arguments are checked.
-    bad_arg_analysis(rocsparse_spscale_buffer_size, handle, alpha, mat_A, mat_C, buffer_size);
+    // p_error is an optional output error descriptor and may be null.
+    rocsparse_error p_error[1] = {nullptr};
 
-    // Compute: buffer_size (arg 4) and temp_buffer (arg 5) are not checked.
+    // Buffer size: p_error (arg 4) is optional and not checked.
     {
-        static const int nex   = 2;
-        static const int ex[2] = {4, 5};
+        static const int nex   = 1;
+        static const int ex[1] = {4};
+        select_bad_arg_analysis(rocsparse_spscale_buffer_size,
+                                nex,
+                                ex,
+                                handle,
+                                mat_A,
+                                mat_C,
+                                buffer_size_in_bytes,
+                                p_error);
+    }
+
+    // Compute: buffer_size_in_bytes (arg 4), temp_buffer (arg 5) and p_error (arg 6) are not checked.
+    {
+        static const int nex   = 3;
+        static const int ex[3] = {4, 5, 6};
         select_bad_arg_analysis(rocsparse_spscale,
                                 nex,
                                 ex,
@@ -81,7 +95,8 @@ void testing_spscale_bad_arg(const Arguments& arg)
                                 mat_A,
                                 mat_C,
                                 local_buffer_size,
-                                temp_buffer);
+                                temp_buffer,
+                                p_error);
     }
 
     // Consistency checks between A and C that the generic bad-arg harness does not exercise.
@@ -92,7 +107,7 @@ void testing_spscale_bad_arg(const Arguments& arg)
             m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, base, ttype);
         rocsparse_spmat_descr mat_C_coo = local_C_coo;
         EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_coo, buffer_size),
+            rocsparse_spscale_buffer_size(handle, mat_A, mat_C_coo, buffer_size_in_bytes, p_error),
             rocsparse_status_not_implemented);
 
         // Dimension mismatch: C has a different number of rows.
@@ -100,7 +115,7 @@ void testing_spscale_bad_arg(const Arguments& arg)
             m + 1, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, ttype);
         rocsparse_spmat_descr mat_C_rows = local_C_rows;
         EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_rows, buffer_size),
+            rocsparse_spscale_buffer_size(handle, mat_A, mat_C_rows, buffer_size_in_bytes, p_error),
             rocsparse_status_invalid_size);
 
         // Data-type mismatch between A and C.
@@ -110,9 +125,9 @@ void testing_spscale_bad_arg(const Arguments& arg)
         rocsparse_local_spmat    local_C_dtype(
             m, n, nnz, csr_row_ptr_C, csr_col_ind_C, csr_val_C, itype, jtype, base, other_ttype);
         rocsparse_spmat_descr mat_C_dtype = local_C_dtype;
-        EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_dtype, buffer_size),
-            rocsparse_status_type_mismatch);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spscale_buffer_size(
+                                    handle, mat_A, mat_C_dtype, buffer_size_in_bytes, p_error),
+                                rocsparse_status_type_mismatch);
 
         // Index-base mismatch: differing base between A and C is not supported yet.
         rocsparse_local_spmat local_C_base(m,
@@ -127,7 +142,7 @@ void testing_spscale_bad_arg(const Arguments& arg)
                                            ttype);
         rocsparse_spmat_descr mat_C_base = local_C_base;
         EXPECT_ROCSPARSE_STATUS(
-            rocsparse_spscale_buffer_size(handle, alpha, mat_A, mat_C_base, buffer_size),
+            rocsparse_spscale_buffer_size(handle, mat_A, mat_C_base, buffer_size_in_bytes, p_error),
             rocsparse_status_not_implemented);
     }
 }
@@ -162,7 +177,7 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
     size_t buffer_size_in_bytes;
     void*  buffer;
     CHECK_ROCSPARSE_ERROR(
-        rocsparse_spscale_buffer_size(handle, h_alpha_ptr, mat_A, mat_C, &buffer_size_in_bytes));
+        rocsparse_spscale_buffer_size(handle, mat_A, mat_C, &buffer_size_in_bytes, nullptr));
 
     CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size_in_bytes));
 
@@ -180,8 +195,8 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
         for(int32_t i = 0; i < 2; i++)
         {
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spscale(handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
+                handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
             hC.near_check(dC);
         }
 
@@ -189,8 +204,8 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
         for(int32_t i = 0; i < 2; i++)
         {
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spscale(handle, d_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
+                handle, d_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
             hC.near_check(dC);
         }
     }
@@ -205,8 +220,8 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
         // Warm up
         for(int32_t iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spscale(handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
+                handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
         }
 
         double gpu_solve_time_used = get_time_us();
@@ -214,8 +229,8 @@ static void testing_spscale_dispatch(const Arguments& arg, HostMatrix& hA)
         // Performance run
         for(int32_t iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spscale(handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer));
+            CHECK_ROCSPARSE_ERROR(rocsparse_spscale(
+                handle, h_alpha_ptr, mat_A, mat_C, buffer_size_in_bytes, buffer, nullptr));
         }
 
         gpu_solve_time_used = (get_time_us() - gpu_solve_time_used) / number_hot_calls;

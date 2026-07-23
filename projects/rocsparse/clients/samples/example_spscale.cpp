@@ -150,7 +150,7 @@ int main(int argc, char* argv[])
     // Query buffer size (zero for the CSR format) and allocate.
     size_t buffer_size_in_bytes;
     void*  buffer = nullptr;
-    ROCSPARSE_CHECK(rocsparse_spscale_buffer_size(handle, &alpha, A, C, &buffer_size_in_bytes));
+    ROCSPARSE_CHECK(rocsparse_spscale_buffer_size(handle, A, C, &buffer_size_in_bytes, nullptr));
 
     if(buffer_size_in_bytes > 0)
     {
@@ -159,7 +159,7 @@ int main(int argc, char* argv[])
 
     // Compute C = alpha * A.
     ROCSPARSE_CHECK(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-    ROCSPARSE_CHECK(rocsparse_spscale(handle, &alpha, A, C, buffer_size_in_bytes, buffer));
+    ROCSPARSE_CHECK(rocsparse_spscale(handle, &alpha, A, C, buffer_size_in_bytes, buffer, nullptr));
 
     HIP_CHECK(hipStreamSynchronize(stream));
 

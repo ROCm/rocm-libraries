@@ -59,67 +59,78 @@ namespace rocsparse
         return false;
     }
 
+    // Argument checks shared by rocsparse_spscale and rocsparse_spscale_buffer_size. The two
+    // routines place mat_A and mat_C at different argument positions, so the caller passes the
+    // matching argument indices (\p arg_A, \p arg_C) used for error reporting.
     static rocsparse_status spscale_checkarg(rocsparse_handle            handle,
-                                             const void*                 alpha,
                                              rocsparse_const_spmat_descr mat_A,
-                                             rocsparse_spmat_descr       mat_C)
+                                             rocsparse_spmat_descr       mat_C,
+                                             int                         arg_A,
+                                             int                         arg_C)
     {
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
-        ROCSPARSE_CHECKARG_POINTER(1, alpha);
-        ROCSPARSE_CHECKARG_POINTER(2, mat_A);
-        ROCSPARSE_CHECKARG_POINTER(3, mat_C);
-        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(3, mat_C, (mat_C->init == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG_POINTER(arg_A, mat_A);
+        ROCSPARSE_CHECKARG_POINTER(arg_C, mat_C);
+        ROCSPARSE_CHECKARG(arg_A, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(arg_C, mat_C, (mat_C->init == false), rocsparse_status_not_initialized);
 
         // A and C must share the same format, and the format must be one that is supported.
         ROCSPARSE_CHECKARG(
-            3, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(2,
+            arg_C, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(arg_A,
                            mat_A,
                            (rocsparse::spscale_is_supported_format(mat_A->format) == false),
                            rocsparse_status_not_implemented);
 
         // A and C must have matching shape, nonzero count and types.
-        ROCSPARSE_CHECKARG(3, mat_C, (mat_C->rows != mat_A->rows), rocsparse_status_invalid_size);
-        ROCSPARSE_CHECKARG(3, mat_C, (mat_C->cols != mat_A->cols), rocsparse_status_invalid_size);
-        ROCSPARSE_CHECKARG(3, mat_C, (mat_C->nnz != mat_A->nnz), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
-            3, mat_C, (mat_C->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
+            arg_C, mat_C, (mat_C->rows != mat_A->rows), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
-            3, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+            arg_C, mat_C, (mat_C->cols != mat_A->cols), rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG(arg_C, mat_C, (mat_C->nnz != mat_A->nnz), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
-            3, mat_C, (mat_C->data_type != mat_A->data_type), rocsparse_status_type_mismatch);
+            arg_C, mat_C, (mat_C->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            arg_C, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+        ROCSPARSE_CHECKARG(
+            arg_C, mat_C, (mat_C->data_type != mat_A->data_type), rocsparse_status_type_mismatch);
 
         // Format specific layout parameters must also match between A and C.
         switch(mat_A->format)
         {
         case rocsparse_format_bsr:
         {
-            ROCSPARSE_CHECKARG(
-                3, mat_C, (mat_C->block_dim != mat_A->block_dim), rocsparse_status_invalid_size);
+            ROCSPARSE_CHECKARG(arg_C,
+                               mat_C,
+                               (mat_C->block_dim != mat_A->block_dim),
+                               rocsparse_status_invalid_size);
             break;
         }
         case rocsparse_format_ell:
         {
-            ROCSPARSE_CHECKARG(
-                3, mat_C, (mat_C->ell_width != mat_A->ell_width), rocsparse_status_invalid_size);
+            ROCSPARSE_CHECKARG(arg_C,
+                               mat_C,
+                               (mat_C->ell_width != mat_A->ell_width),
+                               rocsparse_status_invalid_size);
             break;
         }
         case rocsparse_format_bell:
         {
             ROCSPARSE_CHECKARG(
-                3, mat_C, (mat_C->ell_cols != mat_A->ell_cols), rocsparse_status_invalid_size);
-            ROCSPARSE_CHECKARG(
-                3, mat_C, (mat_C->block_dim != mat_A->block_dim), rocsparse_status_invalid_size);
+                arg_C, mat_C, (mat_C->ell_cols != mat_A->ell_cols), rocsparse_status_invalid_size);
+            ROCSPARSE_CHECKARG(arg_C,
+                               mat_C,
+                               (mat_C->block_dim != mat_A->block_dim),
+                               rocsparse_status_invalid_size);
             break;
         }
         case rocsparse_format_sell:
         {
-            ROCSPARSE_CHECKARG(3,
+            ROCSPARSE_CHECKARG(arg_C,
                                mat_C,
                                (mat_C->sell_slice_size != mat_A->sell_slice_size),
                                rocsparse_status_invalid_size);
-            ROCSPARSE_CHECKARG(3,
+            ROCSPARSE_CHECKARG(arg_C,
                                mat_C,
                                (mat_C->sell_colval_size != mat_A->sell_colval_size),
                                rocsparse_status_invalid_size);
@@ -133,12 +144,14 @@ namespace rocsparse
         }
 
         // Batched matrices are not supported.
-        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(3, mat_C, (mat_C->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            arg_A, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(
+            arg_C, mat_C, (mat_C->batch_count != 1), rocsparse_status_not_implemented);
 
         // Differing index base between A and C is not yet supported (base conversion follow-up).
         ROCSPARSE_CHECKARG(
-            3, mat_C, (mat_C->idx_base != mat_A->idx_base), rocsparse_status_not_implemented);
+            arg_C, mat_C, (mat_C->idx_base != mat_A->idx_base), rocsparse_status_not_implemented);
 
         return rocsparse_status_continue;
     }
@@ -303,26 +316,30 @@ namespace rocsparse
 }
 
 extern "C" rocsparse_status rocsparse_spscale_buffer_size(rocsparse_handle            handle,
-                                                          const void*                 alpha,
                                                           rocsparse_const_spmat_descr mat_A,
                                                           rocsparse_spmat_descr       mat_C,
-                                                          size_t*                     buffer_size)
+                                                          size_t*          buffer_size_in_bytes,
+                                                          rocsparse_error* p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    rocsparse::log_trace("rocsparse_spscale_buffer_size", handle, alpha, mat_A, mat_C, buffer_size);
+    rocsparse::log_trace(
+        "rocsparse_spscale_buffer_size", handle, mat_A, mat_C, buffer_size_in_bytes);
 
-    const rocsparse_status status = rocsparse::spscale_checkarg(handle, alpha, mat_A, mat_C);
+    // p_error is reserved for forward compatibility and is not populated yet.
+    (void)p_error;
+
+    const rocsparse_status status = rocsparse::spscale_checkarg(handle, mat_A, mat_C, 1, 2);
     if(status != rocsparse_status_continue)
     {
         RETURN_IF_ROCSPARSE_ERROR(status);
         return rocsparse_status_success;
     }
 
-    ROCSPARSE_CHECKARG_POINTER(4, buffer_size);
+    ROCSPARSE_CHECKARG_POINTER(3, buffer_size_in_bytes);
 
     // Scaling does not require any additional workspace for the supported formats.
-    *buffer_size = 0;
+    *buffer_size_in_bytes = 0;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -337,19 +354,24 @@ extern "C" rocsparse_status rocsparse_spscale(rocsparse_handle            handle
                                               const void*                 alpha,
                                               rocsparse_const_spmat_descr mat_A,
                                               rocsparse_spmat_descr       mat_C,
-                                              size_t                      buffer_size,
-                                              void*                       temp_buffer)
+                                              size_t                      buffer_size_in_bytes,
+                                              void*                       temp_buffer,
+                                              rocsparse_error*            p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
     rocsparse::log_trace(
-        "rocsparse_spscale", handle, alpha, mat_A, mat_C, buffer_size, temp_buffer);
+        "rocsparse_spscale", handle, alpha, mat_A, mat_C, buffer_size_in_bytes, temp_buffer);
 
     // No workspace is required for the currently supported formats.
-    (void)buffer_size;
+    (void)buffer_size_in_bytes;
     (void)temp_buffer;
+    // p_error is reserved for forward compatibility and is not populated yet.
+    (void)p_error;
 
-    const rocsparse_status status = rocsparse::spscale_checkarg(handle, alpha, mat_A, mat_C);
+    ROCSPARSE_CHECKARG_POINTER(1, alpha);
+
+    const rocsparse_status status = rocsparse::spscale_checkarg(handle, mat_A, mat_C, 2, 3);
     if(status != rocsparse_status_continue)
     {
         RETURN_IF_ROCSPARSE_ERROR(status);
