@@ -14,11 +14,11 @@ The plugin follows the standard hipDNN plugin architecture:
 
 ```
 HipKernelEngine
-├── PlanBuilder (IPlanBuilder)
-│   ├── ApplicabilityChecks
-│   └── Plan (IPlan)
-│       └── execute() - Compile and launch kernel on GPU
-└── [Additional plan builders...]
++-- PlanBuilder (IPlanBuilder)
+|   +-- ApplicabilityChecks
+|   +-- Plan (IPlan)
+|       +-- execute() - Compile and launch kernel on GPU
++-- [Additional plan builders...]
 ```
 
 ### Key Components
