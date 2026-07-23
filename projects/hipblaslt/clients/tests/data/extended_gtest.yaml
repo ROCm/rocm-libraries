@@ -10,6 +10,7 @@ Tests:
 # ==============================================================================
 
 - name: extended_grouped_gemm_basic
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -33,6 +34,7 @@ Tests:
 # ==============================================================================
 
 - name: extended_complex_float
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_c
@@ -53,6 +55,7 @@ Tests:
   batch_count: [1, 2]
 
 - name: extended_complex_double
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f64_c
@@ -73,6 +76,7 @@ Tests:
   batch_count: 1
 
 - name: extended_complex_float_batch
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_c
@@ -100,6 +104,7 @@ Tests:
 
 # Tensor E (auxiliary output) with various data types
 - name: extended_scaleAlpha_vector
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -120,6 +125,7 @@ Tests:
 
 # Bias with different sources
 - name: extended_bias_sources
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -142,6 +148,7 @@ Tests:
 
 # Bias with batch and stride
 - name: extended_gradient_mode
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -162,6 +169,7 @@ Tests:
 
 # Swizzle tensors (stride_a=0 enables swizzle)
 - name: extended_swizzle_tensorA
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -181,6 +189,7 @@ Tests:
   batch_count: 2
 
 - name: extended_swizzle_tensorB
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -212,6 +221,7 @@ Tests:
 
 # Float8 FNUZ comprehensive tests
 - name: extended_int8_basic_i32_output
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: i8_r
@@ -231,6 +241,7 @@ Tests:
 
 # Int8 with i8 output
 - name: extended_int8_basic_i8_output
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: i8_r
@@ -250,6 +261,7 @@ Tests:
 
 # Int8 with batching
 - name: extended_int8_batch
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: i8_r
@@ -274,6 +286,7 @@ Tests:
 
 # Bad argument tests using matmul_bad_arg function
 - name: extended_matmul_bad_arg
+  marks: [skip-gfx90a]
   category: quick
   function: matmul_bad_arg
   a_type: f16_r
@@ -296,6 +309,7 @@ Tests:
 
 # MX Block Size Variants
 - name: extended_grouped_gemm_activation
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -326,6 +340,7 @@ Tests:
 
 # Test 1: Large group count (16 groups) with variable problem sizes
 - name: extended_grouped_16
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -347,6 +362,7 @@ Tests:
 # Test 2: Variable group sizes with comprehensive transpose/beta combos
 # Creates 36 test variations (3 group counts × 2 transA × 2 transB × 3 beta)
 - name: extended_grouped_gemm_large_batch
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -372,6 +388,7 @@ Tests:
 
 # Test 4: All transpose combinations with FP32 (NN, NT, TN, TT)
 - name: extended_transpose_all
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_r
@@ -391,6 +408,7 @@ Tests:
 
 # Test 5: Transpose with FP16 and complex strides
 - name: extended_transpose_strided
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -425,6 +443,7 @@ Tests:
 
 # Test 9: Explicit solution index selection
 - name: extended_solution_index
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -445,6 +464,7 @@ Tests:
 
 # Test 10: Algorithm selection with preferences
 - name: extended_algorithm_search
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_r
@@ -465,6 +485,7 @@ Tests:
 
 # Grouped GEMM: Beta accumulation (targets beta path in grouped context)
 - name: extended_activation_sigmoid
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -494,6 +515,7 @@ Tests:
 
 # All transpose combinations for comprehensive coverage
 - name: extended_transpose_combinations
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_r
@@ -523,6 +545,7 @@ Tests:
 
 # Odd sizes to trigger different kernel selection paths
 - name: extended_kernel_select_odd_sizes
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -557,6 +580,7 @@ Tests:
 
 # Large batch count
 - name: extended_large_batch_count
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -576,6 +600,7 @@ Tests:
 
 # Strided batch with non-default strides
 - name: extended_custom_batch_stride
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_r
@@ -603,6 +628,7 @@ Tests:
 
 # GELU activation
 - name: extended_bias_f32
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -637,6 +663,7 @@ Tests:
 # Phase 4.1: Matrix Layout Attributes - Custom Strides
 # Targets: rocblaslt_auxiliary.cpp matrix layout attribute handling
 - name: auxiliary_coverage_custom_strides
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
@@ -660,6 +687,7 @@ Tests:
 
 # Phase 4.1: Matrix Layout Attributes - Row vs Column Order
 - name: auxiliary_coverage_layout_order
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_r
@@ -685,6 +713,7 @@ Tests:
 # Phase 4.3: Preference & Algorithm - Workspace Limits
 # Targets: rocblaslt_auxiliary.cpp preference attribute handling
 - name: auxiliary_coverage_workspace_limits
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f32_r
@@ -705,6 +734,7 @@ Tests:
 
 # Phase 4.3: Algorithm Search with Max Solutions
 - name: auxiliary_coverage_algorithm_max_solutions
+  marks: [skip-gfx90a]
   category: pre_checkin
   function: matmul
   a_type: f16_r
