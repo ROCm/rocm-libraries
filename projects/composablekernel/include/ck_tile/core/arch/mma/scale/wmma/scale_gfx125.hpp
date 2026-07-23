@@ -146,6 +146,46 @@ WMMA_SCALE16_IMPL(pk_fp4_t,    pk_fp4_t,    1, 1)
 #undef WMMA_SCALE16_IMPL
 #undef WMMA_SCALE_IMPL
 
+#define WMMA_SCALE_IMPL32(OP_FAMILY, INSTRUCTION, SCALE_TYPE) \
+template <typename CompilerTarget>\
+    /*               |A B C DataTypes           |MNK            |                                                                     */ \
+    struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 16u, 128u, CompilerTarget, OP_FAMILY, enable_if_target_gfx1250_t<CompilerTarget>> \
+    /*                                                          |WS  |AParams  |BPar |CPar  |                                         */ \
+    : amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 16, 2, WmmaOp, OP_FAMILY>                         \
+    {                                                                                                                                    \
+        static constexpr const char* instruction_name = #INSTRUCTION;                                                                    \
+                                                                                                                                         \
+        template <typename... Params>                                                                                                    \
+        CK_TILE_DEVICE static CVecType exec(AVecType const& aVec,                                                                        \
+                                            BVecType const& bVec,                                                                        \
+                                            CVecType const& cVec,                                                                        \
+                                            SCALE_TYPE scaleA,                                                                           \
+                                            SCALE_TYPE scaleB)                                                                           \
+        {                                                                                                                                \
+            using P = WarpGemmParamsParser<Params...>;                                                                                   \
+            static_assert(                                                                                                               \
+                scale::detail::is_legal_combination<pk_fp4_t, pk_fp4_t, P::scale_a, P::scale_b>,                                         \
+                "Unsupported ADataType/BDataType/scale_a/scale_b combination");                                                          \
+            return {INSTRUCTION(to_type<int32x16_t>(aVec),                                                                               \
+                                to_type<int32x8_t>(bVec),                                                                                \
+                                0,                                                                                                       \
+                                cVec,                                                                                                    \
+                                P::op_sel_a,                                                                                             \
+                                P::scale_a,                                                                                              \
+                                scaleA,                                                                                                  \
+                                P::op_sel_b,                                                                                             \
+                                P::scale_b,                                                                                              \
+                                scaleB,                                                                                                  \
+                                P::reuse_a,                                                                                              \
+                                P::reuse_b)};                                                                                            \
+        }                                                                                                                                \
+    };
+
+WMMA_SCALE_IMPL32(MmaOpFamily::SCALE,   __builtin_amdgcn_wmma_scale_f32_32x16x128_f4,   int32_t)
+WMMA_SCALE_IMPL32(MmaOpFamily::SCALE16, __builtin_amdgcn_wmma_scale16_f32_32x16x128_f4, int64_t)
+
+#undef WMMA_SCALE_IMPL32
+
 // Some type combinations already have a DENSE specialisation with a dedicated builtin. 
 // Here, we provide remaining no-scale specialisations because for gfx1250 WMMA,
 // the caller wants to use an actual no-scale instruction.

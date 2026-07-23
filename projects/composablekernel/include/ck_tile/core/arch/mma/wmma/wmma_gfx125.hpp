@@ -631,6 +631,27 @@ struct amdgcn_mma<fp16_t, fp16_t, fp16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
     }
 };
 
+template <typename CompilerTarget>
+// clang-format off
+//               |A B C DataTypes           |MNK            |
+struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 16u, 128u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_gfx1250_t<CompilerTarget>>
+//                                                          |WS  |AParams  |BPar |CPar  |
+: amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 16, 2, WmmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_32x16x128_f4";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+        return {__builtin_amdgcn_wmma_f32_32x16x128_f4(to_type<int32x16_t>(aVec),
+                                                       to_type<int32x8_t>(bVec),
+                                                       0, // C_mod
+                                                       cVec)};
+    }
+};
+
 /** @} */ // dense_wmma_gfx125
 
 } // namespace ck_tile::core::arch::mma
