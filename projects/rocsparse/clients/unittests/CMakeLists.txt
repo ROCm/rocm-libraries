@@ -89,4 +89,10 @@ set_target_properties(rocsparse-unit-test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
+# CTest registration. enable_testing() is already invoked at the top-level
+# project scope (projects/rocsparse/CMakeLists.txt, guarded by BUILD_CLIENTS_TESTS),
+# so this test is discoverable via `ctest` from the top build directory. This lets
+# CI run the fast, GPU-independent unit tests as an early gate: `ctest -R rocsparse-unit-test`.
+add_test(NAME rocsparse-unit-test COMMAND rocsparse-unit-test)
+
 rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
