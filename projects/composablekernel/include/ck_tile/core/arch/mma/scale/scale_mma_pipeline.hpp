@@ -312,6 +312,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
 
         if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
         {
+            // check types
             static_assert(
                 std::is_same_v<typename UnscaledMmaOp::AVecType, typename MmaOp::AVecType> &&
                     std::is_same_v<typename UnscaledMmaOp::BVecType, typename MmaOp::BVecType> &&
@@ -330,8 +331,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                     {
                         if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
                         {
-                            // UnscaledMmaOp::exec is not templated on Params (no op_sel/reuse
-                            // dependency for a plain unscaled op), unlike MmaOp::exec below.
+                            // UnscaledMmaOp::exec is not templated on Params
                             c_buf.at(bm * FragsN + bn) =
                                 UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
                                                     b_buf.at(bn * FragsK + bk),
@@ -339,7 +339,9 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                         }
                         else
                         {
+                            // MmaOpFamily::SCALE, therefore 4 bytes
                             constexpr int32_t identity_scale = 0x7F7F7F7F;
+                            // MmaOp::exec
                             c_buf.at(bm * FragsN + bn) =
                                 MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
                                                                 b_buf.at(bn * FragsK + bk),
@@ -361,8 +363,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                     {
                         if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
                         {
-                            // UnscaledMmaOp::exec is not templated on Params (no op_sel/reuse
-                            // dependency for a plain unscaled op), unlike MmaOp::exec below.
+                            // UnscaledMmaOp::exec is not templated on Params
                             c_buf.at(bm * FragsN + bn) =
                                 UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
                                                     b_buf.at(bn * FragsK + bk),
@@ -371,6 +372,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                         else
                         {
                             constexpr int32_t identity_scale = 0x7F7F7F7F;
+                            // MmaOp::exec
                             c_buf.at(bm * FragsN + bn) =
                                 MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
                                                                 b_buf.at(bn * FragsK + bk),
@@ -384,6 +386,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         }
         else
         {
+            // throw error
             static_assert(false, "Invalid accumulation policy");
         }
     }
