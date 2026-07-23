@@ -37,6 +37,7 @@
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
@@ -187,8 +188,7 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     if (isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst)) return EV_VGPR_FLAT_READ;
     // VMEM family. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALLoad(inst) ||
-        isGLOBALStore(inst))
+    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALOrAtomic(inst))
         return EV_VGPR_VMEM_READ;
     return std::nullopt;
 }
@@ -199,6 +199,24 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
 inline bool hasMatrixScalePair(const StinkyInstruction& inst) {
     auto mc = inst.getHwInstDesc()->microcode;
     return mc == MicrocodeFormat::MC_VOP3PX2 || mc == MicrocodeFormat::MC_VOP3PX3;
+}
+
+// Walk `regs`, skipping non-VGPR ones, and invoke fn(vgprIdx, half) for each
+// VGPR. halfFn maps an operand's position (VGPR-only) to its True16 half
+// selector, so fn may act at half-word (LOW/HIGH) granularity. Callers pass a
+// single operand list (getSrcRegs or getDestRegs) — never both, since src and
+// dst use different half selectors. Shared by producer stamping and consumer
+// probing.
+template <typename HalfFn, typename Fn>
+inline void forEachVGPR(const std::vector<StinkyRegister>& regs, HalfFn&& halfFn, Fn&& fn) {
+    size_t opIdx = 0;
+    for (const auto& reg : regs) {
+        if (reg.dataType != StinkyRegister::Type::Register) continue;
+        if (reg.reg.type != RegType::V) continue;
+        HighBitSel half = halfFn(opIdx);
+        ++opIdx;
+        for (uint16_t off = 0; off < reg.reg.num; ++off) fn(reg.reg.idx + off, half);
+    }
 }
 
 // EXEC writes invalidate any non-zero VA_VDST wait (skipped VALUs don't bump
@@ -216,24 +234,6 @@ inline bool writesExec(const StinkyInstruction& inst) {
 
 inline bool isWaitAluInst(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_wait_alu;
-}
-
-// isReturn = kernel exit (s_endpgm). Used to drop mode2 before the wave exits.
-// Note: function-call returns (s_setpc_b64 s[26:27]) are intentionally NOT
-// handled here — mode2 is confined to the loop region.
-inline bool isReturn(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_endpgm;
-}
-
-// Last real (non-pseudo) instruction in a block, or nullptr if the block is
-// label-only. Walks back from the terminator, skipping trailing pseudos
-// (label / asm directive).
-inline StinkyInstruction* lastRealInst(BasicBlock& bb) {
-    for (IRBase* n = bb.getTerminator(); n; n = n->getPrev()) {
-        auto* inst = dyn_cast<StinkyInstruction>(n);
-        if (inst && !isPseudoInst(inst)) return inst;
-    }
-    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,40 +335,25 @@ class WaitcntBrackets {
 
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
+        auto stamp = [&](unsigned idx, HighBitSel half, CounterType c) {
+            RegKey k = keyer.producerKey(idx, half);
+            scores[k][c] = curr;
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx << "("
+                                 << halfName(k.half) << ") " << eventName(ev) << "\n");
+        };
+
         if (ct == CT_VA_VDST) {
-            size_t destIdx = 0;
-            for (size_t i = 0; i < inst.getNumDestRegs(); ++i) {
-                const auto& reg = inst.getDestReg(i);
-                if (reg.dataType != StinkyRegister::Type::Register) continue;
-                if (reg.reg.type != RegType::V) continue;
-                HighBitSel half = destHalfSel(true16Mod, destIdx);
-                ++destIdx;
-                for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                    RegKey k = keyer.producerKey(reg.reg.idx + off, half);
-                    scores[k][CT_VA_VDST] = curr;
-                    // Per-VGPR stamp record so a later "wait hit ... score=N"
-                    // can be grepped back to the producer instruction.
-                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx
-                                         << "(" << halfName(k.half) << ") " << eventName(ev)
-                                         << "\n");
-                }
-            }
+            forEachVGPR(
+                inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
+                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
+            forEachVGPR(
+                inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
+                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VA_VDST); });
         } else {
-            for (size_t i = 0; i < inst.getNumSrcRegs(); ++i) {
-                const auto& reg = inst.getSrcReg(i);
-                if (reg.dataType != StinkyRegister::Type::Register) continue;
-                if (reg.reg.type != RegType::V) continue;
-                // VM_VSRC tracks "in-flight VMEM read of this VGPR". The
-                // potential WAR is against a 32-bit VALU write to the same
-                // DWORD, so a full-DWORD key is correct.
-                for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                    RegKey k{RegType::V, reg.reg.idx + off, RegHalf::NONE};
-                    scores[k][CT_VM_VSRC] = curr;
-                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx
-                                         << "(" << halfName(k.half) << ") " << eventName(ev)
-                                         << "\n");
-                }
-            }
+            // VM_VSRC tracks in-flight VMEM reads, which are always full DWORD.
+            forEachVGPR(
+                inst.getSrcRegs(), [](size_t) { return HighBitSel::NONE; },
+                [&](unsigned idx, HighBitSel half) { stamp(idx, half, CT_VM_VSRC); });
         }
     }
 
@@ -377,39 +362,27 @@ class WaitcntBrackets {
     void onConsumer(const StinkyInstruction& inst, const VGPRHalfKeyer& keyer, Wait& wait) const {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
-        size_t srcIdx = 0;
-        for (size_t i = 0; i < inst.getNumSrcRegs(); ++i) {
-            const auto& reg = inst.getSrcReg(i);
-            if (reg.dataType != StinkyRegister::Type::Register) continue;
-            if (reg.reg.type != RegType::V) continue;
-            HighBitSel half = srcHalfSel(true16Mod, srcIdx);
-            ++srcIdx;
-            for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                keyer.forEachConsumerKey(reg.reg.idx + off, half, [&](RegKey k) {
+        forEachVGPR(
+            inst.getSrcRegs(), [&](size_t i) { return srcHalfSel(true16Mod, i); },
+            [&](unsigned idx, HighBitSel half) {
+                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
                     determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
                                           "src(RAW)");
                 });
-            }
-        }
+            });
 
-        size_t destIdx = 0;
-        for (size_t i = 0; i < inst.getNumDestRegs(); ++i) {
-            const auto& reg = inst.getDestReg(i);
-            if (reg.dataType != StinkyRegister::Type::Register) continue;
-            if (reg.reg.type != RegType::V) continue;
-            HighBitSel half = destHalfSel(true16Mod, destIdx);
-            ++destIdx;
-            for (uint16_t off = 0; off < reg.reg.num; ++off) {
-                keyer.forEachConsumerKey(reg.reg.idx + off, half, [&](RegKey k) {
+        forEachVGPR(
+            inst.getDestRegs(), [&](size_t i) { return destHalfSel(true16Mod, i); },
+            [&](unsigned idx, HighBitSel half) {
+                keyer.forEachConsumerKey(idx, half, [&](RegKey k) {
                     determineWaitForScore(CT_VA_VDST, getVGPRScore(k, CT_VA_VDST), wait, k,
                                           "dst(WAW)");
                 });
                 // WAR on VM_VSRC: writer-vs-in-flight-VMEM-read uses full DWORD.
-                RegKey full{RegType::V, reg.reg.idx + off, RegHalf::NONE};
+                RegKey full{RegType::V, idx, RegHalf::NONE};
                 determineWaitForScore(CT_VM_VSRC, getVGPRScore(full, CT_VM_VSRC), wait, full,
                                       "dst(WAR)");
-            }
-        }
+            });
     }
 
     void determineWaitForScore(CounterType c, unsigned score, Wait& wait, const RegKey& k,
@@ -513,10 +486,15 @@ class WaitcntBrackets {
 // ---------------------------------------------------------------------------
 
 class InsertWaitAluPassImpl : public Pass {
+    StinkyAsmModule* module = nullptr;
     std::unordered_map<BasicBlock*, WaitcntBrackets> blockEntryState;
     GfxArchID archId = GfxArchID{};
     VGPRHalfKeyer keyer{};
 
+   public:
+    explicit InsertWaitAluPassImpl(StinkyAsmModule* module) : module(module) {}
+
+   private:
     StinkyInstruction* emitWaitAlu(BasicBlock& bb, IRBase* insertBefore, const Wait& wait,
                                    int hold_cnt = -1) {
         AsmIRBuilder builder(bb, archId);
@@ -630,22 +608,32 @@ class InsertWaitAluPassImpl : public Pass {
             PASS_DEBUG(std::cerr << "[InsertWaitAlu]   visit " << inst->getHwInstDesc()->mnemonic
                                  << "\n");
 
-            // Function call (s_swappc): treat as an analysis barrier — reset the
-            // scoreboard so pre-call producer scores don't leak into post-call
-            // tracking as phantom dependencies.
-            //
-            // No drain / no callee-return handling is needed: mode2 is confined
-            // to the loop region (see insertSchedModeLifecycle), and every
-            // s_swappc lives in the mode0 epilogue (GlobalWriteBatch is the sole
-            // call emitter). In mode0 the hardware auto-stalls on all hazards —
-            // caller leftovers and callee outputs are all handled by HW, so the
-            // pass needs to emit nothing around the call.
+            // Function call (s_swappc): drain both counters right after the call,
+            // at the return-landing site. The callee may leave VALU/VMEM
+            // instructions outstanding on VA_VDST/VM_VSRC, so the drain is
+            // unconditional. The callee entry is drained separately
+            // (runCalleeConservativeDrain).
             if (isCall(*inst)) {
-                PASS_DEBUG(std::cerr << "[InsertWaitAlu]   call — reset brackets (mode0 epilogue, "
-                                        "HW handles hazards)\n");
+                PASS_DEBUG(std::cerr << "[InsertWaitAlu]   call — drain va_vdst(0)+vm_vsrc(0) "
+                                        "after s_swappc (callee->caller bracket)\n");
+                // nextIt is the instruction after the call. The drain is inserted
+                // before it, so resuming at nextIt continues past the drain
+                // instead of re-visiting it.
+                auto nextIt = it;
+                ++nextIt;
+                if (emit) {
+                    Wait drain;
+                    addWait(drain, CT_VA_VDST, 0);
+                    addWait(drain, CT_VM_VSRC, 0);
+                    // Insert before the node after the call (append at BB end if
+                    // the call is the last node) so the drain lands in the
+                    // caller's own BB, bound to the return path.
+                    IRBase* insertBefore = (nextIt == bb.end()) ? nullptr : nextIt.getNodePtr();
+                    emitWaitAlu(bb, insertBefore, drain);
+                }
                 sb.applyWaitcnt(CT_VA_VDST, 0);
                 sb.applyWaitcnt(CT_VM_VSRC, 0);
-                ++it;
+                it = nextIt;
                 continue;
             }
 
@@ -703,7 +691,11 @@ class InsertWaitAluPassImpl : public Pass {
         BasicBlock* entry = func.getEntryBlock();
         if (!entry) return;
 
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 3: insert mode2 lifecycle setregs\n");
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 3: insert mode2 enable setreg\n");
+
+        // Whole-kernel mode2: enable at the kernel entry label(s). Mode2 stays
+        // active across function calls and across the whole kernel body — it is
+        // never switched back to mode0.
 
         // The wave can enter the compute region through two labels: the
         // kernarg-preload path jumps straight to label_Preload_Offset_Start
@@ -724,7 +716,7 @@ class InsertWaitAluPassImpl : public Pass {
         if (anchorBBs.empty()) anchorBBs.push_back(entry);
 
         // Drain-free: each anchor is a kernel entry (all DEPCTR counters zero,
-        // SALU kernarg code follows), and mode2->mode0 needs no drain either.
+        // SALU kernarg code follows).
         for (BasicBlock* anchorBB : anchorBBs) {
             // Skip leading labels / pseudo instructions so the setreg lands at
             // the first real instruction position after the label.
@@ -743,145 +735,6 @@ class InsertWaitAluPassImpl : public Pass {
                                     "bb=\""
                                  << anchorBB->getLabel() << "\"\n");
         }
-
-        // Disable mode2 before every return and every call. We do NOT re-enable
-        // after a call: function calls only occur in the mode0 epilogue.
-        struct Insertion {
-            BasicBlock* bb;
-            StinkyInstruction* anchor;
-            int value;
-            bool insertAfter;
-        };
-        std::vector<Insertion> work;
-        std::unordered_set<BasicBlock*> bbsWithExitDisable;
-        for (BasicBlock& bb : func) {
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (!inst) continue;
-                if (isReturn(*inst)) {
-                    work.push_back({&bb, inst, /*value=*/0, /*insertAfter=*/false});
-                    bbsWithExitDisable.insert(&bb);
-                } else if (isCall(*inst)) {
-                    work.push_back({&bb, inst, /*value=*/0, /*insertAfter=*/false});
-                    bbsWithExitDisable.insert(&bb);
-                }
-            }
-        }
-
-        // A BB containing no real (non-pseudo) instruction is an out-of-region
-        // placeholder: CFGBuilder created it as the target of a branch whose real
-        // destination lives outside the extracted scope.
-        auto hasRealInst = [](BasicBlock& b) {
-            for (auto it = b.begin(); it != b.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst && !isPseudoInst(inst)) return true;
-            }
-            return false;
-        };
-        // A "scope-exit placeholder" is a label-only BB that CFGBuilder created
-        // as the target of a branch whose real IR lives OUTSIDE the extracted
-        // region: it has no real instructions AND no path back to real in-region
-        // content (a leaf, or a chain of label-only BBs that dead-ends). This
-        // must NOT match an in-region label-only BB that merely falls through to
-        // its real body in the next BB (e.g. label_ActivationSetPCAddrEnd,
-        // label_GW_B0_FD0_OptNLL_MB, the To_Activation_* arm targets) — those are
-        // not exits and would otherwise collect spurious mode0 disables.
-        auto isExitPlaceholder = [&](BasicBlock& start) {
-            if (hasRealInst(start)) return false;
-            std::unordered_set<BasicBlock*> seen;
-            std::vector<BasicBlock*> stack{&start};
-            while (!stack.empty()) {
-                BasicBlock* b = stack.back();
-                stack.pop_back();
-                if (!seen.insert(b).second) continue;
-                for (BasicBlock* s : b->getSuccessors()) {
-                    if (!s) continue;
-                    if (hasRealInst(*s)) return false;  // reaches real in-region code
-                    stack.push_back(s);
-                }
-            }
-            return true;  // no real in-region content reachable -> true exit
-        };
-
-        // Region-exit disables: one mode0 per edge leaving the mode2 region, none
-        // on in-region edges. Never disable before a conditional branch (it would
-        // clobber the in-region edge); conditional exits converge at the boundary label.
-        std::unordered_set<BasicBlock*> coveredAtLabel;
-        for (BasicBlock& bb : func) {
-            if (bbsWithExitDisable.count(&bb)) continue;
-            if (!bb.getSuccessors().empty()) continue;
-            StinkyInstruction* tail = lastRealInst(bb);
-            if (tail) {
-                const bool tailExits =
-                    isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
-                work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailExits});
-                bbsWithExitDisable.insert(&bb);
-                continue;
-            }
-            // Label-only BB. Skip if unreachable — every predecessor terminates
-            // with a return (s_endpgm), e.g. a trailing `label_ASM_End:` after
-            // `s_endpgm`, where the disable would be dead code.
-            StinkyInstruction* labelAnchor = nullptr;
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst && inst->getUnifiedOpcode() == GFX::LABEL) {
-                    labelAnchor = inst;
-                    break;
-                }
-            }
-            if (labelAnchor) {
-                bool reachable = bb.getPredecessors().empty();
-                for (BasicBlock* pred : bb.getPredecessors()) {
-                    StinkyInstruction* predTail = lastRealInst(*pred);
-                    if (!predTail || !isReturn(*predTail)) {
-                        reachable = true;
-                        break;
-                    }
-                }
-                if (reachable) {
-                    work.push_back({&bb, labelAnchor, /*value=*/0, /*insertAfter=*/true});
-                    bbsWithExitDisable.insert(&bb);
-                    coveredAtLabel.insert(&bb);
-                }
-            }
-        }
-        // Pass B — unconditional out-transfer (s_branch / s_setpc) not already
-        // covered by Pass A: disable before the terminator. Conditional branches
-        // are never disabled here (their exit converges at the label, Pass A).
-        for (BasicBlock& bb : func) {
-            if (bbsWithExitDisable.count(&bb)) continue;
-            StinkyInstruction* tail = lastRealInst(bb);
-            if (!tail) continue;
-            if (isConditionalBranch(*tail)) continue;
-            BasicBlock* exitSucc = nullptr;
-            for (BasicBlock* succ : bb.getSuccessors()) {
-                if (succ && isExitPlaceholder(*succ)) {
-                    exitSucc = succ;
-                    break;
-                }
-            }
-            if (!exitSucc) continue;
-            if (coveredAtLabel.count(exitSucc)) continue;
-            const bool tailTransfers =
-                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
-            work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
-            bbsWithExitDisable.insert(&bb);
-        }
-        for (const auto& w : work) {
-            IRBase* insertBefore = nullptr;
-            if (w.insertAfter) {
-                auto it = IRList::iterator(w.anchor);
-                ++it;
-                insertBefore = (it == w.bb->end()) ? nullptr : it.getNodePtr();
-            } else {
-                insertBefore = w.anchor;
-            }
-            makeSchedModeSetreg(*w.bb, insertBefore, w.value);
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   inserted setreg(SCHED_MODE)=" << w.value
-                                 << " " << (w.insertAfter ? "after" : "before") << " "
-                                 << w.anchor->getHwInstDesc()->mnemonic << " in bb=\""
-                                 << w.bb->getLabel() << "\"\n");
-        }
     }
 
    public:
@@ -893,21 +746,65 @@ class InsertWaitAluPassImpl : public Pass {
         return &InsertWaitAluPassImpl::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
-        auto arch = passCtx.getGemmTileConfig().arch;
-        archId = getGfxArchID(arch[0], arch[1], arch[2]);
-        const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
-        const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
-        keyer = VGPRHalfKeyer(hasD16);
+   private:
+    // Conservatively drain both counters at the callee entry.
+    //
+    // TODO: also run the full fixed-point WaitAlu analysis over the callee body
+    // (build its CFG, run the scoreboard) so the callee gets its own intra-body
+    // s_wait_alu, matching the entry-function path. Today the callee body is left
+    // un-analyzed.
+    void runCalleeConservativeDrain(Function& callee) {
+        BasicBlock* entry = callee.getEntryBlock();
+        if (!entry) return;
 
-        PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
-                             << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
-
-        if (func.empty()) {
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu] empty function, nothing to do\n");
-            return preserveCFGAnalyses();
+        // A callee that never touches a VGPR (e.g. the "None" activation, which
+        // only does s_setpc back) has no hazard to drain — skip it.
+        if (!functionReadsOrWritesVGPR(callee)) {
+            PASS_DEBUG(std::cerr << "[InsertWaitAlu] callee \"" << callee.getName()
+                                 << "\": no VGPR use, skip entry drain\n");
+            return;
         }
 
+        // Land the drain at the first real instruction.
+        auto it = entry->begin();
+        while (it != entry->end()) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (inst && isPseudoInst(inst)) {
+                ++it;
+                continue;
+            }
+            break;
+        }
+        IRBase* anchor = (it == entry->end()) ? nullptr : it.getNodePtr();
+
+        Wait drain;
+        addWait(drain, CT_VA_VDST, 0);
+        addWait(drain, CT_VM_VSRC, 0);
+        emitWaitAlu(*entry, anchor, drain);
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] callee \"" << callee.getName()
+                             << "\": entry drain va_vdst(0)+vm_vsrc(0)\n");
+    }
+
+    // True if any real instruction in func reads or writes a VGPR.
+    static bool functionReadsOrWritesVGPR(Function& func) {
+        for (BasicBlock& bb : func) {
+            for (auto it = bb.begin(); it != bb.end(); ++it) {
+                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+                if (!inst || isPseudoInst(inst)) continue;
+                for (const auto& r : inst->getSrcRegs())
+                    if (r.dataType == StinkyRegister::Type::Register && r.reg.type == RegType::V)
+                        return true;
+                for (const auto& r : inst->getDestRegs())
+                    if (r.dataType == StinkyRegister::Type::Register && r.reg.type == RegType::V)
+                        return true;
+            }
+        }
+        return false;
+    }
+
+    // Full fixed-point scoreboard analysis + mode2 enable for the entry
+    // (non-callee) function.
+    void runEntryFunction(Function& func, AnalysisManager& AM) {
         const auto& bbIndex = AM.getResult<BBIndexAnalysis>(func);
         const auto& rpo = bbIndex.rpo;
 
@@ -944,15 +841,48 @@ class InsertWaitAluPassImpl : public Pass {
                                  << " BB visits\n");
         }
 
-        // Phase 2: emit s_wait_alu using converged state.
+        // Phase 2: emit s_wait_alu using converged state. Caller->callee bracket
+        // drains are emitted here, in the isCall branch of runOnBasicBlock.
         PASS_DEBUG(std::cerr << "[InsertWaitAlu] Phase 2: emit s_wait_alu instructions\n");
         for (auto* bb : rpo) runOnBasicBlock(*bb, /*emit=*/true);
 
-        // Phase 3: mode2 lifecycle (setreg at entry / before calls+returns /
-        // after calls).
+        // Phase 3: enable mode2 at entry label (never disabled thereafter).
         insertSchedModeLifecycle(func);
 
         blockEntryState.clear();
+    }
+
+   public:
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
+        auto arch = passCtx.getGemmTileConfig().arch;
+        archId = getGfxArchID(arch[0], arch[1], arch[2]);
+        const auto* archInfo = ArchHelper::getInstance().getArchInfo(archId);
+        const bool hasD16 = archInfo && archInfo->hasD16Writes32BitVgpr();
+        keyer = VGPRHalfKeyer(hasD16);
+
+        PASS_DEBUG(std::cerr << "[InsertWaitAlu] run arch=gfx" << arch[0] << arch[1] << arch[2]
+                             << " hasD16Writes32BitVgpr=" << hasD16 << "\n");
+
+        // Whole-kernel: process the entry function with full analysis, then apply
+        // the conservative entry drain to every callee. The pass is invoked on the
+        // entry function; callees are reached via the module. Guard against being
+        // re-invoked per-function by a future driver: only the non-callee run
+        // drives callee processing.
+        if (func.getIsCallable()) {
+            if (!func.empty()) runCalleeConservativeDrain(func);
+            return PreservedAnalyses::none();
+        }
+
+        if (!func.empty()) runEntryFunction(func, AM);
+
+        // Reach callees only when a module is available (backend pipeline). In
+        // stinkytofu-opt single-pass mode / unit tests there is no module.
+        if (module) {
+            for (Function* fn : module->getFunctions()) {
+                if (fn && fn->getIsCallable() && !fn->empty()) runCalleeConservativeDrain(*fn);
+            }
+        }
+
         return PreservedAnalyses::none();
     }
 };
@@ -962,7 +892,10 @@ char InsertWaitAluPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
+std::unique_ptr<Pass> createInsertWaitAluPass(StinkyAsmModule& module) {
+    return std::make_unique<InsertWaitAluPassImpl>(&module);
+}
 std::unique_ptr<Pass> createInsertWaitAluPass() {
-    return std::make_unique<InsertWaitAluPassImpl>();
+    return std::make_unique<InsertWaitAluPassImpl>(nullptr);
 }
 }  // namespace stinkytofu
