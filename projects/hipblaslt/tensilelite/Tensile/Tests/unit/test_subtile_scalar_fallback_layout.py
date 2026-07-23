@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 ################################################################################
-# Guards the out-of-line 16-bit subtile scalar-fallback store layout
-# ("BranchPenaltyFallThrough") in Components/GlobalWriteBatch.py: the paired
-# dwordx store falls through to its merge label, and each scalar fallback block
-# is emitted out of line at the end of the batch, bracketed by a skip s_branch
-# and an end label. Drives the real KernelWriterAssembly.notLocalSplitUGlobalWrite
+# Guards the out-of-line 16-bit subtile scalar-fallback store layout in
+# Components/GlobalWriteBatch.py, which keeps the scalar fallback off the hot
+# store path (less instruction-fetch pressure): the paired dwordx store falls
+# through to its merge label, and each scalar fallback block is emitted out of
+# line at the end of the batch, bracketed by a skip s_branch and an end label.
+# Drives the real KernelWriterAssembly.notLocalSplitUGlobalWrite
 # emission (CPU-only, no GPU) and asserts the ordering/branch invariants.
 #
 # Usage:
