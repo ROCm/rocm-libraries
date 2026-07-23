@@ -179,13 +179,6 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     // Expose kCMLane for some callers (e.g. gemm_quant block policies)
     static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
 
-    // Scale intrinsics have no "no-scale" opcode.
-    // Packed e8m0_t, bias 127 = 0x7F => 2^(127-127) = 1 for each byte.
-    // For architectures with a wider scale operand, e.g. gfx1250 scale16: 8 packed bytes
-    // For architectures with a narrower scale operand, e.g. gfx950 scale8: 4 packed bytes
-    // Since each byte is 0x7F, implicit narrowing to 4 bytes is still correct.
-    static constexpr int64_t kIdentityScale = 0x7F7F7F7F7F7F7F7Fll;
-
     // Unsupported MmaOps with nonTrivial AttrNumAccess / Swizzle lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
