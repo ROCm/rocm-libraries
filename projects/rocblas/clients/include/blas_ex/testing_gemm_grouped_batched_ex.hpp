@@ -758,7 +758,9 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
         if(arg.pointer_mode_host)
         {
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+            handle.pre_test(arg);
             run_grouped_gemm_ex(cfg.alpha_array.data(), cfg.beta_array.data());
+            handle.post_test(arg);
             CHECK_HIP_ERROR(hD_1.transfer_from(dDref));
         }
 
