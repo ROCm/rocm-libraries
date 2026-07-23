@@ -15,7 +15,7 @@
   <rect x="20" y="36" width="250" height="140" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="36" y="62" font-size="12" fill="#333">descriptor files:</text>
   <text x="36" y="84" font-family="Consolas, monospace" font-size="12">  KDP: matchers+eng+heur</text>
-  <text x="36" y="106" font-family="Consolas, monospace" font-size="12">       +UDD + kernel vector</text>
+  <text x="36" y="106" font-family="Consolas, monospace" font-size="12">       +UDD+KMD + kernels</text>
   <text x="36" y="128" font-family="Consolas, monospace" font-size="12">kernel sources / &lt;arch&gt;</text>
 
   <!-- Build-time box -->

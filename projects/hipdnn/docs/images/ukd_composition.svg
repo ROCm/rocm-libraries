@@ -72,7 +72,7 @@
   <text x="544" y="328" font-size="10" fill="#555">&#8627; resolves to a UKD, picked by its own heuristic</text>
 
   <!-- caption -->
-  <text x="703" y="366" text-anchor="middle" font-size="11" fill="#555">each stage = a UMD/UHD/UED + Launch bundle</text>
+  <text x="703" y="366" text-anchor="middle" font-size="11" fill="#555">each stage resolves to a UKD from its own KDP</text>
   <text x="703" y="390" text-anchor="middle" font-size="12" fill="#333">Independently authored kernels, each ranked</text>
   <text x="703" y="408" text-anchor="middle" font-size="12" fill="#333">separately, wired by intermediate tensors.</text>
 
