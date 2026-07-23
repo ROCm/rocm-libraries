@@ -463,8 +463,10 @@ graph matches, then **used** in the UDD's formulas ([Section 6](#6-dispatch-and-
 binds here and feeds `ceil_div($q.seqlen_q, 16)` there. A formula can only reference fields the match
 produces. A capture name reused across patterns binds once and requires the matches to agree, so
 `head_size` naming a dim in the Q, K, and V shapes expresses equal head dim across the three tensors as
-ordinary data, no escape hatch, the same way `batch` and `num_heads` shared across them require those to
-agree too.
+ordinary data, no escape hatch. Reuse handles the equality case; a cross-tensor relation that is not
+equality is written explicitly as an operator over two bound references, for example GQA grouping as
+`divisible($q.num_heads, $k.num_heads)` or a derived comparison over a product of dims. Both forms are
+plain data over the fields the match binds.
 
 ![A live graph is matched against a declarative pattern, binding named variables](../images/ukd_criteria_match.svg)
 
@@ -755,14 +757,17 @@ The provider surfaces:
   fell to `priority` or stable `id`.
 - **Load and compile diagnostics**: which descriptors were discovered, which were quarantined and why,
   and the timing of descriptor discovery and any JIT compilation.
-- **Load-time validation**: every descriptor is checked as it loads, and a failure names the descriptor,
-  the field, and the reason. The checks include expression syntax (balanced tree, known operators, right
-  arity); token references that resolve (every `$`-field is declared in the schema, and every `$kernel.*`
-  a matcher or dispatch formula reads exists in the engine's KMD); cross-descriptor references that
-  resolve (a KDP's `engine`, `matchers`, and `dispatch`; a UED's `heuristic` and `metadata`); UDD
-  formulas that reference only fields the matcher binds; and launch slots that every referenced kernel
-  source fills. Anything that fails, an unbound token, an unknown operator, a dangling reference, is a
-  clear load error that quarantines the offending descriptor, never a runtime surprise.
+- **Load-time validation**: each descriptor is checked when it loads (eagerly for UEDs and matchers, at
+  first use for the lazily loaded rest), and a failure names the descriptor, the field, and the reason.
+  The checks include expression syntax (balanced tree, known operators, right arity); token references
+  that resolve (every `$`-field is declared in the schema, and every `$kernel.*` a matcher or dispatch
+  formula reads exists in the engine's KMD); cross-descriptor references that resolve (a KDP's `engine`,
+  `matchers`, and `dispatch`; a UED's `heuristic` and `metadata`); UDD formulas that reference only
+  fields the matcher binds; and launch slots that every referenced kernel source fills. Where a code
+  object exposes its kernarg layout, the UDD's argument signature is checked against it so an ABI
+  mismatch is caught here rather than corrupting the launch. Anything that fails, an unbound token, an
+  unknown operator, a dangling reference, is a clear error that quarantines the offending descriptor,
+  never a runtime surprise.
 
 These make a descriptor-backed kernel as debuggable as hand-written C++, and are what let an operator
 trust a system whose behavior lives in data. The tooling surface is built out alongside the phases of
