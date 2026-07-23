@@ -132,211 +132,79 @@ def _run_git(args):
         return 1, "", f"{type(e).__name__}: {e}"
 
 
-def _dump_git_state(g):
-    """EXPERIMENTAL/DEBUG: dump everything about the checkout so we can see what refs are
-    available to compute a base from on the TheRock CI runner. Remove once the right
-    strategy is known."""
-    print("=" * 78)
-    print("DAPPER DEBUG: git state (source_dir git dir)")
-    print("=" * 78)
-    probes = [
-        ("cwd/source_dir", g[2]),
-        ("toplevel", g + ["rev-parse", "--show-toplevel"]),
-        ("git-dir", g + ["rev-parse", "--git-dir"]),
-        ("is-shallow", g + ["rev-parse", "--is-shallow-repository"]),
-        ("HEAD", g + ["rev-parse", "HEAD"]),
-        ("HEAD+parents", g + ["rev-list", "--parents", "-n", "1", "HEAD"]),
-        ("HEAD log -5", g + ["log", "--oneline", "-5", "HEAD"]),
-        ("remotes", g + ["remote", "-v"]),
-        ("branch -a", g + ["branch", "-a"]),
-        ("branch -r", g + ["branch", "-r"]),
-        (
-            "for-each-ref",
-            g + ["for-each-ref", "--format=%(objectname:short) %(refname)"],
-        ),
-        ("tags", g + ["tag", "--list"]),
-        ("FETCH_HEAD", g + ["rev-parse", "--verify", "-q", "FETCH_HEAD"]),
-        ("remote config", g + ["config", "--get-regexp", r"^remote\."]),
-    ]
-    for label, cmd in probes:
-        if isinstance(cmd, str):
-            print(f"--- {label}: {cmd}")
-            continue
-        rc, out, err = _run_git(cmd)
-        print(f"--- {label} (rc={rc}) ---")
-        if out:
-            print(out)
-        elif err:
-            print(f"[stderr] {err}")
-        else:
-            print("(empty)")
-    print("=" * 78)
-
-
-def _ci_base_from_env():
-    """EXPERIMENTAL/DEBUG: authoritative base candidates from the CI environment.
-
-    On GitHub Actions the PR's true base is github.event.pull_request.base.sha (the target
-    branch tip at PR time). It is in the event payload at $GITHUB_EVENT_PATH and, for
-    pull_request runs, GITHUB_BASE_REF holds the target branch name. This is a nice-to-have
-    shortcut only: even with nothing here, dapper self-serves by fetching develop / base_ref
-    blobless from origin (see resolve_base_sha strategy 3), so no TheRock plumbing is needed.
-    Returns a list of (why, value) to fetch+merge-base against, most authoritative first, and
-    prints what it found."""
-    print("--- CI env (base discovery) ---")
-    for v in (
-        "GITHUB_EVENT_NAME",
-        "GITHUB_BASE_REF",
-        "GITHUB_HEAD_REF",
-        "GITHUB_REF",
-        "GITHUB_SHA",
-        "GITHUB_REPOSITORY",
-        "GITHUB_EVENT_PATH",
-        "GITHUB_BASE_SHA",
-        "PR_BASE_SHA",
-        "THEROCK_PR_BASE_SHA",
-        "CI",
-    ):
-        print(f"    {v}={os.environ.get(v)}")
-    print(
-        f"    token present: {bool(os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN'))}"
-    )
+def _ci_base_candidates():
+    """Authoritative base candidates from the CI environment. On GitHub Actions the PR base
+    is github.event.pull_request.base.sha (in the event payload at $GITHUB_EVENT_PATH) and
+    GITHUB_BASE_REF holds the target branch name. Returns [(why, value)], most authoritative
+    first. Optional -- resolve_base_sha also falls back to a blobless develop fetch."""
     cands = []
     ev = os.environ.get("GITHUB_EVENT_PATH")
     if ev and os.path.isfile(ev):
         try:
             with open(ev) as f:
-                pr = json.load(f).get("pull_request") or {}
-            base = pr.get("base") or {}
-            print(
-                f"    event base.sha={base.get('sha')} base.ref={base.get('ref')} "
-                f"head.sha={(pr.get('head') or {}).get('sha')}"
-            )
+                base = (json.load(f).get("pull_request") or {}).get("base") or {}
             if base.get("sha"):
                 cands.append(("event.base.sha", base["sha"]))
             if base.get("ref"):
                 cands.append(("event.base.ref", base["ref"]))
         except Exception as e:  # noqa: BLE001
-            print(f"    (could not parse GITHUB_EVENT_PATH: {e})")
-    for var in (
-        "GITHUB_BASE_SHA",
-        "PR_BASE_SHA",
-        "THEROCK_PR_BASE_SHA",
-        "GITHUB_BASE_REF",
-    ):
-        val = os.environ.get(var)
-        if val:
-            cands.append((f"env:{var}", val))
+            print(f"DAPPER base: could not parse GITHUB_EVENT_PATH ({e})")
+    if os.environ.get("GITHUB_BASE_REF"):
+        cands.append(("GITHUB_BASE_REF", os.environ["GITHUB_BASE_REF"]))
     return cands
 
 
 def resolve_base_sha(source_dir, base_ref, feature="HEAD"):
-    """Determine the base commit for the impact diff, robust to CI checkouts.
+    """Base commit for the impact diff = merge-base(feature, target branch).
 
-    `feature` is the tip we diff FROM -- normally the PR head, NOT the CI merge commit.
-    (On TheRock the checkout HEAD is refs/pull/N/merge = head merged with current develop;
-    diffing against that drags in develop's advancement, so the caller passes the real PR
-    head here.) All merge-base checks are against `feature`.
+    `feature` is the tip we diff FROM -- the PR head, NOT the CI merge commit (diffing the
+    merge would drag in develop's advancement); the caller passes the real PR head.
 
-    EXPERIMENTAL/DEBUG version: dumps the full git state and tries a battery of strategies
-    until it finds a commit that shares history with `feature` (a merge-base). Once a real
-    run confirms the winning path we can trim this down.
+    - Native MIOpen-CI: the target (base_ref / origin/develop) is already a local ref, so
+      merge-base resolves directly.
+    - TheRock CI: origin/develop is not fetched and the checkout is shallow, but the PR base
+      is in the event payload (pull_request.base.sha). Fetch it BLOBLESS (commits + trees,
+      no file blobs -- all that merge-base and `git diff --name-only` need), deepening until
+      it shares history with the feature.
+    - Last resort: a blobless develop / base_ref fetch (self-service; nothing needs to be
+      passed down from TheRock).
 
-    Order: (1) if feature is a merge, fork-point of its parents; (2) merge-base(feature, ref)
-    for a battery of already-present candidate refs; (3) fetch base/develop blobless
-    (progressively deeper) and retry. Returns None only if everything fails (caller fails
-    open to entire_category).
-    """
+    Returns None only if nothing resolves (caller fails open to entire_category)."""
     g = ["git", "-C", source_dir]
-    _dump_git_state(g)
-    env_bases = _ci_base_from_env()
 
-    def try_merge_base(ref, why):
-        rc, sha, _ = _run_git(g + ["rev-parse", "--verify", "-q", f"{ref}^{{commit}}"])
-        if rc != 0 or not sha:
-            print(f"DAPPER base [{why}] ref='{ref}': does not resolve -- skip")
+    def try_mb(ref, why):
+        if not _run_git(g + ["rev-parse", "--verify", "-q", f"{ref}^{{commit}}"])[1]:
             return None
-        rc, mb, err = _run_git(g + ["merge-base", feature, ref])
+        rc, mb, _ = _run_git(g + ["merge-base", feature, ref])
         if rc == 0 and mb:
-            print(
-                f"DAPPER base [{why}] ref='{ref}' ({sha[:12]}) -> merge-base {mb[:12]}  OK"
-            )
+            print(f"DAPPER base [{why}] {ref} -> merge-base {mb[:12]}")
             return mb
-        print(f"DAPPER base [{why}] ref='{ref}' ({sha[:12]}): NO merge-base ({err})")
         return None
 
-    # (1) feature is itself a merge commit -> order-independent fork point of its parents.
-    rc, parents, _ = _run_git(g + ["rev-list", "--parents", "-n", "1", feature])
-    toks = parents.split() if parents else []
-    if len(toks) >= 3:
-        rc, mb, _ = _run_git(g + ["merge-base", toks[1], toks[2]])
-        if rc == 0 and mb:
-            print(
-                f"DAPPER base [merge-fork] parents {toks[1][:12]},{toks[2][:12]} -> {mb[:12]}  OK"
-            )
-            return mb
-
-    # (2) battery of candidate refs already present in the checkout.
-    candidates = [
-        base_ref,
-        "origin/develop",
-        "refs/remotes/origin/develop",
-        "develop",
-        "refs/heads/develop",
-        "origin/HEAD",
-        "origin/main",
-        "main",
-        "origin/master",
-        "master",
-    ]
-    rc, refs, _ = _run_git(g + ["for-each-ref", "--format=%(refname)"])
-    for r in refs.splitlines() if refs else []:
-        if r.rsplit("/", 1)[-1] in ("develop", "main", "master"):
-            candidates.append(r)
-    seen, tried = set(), []
-    for ref in candidates:
-        if ref in seen:
-            continue
-        seen.add(ref)
-        tried.append(ref)
-        mb = try_merge_base(ref, "local-ref")
+    # 1. Target branch already present locally (native MIOpen-CI).
+    for ref in (base_ref, "origin/develop"):
+        mb = try_mb(ref, "local")
         if mb:
             return mb
 
-    # (3) Self-service fetch straight from rocm-libraries -- no need to plumb anything down
-    # from TheRock. Fetch BLOBLESS (--filter=blob:none): that pulls commits + trees but no
-    # file contents, which is all dapper needs -- merge-base uses the commit graph and
-    # `git diff --name-only` uses trees, not blobs. The base branch is known (develop /
-    # base_ref); try any CI-provided base first, then develop. Escalate depth until HEAD and
-    # the base share history (a not-current PR needs the fork point present); --unshallow
-    # stays cheap because it is blobless.
-    fetch_targets = env_bases + [("develop", "develop"), (base_ref, base_ref)]
-    for why, target in fetch_targets:
-        for depth in (["--depth=1"], ["--deepen=5000"], ["--unshallow"]):
-            cmd = (
+    # 2. Fetch the base BLOBLESS and retry: CI-authoritative base(s) first, then develop /
+    #    base_ref as a last resort; escalate depth until feature and base share history.
+    for why, target in _ci_base_candidates() + [
+        ("develop", "develop"),
+        ("base_ref", base_ref),
+    ]:
+        for depth in ("--depth=1", "--deepen=5000", "--unshallow"):
+            rc, _, err = _run_git(
                 g
-                + ["fetch", "--no-tags", "--filter=blob:none"]
-                + depth
-                + [
-                    "origin",
-                    target,
-                ]
+                + ["fetch", "--no-tags", "--filter=blob:none", depth, "origin", target]
             )
-            print(f"DAPPER base: [{why}] {' '.join(cmd)}")
-            rc, out, err = _run_git(cmd)
-            print(f"  -> rc={rc} {(err or out)[:300]}")
             if rc != 0:
                 continue
-            for ref in ("FETCH_HEAD", target, f"origin/{target}"):
-                mb = try_merge_base(ref, f"{why}/{depth[0]}")
-                if mb:
-                    return mb
+            mb = try_mb("FETCH_HEAD", f"{why}/{depth}")
+            if mb:
+                return mb
 
-    print(
-        f"DAPPER base: ALL strategies failed (local refs: {tried}; "
-        f"env bases: {[w for w, _ in env_bases]}; + develop fetch). "
-        "Returning None -> entire_category fallback."
-    )
+    print("DAPPER base: unresolved -> entire_category fallback")
     return None
 
 
