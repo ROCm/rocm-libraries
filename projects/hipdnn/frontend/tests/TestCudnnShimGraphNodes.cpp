@@ -453,6 +453,98 @@ TEST(TestCudnnShimGraphNodes, BlockScaleDequantizeValidGraphValidates)
     EXPECT_TRUE(graph.validate().is_good());
 }
 
+// --- (a2) Unhappy path: Tier-1 nodes still enforce constraints --------------
+//
+// The wrapper forwards to the real hipDNN engines, so a malformed Tier-1 graph
+// must fail validate() gracefully with a specific error code -- never crash and
+// never masquerade as GRAPH_NOT_SUPPORTED (which is reserved for fail-stubs).
+
+void expectValidateFails(fe::graph::Graph& graph, fe::error_code_t code)
+{
+    auto error = graph.validate();
+    EXPECT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), code);
+    EXPECT_NE(error.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+}
+
+// conv_fprop with default attributes: padding/stride/dilation unset -> the conv
+// node's pre-validation rejects it with ATTRIBUTE_NOT_SET.
+TEST(TestCudnnShimGraphNodes, ConvFpropMissingParamsFailsValidation)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto x = hipdnn_shim_test::makeTensor(graph, {16, 128, 64, 64}, {524288, 1, 8192, 128}, 1);
+    auto w = hipdnn_shim_test::makeTensor(graph, {256, 128, 1, 1}, {128, 1, 128, 128}, 2);
+
+    auto y = graph.conv_fprop(x, w, fe::graph::Conv_fprop_attributes{});
+    ASSERT_NE(y, nullptr);
+    y->set_output(true).set_uid(3);
+
+    expectValidateFails(graph, fe::error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+// conv_dgrad output dim cannot be inferred from the attributes alone; omitting
+// the explicit dx dim fails with ATTRIBUTE_NOT_SET (mirrors the happy-path test
+// that sets it, proving the constraint is real).
+TEST(TestCudnnShimGraphNodes, ConvDgradMissingOutputDimFailsValidation)
+{
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto dy = hipdnn_shim_test::makeTensor(graph, {1, 64, 32, 32}, {65536, 1024, 32, 1}, 1);
+    auto w = hipdnn_shim_test::makeTensor(graph, {64, 3, 3, 3}, {27, 9, 3, 1}, 2);
+
+    auto dx = graph.conv_dgrad(
+        dy,
+        w,
+        fe::graph::Conv_dgrad_attributes{}.set_padding({1, 1}).set_stride({1, 1}).set_dilation(
+            {1, 1}));
+    ASSERT_NE(dx, nullptr);
+    dx->set_output(true).set_uid(3); // deliberately no set_dim
+
+    expectValidateFails(graph, fe::error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+// Two graph tensors sharing a UID is a structural error caught before any node
+// validation: INVALID_VALUE.
+TEST(TestCudnnShimGraphNodes, DuplicateTensorUidFailsValidation)
+{
+    const int64_t n = 4;
+
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto a = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
+    auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 1);
+
+    auto c = graph.pointwise(
+        a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
+    ASSERT_NE(c, nullptr);
+    c->set_output(true).set_uid(2);
+
+    expectValidateFails(graph, fe::error_code_t::INVALID_VALUE);
+}
+
+// A non-positive tensor dimension is rejected by tensor validation: INVALID_VALUE.
+TEST(TestCudnnShimGraphNodes, NonPositiveDimFailsValidation)
+{
+    const int64_t n = 4;
+
+    fe::graph::Graph graph;
+    setFloatGraphTypes(graph);
+
+    auto a = hipdnn_shim_test::makeTensor(graph, {n, 0, n, n}, {n * n * n, n * n, n, 1}, 1);
+    auto b = hipdnn_shim_test::makeTensor(graph, {n, n, n, n}, {n * n * n, n * n, n, 1}, 2);
+
+    auto c = graph.pointwise(
+        a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
+    ASSERT_NE(c, nullptr);
+    c->set_output(true).set_uid(3);
+
+    expectValidateFails(graph, fe::error_code_t::INVALID_VALUE);
+}
+
 // --- (b) Tier-2 fail-stub nodes: recorded GRAPH_NOT_SUPPORTED ---------------
 //
 // The error is recorded before any tensor validation, so null inputs are fine.
