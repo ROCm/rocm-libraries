@@ -114,7 +114,9 @@ def _profile_command(args: argparse.Namespace, variant: str) -> list[str]:
     return cmd + ["--", *_benchmark_command(args, variant)]
 
 
-def _run(cmd: Sequence[str], *, allow_regression: bool = False) -> subprocess.CompletedProcess:
+def _run(
+    cmd: Sequence[str], *, allow_regression: bool = False
+) -> subprocess.CompletedProcess:
     proc = subprocess.run(
         cmd,
         capture_output=True,
@@ -179,7 +181,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"[sweep] {row.config_name:7s} ERROR {row.error}")
 
     winner, results = autotune_sweep(configs, bench_fn=bench, on_progress=progress)
-    ranked = sorted((row for row in results if row.is_ok), key=lambda row: row.ms_per_iter)
+    ranked = sorted(
+        (row for row in results if row.is_ok), key=lambda row: row.ms_per_iter
+    )
     print(f"[sweep] winner: {winner.name}")
 
     for row in ranked[: args.shortlist]:
