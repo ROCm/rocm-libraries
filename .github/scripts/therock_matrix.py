@@ -177,8 +177,21 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
     "projects/hipblaslt": "sparselt",
 }
 
+# PR labels that inject an extra cmake option into a specific project's build.
+# The option is only added when the label is present on the PR, so the default
+# build is unchanged (and, for MIOpen, byte-equivalent). This lets a branch opt a
+# single superbuild into a feature flag without adding a second, colliding job:
+# the existing job builds with the flag on and uploads its artifact once, in place
+# of the flag-off one, so there is no S3 artifact overlap or job-name clash.
+LABEL_GATED_CMAKE_OPTIONS = {
+    "ci:miopen-hipdnn-wrapper": {
+        "project": "miopen",
+        "cmake_option": "-DTHEROCK_FLAG_MIOPEN_ENABLE_HIPDNN_WRAPPER=ON",
+    },
+}
 
-def collect_projects_to_run(subtrees):
+
+def collect_projects_to_run(subtrees, pr_labels=None):
     platform = os.getenv("PLATFORM")
     projects = set()
     # Work on per-call deep copies so module-level state stays immutable across calls.
@@ -238,6 +251,16 @@ def collect_projects_to_run(subtrees):
     for to_remove_item in to_remove_from_project_map:
         projects.remove(to_remove_item)
         del local_project_map[to_remove_item]
+
+    # Inject label-gated cmake options into their target project's build. Only
+    # applied when the gating label is present and that project is actually being
+    # built, so the default build is untouched. See LABEL_GATED_CMAKE_OPTIONS.
+    for label in pr_labels or []:
+        gated = LABEL_GATED_CMAKE_OPTIONS.get(label)
+        if gated and gated["project"] in projects:
+            local_project_map[gated["project"]]["cmake_options"].append(
+                gated["cmake_option"]
+            )
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
