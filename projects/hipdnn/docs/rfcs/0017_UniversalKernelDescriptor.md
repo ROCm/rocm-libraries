@@ -327,9 +327,10 @@ vocabulary up front and the interpreter fails closed on anything undeclared. The
 namespaces, and every criteria and dispatch expression draws from the same set:
 
 - **Tensor:** a bound operand's fields: `$q.dtype`, `$q.rank`, its named dims (`$q.seqlen_q`, `$w.c`),
-  and evaluated flags the schema computes (`$q.stride_order`, `$q.packed`, and `$q.virtual`, set when the
-  tensor is internal to the matched subgraph rather than a graph input or output).
-- **Graph:** structural facts of the matched subgraph, e.g. `$graph.node_count`.
+  evaluated flags (`$q.stride_order`, `$q.packed`), and `$q.virtual` (an internal intermediate between
+  matched nodes, not a graph input or output).
+- **Graph:** structural facts of the matched graph, e.g. `$graph.node_count`, which pins an exact match
+  (the graph has exactly this many nodes).
 - **Attributes:** a matched op node's attributes, named by the node's pattern `id`: an SDPA node
   `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.head_size`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
 - **Kernel metadata:** `$kernel.<field>`, the current UKD's build features and values (tile and vector
@@ -342,6 +343,14 @@ namespaces, and every criteria and dispatch expression draws from the same set:
 New fields are added to the schema and referenced the same way; the full field and operator vocabulary,
 the operand-property set (broadcast, alignment, sparse and ragged kinds), and the interpreter profile
 are in the UMD follow-up.
+
+**A prebuilt match is exact.** A prebuilt kernel solves one complete graph, so a matcher asserts
+`$graph.node_count` to accept only a graph of exactly that size, and marks each intermediate tensor
+`virtual`. A single-op kernel checks `node_count == 1`; a fused Conv-Bias-ReLU kernel checks
+`node_count == 3` with its two intermediates `virtual`. Shared checks (like the tile matcher below) stay
+graph-shape-agnostic, so one such matcher composes into packs of either shape. Matching a pattern inside
+a larger graph, without a fixed count, is the looser JIT / general-matching mode
+([Section 8.3](#83-future-jit-and-normalized-providers)).
 
 **Architecture** is handled at pack selection rather than as a runtime criterion, at least for AOT: a
 pack carries code objects for the arches it targets, so its per-architecture `kpack` manifest
@@ -400,7 +409,8 @@ them:
     {"in":    [{"var": "$v.dtype"}, ["BFLOAT16"]]},
     {"hipdnn.same_head_dim": [{"var": "$q"}, {"var": "$k"}, {"var": "$v"}]},      // custom operation
     {"==":    [{"var": "$sdpa_fwd.head_size"}, 128]},
-    {"in":    [{"var": "$sdpa_fwd.mask_mode"}, ["none"]]}
+    {"in":    [{"var": "$sdpa_fwd.mask_mode"}, ["none"]]},
+    {"==":    [{"var": "$graph.node_count"}, 1]}  // exact: this kernel is the whole graph
   ]}
 }
 ```
@@ -444,13 +454,10 @@ top-scored kernel wins. Ties break in a fixed order: explicit `priority`, then t
 follow-up ([Section 8.3](#83-future-jit-and-normalized-providers)); a prebuilt kernel encodes one fixed
 graph shape, so bounded matching covers it, and operand optionality is handled by shipping distinct UKDs.
 
-**A fused match.** The same UMD form matches several ops as one fusable unit. A pattern matches a
-subgraph *wherever* it appears, so this Conv, Bias, and ReLU chain matches even when embedded in a
-larger graph. The fusion is legal only if the intermediates it absorbs do not escape, so the criteria
-require `$conv_out` and `$bias_out` to be `virtual` (produced and consumed inside the pattern, read
-nowhere else); then one UKD serves the whole chain as a single kernel. (`$graph.node_count == 3` is the
-stricter alternative, for a matcher that should accept only a graph that is exactly these ops and
-nothing more.)
+**A fused match.** The same UMD form matches several ops as one fusable unit. This Conv-Bias-ReLU
+matcher pins the exact graph: `$graph.node_count == 3` accepts only these three ops, and `$conv_out` and
+`$bias_out` are required `virtual`, so those intermediates are absorbed into the fused kernel and one UKD
+serves the whole chain as a single kernel.
 
 ```jsonc
 {
@@ -472,7 +479,8 @@ nothing more.)
     {"==":    [{"var": "$y.stride_order"}, [0, 2, 3, 1]]}, {"var": "$y.packed"},  // NHWC
     {"shape": [{"var": "$y"}, ["batch", "out_h", "out_w", "out_channels"]]},
     {"shape": [{"var": "$bias"}, ["out_channels"]]},
-    {"var": "$conv_out.virtual"},  // internal to the pattern (read nowhere else), so the fusion is legal
+    {"==":  [{"var": "$graph.node_count"}, 3]},  // exactly these three ops
+    {"var": "$conv_out.virtual"},                // internal intermediate, absorbed by the fused kernel
     {"var": "$bias_out.virtual"}
   ]}
 }
@@ -756,7 +764,8 @@ shown below so the example stands on its own; the matcher is the SDPA forward on
     {"in":    [{"var": "$v.dtype"}, ["BFLOAT16"]]},
     {"hipdnn.same_head_dim": [{"var": "$q"}, {"var": "$k"}, {"var": "$v"}]},      // custom operation
     {"==":    [{"var": "$sdpa_fwd.head_size"}, 128]},
-    {"in":    [{"var": "$sdpa_fwd.mask_mode"}, ["none"]]}
+    {"in":    [{"var": "$sdpa_fwd.mask_mode"}, ["none"]]},
+    {"==":    [{"var": "$graph.node_count"}, 1]}  // exact: this kernel is the whole graph
   ]}
   // arch is a pack property (KDP.arch below), not a criterion
 }
