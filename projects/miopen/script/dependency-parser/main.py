@@ -230,18 +230,22 @@ def _ci_base_from_env():
     return cands
 
 
-def resolve_base_sha(source_dir, base_ref):
+def resolve_base_sha(source_dir, base_ref, feature="HEAD"):
     """Determine the base commit for the impact diff, robust to CI checkouts.
 
-    EXPERIMENTAL/DEBUG version: dumps the full git state and tries a battery of strategies
-    until it finds a commit that shares history with HEAD (a merge-base). This exists
-    because TheRock's checkout has neither `origin/develop` as a ref nor a merge commit at
-    HEAD, so earlier attempts fell back to entire_category. Once we see the debug dump from
-    a real TheRock run we can trim this down to the one strategy that works.
+    `feature` is the tip we diff FROM -- normally the PR head, NOT the CI merge commit.
+    (On TheRock the checkout HEAD is refs/pull/N/merge = head merged with current develop;
+    diffing against that drags in develop's advancement, so the caller passes the real PR
+    head here.) All merge-base checks are against `feature`.
 
-    Order: (1) if HEAD is a merge, fork-point of its parents; (2) merge-base(HEAD, ref) for
-    a battery of already-present candidate refs; (3) fetch develop (progressively deeper)
-    and retry. Returns None only if everything fails (caller fails open to entire_category).
+    EXPERIMENTAL/DEBUG version: dumps the full git state and tries a battery of strategies
+    until it finds a commit that shares history with `feature` (a merge-base). Once a real
+    run confirms the winning path we can trim this down.
+
+    Order: (1) if feature is a merge, fork-point of its parents; (2) merge-base(feature, ref)
+    for a battery of already-present candidate refs; (3) fetch base/develop blobless
+    (progressively deeper) and retry. Returns None only if everything fails (caller fails
+    open to entire_category).
     """
     g = ["git", "-C", source_dir]
     _dump_git_state(g)
@@ -252,7 +256,7 @@ def resolve_base_sha(source_dir, base_ref):
         if rc != 0 or not sha:
             print(f"DAPPER base [{why}] ref='{ref}': does not resolve -- skip")
             return None
-        rc, mb, err = _run_git(g + ["merge-base", "HEAD", ref])
+        rc, mb, err = _run_git(g + ["merge-base", feature, ref])
         if rc == 0 and mb:
             print(
                 f"DAPPER base [{why}] ref='{ref}' ({sha[:12]}) -> merge-base {mb[:12]}  OK"
@@ -261,8 +265,8 @@ def resolve_base_sha(source_dir, base_ref):
         print(f"DAPPER base [{why}] ref='{ref}' ({sha[:12]}): NO merge-base ({err})")
         return None
 
-    # (1) HEAD is a merge commit -> order-independent fork point of its parents.
-    rc, parents, _ = _run_git(g + ["rev-list", "--parents", "-n", "1", "HEAD"])
+    # (1) feature is itself a merge commit -> order-independent fork point of its parents.
+    rc, parents, _ = _run_git(g + ["rev-list", "--parents", "-n", "1", feature])
     toks = parents.split() if parents else []
     if len(toks) >= 3:
         rc, mb, _ = _run_git(g + ["merge-base", toks[1], toks[2]])
@@ -336,8 +340,61 @@ def resolve_base_sha(source_dir, base_ref):
     return None
 
 
+def resolve_feature_sha(source_dir):
+    """The tip to diff FROM. In CI we must diff the PR HEAD, not the checkout's HEAD:
+    TheRock checks out refs/pull/N/merge (the PR head merged with *current* develop), so
+    HEAD contains develop's advancement, not just the PR. The event payload gives the true
+    PR head (pull_request.head.sha); fetch it blobless and use it. Falls back to HEAD for a
+    normal (non-PR) build such as native MIOpen-CI."""
+    g = ["git", "-C", source_dir]
+    head = None
+    ev = os.environ.get("GITHUB_EVENT_PATH")
+    if ev and os.path.isfile(ev):
+        try:
+            with open(ev) as f:
+                pr = json.load(f).get("pull_request") or {}
+            head = (pr.get("head") or {}).get("sha")
+        except Exception as e:  # noqa: BLE001
+            print(f"    feature: could not parse GITHUB_EVENT_PATH ({e})")
+    # refs/pull/N/head from GITHUB_REF=refs/pull/N/merge -- a reliably-fetchable ref for the
+    # PR head even when the bare sha isn't advertised.
+    gref = os.environ.get("GITHUB_REF", "")
+    pr_head_ref = (
+        gref[: -len("/merge")] + "/head"
+        if gref.startswith("refs/pull/") and gref.endswith("/merge")
+        else None
+    )
+    if head:
+
+        def _have():
+            return bool(
+                _run_git(g + ["rev-parse", "--verify", "-q", f"{head}^{{commit}}"])[1]
+            )
+
+        if not _have():
+            base_fetch = [
+                "fetch",
+                "--no-tags",
+                "--filter=blob:none",
+                "--depth=1",
+                "origin",
+            ]
+            for what in ([head], [pr_head_ref] if pr_head_ref else None):
+                if not what:
+                    continue
+                rc, _, err = _run_git(g + base_fetch + what)
+                print(f"    feature: fetch {what} rc={rc} {err[:120]}")
+                if _have():
+                    break
+        if _have():
+            print(f"    feature: PR head = {head[:12]}")
+            return head
+        print("    feature: PR head not usable after fetch; falling back to HEAD")
+    return get_git_sha(g + ["rev-parse", "HEAD"])
+
+
 def write_shas_file(context, shas_file, base_ref="origin/develop", source_dir="."):
-    """Write base and feature (HEAD) SHAs.
+    """Write base and feature SHAs.
 
     source_dir points at the project's git worktree. For an in-source build (CI)
     this is the default '.'; for an out-of-source build (TheRock) the build dir is
@@ -345,8 +402,8 @@ def write_shas_file(context, shas_file, base_ref="origin/develop", source_dir=".
     """
     origin = get_git_origin_url(source_dir)
     print(f"{context}: origin={origin} base_ref={base_ref} source_dir={source_dir}")
-    feature_sha = get_git_sha(["git", "-C", source_dir, "rev-parse", "HEAD"])
-    base_sha = resolve_base_sha(source_dir, base_ref)
+    feature_sha = resolve_feature_sha(source_dir)
+    base_sha = resolve_base_sha(source_dir, base_ref, feature_sha or "HEAD")
     with open(shas_file, "w") as file:
         file.write(f"{base_sha}\n")
         file.write(f"{feature_sha}\n")
