@@ -12,10 +12,12 @@ Documentation for rocFFT is available at
 ### Changed
 
 * Relaxed the usage requirements for `rocfft_setup` and `rocfft_cleanup`.
+* Removed the ROCFFT_RTC_PROCESS_HELPER debug environment variable.
 
 ### Resolved issues
 
 * Addressed internal issues causing multi-device plans to fall back to the least-performant code path for certain 3D real transforms (e.g., multi-device single-precision real out-of-place 3D of size 320x320x320 using slab decomposition).
+* Fixed a thread-safety issue that could cause `rocfft_plan_create` to crash when called concurrently from many threads.
 
 ## rocFFT 1.0.38 for ROCm 7.14
 
@@ -23,6 +25,7 @@ Documentation for rocFFT is available at
 
 * Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
 * Support for the gfx1250 architecture.
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that have not been explicitly compiled in.
 
 ### Optimized
 

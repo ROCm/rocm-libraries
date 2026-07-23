@@ -24,8 +24,10 @@
 namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
 {
 
-// hipDNN publishes cuDNN's `Tensor_attributes` spelling as a typedef; aliasing
-// it lets consumer code using that name resolve through the shim.
+using hipdnn_frontend::half;
+using hipdnn_frontend::graph::ScalarType;
 using hipdnn_frontend::graph::Tensor_attributes;
+using hipdnn_frontend::graph::TensorAttributes;
+using nv_bfloat16 = hipdnn_frontend::bfloat16;
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::graph
