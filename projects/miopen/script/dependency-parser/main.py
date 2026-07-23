@@ -331,6 +331,13 @@ def run_finalize_ctest(args):
     reference (downloadable record). All computation happens here, at build time, in one
     process; the runner just runs ctest with the burned-in filters (no dapper code ships).
 
+    The '<name>_unfiltered_suite' copies the original suite's properties but is RE-LABELED
+    to a distinct '<category>_unfiltered' label. This is essential: the runner selects by
+    label (e.g. `ctest -L '^standard$'`), so if the unfiltered suite kept the category
+    label it would be selected too and -- across sharding -- the full suite would run,
+    defeating Dapper. Re-labeling makes the anchored label query match ONLY the dapper
+    suite; the unfiltered suite stays as an opt-in escape hatch (`-L <category>_unfiltered`).
+
     Fails open: if the yaml or dapper JSON can't be read, the CTestTestfile is copied
     through unchanged so the full categories still run.
     """
@@ -403,6 +410,9 @@ def run_finalize_ctest(args):
         lines = f.readlines()
 
     rewritten = {}  # union-suite name -> unfiltered-suite name
+    cat_by_name = (
+        {}
+    )  # union-suite name -> category (for re-labeling the unfiltered copy)
     processed = set()  # category names finalized
     out = []
     for line in lines:
@@ -432,6 +442,7 @@ def run_finalize_ctest(args):
                     line.replace(f"add_test({name} ", f"add_test({name_unfiltered} ", 1)
                 )
                 rewritten[name] = name_unfiltered
+                cat_by_name[name] = cat
                 processed.add(cat)
                 data[f"category_{cat}_filter"] = original_filter
                 data[f"category_{cat}_union"] = union
@@ -439,10 +450,18 @@ def run_finalize_ctest(args):
         sm = setprops_re.match(line)
         if sm and sm.group(1) in rewritten:
             name = sm.group(1)
-            out.append(line)  # properties for the union suite (name unchanged)
-            out.append(
-                line.replace(name, rewritten[name], 1)
-            )  # ...and the _unfiltered suite
+            out.append(line)  # properties for the union suite (name/labels unchanged)
+            # Copy properties to the _unfiltered suite, then re-label it so the runner's
+            # label query (e.g. ctest -L '^standard$') selects ONLY the dapper suite.
+            # Without this the full suite would run on some shard, defeating Dapper.
+            unfiltered = line.replace(name, rewritten[name], 1)
+            unfiltered = re.sub(
+                r'LABELS\s+"[^"]*"',
+                f'LABELS "{cat_by_name[name]}_unfiltered"',
+                unfiltered,
+                count=1,
+            )
+            out.append(unfiltered)
             continue
         out.append(line)
 
