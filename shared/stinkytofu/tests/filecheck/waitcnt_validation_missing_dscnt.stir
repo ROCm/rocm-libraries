@@ -1,0 +1,26 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --WaitCntValidationCheckPass --print-output 2>&1
+# XFAIL: WaitCntValidationCheckPass aborts (report_fatal_error) on a missing wait
+#
+# WaitCntValidationCheckPass (gfx1250): negative case. A v_wmma consumes the
+# result of a ds_load, but there is NO s_wait_dscnt between them. The ds_load is
+# still in flight on the DS counter when the WMMA reads it, so the validator
+# reports a MISSING s_wait_dscnt violation and aborts via report_fatal_error.
+#
+# Note: no --StinkyWaitCntInsertionPass here on purpose -- we want to validate
+# hand-written IR that is deliberately missing the required wait. stderr is
+# folded into stdout (2>&1) so the diagnostic is visible to FileCheck. The pass
+# aborts before --print-output runs, so only the diagnostic (not the IR dump)
+# appears; the checks match the stderr diagnostic instead of the printed label.
+#
+# CHECK: [WaitCntValidationCheck] ERROR
+# CHECK: MISSING
+# CHECK-SAME: v_wmma_f32_16x16x32_bf16
+# CHECK-SAME: ds_load_b64
+# CHECK-SAME: s_wait_dscnt
+# CHECK: FATAL ERROR: missing s_wait_*
+
+st.func @waitcnt_validation_missing_dscnt() {
+^entry:
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
