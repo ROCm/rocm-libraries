@@ -1,4 +1,4 @@
-# RFC 0017: Universal Kernel Descriptors (UKD/UMD/UDD/UED/UHD): A Data-Driven Kernel Ingestor
+# RFC 0017: Universal Kernel Descriptors (UKD/UMD/UDD/UED/UHD/KMD/KDP): A Data-Driven Kernel Ingestor
 
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
 
@@ -115,7 +115,7 @@ full provider. This complements build-time codegen rather than replacing it.
 
 | Capability | This RFC (day-one) | Deferred to a follow-up |
 |---|---|---|
-| Single-kernel path: UKD + UMD + UDD + UED + UHD | Yes | None |
+| Single-kernel path: UKD + UMD + UDD + UED + UHD + KMD, bound by a KDP | Yes | None |
 | Fusion: one UMD matches a bounded multi-op subgraph, run as one kernel | Yes ([§5](#5-matching-and-the-umd)) | None |
 | Match criteria: opcode, dtype, shape/rank, stride order, packed, divisibility, range, attribute, graph-structure, cross-tensor, per-element `all`, bounded `or` | Yes ([§5](#5-matching-and-the-umd)) | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
@@ -147,8 +147,8 @@ A kernel descriptor carries no logic of its own. Everything but the code comes f
 shared matcher set decides when the kernel applies and its one dispatch descriptor decides how it
 launches, while the engine the KDP names owns the heuristic that ranks it and the metadata schema it
 fills. So a UKD is just its source details plus the metadata values the heuristic ranks it by. The KDP's
-one UDD holds one or more **Launches**, each a dispatch step, and a Launch pairs one such step with the
-kernel source that fills it. A simple kernel is a one-Launch UDD; a multi-launch kernel such as SDPA
+one UDD holds one or more **Launches**, each a dispatch step, and each Launch is paired at runtime with
+the UKD source that fills it. A simple kernel is a one-Launch UDD; a multi-launch kernel such as SDPA
 backward is a several-Launch UDD run in order ([Section 13](#13-multiple-kernels-and-composition)), still
 one shared UDD per pack. Because the engine (not the KDP) owns the heuristic and metadata schema, many
 KDPs may share one engine while differing in their matchers and dispatch; all of them are ranked by that
@@ -184,12 +184,15 @@ selection, launch) is identical regardless of how a kernel arrived.
 
 ![Two ingestion paths converging on one generic engine and launcher](../images/ukd_flows.svg)
 
-At provider load, the generic engine discovers all available descriptors and wires them up: it loads
-every KDP, then builds the set of engines from them: each UED becomes an engine with its heuristic (UHD)
-and metadata schema (KMD), the KDPs that name it contribute their matchers, dispatch, and kernels, and
-each child kernel becomes a data-backed plan builder inside that engine. Deciding which kernels apply to
-a graph is then a cheap, shared-matcher pass ([Section 5](#5-matching-and-the-umd)): shared checks run
-once for the whole graph, per-kernel checks run only for the survivors, and results are cached. No new host or plugin-ABI interfaces are introduced; the
+At provider load, the generic engine discovers all available descriptors and wires up the engines. Two
+kinds load eagerly, because every graph needs them to decide applicability: every UED, so the set of
+engines and their identities exist, and every matcher. The heavier content, each engine's heuristic
+model, the kernels and their metadata, and the dispatch descriptors, loads lazily the first time a graph
+needs it and is cached thereafter. Each UED becomes an engine that names its heuristic (UHD) and metadata
+schema (KMD); the KDPs that name it contribute their matchers, dispatch, and kernels, and each child
+kernel becomes a data-backed plan builder inside that engine. Deciding which kernels apply to a graph is
+then a cheap, shared-matcher pass ([Section 5](#5-matching-and-the-umd)): shared checks run once for the
+whole graph, per-kernel checks run only for the survivors, and results are cached. No new host or plugin-ABI interfaces are introduced; the
 generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery it
 needs (the matcher, the expression interpreter, the selector, and the predicate and custom-plan
 registries) lives inside the provider behind those contracts.
@@ -203,19 +206,21 @@ form for fast loading. Each format has a defined schema and a
 version; a descriptor is refused, never silently reinterpreted, if its version is newer than the
 runtime understands. The concrete serialization and schema for each format are deferred to that
 format's follow-up RFC.
-Every descriptor also carries a stable, opaque `id` used for cross-references and a `name` that is mandatory for
-logging and diagnostics; both appear in the examples. The examples are illustrative, and the
-`schema`/version plumbing is shown once here and elided elsewhere.
+Every descriptor also carries a stable `id`, a GUID, used for cross-references, and a `name` that is
+mandatory for logging and diagnostics; both appear in the examples. GUIDs let any author mint an id
+locally that never collides with another author's, so there is no central allocation authority to
+serialize through. The examples are illustrative, and the `schema`/version plumbing is shown once here
+and elided elsewhere.
 
 **UED, an engine with its heuristic, metadata schema, knobs, and notes:**
 
 ```jsonc
 {
   "schema": "hipdnn.ued/v1",
-  "id":     3310472051,                        // stable, unique; referenced by the KDP
+  "id":     "efc9eae4-fe33-4cb0-a593-95d771dc13b2",                        // stable, unique; referenced by the KDP
   "name":   "Example attention engine",        // human-readable label
-  "heuristic": 3310472052,                     // one UHD: the selector for this engine's kernels
-  "metadata":  3310472053,                     // one KMD: the variant schema this engine's kernels fill
+  "heuristic": "ae896b07-80cd-473c-b3f4-6a8892998519",                     // one UHD: the selector for this engine's kernels
+  "metadata":  "9ae0b215-32a7-49d1-96df-e9b05e1927ea",                     // one KMD: the variant schema this engine's kernels fill
   "behavior_notes":  ["runtime_compilation"],  // hipDNN behavior notes for this engine
   "numerical_notes": ["tensor_core", "reduced_precision_reduction"],  // hipDNN numerical notes
   "knobs": [                                   // author-exposed, user-controllable
@@ -230,7 +235,7 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```jsonc
 {
   "schema": "hipdnn.uhd/v1",
-  "id":     3310472052,       // stable, unique; referenced by the UED (one per engine)
+  "id":     "ae896b07-80cd-473c-b3f4-6a8892998519",       // stable, unique; referenced by the UED (one per engine)
   "name":   "Example attention LightGBM selector",
   "kind":   "model",          // "model" | "static_order" | "custom_library"
   "model": {
@@ -244,13 +249,19 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 
 **KMD, the metadata schema:** the variant fields every kernel in the engine carries, each with a type and
 an optional default. It declares upfront which variants the engine spans; each UKD fills in concrete
-values. (When the engine's KDPs span slightly different axes, the schema is their union and unused fields
-take their defaults.)
+values. When the engine's KDPs span different axes, the schema is their union and unused fields take
+their defaults.
+
+The KMD is exactly the feature space the engine's heuristic ranks over, which is why the UED owns both
+the KMD and the one UHD. They move together: changing the KMD (adding, removing, or retyping a field)
+changes the features the UHD sees, so it requires retraining the UHD and rebinding it to the new schema.
+That coupling is intentional and is why a KMD change is a deliberate, engine-level act rather than a
+casual per-kernel edit.
 
 ```jsonc
 {
   "schema": "hipdnn.kmd/v1",
-  "id":     3310472053,       // stable, unique; referenced by the UED (one per engine)
+  "id":     "9ae0b215-32a7-49d1-96df-e9b05e1927ea",       // stable, unique; referenced by the UED (one per engine)
   "name":   "Example attention variant fields",
   "fields": [
     {"name": "tile_m",  "type": "int",    "optional": true, "default": 1},
@@ -267,7 +278,7 @@ its kernels require.
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
-  "id":     8811203344,    // stable; listed in KDP matchers[], shared across packs
+  "id":     "968156a8-ee21-4827-bcd7-893a8a72dccc",    // stable; listed in KDP matchers[], shared across packs
   "name":   "SDPA prefill d128 bf16 match",
   "nodes":    [ ... ],     // structural pattern that binds $vars (Section 5)
   "criteria": { ... }      // declarative expression tree over bound tokens (Section 5)
@@ -279,7 +290,7 @@ its kernels require.
 ```jsonc
 {
   "schema": "hipdnn.udd/v1",
-  "id":     8811203390,
+  "id":     "625df14f-f0cd-4beb-9297-1872d055c1cb",
   "name":   "SDPA prefill d128 dispatch",
   "grid":   { ... }, "block": { ... },  // Section 6
   "shared_mem_bytes": 32768,
@@ -299,7 +310,7 @@ so it names none of them.
 ```jsonc
 {
   "schema": "hipdnn.ukd/v1",
-  "id":        4471900201,
+  "id":        "15b02840-05ba-40cf-ac17-384b50f56a7d",
   "name":      "Example attention prefill d128 bf16 (gfx942)",
   "kernel_source": { ... },                       // Section 7: a compiled kernel, or how to build it AOT
   "metadata":  {"tile_m": 128, "split_k": 1, "dtype": "bf16"},  // concrete values for the KMD's fields
@@ -319,12 +330,12 @@ differs in any of them belongs in a different pack.
   "schema": "hipdnn.kdp/v1",
   "version": "1",              // pack format version, gated at load
   "arch":     ["gfx942"],      // arch is a pack property, resolved at selection (Section 5)
-  "matchers": [8811203344, 8811203301, 8811203302],  // UMD ids; a kernel applies iff all pass
-  "engine":    3310472051,     // one UED id: the engine every child kernel joins (carries UHD + KMD)
-  "dispatch":  8811203390,     // one UDD id, shared by every child kernel (Section 6)
+  "matchers": ["968156a8-ee21-4827-bcd7-893a8a72dccc", "a541565e-09eb-471b-8507-0e00f5bf75d7", "efa31b85-150b-49aa-bc05-027b94a2b084"],  // UMD ids; a kernel applies iff all pass
+  "engine":    "efc9eae4-fe33-4cb0-a593-95d771dc13b2",     // one UED id: the engine every child kernel joins (carries UHD + KMD)
+  "dispatch":  "625df14f-f0cd-4beb-9297-1872d055c1cb",     // one UDD id, shared by every child kernel (Section 6)
   "kernelDescriptors": [       // the vector of child kernels; each is just source + metadata values
-    { "id": 4471900201, ... },
-    { "id": 4471900202, ... }
+    { "id": "15b02840-05ba-40cf-ac17-384b50f56a7d", ... },
+    { "id": "562e3777-8082-483d-82b8-12b0f7a363e4", ... }
     // ...
   ]
 }
@@ -370,6 +381,10 @@ namespaces, and every criteria and dispatch expression draws from the same set:
 - **Device properties:** `$device.<field>` such as `$device.lds_size` or `$device.warp_size`, for a
   check like an LDS budget `<=($kernel.lds_per_block, $device.lds_size)`.
 
+A bare boolean field used on its own is a truthiness check: a lone `"$q.packed"` in an `and` list reads
+as "the tensor is packed", equivalent to `==($q.packed, true)`, so such a token is a criterion, not a
+stray element.
+
 New fields are added to the schema and referenced the same way; the full field and operator vocabulary,
 the operand-property set (broadcast, alignment, sparse and ragged kinds), and the interpreter profile
 are in the UMD follow-up.
@@ -396,7 +411,7 @@ dims) against the kernel instance's tile constants (its `$kernel.*` metadata):
 // conv.tile_fit: implicit-GEMM M/N/K (products of the conv's bound dims) must divide the tile constants
 {
   "schema": "hipdnn.umd/v1",
-  "id":   8811203301,
+  "id":   "a541565e-09eb-471b-8507-0e00f5bf75d7",
   "name": "conv.tile_fit",
   "nodes": [
     {"kind": "op", "id": "conv", "op": "convolution_fwd",
@@ -421,7 +436,7 @@ them:
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
-  "id":   1180449020,
+  "id":   "daef2dc6-647d-4c9e-b0e0-85402d2dc2bd",
   "name": "SDPA forward (d128, bf16) match",
   "nodes": [
     {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
@@ -493,7 +508,7 @@ serves the whole chain as a single kernel.
 ```jsonc
 {
   "schema": "hipdnn.umd/v1",
-  "id":   6620551007,
+  "id":   "963e2d15-9293-4eca-b071-793eb0a47d60",
   "name": "Conv-Bias-ReLU (NHWC, f16) match",
   "nodes": [
     {"kind": "op", "id": "conv", "op": "convolution_fwd",
@@ -559,7 +574,9 @@ dimension products (from the graph) times per-element byte rates (author constan
 attributes where needed. Kernels whose scratch depends on a knob, such as a split-K GEMM sizing its
 partials by the split factor, use the full expression (ceil-div, max, and the rest), not only the
 sum-of-products form. It is evaluated once per plan, satisfying hipDNN's existing workspace-size query
-generically.
+generically. The formula is the author's contract: the provider allocates exactly what it reports and
+hands the kernel that scratch, so a wrong formula is an author bug in the same class as a wrong kernel,
+caught by testing and code review rather than by a runtime guard.
 
 **Declarative argument binding** describes each kernel argument and where its value comes from,
 so the generic launcher can assemble the call directly from the matched graph:
@@ -732,6 +749,14 @@ The provider surfaces:
   fell to `priority` or stable `id`.
 - **Load and compile diagnostics**: which descriptors were discovered, which were quarantined and why,
   and the timing of descriptor discovery and any JIT compilation.
+- **Load-time validation**: every descriptor is checked as it loads, and a failure names the descriptor,
+  the field, and the reason. The checks include expression syntax (balanced tree, known operators, right
+  arity); token references that resolve (every `$`-field is declared in the schema, and every `$kernel.*`
+  a matcher or dispatch formula reads exists in the engine's KMD); cross-descriptor references that
+  resolve (a KDP's `engine`, `matchers`, and `dispatch`; a UED's `heuristic` and `metadata`); UDD
+  formulas that reference only fields the matcher binds; and launch slots that every referenced kernel
+  source fills. Anything that fails, an unbound token, an unknown operator, a dangling reference, is a
+  clear load error that quarantines the offending descriptor, never a runtime surprise.
 
 These make a descriptor-backed kernel as debuggable as hand-written C++, and are what let an operator
 trust a system whose behavior lives in data. The tooling surface is built out alongside the phases of
@@ -772,39 +797,18 @@ including restricting drop-in to prebuilt code objects, are deferred to the deli
 
 The SDPA path prototyped in the rocKE work ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)),
 a graph allowlist plus a grid-symbol table plus hand-written argument wiring, collapses into a matcher,
-a dispatch descriptor, and a KDP that binds them over a kernel vector. All three are
-shown below so the example stands on its own; the matcher is the SDPA forward one from
-[Section 5](#5-matching-and-the-umd) (id `1180449020`), repeated here for reference:
+a dispatch descriptor, an engine, and a KDP that binds them over a kernel vector. The matcher is the
+SDPA forward one from [Section 5](#5-matching-and-the-umd) (id
+`daef2dc6-647d-4c9e-b0e0-85402d2dc2bd`), referenced here by id rather than repeated; the UDD, UED, and
+KDP follow:
 
 ```jsonc
-// --- UMD (a matcher): when it applies + the vars it binds (same as Section 5; repeated so this stands alone) ---
-{
-  "schema": "hipdnn.umd/v1",
-  "id":   1180449020,
-  "name": "SDPA forward (d128, bf16) match",
-  "nodes": [
-    {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
-     "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
-  ],
-  "criteria": {"and": [
-    {"in":    ["$q.dtype", ["BFLOAT16"]]},
-    {"==":    ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed",  // contiguous bhsd
-    {"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]},  // binds these dims
-    {"in":    ["$k.dtype", ["BFLOAT16"]]},
-    {"shape": ["$k", ["batch", "num_heads", "seqlen_k", "head_size"]]},
-    {"in":    ["$v.dtype", ["BFLOAT16"]]},
-    {"hipdnn.same_head_dim": ["$q", "$k", "$v"]},      // custom operation
-    {"==":    ["$sdpa_fwd.head_size", 128]},
-    {"in":    ["$sdpa_fwd.mask_mode", ["none"]]},
-    {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
-  ]}
-  // arch is a pack property (KDP.arch below), not a criterion
-}
+// --- UMD (a matcher): the SDPA-forward matcher id daef2dc6-647d-4c9e-b0e0-85402d2dc2bd from Section 5, referenced not repeated ---
 
 // --- UDD: how to invoke it (one per KDP, shared by every child kernel) ---
 {
   "schema": "hipdnn.udd/v1",
-  "id":   1180449055,
+  "id":   "03739ce1-c971-492b-a403-5872b11f3c18",
   "name": "SDPA forward (d128) dispatch",
   "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 16]},
             "y": "$q.num_heads", "z": "$q.batch"},
@@ -829,23 +833,23 @@ shown below so the example stands on its own; the matcher is the SDPA forward on
 // --- UED (the engine): carries its one heuristic and one metadata schema ---
 {
   "schema":    "hipdnn.ued/v1",
-  "id":        9100067001,      // referenced by the KDP below; many KDPs may share this engine
+  "id":        "1bd3d4c3-84bc-4b9b-a375-e8e14ebd4659",      // referenced by the KDP below; many KDPs may share this engine
   "name":      "rocKE SDPA forward engine",
-  "heuristic": 9100067002,      // one UHD: the selector that ranks this engine's kernels
-  "metadata":  9100067003       // one KMD (not shown): declares the variant fields (head_size, dtype)
+  "heuristic": "6d346c89-bc2e-4250-b6ac-e1b00115dfe8",      // one UHD: the selector that ranks this engine's kernels
+  "metadata":  "45a62a28-86b7-41dd-bebe-c98122e6bd1d"       // one KMD (not shown): declares the variant fields (head_size, dtype)
 }
 
 // --- KDP (the cohesive pack): matchers, one engine, one UDD, and a kernel vector ---
 {
   "schema": "hipdnn.kdp/v1",
   "arch":      ["gfx942"],      // arch is a pack property, resolved at selection
-  "matchers":  [1180449020],    // the UMD above; a child kernel applies iff all listed matchers pass
-  "engine":    9100067001,      // the UED above (carries UHD + KMD); every child kernel joins it
-  "dispatch":  1180449055,      // the one UDD above, shared by every child kernel
+  "matchers":  ["daef2dc6-647d-4c9e-b0e0-85402d2dc2bd"],    // the UMD above; a child kernel applies iff all listed matchers pass
+  "engine":    "1bd3d4c3-84bc-4b9b-a375-e8e14ebd4659",      // the UED above (carries UHD + KMD); every child kernel joins it
+  "dispatch":  "03739ce1-c971-492b-a403-5872b11f3c18",      // the one UDD above, shared by every child kernel
   "kernelDescriptors": [        // the kernel vector; each is just source + metadata values
     {
       "schema": "hipdnn.ukd/v1",
-      "id":   1180449900,
+      "id":   "a81a790d-9a9a-49cb-991c-eeaa15a7bbc8",
       "name": "SDPA forward (d128, bf16, gfx942)",
       "kernel_source": {"kind": "kpack", "library": "rocke_attn.kpack",
                         "symbol": "sdpa_fwd_d128_bf16_gfx942"},   // function symbol in the packed library
@@ -919,7 +923,8 @@ Three areas are new to UKD:
 - **Launch overhead.** Generic launch and plan-time matching add some overhead; the goal is to keep it
   minimal. As hipDNN's benchmarking and performance testing (`tools/dnn-benchmarking`,
   [RFC 0013](0013_Autotune.md)) matures, UKD's overhead is validated against the hand-written
-  baseline. Loading is lazy and cached, so the cost is paid once at plan build.
+  baseline. Only the UEDs and matchers load eagerly at startup; heuristics, kernels with their metadata,
+and dispatch descriptors load lazily and are cached, so that cost is paid once at first use.
 
 ### 12.2 Follow-up RFCs
 
@@ -980,7 +985,7 @@ family; each UKD just fills the launch slots with its own sources. The program i
 the engine's heuristic (it competes against other whole programs for the same graph, not against its own
 Launches) and is selected atomically; a caller never picks a subset of its Launches.
 
-The pack's matcher (id `7715002230`, not shown) matches `sdpa_bwd` and binds the inputs
+The pack's matcher (id `fa32046b-c6e7-4270-8759-8bf879fd5a09`, not shown) matches `sdpa_bwd` and binds the inputs
 `$q, $k, $v, $o, $do`, the gradient outputs `$dq, $dk, $dv`, and the dims `batch, num_heads, seqlen_q,
 seqlen_k` that the Launch formulas and the `$D` intermediate use.
 
@@ -988,7 +993,7 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
 // --- UDD: one per KDP, the launch program shared by every UKD in the family ---
 {
   "schema": "hipdnn.udd/v1",
-  "id":   7715002250,
+  "id":   "f2513834-5b17-4084-b09f-f0c3b440588a",
   "name": "SDPA backward (d128) dispatch",
   "intermediates": [        // named scratch shared across the Launches (see 13.3)
     {"name": "$D", "dtype": "FLOAT", "shape": ["batch", "num_heads", "seqlen_q"]}
@@ -1019,7 +1024,7 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
 // --- UKD: fills each Launch slot with a source, plus metadata (one per family member) ---
 {
   "schema": "hipdnn.ukd/v1",
-  "id":   7715002999,
+  "id":   "8e0f76d6-3522-4099-b5f1-7b1544bde29c",
   "name": "SDPA backward (d128, bf16, gfx942)",
   "sources": {              // one kernel source per Launch name in the pack's UDD
     "preprocess": {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_preprocess_d128_bf16_gfx942"},
@@ -1064,10 +1069,10 @@ its stages' programs, with each stage's intermediates remapped into the composit
 ```jsonc
 {
   "schema": "hipdnn.ucd/v1",  // UCD = Universal Composite Descriptor
-  "id":   2093844170,
+  "id":   "21d7eb92-5948-43f0-a4c7-d25bf60fca40",
   "name": "Layout-adapted work pipeline",
-  "engine": 2093800000,       // its own engine; engine selection picks it vs. the fused engine
-  "match":  2093844001,       // one UMD: matches the work fragment once; binds $x (in), $y (out)
+  "engine": "9a5d91ec-0b87-43dd-bb3e-69ebeabc6a76",       // its own engine; engine selection picks it vs. the fused engine
+  "match":  "aa038018-049d-4caf-a448-b26f6c2f5b5f",       // one UMD: matches the work fragment once; binds $x (in), $y (out)
 
   "intermediates": [
     {"name": "$x_t", "dtype": {"same_as": "$x"}, "shape": {"layout_of": "$x", "as": "nchw"}},
@@ -1075,12 +1080,12 @@ its stages' programs, with each stage's intermediates remapped into the composit
   ],
   "stages": [
     {"name": "transpose_in",  "in": "$x",   "out": "$x_t",
-     "select": {"criteria": {"kind": "op", "op": "transpose"}, "heuristic": 2093800100}},
+     "select": {"criteria": {"kind": "op", "op": "transpose"}, "heuristic": "2ca990b0-fc9d-4539-8e27-578658857693"}},
     {"name": "work",          "in": "$x_t", "out": "$y_t",
-     "select": {"criteria": { ... work fragment ... },  "heuristic": 2093800101}},
+     "select": {"criteria": { ... work fragment ... },  "heuristic": "d2bfd686-b613-4c15-b8e2-44dd6d78d336"}},
     {"name": "transpose_out", "in": "$y_t", "out": "$y",
-     "select": {"candidates": [2093844501, 2093844502],
-                "heuristic": 2093800100}}
+     "select": {"candidates": ["2dfcc98a-8281-4b58-a286-fb599412a68d", "f9c5c4eb-fb5d-42a3-bfb2-649a8a14d830"],
+                "heuristic": "2ca990b0-fc9d-4539-8e27-578658857693"}}
   ]
 }
 ```
@@ -1174,11 +1179,12 @@ follow-up RFCs rather than solved now.
   parse input that, on the drop-in path, may be untrusted or simply malformed. They must be bounded
   (recursion, step count, and size limits) and fail closed rather than crash, and shape and workspace
   arithmetic must use checked-width integers that fail closed on overflow rather than under-allocate.
-- **Identity collisions.** Descriptor ids are unique per kind (a match descriptor and an engine
-  descriptor may share a string; references are typed by field), validated at build; a colliding drop-in id is logged and ignored
-  rather than taking down the provider. Overlapping matches that are not id collisions are handled by
-  arbitration ([Section 5](#5-matching-and-the-umd)). Namespacing, for example a vendor prefix, is
-  encouraged.
+- **Identity collisions.** Ids are GUIDs, so independent authors do not collide by construction and no
+  central allocation authority is needed. References are typed by field (a match descriptor and an engine
+  descriptor are told apart by where the id appears). A duplicate id, which should only arise from a
+  copy-paste mistake, is caught at load, logged, and ignored rather than taking down the provider.
+  Overlapping matches that are not id collisions are handled by arbitration
+  ([Section 5](#5-matching-and-the-umd)).
 - **Compatibility and caching.** Descriptors are refused when newer than the runtime understands, and
   architecture and toolchain are gated before load. Additive schema evolution and JIT cache-key
   composition (architecture, toolchain, driver and runtime version, source hash, descriptor version)
@@ -1241,23 +1247,18 @@ choices; none is a dependency.
   more Launches (one for a single-kernel pack, several for a multi-launch one). One per KDP, shared by
   every child kernel, and reused across packs by ID. (Distinct from a tensor UID, which is an unrelated
   unique identifier.)
-- **Criteria expression:** the declarative `{"op": [args]}` tree that forms a matcher's checks:
-  built-in operators plus custom short-hand tokens and custom operations, over `"..."` token
-  references. The hipDNN schema declares the fields in five namespaces: **Tensor** (`$q.dtype`, dims
-  `$y.ho`, evaluated `$q.stride_order`), **Graph** (`$graph.node_count`), **Attributes**
-  (`$sdpa_fwd.head_size`), **Kernel metadata** (`$kernel.<field>`), and **Device properties**
-  (`$device.<field>`). Plain data the safe interpreter walks; it fails closed on any field the schema
-  does not declare ([Section 5](#5-matching-and-the-umd)).
+- **Criteria expression:** the declarative `{"op": [args]}` tree that forms a matcher's checks, over
+  `$`-prefixed references to schema-declared fields. Plain data the safe interpreter walks; it fails
+  closed on any field the schema does not declare ([Section 5](#5-matching-and-the-umd)).
 - **UED (Universal Engine Descriptor):** one engine, a stable identity plus knobs and behavior/numerical
   notes. It names the engine's one heuristic (UHD) and one metadata schema (KMD); many KDPs may share
   one engine.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
   a graph and picks one. One per engine, named by the UED.
-- **KMD (Kernel Metadata Descriptor):** an upfront declaration of the metadata (variant) fields every
-  kernel in the engine carries, each with a type and an optional default. Each UKD fills in concrete
-  values; the heuristic ranks the catalog on them and matchers read them as `$kernel.<field>`. One per
-  engine, named by the UED and shared across packs by ID. (When the engine's KDPs span slightly different
-  axes, the schema is their union and unused fields take their defaults.)
+- **KMD (Kernel Metadata Descriptor):** the engine's variant fields, each with a type and optional
+  default; it is the feature space the UHD ranks over, so it and the UHD are both engine-owned and change
+  together. Each UKD fills in concrete values; matchers read them as `$kernel.<field>`. One per engine,
+  named by the UED ([Section 4](#4-descriptor-formats)).
 - **Launch:** one dispatch step in a UDD (grid, block, shared memory, argument signature) with a named
   source slot, paired at runtime with the UKD source that fills it. A UDD holds one Launch for a
   single-kernel pack, several run in order for a multi-launch pack
@@ -1270,18 +1271,15 @@ choices; none is a dependency.
   in a different pack.
 - **UCD (Universal Composite Descriptor):** a pipeline of stages, each resolving to a UKD chosen by
   its own heuristic ([Section 13.2](#132-a-pipeline-of-separately-chosen-kernels)).
-- **id / name:** every descriptor carries a stable `id` used for cross-references and a human-readable
-  `name`; references (a KDP's `matchers`, `engine`, and `dispatch`, and a UED's `heuristic` and
-  `metadata`) use the id.
+- **id / name:** every descriptor carries a stable `id`, a GUID minted by the author so ids never
+  collide without a central authority, and a human-readable `name`; references (a KDP's `matchers`,
+  `engine`, and `dispatch`, and a UED's `heuristic` and `metadata`) use the id.
 - **AOT:** ahead-of-time compilation; kernels compiled per architecture at build time and installed
   beside the provider, as opposed to runtime JIT.
 - **ABI:** the calling convention a kernel expects, its argument layout and order plus launch
   configuration, which a UDD encodes as data.
 - **SDPA:** scaled dot-product attention, the running example operation (forward in
   [Section 11](#11-worked-example-sdpa-as-a-ukd), backward in [Section 13.1](#131-several-kernels-for-one-operation)).
-- **Custom plan:** a registered launch handler a UDD names when the declarative dispatch cannot express
-  its needs; carried as a symbol name and typed config, never inline code
-  ([Section 6](#6-dispatch-and-workspace)).
 - **Engine-selection heuristic / kernel-selection heuristic:** the two selection levels; the
   engine-selection heuristic (existing) picks the engine, the kernel-selection heuristic (a UHD) picks
   the kernel within it.
@@ -1312,8 +1310,6 @@ choices; none is a dependency.
   adapter in the provider SDK; deferred to its own follow-up RFC
   ([Section 8.3](#83-future-jit-and-normalized-providers)).
 - **Escape hatch:** a named, registry-resolved predicate or binding for logic the declarative model
-  cannot express, carried as a symbol name and typed arguments, never inline code. The two instances
-  are the native predicate (match side, [Section 5](#5-matching-and-the-umd)) and the custom plan
+  cannot express, carried as a symbol name and typed arguments, never inline code. The two instances are
+  the **native predicate** (match side, [Section 5](#5-matching-and-the-umd)) and the **custom plan**
   (dispatch side, [Section 6](#6-dispatch-and-workspace)).
-- **Native predicate:** the match-side escape hatch; a predicate a UMD names for a check it cannot
-  express declaratively, resolved from the provider registry ([Section 5](#5-matching-and-the-umd)).

@@ -50,10 +50,10 @@
   <text x="345" y="118" font-family="Consolas, monospace" font-size="11">  results  { O:$o }</text>
   <text x="345" y="142" font-family="Consolas, monospace" font-size="11" fill="#8a6d1f">criteria (expression tree):</text>
   <text x="345" y="162" font-family="Consolas, monospace" font-size="11">{"and": [</text>
-  <text x="345" y="180" font-family="Consolas, monospace" font-size="11">  {"in": [$q.dtype, ["BFLOAT16"]]},</text>
-  <text x="345" y="198" font-family="Consolas, monospace" font-size="11">  {"shape": [$q, [b, h, sq, d]]},</text>
-  <text x="345" y="216" font-family="Consolas, monospace" font-size="11">  {"==": [$sdpa_fwd.head_size, 128]},</text>
-  <text x="345" y="234" font-family="Consolas, monospace" font-size="11">  {"hipdnn.same_head_dim": [$q,$k,$v]}</text>
+  <text x="345" y="180" font-family="Consolas, monospace" font-size="11">  {"in": ["$q.dtype", ["BFLOAT16"]]},</text>
+  <text x="345" y="198" font-family="Consolas, monospace" font-size="11">  {"shape": ["$q", [b, h, sq, d]]},</text>
+  <text x="345" y="216" font-family="Consolas, monospace" font-size="11">  {"==": ["$sdpa_fwd.head_size", 128]},</text>
+  <text x="345" y="234" font-family="Consolas, monospace" font-size="11">  {"hipdnn.same_head_dim": ["$q","$k","$v"]}</text>
   <text x="345" y="252" font-family="Consolas, monospace" font-size="11">]}</text>
   <text x="345" y="276" font-family="Consolas, monospace" font-size="10" fill="#555">fields: Tensor · Graph · Attrs · $kernel · $device</text>
   <text x="345" y="296" font-size="10" fill="#8a6d1f">one matcher of the KDP's set, run once, memoized</text>
@@ -64,7 +64,7 @@
 
   <!-- STAGE 3: bound variables box (green) -->
   <rect x="700" y="55" width="200" height="290" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
-  <text x="715" y="90" font-family="Consolas, monospace" font-size="11">$q → Q  (uid, bf16)</text>
+  <text x="715" y="90" font-family="Consolas, monospace" font-size="11">$q → Q  (bf16)</text>
   <text x="715" y="115" font-family="Consolas, monospace" font-size="11">$k → K</text>
   <text x="715" y="140" font-family="Consolas, monospace" font-size="11">$v → V</text>
   <text x="715" y="165" font-family="Consolas, monospace" font-size="11">$o → O</text>

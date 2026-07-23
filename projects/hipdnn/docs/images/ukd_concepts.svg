@@ -82,6 +82,6 @@
 
   <!-- caption -->
   <text x="430" y="392" text-anchor="middle" font-size="12" fill="#333">One engine and UDD, a shared matcher set, one source + metadata per kernel, but many kernels.</text>
-  <text x="430" y="410" text-anchor="middle" font-size="12" fill="#333">The engine carries the heuristic and metadata schema, so many KDPs may share one engine. Everything is by ID.</text>
+  <text x="430" y="410" text-anchor="middle" font-size="12" fill="#333">The engine carries the heuristic and metadata schema and can be shared by other KDPs (not drawn here). Everything is by ID.</text>
   <text x="430" y="428" text-anchor="middle" font-size="12" fill="#555">Engine-level selection picks the engine; the UHD then picks the kernel within it.</text>
 </svg>
