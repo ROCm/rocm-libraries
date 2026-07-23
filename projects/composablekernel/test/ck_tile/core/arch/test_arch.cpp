@@ -213,7 +213,9 @@ TEST(ArchTest, MakeSpirvTargetFields)
 
 // Tests to_string for the AMDGCN_SPIRV target id
 TEST(ArchTest, SpirvTargetIdToString)
-{ EXPECT_STREQ(to_string(amdgcn_target_id::AMDGCN_SPIRV), "AMDGCN_SPIRV"); }
+{
+    EXPECT_STREQ(to_string(amdgcn_target_id::AMDGCN_SPIRV), "AMDGCN_SPIRV");
+}
 
 // Tests that the "amdgcnspirv" gcnArchName string maps to AMDGCN_SPIRV
 TEST(ArchTest, GcnArchNameStringMapsToSpirv)
