@@ -562,7 +562,12 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
-    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
+    if(rv["ArchAccUnifiedRegs"])
+        rv["MaxWavesPerSimd"] = 8;
+    else if(isaVersion[0] == 11 || (isaVersion[0] == 12 && isaVersion[1] != 5))
+        rv["MaxWavesPerSimd"] = 16;
+    else
+        rv["MaxWavesPerSimd"] = 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -611,7 +616,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     // 1024 vgpr
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
     // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
-    rv["MaxSgpr"] = 102;
+    rv["MaxSgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 106 : 102;
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;

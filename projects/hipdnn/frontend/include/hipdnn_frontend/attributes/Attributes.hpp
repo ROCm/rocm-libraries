@@ -18,6 +18,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -76,6 +77,14 @@ public:
     std::string name; ///< Operation name for debugging
     DataType compute_data_type = DataType::NOT_SET; ///< Compute/accumulation data type (NOLINT)
 
+    // First-wins latch for source-compatibility setters that have no hipDNN
+    // equivalent; set via recordUnsupported(), read via hasUnsupportedUsage() /
+    // getUnsupportedReason(), and surfaced by the owning node at validate().
+    // Public (not private) only because the attribute types are C++17 aggregates
+    // brace-initialized in non-friend contexts, which a non-public base member
+    // would break; prefer the accessors over touching it directly.
+    std::optional<std::string> unsupported_reason; // NOLINT(readability-identifier-naming)
+
     /**
      * @brief Set the operation name
      * @param nameValue The name to assign
@@ -116,6 +125,31 @@ public:
     DataType get_compute_data_type() const
     {
         return compute_data_type;
+    }
+
+    /**
+     * @brief Whether a source-compatibility setter recorded an unsupported request
+     * @return true if a setter with no hipDNN equivalent was invoked
+     *
+     * Setters that accept a foreign (e.g. cuDNN) spelling with no hipDNN
+     * behavior record the request instead of failing at the call site; the
+     * owning node surfaces it as an error at validate().
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    bool hasUnsupportedUsage() const
+    {
+        return unsupported_reason.has_value();
+    }
+
+    /**
+     * @brief The reason recorded by the first unsupported setter, if any
+     * @return The recorded message, or an empty string when none was recorded
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    const std::string& getUnsupportedReason() const
+    {
+        static const std::string s_empty;
+        return unsupported_reason ? *unsupported_reason : s_empty;
     }
 
     /**
@@ -314,6 +348,23 @@ protected:
     DerivedT& setOutput(OutputNameT outputName, std::shared_ptr<TensorAttributes>&& value)
     {
         self().outputs[outputName] = std::move(value);
+        return self();
+    }
+
+    /**
+     * @brief Record the first unsupported source-compatibility request (first wins)
+     * @param reason Human-readable description of what is unsupported
+     * @return Reference to derived class for method chaining
+     *
+     * Latches the first reason only; later calls are no-ops so the earliest
+     * offending setter is the one surfaced at validate().
+     */
+    DerivedT& recordUnsupported(const char* reason)
+    {
+        if(!unsupported_reason.has_value())
+        {
+            unsupported_reason = reason;
+        }
         return self();
     }
 

@@ -32,8 +32,6 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-
-
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
 # specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -66,6 +64,23 @@ endif()
 
 include( ROCMInstallTargets )
 
+# embed rocfft_complex.h so it can be used in hiprtc for callbacks
+find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
+set( callback_embed_command ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/embed-to-header-rtc.py )
+# generated source file
+set( callback_embed_cpp ${CMAKE_CURRENT_BINARY_DIR}/callback-embed.cpp )
+# files that need to be embedded into the test, to be able to generate callback code
+set( callback_embed_files
+     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocfft_complex.h
+)
+add_custom_command(
+  OUTPUT ${callback_embed_cpp}
+  COMMAND ${Python3_EXECUTABLE} ${callback_embed_command}
+  --embed ${callback_embed_files} --output ${callback_embed_cpp}
+  DEPENDS ${callback_embed_command} ${callback_embed_files}
+  VERBATIM
+)
+
 set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
@@ -90,6 +105,7 @@ set( rocfft-test_source
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
+  ${callback_embed_cpp}
   )
 
 # rocfft_c.c verifies that rocfft/rocfft.h is self-sufficient in plain C.
@@ -107,47 +123,20 @@ endif()
 
 if( NOT "${ROCFFT_LINKED_VERSION}" STREQUAL ""
     AND NOT ROCFFT_LINKED_VERSION VERSION_LESS ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION )
-  list( APPEND rocfft-test_source rocfft_c.c )
-  set( ROCFFT_ENABLE_C_API_COMPILE_TEST ON )
+  add_executable( rocfft_c rocfft_c.c )
+  target_link_libraries( rocfft_c
+    PRIVATE
+    roc::rocfft
+    )
 else()
   message( STATUS
     "Skipping rocfft_c.c: linked rocFFT version '${ROCFFT_LINKED_VERSION}' is older than ${ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION}." )
 endif()
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
-add_executable( rtc_helper_crash rtc_helper_crash.cpp )
-
-if( NOT ROCFFT_ENABLE_C_API_COMPILE_TEST )
-  target_compile_definitions( rocfft-test PRIVATE SKIP_ROCFFT_C_TEST )
-endif()
-
-# Standalone clients builds can pick up /opt/rocm headers from transitive
-# dependencies; force the resolved rocFFT package include path to the front.
-set( ROCFFT_PACKAGE_INCLUDE_DIRS "" )
-if( TARGET roc::rocfft )
-  get_target_property( ROCFFT_PACKAGE_INCLUDE_DIRS roc::rocfft INTERFACE_INCLUDE_DIRECTORIES )
-endif()
-if( NOT ROCFFT_PACKAGE_INCLUDE_DIRS )
-  if( DEFINED rocfft_INCLUDE_DIRS )
-    set( ROCFFT_PACKAGE_INCLUDE_DIRS ${rocfft_INCLUDE_DIRS} )
-  elseif( DEFINED ROCFFT_INCLUDE_DIRS )
-    set( ROCFFT_PACKAGE_INCLUDE_DIRS ${ROCFFT_INCLUDE_DIRS} )
-  endif()
-endif()
-if( ROCFFT_PACKAGE_INCLUDE_DIRS )
-  list( REMOVE_DUPLICATES ROCFFT_PACKAGE_INCLUDE_DIRS )
-  target_include_directories( rocfft-test BEFORE PRIVATE ${ROCFFT_PACKAGE_INCLUDE_DIRS} )
-endif()
-
-# rocFFT device code builds with -O3 by default.  rocfft-test
-# contains device code for callback functions, so ensure the device
-# code is built with the same optimization level to minimize chance
-# of a mismatch.
-# rocfft_c.c is plain C and must not receive HIP device flags.
-target_compile_options( rocfft-test PRIVATE
-  $<$<NOT:$<COMPILE_LANGUAGE:C>>:-Xarch_device -O3> )
 
 option( BUILD_FFTW "Download and build FFTW" OFF )
+
 
 # look for installed FFTW if we weren't asked to build it
 if( NOT BUILD_FFTW )
@@ -337,9 +326,11 @@ if( NOT ROCFFT_BUILD_SCOPE )
   set( ROCFFT_SQLITE_LIB SQLite::SQLite3)
 endif()
 
+find_package( hiprtc REQUIRED CONFIG PATHS ${ROCM_PATH} )
 target_link_libraries( rocfft-test
   PRIVATE
   hip::device
+  hiprtc::hiprtc
   roc::rocfft
   ${ROCFFT_SQLITE_LIB}
   ${rocfft-test_link_libs}
@@ -407,13 +398,16 @@ set_target_properties(rocfft-test
                       PROPERTIES 
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
-set_target_properties(rtc_helper_crash
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
-                      ${TESTS_OUT_DIR})
 
+# On Linux, always include amdgcnspirv target so the clients work
+# on an architecture that the runtime supports but was not
+# specified a build time
+if( NOT WIN32 )
+  target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+  target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+endif()
 
-rocm_install(TARGETS rocfft-test rtc_helper_crash COMPONENT tests)
+rocm_install(TARGETS rocfft-test COMPONENT tests)
 
 #Ctest based Test Filter Standardization using test_categories.yaml
 
@@ -478,7 +472,14 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp ../../shared/array_validator.cpp)
+    add_executable(
+      ${worker}
+      rocfft_mpi_worker.cpp
+      ../../shared/test_callbacks.cpp
+      ../../shared/data_gen_device.cpp
+      ../../shared/array_validator.cpp
+      ${callback_embed_cpp}
+      )
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES
@@ -505,6 +506,7 @@ if( ROCFFT_MPI_ENABLE )
         ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
+        hiprtc::hiprtc
         MPI::MPI_CXX
         ${FFTW_LIBRARIES}
         "mpi_gtl_hsa"
@@ -518,6 +520,7 @@ if( ROCFFT_MPI_ENABLE )
         ${ROCFFT_OPENMP_LIBRARY}
         hip::hiprand
         hip::device
+        hiprtc::hiprtc
         MPI::MPI_CXX
         ${FFTW_LIBRARIES}
       )    
@@ -531,6 +534,13 @@ if( ROCFFT_MPI_ENABLE )
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
 
+    # On Linux, always include amdgcnspirv target so the clients work
+    # on an architecture that the runtime supports but was not
+    # specified a build time
+    if( NOT WIN32 )
+      target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+      target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+    endif()
   endforeach()
 
   # link normal MPI worker against rocFFT
