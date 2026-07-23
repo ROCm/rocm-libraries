@@ -672,8 +672,8 @@ def build_implicit_gemm_conv_wgrad(
     )
     # dW (weight gradient): output D.
     # split_k=1: normal writeonly store.
-    # split_k>1: atomic-add into a caller-zero-init fp32 dW; writeonly dropped
-    #            because atomicrmw is read+modify+write.  dtype_d must be fp32.
+    # split_k>1: atomic-add into caller-zero-init dW; writeonly dropped because
+    #            atomicrmw is read+modify+write (dtype_d in fp32/bf16/fp16).
     _dw_writeonly = not _is_split_k
     dW = b.param(
         "dW",
