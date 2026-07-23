@@ -251,6 +251,7 @@ typedef enum rocke_opcode
 
     /* math.* */
     ROCKE_OP_MATH_EXP2,
+    ROCKE_OP_MATH_EXP2_FAST,
     ROCKE_OP_MATH_LOG2,
     ROCKE_OP_MATH_RCP,
     ROCKE_OP_MATH_RCP_FAST,
@@ -682,6 +683,7 @@ rocke_value_t*
 
 /* ----- math ----- */
 rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a);
+rocke_value_t* rocke_b_exp2_fast(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_log2(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp_fast(rocke_ir_builder_t* b, rocke_value_t* a);

@@ -464,10 +464,6 @@ int main(int argc, char* argv[])
             n_random_tests = 10;
         });
 
-    app.add_flag(
-           "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
-        ->default_val("none");
-
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")
         ->default_val(default_seed_dev());
     // Filename for fftw and fftwf wisdom.
@@ -549,6 +545,11 @@ int main(int argc, char* argv[])
         ->default_val(0);
     non_token->add_option("--ioffset", manual_params.ioffset, "Input offset");
     non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
+
+    non_token->add_option("--callback", manual_params.run_callbacks, "Inject load/store callbacks.")
+        ->default_val("none")
+        ->check(CLI::IsMember({"none", "funcptr", "jit"}));
+
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
