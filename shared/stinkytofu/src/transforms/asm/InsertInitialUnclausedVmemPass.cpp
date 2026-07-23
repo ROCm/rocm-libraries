@@ -72,8 +72,8 @@ class InsertInitialUnclausedVmemPass : public Pass {
                 irBuilder.create(nopDesc, insertBefore);
 
                 PASS_DEBUG(std::cerr << "[InsertInitialUnclausedVmemPass] inserted "
-                                     << "global_prefetch_b8/v_nop prologue in bb=\"" << bb.getLabel()
-                                     << "\"\n");
+                                     << "global_prefetch_b8/v_nop prologue in bb=\""
+                                     << bb.getLabel() << "\"\n");
                 return preserveCFGAnalyses();
             }
         }
