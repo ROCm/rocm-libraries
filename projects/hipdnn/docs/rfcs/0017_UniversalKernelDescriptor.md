@@ -59,30 +59,33 @@ works from a small family of reusable descriptors, bound together for a family o
   declarative criteria expression, which also bind the named variables the launch references.
 - **UDD (Universal Dispatch Descriptor).** How to invoke a kernel, the dispatch application binary interface (ABI): argument binding
   and ordering, grid, block, shared memory, and workspace.
-- **UED (Universal Engine Descriptor).** One engine: a stable identity plus the knobs it exposes and
-  its behavior and numerical notes. An engine is a named group of kernels.
-- **UHD (Universal Heuristic Descriptor).** One kernel-selection model: given many kernels that fit a
-  graph, it picks the best one for the problem.
-- **KMD (Kernel Metadata Descriptor).** An upfront declaration of the metadata fields every kernel in
-  the pack carries, each with a type and an optional default: the variant axes the pack spans (tile
-  size, block size, and the like). Each UKD supplies concrete values for these fields; the heuristic
-  ranks the resulting catalog of kernels on them, and matchers read them as `$kernel.<field>`.
+- **UED (Universal Engine Descriptor).** One engine: a stable identity plus the knobs it exposes and its
+  behavior and numerical notes. It also names the engine's **one heuristic (UHD)** and **one metadata
+  schema (KMD)**, since a single selector ranks all the engine's kernels over one feature space. An
+  engine is a named group of kernels.
+- **UHD (Universal Heuristic Descriptor).** One kernel-selection model, one per engine: given the
+  kernels that fit a graph, it picks the best for the problem, ranking on their metadata and the problem
+  shape.
+- **KMD (Kernel Metadata Descriptor).** The engine's metadata schema: the variant fields every kernel in
+  the engine carries, each with a type and an optional default (tile size, block size, and the like).
+  Each UKD supplies concrete values; the engine's heuristic ranks the catalog on them, and matchers read
+  them as `$kernel.<field>`.
 - **UKD (Universal Kernel Descriptor).** One launchable kernel, carrying no logic of its own: its source
-  details plus the metadata carried with it. The source is either a compiled kernel or the details for
-  building it ahead-of-time (AOT); the metadata gives the values for the fields the KMD declares. Every
-  UKD in a KDP shares that pack's matchers, engine, heuristic, dispatch, and metadata schema, so a UKD
-  names none of them; it is applicable only when **all** of its pack's matchers pass.
+  details plus concrete metadata values for the fields the engine's KMD declares. The source is either a
+  compiled kernel or the details for building it ahead-of-time (AOT). A UKD lives in a KDP and inherits
+  the pack's matchers and dispatch and, through the pack's engine, the heuristic and metadata schema, so
+  it names none of them; it is applicable only when **all** of its pack's matchers pass.
 
-A family of near-identical kernels launches the same way, matches the same graph shapes, joins the same
-engine, and is ranked by the same selector, differing only in their compiled source and its build
-metadata. That family is exactly a KDP: one cohesive file that binds a
-**set of matchers** (referenced by ID and shared across packs), **one engine descriptor**, **one
-heuristic descriptor**, **one dispatch descriptor**, and **one metadata schema**, over a **vector of
-child kernels** that each supply only their source and metadata values. One of each shared piece per KDP
-is intentional: a kernel whose ABI, engine, selector, or matcher set differs simply belongs in another
-pack. Because every shared
-descriptor is authored once and referenced by ID, a family is a handful of shared descriptors plus one
-tiny entry per kernel, not hundreds of near-duplicate files.
+A family of near-identical kernels launches the same way and matches the same graph shapes, differing
+only in their compiled source and its build metadata. That family is exactly a KDP: one cohesive file
+that binds a **set of matchers** (referenced by ID and shared across packs), **one engine descriptor**,
+and **one dispatch descriptor**, over a **vector of child kernels** that each supply only their source
+and metadata values. The engine carries the heuristic and metadata schema, so many KDPs may share one
+engine while differing in their matchers and dispatch. One matcher set and UDD per KDP is intentional: a
+kernel whose ABI or matcher set differs belongs in another pack, and one whose engine, heuristic, or
+metadata schema differs belongs in another engine. Because every shared descriptor is authored once and
+referenced by ID, a family is a handful of shared descriptors plus one tiny entry per kernel, not
+hundreds of near-duplicate files.
 
 A prototype for a single operation (SDPA) runs a kernel end-to-end from a generic launch core plus a
 thin operation-specific adapter (rocKE, [PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)).
@@ -133,29 +136,30 @@ becomes data instead of hand-written code.
 | Descriptor | Purpose | Exists in hipDNN today as |
 |---|---|---|
 | **UKD** (kernel) | One launchable kernel: its source details plus build metadata; the KDP binds the rest | The compiled kernel module (code object) and its hand-tracked build config |
-| **KDP** (pack) | Bind a matcher set, one engine, one heuristic, one dispatch, and one metadata schema over a kernel vector | The engine-registration table plus the per-kernel applicability and launch scaffolding |
+| **KDP** (pack) | Bind a matcher set, one engine, and one dispatch over a kernel vector | The engine-registration table plus the per-kernel applicability and launch scaffolding |
 | **UMD** (match) | Accept a graph and bind its named variables | The graph half of `isApplicable` |
 | **UDD** (dispatch) | Invoke a kernel: args & ordering, grid/block, shared mem, workspace | The bespoke launch and argument-wiring code |
-| **UED** (engine) | A stable engine identity with its knobs and behavior/numerical notes | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
+| **UED** (engine) | A stable engine identity with its heuristic, metadata schema, knobs, and behavior/numerical notes | The provider's engine-registration table plus a `HIPDNN_REGISTER_ENGINE` id |
 | **UHD** (heuristic) | Rank the kernels within one engine and pick one | A ranking model living inside an engine's dispatcher |
-| **KMD** (metadata) | Declare the variant fields every kernel in the pack carries, with types and defaults | The compile-time template/tuning parameters that distinguish each hand-written kernel variant |
+| **KMD** (metadata) | Declare the engine's variant fields, each with a type and optional default | The compile-time template/tuning parameters that distinguish each hand-written kernel variant |
 
-A kernel descriptor carries no logic of its own. Everything but the code is the KDP's: the pack's shared
-matcher set decides when the kernel applies, its one engine and one heuristic own and rank it, and its
-one dispatch descriptor decides how it launches. So a UKD is just its source details plus the build
-metadata the heuristic ranks it by. The pack's one UDD holds one or more **Launches**, each a dispatch
-step, and a Launch pairs one such step with the kernel source that fills it. A simple kernel is a
-one-Launch UDD; a multi-launch kernel such as SDPA backward is a several-Launch UDD run in order
-([Section 13](#13-multiple-kernels-and-composition)), still one shared UDD per pack. Because the KDP
-holds the engine and heuristic, every kernel in it joins one engine (an engine is a group of kernels)
-and is ranked by one selector (a selection group); many KDPs may name the same engine and heuristic.
+A kernel descriptor carries no logic of its own. Everything but the code comes from above: the KDP's
+shared matcher set decides when the kernel applies and its one dispatch descriptor decides how it
+launches, while the engine the KDP names owns the heuristic that ranks it and the metadata schema it
+fills. So a UKD is just its source details plus the metadata values the heuristic ranks it by. The KDP's
+one UDD holds one or more **Launches**, each a dispatch step, and a Launch pairs one such step with the
+kernel source that fills it. A simple kernel is a one-Launch UDD; a multi-launch kernel such as SDPA
+backward is a several-Launch UDD run in order ([Section 13](#13-multiple-kernels-and-composition)), still
+one shared UDD per pack. Because the engine (not the KDP) owns the heuristic and metadata schema, many
+KDPs may share one engine while differing in their matchers and dispatch; all of them are ranked by that
+one selector over that one feature space.
 
 Two more terms complete the set: a **KDP (Kernel Descriptor Pack)** is the cohesive unit above (a set of
-matchers, one engine, one heuristic, one dispatch descriptor, and one metadata schema over a vector of
-child kernels, the deployment shape of [Section 1](#1-overview)), and a **UCD (Universal Composite
-Descriptor)** composes stages that each resolve to a UKD (future work, [Section 13](#13-multiple-kernels-and-composition)).
+matchers, one engine, and one dispatch descriptor over a vector of child kernels, the deployment shape of
+[Section 1](#1-overview)), and a **UCD (Universal Composite Descriptor)** composes stages that each
+resolve to a UKD (future work, [Section 13](#13-multiple-kernels-and-composition)).
 
-![How the descriptors relate: a KDP binding a matcher set, one engine, one heuristic, one UDD, and one metadata schema over a vector of child kernels](../images/ukd_concepts.svg)
+![How the descriptors relate: an engine owning one heuristic and one metadata schema; a KDP binding a matcher set, that engine, and one UDD over a vector of child kernels](../images/ukd_concepts.svg)
 
 There are two independent selection levels, and they are named apart to avoid conflation. The
 **engine-selection heuristic** is hipDNN's existing heuristic plugin interface, which chooses which
@@ -181,10 +185,10 @@ selection, launch) is identical regardless of how a kernel arrived.
 ![Two ingestion paths converging on one generic engine and launcher](../images/ukd_flows.svg)
 
 At provider load, the generic engine discovers all available descriptors and wires them up: it loads
-every KDP, then builds the set of engines from them: each UED becomes an engine associated with the
-KDPs that name it, each child kernel becomes a data-backed plan builder inside that engine, and each
-KDP's heuristic becomes the selector its engine consults. Deciding which kernels apply to a
-graph is then a cheap, shared-matcher pass ([Section 5](#5-matching-and-the-umd)): shared checks run
+every KDP, then builds the set of engines from them: each UED becomes an engine with its heuristic (UHD)
+and metadata schema (KMD), the KDPs that name it contribute their matchers, dispatch, and kernels, and
+each child kernel becomes a data-backed plan builder inside that engine. Deciding which kernels apply to
+a graph is then a cheap, shared-matcher pass ([Section 5](#5-matching-and-the-umd)): shared checks run
 once for the whole graph, per-kernel checks run only for the survivors, and results are cached. No new host or plugin-ABI interfaces are introduced; the
 generic engine satisfies hipDNN's existing contracts using descriptor data, and the new machinery it
 needs (the matcher, the expression interpreter, the selector, and the predicate and custom-plan
@@ -203,13 +207,15 @@ Every descriptor also carries a stable, opaque `id` used for cross-references an
 logging and diagnostics; both appear in the examples. The examples are illustrative, and the
 `schema`/version plumbing is shown once here and elided elsewhere.
 
-**UED, an engine with its knobs and notes:**
+**UED, an engine with its heuristic, metadata schema, knobs, and notes:**
 
 ```jsonc
 {
   "schema": "hipdnn.ued/v1",
   "id":     3310472051,                        // stable, unique; referenced by the KDP
   "name":   "Example attention engine",        // human-readable label
+  "heuristic": 3310472052,                     // one UHD: the selector for this engine's kernels
+  "metadata":  3310472053,                     // one KMD: the variant schema this engine's kernels fill
   "behavior_notes":  ["runtime_compilation"],  // hipDNN behavior notes for this engine
   "numerical_notes": ["tensor_core", "reduced_precision_reduction"],  // hipDNN numerical notes
   "knobs": [                                   // author-exposed, user-controllable
@@ -224,7 +230,7 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 ```jsonc
 {
   "schema": "hipdnn.uhd/v1",
-  "id":     3310472052,       // stable, unique; referenced by the KDP
+  "id":     3310472052,       // stable, unique; referenced by the UED (one per engine)
   "name":   "Example attention LightGBM selector",
   "kind":   "model",          // "model" | "static_order" | "custom_library"
   "model": {
@@ -236,13 +242,15 @@ logging and diagnostics; both appear in the examples. The examples are illustrat
 }
 ```
 
-**KMD, the metadata schema:** the variant fields every kernel in the pack carries, each with a type and
-an optional default. It declares upfront which variants the pack spans; each UKD fills in concrete values.
+**KMD, the metadata schema:** the variant fields every kernel in the engine carries, each with a type and
+an optional default. It declares upfront which variants the engine spans; each UKD fills in concrete
+values. (When the engine's KDPs span slightly different axes, the schema is their union and unused fields
+take their defaults.)
 
 ```jsonc
 {
   "schema": "hipdnn.kmd/v1",
-  "id":     3310472053,       // stable, unique; referenced by the KDP
+  "id":     3310472053,       // stable, unique; referenced by the UED (one per engine)
   "name":   "Example attention variant fields",
   "fields": [
     {"name": "tile_m",  "type": "int",    "optional": true, "default": 1},
@@ -283,9 +291,10 @@ its kernels require.
 **UKD, one kernel:** its source details plus concrete metadata values for the fields the KMD declares.
 The source points at a compiled kernel or says how to build it AOT ([Section 7](#7-kernel-source)); the
 metadata gives the exact variant this kernel was built with (a field the UKD omits takes the KMD's
-default). The heuristic ranks the catalog on these values and criteria read them as `$kernel.*` tokens
-([Section 5](#5-matching-and-the-umd)); they are checked against the KMD at load. A UKD's matchers,
-engine, heuristic, dispatch, and metadata schema are all the KDP's, so it names none of them.
+default). The engine's heuristic ranks the catalog on these values and criteria read them as `$kernel.*`
+tokens ([Section 5](#5-matching-and-the-umd)); they are checked against the engine's KMD at load. A UKD's
+matchers, engine, and dispatch are all the KDP's, and its heuristic and metadata schema are the engine's,
+so it names none of them.
 
 ```jsonc
 {
@@ -298,11 +307,12 @@ engine, heuristic, dispatch, and metadata schema are all the KDP's, so it names 
 }
 ```
 
-**KDP, a cohesive pack:** one file that binds a shared **matcher set**, **one engine**, **one
-heuristic**, **one dispatch descriptor**, and **one metadata schema (KMD)**, over a **vector of child
-kernels**. Every referenced descriptor is shared by ID across packs; only the child kernels are unique to
-this pack. One of each is intentional: every kernel in the pack shares that launch ABI, engine, selector,
-matcher set, and metadata schema, so a kernel that differs in any of them belongs in a different pack.
+**KDP, a cohesive pack:** one file that binds a shared **matcher set**, **one engine**, and **one dispatch
+descriptor**, over a **vector of child kernels**. Every referenced descriptor is shared by ID across
+packs; only the child kernels are unique to this pack. The engine carries the heuristic and metadata
+schema, so many KDPs may share one engine while differing in their matchers and dispatch. One of each is
+intentional: every kernel in the pack shares that launch ABI, engine, and matcher set, so a kernel that
+differs in any of them belongs in a different pack.
 
 ```jsonc
 {
@@ -310,10 +320,8 @@ matcher set, and metadata schema, so a kernel that differs in any of them belong
   "version": "1",              // pack format version, gated at load
   "arch":     ["gfx942"],      // arch is a pack property, resolved at selection (Section 5)
   "matchers": [8811203344, 8811203301, 8811203302],  // UMD ids; a kernel applies iff all pass
-  "engine":    3310472051,     // one UED id: the engine every child kernel joins
-  "heuristic": 3310472052,     // one UHD id: the selector that ranks them
+  "engine":    3310472051,     // one UED id: the engine every child kernel joins (carries UHD + KMD)
   "dispatch":  8811203390,     // one UDD id, shared by every child kernel (Section 6)
-  "metadata":  3310472053,     // one KMD id: the variant schema every child kernel fills
   "kernelDescriptors": [       // the vector of child kernels; each is just source + metadata values
     { "id": 4471900201, ... },
     { "id": 4471900202, ... }
@@ -354,10 +362,11 @@ namespaces, and every criteria and dispatch expression draws from the same set:
   (the graph has exactly this many nodes).
 - **Attributes:** a matched op node's attributes, named by the node's pattern `id`: an SDPA node
   `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.head_size`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
-- **Kernel metadata:** `$kernel.<field>`, the values a UKD supplies for the fields its KMD declares (tile
-  and vector constants, the dtype it targets); the heuristic ranks on them
+- **Kernel metadata:** `$kernel.<field>`, the values a UKD supplies for the fields its engine's KMD
+  declares (tile and vector constants, the dtype it targets); the heuristic ranks on them
   ([Section 4](#4-descriptor-formats)) and a check binds a kernel to the graph, e.g.
-  `divisible($q.head_size, $kernel.tile_m)`.
+  `divisible($q.head_size, $kernel.tile_m)`. A `$kernel.*` field a shared matcher reads must exist in the
+  engine's KMD; this is checked at load.
 - **Device properties:** `$device.<field>` such as `$device.lds_size` or `$device.warp_size`, for a
   check like an LDS budget `<=($kernel.lds_per_block, $device.lds_size)`.
 
@@ -817,15 +826,22 @@ shown below so the example stands on its own; the matcher is the SDPA forward on
   ]
 }
 
-// --- KDP (the cohesive pack): matchers, one engine, heuristic, UDD, metadata schema, and a kernel vector ---
+// --- UED (the engine): carries its one heuristic and one metadata schema ---
+{
+  "schema":    "hipdnn.ued/v1",
+  "id":        9100067001,      // referenced by the KDP below; many KDPs may share this engine
+  "name":      "rocKE SDPA forward engine",
+  "heuristic": 9100067002,      // one UHD: the selector that ranks this engine's kernels
+  "metadata":  9100067003       // one KMD (not shown): declares the variant fields (head_size, dtype)
+}
+
+// --- KDP (the cohesive pack): matchers, one engine, one UDD, and a kernel vector ---
 {
   "schema": "hipdnn.kdp/v1",
   "arch":      ["gfx942"],      // arch is a pack property, resolved at selection
   "matchers":  [1180449020],    // the UMD above; a child kernel applies iff all listed matchers pass
-  "engine":    9100067001,      // one UED: the engine every child kernel joins
-  "heuristic": 9100067002,      // one UHD: the selector that ranks them
+  "engine":    9100067001,      // the UED above (carries UHD + KMD); every child kernel joins it
   "dispatch":  1180449055,      // the one UDD above, shared by every child kernel
-  "metadata":  9100067003,      // one KMD (not shown): declares the variant fields (head_size, dtype)
   "kernelDescriptors": [        // the kernel vector; each is just source + metadata values
     {
       "schema": "hipdnn.ukd/v1",
@@ -836,8 +852,9 @@ shown below so the example stands on its own; the matcher is the SDPA forward on
       "metadata": {"head_size": 128, "dtype": "bf16"},  // concrete values for the KMD's fields
       "priority":  100
     }
-    // more child kernels share this pack's matchers, engine, heuristic, UDD, and metadata schema; a
-    // kernel that differs in any of those (e.g. d64 with a different ABI) belongs in its own KDP
+    // more child kernels share this pack's matchers, engine, and UDD (and, through the engine, its
+    // heuristic and metadata schema); a kernel that differs in any of those (e.g. d64 with a different
+    // ABI) belongs in its own KDP
   ]
 }
 ```
@@ -960,7 +977,7 @@ symbol table. Each Launch is a dispatch step (its own grid, block, shared memory
 signature) with a named source slot, and the Launches run in written order on the plan stream so a
 producer's writes are visible to its consumers. The UDD stays one per pack and shared by the whole
 family; each UKD just fills the launch slots with its own sources. The program is ranked as a unit by
-the pack's heuristic (it competes against other whole programs for the same graph, not against its own
+the engine's heuristic (it competes against other whole programs for the same graph, not against its own
 Launches) and is selected atomically; a caller never picks a subset of its Launches.
 
 The pack's matcher (id `7715002230`, not shown) matches `sdpa_bwd` and binds the inputs
@@ -1211,9 +1228,9 @@ choices; none is a dependency.
 
 - **UKD (Universal Kernel Descriptor):** one launchable kernel, carrying no logic of its own: its source
   details (a compiled kernel, or how to build it AOT; one source per Launch for a multi-launch pack) and
-  concrete metadata values for the fields its KMD declares (with an optional `priority`). It lives in a
-  KDP and inherits everything shared (the pack's matchers, engine, heuristic, UDD, and metadata schema),
-  so it names none of them.
+  concrete metadata values for the fields its engine's KMD declares (with an optional `priority`). It
+  lives in a KDP and inherits everything shared (the pack's matchers, engine, and UDD, and through the
+  engine its heuristic and metadata schema), so it names none of them.
 - **UMD (Universal Match Descriptor) / matcher:** one shared, ID-referenced matcher, a structural
   pattern (when present) plus a declarative **criteria expression**, that decides whether a kernel
   applies and binds the variables its dispatch and workspace formulas use
@@ -1231,26 +1248,31 @@ choices; none is a dependency.
   (`$sdpa_fwd.head_size`), **Kernel metadata** (`$kernel.<field>`), and **Device properties**
   (`$device.<field>`). Plain data the safe interpreter walks; it fails closed on any field the schema
   does not declare ([Section 5](#5-matching-and-the-umd)).
-- **UED (Universal Engine Descriptor):** one engine, a stable identity plus knobs and behavior/numerical notes.
+- **UED (Universal Engine Descriptor):** one engine, a stable identity plus knobs and behavior/numerical
+  notes. It names the engine's one heuristic (UHD) and one metadata schema (KMD); many KDPs may share
+  one engine.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
-  a graph and picks one.
+  a graph and picks one. One per engine, named by the UED.
 - **KMD (Kernel Metadata Descriptor):** an upfront declaration of the metadata (variant) fields every
-  kernel in the pack carries, each with a type and an optional default. Each UKD fills in concrete
+  kernel in the engine carries, each with a type and an optional default. Each UKD fills in concrete
   values; the heuristic ranks the catalog on them and matchers read them as `$kernel.<field>`. One per
-  KDP, shared across packs by ID.
+  engine, named by the UED and shared across packs by ID. (When the engine's KDPs span slightly different
+  axes, the schema is their union and unused fields take their defaults.)
 - **Launch:** one dispatch step in a UDD (grid, block, shared memory, argument signature) with a named
   source slot, paired at runtime with the UKD source that fills it. A UDD holds one Launch for a
   single-kernel pack, several run in order for a multi-launch pack
   ([Section 13](#13-multiple-kernels-and-composition)); it is always one shared UDD per pack.
 - **KDP (Kernel Descriptor Pack):** one cohesive file binding a **set of matchers** (referenced by ID,
-  shared across packs), **one engine**, **one heuristic**, **one dispatch descriptor**, and **one
-  metadata schema (KMD)**, over a **vector of child kernels**, so a family of kernels is not hundreds of
-  near-duplicate files. One of each is intentional: a kernel whose launch ABI, engine, selector, matcher
-  set, or metadata schema differs belongs in a different pack.
+  shared across packs), **one engine**, and **one dispatch descriptor**, over a **vector of child
+  kernels**, so a family of kernels is not hundreds of near-duplicate files. The engine carries the
+  heuristic and metadata schema, so many KDPs may share one engine while differing in their matchers and
+  dispatch. One of each is intentional: a kernel whose launch ABI, engine, or matcher set differs belongs
+  in a different pack.
 - **UCD (Universal Composite Descriptor):** a pipeline of stages, each resolving to a UKD chosen by
   its own heuristic ([Section 13.2](#132-a-pipeline-of-separately-chosen-kernels)).
 - **id / name:** every descriptor carries a stable `id` used for cross-references and a human-readable
-  `name`; references (a KDP's `matchers`, `engine`, `heuristic`, `dispatch`, and `metadata`) use the id.
+  `name`; references (a KDP's `matchers`, `engine`, and `dispatch`, and a UED's `heuristic` and
+  `metadata`) use the id.
 - **AOT:** ahead-of-time compilation; kernels compiled per architecture at build time and installed
   beside the provider, as opposed to runtime JIT.
 - **ABI:** the calling convention a kernel expects, its argument layout and order plus launch

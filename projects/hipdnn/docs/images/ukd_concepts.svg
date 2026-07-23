@@ -8,43 +8,45 @@
 
   <!-- TITLE -->
   <text x="430" y="28" text-anchor="middle" font-weight="600" font-size="15">The descriptor family: many kernels, few shared pieces</text>
-  <text x="430" y="48" text-anchor="middle" fill="#555" font-size="12">A KDP binds shared descriptors (matchers, engine, heuristic, dispatch, metadata) over a vector of child kernels</text>
+  <text x="430" y="48" text-anchor="middle" fill="#555" font-size="12">A KDP binds shared descriptors (matchers, engine, dispatch) over a vector of child kernels; the engine carries the heuristic and metadata schema</text>
 
-  <!-- CENTER: KDP = matchers + engine + heuristic + UDD + KMD + kernel vector -->
+  <!-- CENTER: KDP = matchers + engine + UDD + kernel vector -->
   <rect x="315" y="104" width="230" height="262" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
   <text x="430" y="124" text-anchor="middle" font-weight="600">KDP: Kernel Descriptor Pack</text>
-  <text x="430" y="141" text-anchor="middle" font-size="10" fill="#2a9d8f">matchers[] &#8594; shared UMD set</text>
-  <text x="430" y="156" text-anchor="middle" font-size="10" fill="#4a72c4">engine &#8594; one UED</text>
-  <text x="430" y="171" text-anchor="middle" font-size="10" fill="#3f9159">heuristic &#8594; one UHD</text>
-  <text x="430" y="186" text-anchor="middle" font-size="10" fill="#8e5bc4">dispatch &#8594; one UDD</text>
-  <text x="430" y="201" text-anchor="middle" font-size="10" fill="#b5651d">metadata &#8594; one KMD</text>
-  <text x="430" y="217" text-anchor="middle" font-size="10" fill="#8a6d1f">kernelDescriptors[] : kernel vector</text>
-  <rect x="333" y="223" width="194" height="22" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
-  <text x="430" y="238" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD #1 · source + metadata</text>
-  <rect x="333" y="249" width="194" height="22" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
-  <text x="430" y="264" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD #2 · source + metadata</text>
-  <text x="430" y="285" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD ... (N)</text>
-  <text x="430" y="305" text-anchor="middle" font-size="9.5" fill="#555">one engine / heuristic / UDD / KMD per KDP</text>
-  <text x="430" y="319" text-anchor="middle" font-size="9.5" fill="#555">kernels differ only in source + metadata</text>
-  <text x="430" y="333" text-anchor="middle" font-size="9.5" fill="#555">applicable iff all matchers pass</text>
+  <text x="430" y="143" text-anchor="middle" font-size="10" fill="#2a9d8f">matchers[] &#8594; shared UMD set</text>
+  <text x="430" y="160" text-anchor="middle" font-size="10" fill="#4a72c4">engine &#8594; one UED (carries UHD + KMD)</text>
+  <text x="430" y="177" text-anchor="middle" font-size="10" fill="#8e5bc4">dispatch &#8594; one UDD</text>
+  <text x="430" y="196" text-anchor="middle" font-size="10" fill="#8a6d1f">kernelDescriptors[] : kernel vector</text>
+  <rect x="333" y="203" width="194" height="22" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
+  <text x="430" y="218" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD #1 · source + metadata</text>
+  <rect x="333" y="229" width="194" height="22" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
+  <text x="430" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD #2 · source + metadata</text>
+  <text x="430" y="266" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD ... (N)</text>
+  <text x="430" y="288" text-anchor="middle" font-size="9.5" fill="#555">one engine + UDD per KDP; engine carries UHD + KMD</text>
+  <text x="430" y="302" text-anchor="middle" font-size="9.5" fill="#555">kernels differ only in source + metadata</text>
+  <text x="430" y="316" text-anchor="middle" font-size="9.5" fill="#555">applicable iff all matchers pass</text>
 
-  <!-- LEFT: shared pieces the KDP names -->
-  <rect x="35" y="92" width="215" height="66" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
-  <text x="50" y="116" font-weight="600">UED: Engine Descriptor</text>
-  <text x="50" y="136" font-size="12" fill="#333">one group of kernels</text>
-  <text x="50" y="152" font-size="11" fill="#555">named by the KDP; shared by its kernels</text>
+  <!-- LEFT: the engine, which owns one heuristic and one metadata schema -->
+  <rect x="35" y="120" width="215" height="70" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="50" y="144" font-weight="600">UED: Engine Descriptor</text>
+  <text x="50" y="164" font-size="12" fill="#333">one group of kernels</text>
+  <text x="50" y="180" font-size="11" fill="#555">owns one UHD + one KMD; named by the KDP</text>
 
-  <rect x="35" y="176" width="215" height="66" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
-  <text x="50" y="200" font-weight="600">UHD: Heuristic Descriptor</text>
-  <text x="50" y="220" font-size="12" fill="#333">one kernel selector</text>
-  <text x="50" y="236" font-size="11" fill="#555">ranks the kernels that fit a graph</text>
+  <rect x="35" y="250" width="103" height="86" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="46" y="272" font-weight="600" font-size="12">UHD</text>
+  <text x="46" y="290" font-size="11" fill="#333">Heuristic</text>
+  <text x="46" y="306" font-size="10" fill="#555">one kernel</text>
+  <text x="46" y="320" font-size="10" fill="#555">selector; ranks</text>
+  <text x="46" y="332" font-size="10" fill="#555">kernels that fit</text>
 
-  <rect x="35" y="260" width="215" height="66" rx="8" fill="#f6ede2" stroke="#b5651d" stroke-width="1.5"/>
-  <text x="50" y="284" font-weight="600">KMD: Metadata schema</text>
-  <text x="50" y="304" font-size="12" fill="#333">variant fields + defaults</text>
-  <text x="50" y="320" font-size="11" fill="#555">each kernel supplies values</text>
+  <rect x="147" y="250" width="103" height="86" rx="8" fill="#f6ede2" stroke="#b5651d" stroke-width="1.5"/>
+  <text x="158" y="272" font-weight="600" font-size="12">KMD</text>
+  <text x="158" y="290" font-size="11" fill="#333">Metadata schema</text>
+  <text x="158" y="306" font-size="10" fill="#555">variant fields</text>
+  <text x="158" y="320" font-size="10" fill="#555">+ defaults; each</text>
+  <text x="158" y="332" font-size="10" fill="#555">kernel fills them</text>
 
-  <!-- RIGHT: shared pieces the KDP names -->
+  <!-- RIGHT: shared pieces the KDP names, plus the per-kernel source -->
   <rect x="610" y="92" width="215" height="66" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
   <text x="625" y="116" font-weight="600">UMD: matcher (shared)</text>
   <text x="625" y="136" font-size="12" fill="#333">a set, referenced by ID</text>
@@ -60,14 +62,17 @@
   <text x="625" y="304" font-size="12" fill="#333">one per UKD (unique)</text>
   <text x="625" y="320" font-size="11" fill="#555">kpack/hsaco/hip + values</text>
 
-  <!-- arrows: the KDP references every shared piece by ID (straight across, label above) -->
-  <text x="283" y="119" text-anchor="middle" font-size="10" fill="#333">engine</text>
-  <line x1="315" y1="125" x2="252" y2="125" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="283" y="203" text-anchor="middle" font-size="10" fill="#333">heuristic</text>
-  <line x1="315" y1="209" x2="252" y2="209" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="283" y="287" text-anchor="middle" font-size="10" fill="#333">metadata</text>
-  <line x1="315" y1="293" x2="252" y2="293" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <!-- arrow: the KDP names one engine -->
+  <text x="283" y="149" text-anchor="middle" font-size="10" fill="#333">engine</text>
+  <line x1="315" y1="155" x2="252" y2="155" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
 
+  <!-- arrows: the engine owns its one heuristic and one metadata schema -->
+  <text x="70" y="223" text-anchor="middle" font-size="10" fill="#333">heuristic</text>
+  <line x1="100" y1="190" x2="86" y2="248" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="212" y="223" text-anchor="middle" font-size="10" fill="#333">metadata</text>
+  <line x1="185" y1="190" x2="199" y2="248" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+
+  <!-- arrows: the KDP references its shared matcher set, dispatch, and per-kernel source -->
   <text x="577" y="119" text-anchor="middle" font-size="10" fill="#333">matchers</text>
   <line x1="545" y1="125" x2="608" y2="125" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
   <text x="577" y="203" text-anchor="middle" font-size="10" fill="#333">dispatch (1)</text>
@@ -76,7 +81,7 @@
   <line x1="545" y1="293" x2="608" y2="293" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
 
   <!-- caption -->
-  <text x="430" y="392" text-anchor="middle" font-size="12" fill="#333">One engine, selector, dispatch, and metadata schema, a shared matcher set, one source + metadata per kernel, but many kernels.</text>
-  <text x="430" y="410" text-anchor="middle" font-size="12" fill="#333">The KDP binds the shared descriptors; each child kernel adds only its source and metadata values. Everything is by ID.</text>
+  <text x="430" y="392" text-anchor="middle" font-size="12" fill="#333">One engine and UDD, a shared matcher set, one source + metadata per kernel, but many kernels.</text>
+  <text x="430" y="410" text-anchor="middle" font-size="12" fill="#333">The engine carries the heuristic and metadata schema, so many KDPs may share one engine. Everything is by ID.</text>
   <text x="430" y="428" text-anchor="middle" font-size="12" fill="#555">Engine-level selection picks the engine; the UHD then picks the kernel within it.</text>
 </svg>
