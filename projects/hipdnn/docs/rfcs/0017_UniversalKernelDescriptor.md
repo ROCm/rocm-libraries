@@ -320,7 +320,8 @@ the fields the pattern binds, built from logical operators (`and`, `or`, `!`), c
 `<`, `in`), a per-element `all`, and arithmetic (`+`, `*`, `%`), plus a few custom short-hands
 (`divisible`, and the pattern-binding `shape`/`rank`) and registry-resolved custom operations for checks
 the built-ins cannot express (the escape hatch below). Operators nest to any depth, and a left-hand side
-can itself be a computed expression rather than a raw field. Leaves are literals or `{"var": "<field>"}`.
+can itself be a computed expression rather than a raw field. A leaf is a literal or a `$`-prefixed field
+reference (`"$q.dtype"`); the `$` marks a reference, so no `var` wrapper is needed.
 
 **The hipDNN schema declares the fields an expression may reference**, so an author sees the whole
 vocabulary up front and the interpreter fails closed on anything undeclared. The fields fall in five
@@ -373,12 +374,9 @@ dims) against the kernel instance's tile constants (its `$kernel.*` metadata):
      "operands": {"X": "$x", "W": "$w"}, "results": {"Y": "$y"}}
   ],
   "criteria": {"and": [
-    {"divisible": [{"*": [{"var": "$y.n"}, {"var": "$y.ho"}, {"var": "$y.wo"}]},  // GEMM M = output positions
-                   {"var": "$kernel.MPerBlock"}]},
-    {"divisible": [{"var": "$y.k"},                                               // GEMM N = output channels
-                   {"var": "$kernel.NPerBlock"}]},
-    {"divisible": [{"*": [{"var": "$w.c"}, {"var": "$w.y"}, {"var": "$w.x"}]},    // GEMM K = reduction (C*Y*X)
-                   {"var": "$kernel.KPerBlock"}]}
+    {"divisible": [{"*": ["$y.n", "$y.ho", "$y.wo"]}, "$kernel.MPerBlock"]},  // GEMM M = output positions
+    {"divisible": ["$y.k", "$kernel.NPerBlock"]},                             // GEMM N = output channels
+    {"divisible": [{"*": ["$w.c", "$w.y", "$w.x"]}, "$kernel.KPerBlock"]}     // GEMM K = reduction (C*Y*X)
   ]}
 }
 ```
@@ -401,16 +399,16 @@ them:
      "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
   ],
   "criteria": {"and": [
-    {"in":    [{"var": "$q.dtype"}, ["BFLOAT16"]]},
-    {"==":    [{"var": "$q.stride_order"}, [0, 1, 2, 3]]}, {"var": "$q.packed"},  // contiguous bhsd
-    {"shape": [{"var": "$q"}, ["batch", "num_heads", "seqlen_q", "head_size"]]},  // binds these dims
-    {"in":    [{"var": "$k.dtype"}, ["BFLOAT16"]]},
-    {"shape": [{"var": "$k"}, ["batch", "num_heads", "seqlen_k", "head_size"]]},
-    {"in":    [{"var": "$v.dtype"}, ["BFLOAT16"]]},
-    {"hipdnn.same_head_dim": [{"var": "$q"}, {"var": "$k"}, {"var": "$v"}]},      // custom operation
-    {"==":    [{"var": "$sdpa_fwd.head_size"}, 128]},
-    {"in":    [{"var": "$sdpa_fwd.mask_mode"}, ["none"]]},
-    {"==":    [{"var": "$graph.node_count"}, 1]}  // exact: this kernel is the whole graph
+    {"in":    ["$q.dtype", ["BFLOAT16"]]},
+    {"==":    ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed",  // contiguous bhsd
+    {"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]},  // binds these dims
+    {"in":    ["$k.dtype", ["BFLOAT16"]]},
+    {"shape": ["$k", ["batch", "num_heads", "seqlen_k", "head_size"]]},
+    {"in":    ["$v.dtype", ["BFLOAT16"]]},
+    {"hipdnn.same_head_dim": ["$q", "$k", "$v"]},      // custom operation
+    {"==":    ["$sdpa_fwd.head_size", 128]},
+    {"in":    ["$sdpa_fwd.mask_mode", ["none"]]},
+    {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
   ]}
 }
 ```
@@ -473,15 +471,15 @@ serves the whole chain as a single kernel.
      "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
   ],
   "criteria": {"and": [
-    {"in":    [{"var": "$x.dtype"}, ["FLOAT16"]]},
-    {"==":    [{"var": "$x.stride_order"}, [0, 2, 3, 1]]}, {"var": "$x.packed"},  // NHWC
-    {"in":    [{"var": "$y.dtype"}, ["FLOAT16"]]},
-    {"==":    [{"var": "$y.stride_order"}, [0, 2, 3, 1]]}, {"var": "$y.packed"},  // NHWC
-    {"shape": [{"var": "$y"}, ["batch", "out_h", "out_w", "out_channels"]]},
-    {"shape": [{"var": "$bias"}, ["out_channels"]]},
-    {"==":  [{"var": "$graph.node_count"}, 3]},  // exactly these three ops
-    {"var": "$conv_out.virtual"},                // internal intermediate, absorbed by the fused kernel
-    {"var": "$bias_out.virtual"}
+    {"in":    ["$x.dtype", ["FLOAT16"]]},
+    {"==":    ["$x.stride_order", [0, 2, 3, 1]]}, "$x.packed",  // NHWC
+    {"in":    ["$y.dtype", ["FLOAT16"]]},
+    {"==":    ["$y.stride_order", [0, 2, 3, 1]]}, "$y.packed",  // NHWC
+    {"shape": ["$y", ["batch", "out_h", "out_w", "out_channels"]]},
+    {"shape": ["$bias", ["out_channels"]]},
+    {"==":  ["$graph.node_count", 3]},  // exactly these three ops
+    "$conv_out.virtual",                // internal intermediate, absorbed by the fused kernel
+    "$bias_out.virtual"
   ]}
 }
 ```
@@ -514,12 +512,12 @@ fail-closed remains a backstop, not the first line of defense.
 ```jsonc
 {  // a UDD; every $q.* dim below is a field the pack's matcher bound (Section 5)
   "schema": "hipdnn.udd/v1",
-  "grid":  {"x": {"ceil_div": [{"var": "$q.seqlen_q"}, 16]},
-            "y": {"var": "$q.num_heads"}, "z": {"var": "$q.batch"}},
+  "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 16]},
+            "y": "$q.num_heads", "z": "$q.batch"},
   "block": {"x": 256, "y": 1, "z": 1},
   "shared_mem_bytes": 32768,
-  "workspace_bytes": {"*": [{"*": [{"var": "$q.batch"}, {"var": "$q.num_heads"}]},  // batch*num_heads*seqlen_q*4
-                           {"*": [{"var": "$q.seqlen_q"}, 4]}]}
+  "workspace_bytes": {"*": [{"*": ["$q.batch", "$q.num_heads"]},  // batch*num_heads*seqlen_q*4
+                           {"*": ["$q.seqlen_q", 4]}]}
 }
 ```
 
@@ -542,7 +540,7 @@ so the generic launcher can assemble the call directly from the matched graph:
     {"name": "stride_q",   "kind": "scalar", "type": "i64", "source": {"from": "stride", "ref": "$q", "axis": 2}},
     {"name": "scale_log2", "kind": "scalar", "type": "f32",
        "source": {"from": "expr",
-                  "expr": {"*": [{"rsqrt": [{"var": "$q.head_size"}]}, 1.4426950408889634]}}},
+                  "expr": {"*": [{"rsqrt": ["$q.head_size"]}, 1.4426950408889634]}}},
     {"name": "__workspace__", "kind": "workspace"}
   ]
 }
@@ -756,16 +754,16 @@ shown below so the example stands on its own; the matcher is the SDPA forward on
      "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
   ],
   "criteria": {"and": [
-    {"in":    [{"var": "$q.dtype"}, ["BFLOAT16"]]},
-    {"==":    [{"var": "$q.stride_order"}, [0, 1, 2, 3]]}, {"var": "$q.packed"},  // contiguous bhsd
-    {"shape": [{"var": "$q"}, ["batch", "num_heads", "seqlen_q", "head_size"]]},  // binds these dims
-    {"in":    [{"var": "$k.dtype"}, ["BFLOAT16"]]},
-    {"shape": [{"var": "$k"}, ["batch", "num_heads", "seqlen_k", "head_size"]]},
-    {"in":    [{"var": "$v.dtype"}, ["BFLOAT16"]]},
-    {"hipdnn.same_head_dim": [{"var": "$q"}, {"var": "$k"}, {"var": "$v"}]},      // custom operation
-    {"==":    [{"var": "$sdpa_fwd.head_size"}, 128]},
-    {"in":    [{"var": "$sdpa_fwd.mask_mode"}, ["none"]]},
-    {"==":    [{"var": "$graph.node_count"}, 1]}  // exact: this kernel is the whole graph
+    {"in":    ["$q.dtype", ["BFLOAT16"]]},
+    {"==":    ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed",  // contiguous bhsd
+    {"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]},  // binds these dims
+    {"in":    ["$k.dtype", ["BFLOAT16"]]},
+    {"shape": ["$k", ["batch", "num_heads", "seqlen_k", "head_size"]]},
+    {"in":    ["$v.dtype", ["BFLOAT16"]]},
+    {"hipdnn.same_head_dim": ["$q", "$k", "$v"]},      // custom operation
+    {"==":    ["$sdpa_fwd.head_size", 128]},
+    {"in":    ["$sdpa_fwd.mask_mode", ["none"]]},
+    {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
   ]}
   // arch is a pack property (KDP.arch below), not a criterion
 }
@@ -775,8 +773,8 @@ shown below so the example stands on its own; the matcher is the SDPA forward on
   "schema": "hipdnn.udd/v1",
   "id":   1180449055,
   "name": "SDPA forward (d128) dispatch",
-  "grid":  {"x": {"ceil_div": [{"var": "$q.seqlen_q"}, 16]},
-            "y": {"var": "$q.num_heads"}, "z": {"var": "$q.batch"}},
+  "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 16]},
+            "y": "$q.num_heads", "z": "$q.batch"},
   "block": {"x": 256, "y": 1, "z": 1},
   "shared_mem_bytes": 32768,
   "workspace_bytes":  0,
@@ -787,7 +785,7 @@ shown below so the example stands on its own; the matcher is the SDPA forward on
     {"name": "O", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale_log2", "kind": "scalar", "type": "f32",
       "source": {"from": "expr",
-                 "expr": {"*": [{"rsqrt": [{"var": "$q.head_size"}]}, 1.4426950408889634]}}},
+                 "expr": {"*": [{"rsqrt": ["$q.head_size"]}, 1.4426950408889634]}}},
     {"name": "seqlen_q",   "kind": "scalar", "type": "i64", "source": {"from": "dim",    "ref": "$q", "axis": 2}},
     {"name": "seqlen_k",   "kind": "scalar", "type": "i64", "source": {"from": "dim",    "ref": "$k", "axis": 2}},
     {"name": "stride_q",   "kind": "scalar", "type": "i64", "source": {"from": "stride", "ref": "$q", "axis": 2}}
@@ -954,8 +952,8 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
   ],
   "launches": [             // three dispatch steps, run in order; each has a named source slot
     {"name": "preprocess",
-     "grid":  {"x": {"ceil_div": [{"var": "$q.seqlen_q"}, 128]},
-               "y": {"var": "$q.num_heads"}, "z": {"var": "$q.batch"}},
+     "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 128]},
+               "y": "$q.num_heads", "z": "$q.batch"},
      "block": {"x": 128, "y": 1, "z": 1},
      "args_signature": [
        {"name": "O",  "kind": "pointer", "source": {"from": "tensor",       "ref": "$o"}},
@@ -963,13 +961,13 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
        {"name": "D",  "kind": "pointer", "source": {"from": "intermediate", "ref": "$D", "access": "write"}}
      ]},
     {"name": "dkdv",
-     "grid":  {"x": {"ceil_div": [{"var": "$k.seqlen_k"}, 64]},
-               "y": {"var": "$q.num_heads"}, "z": {"var": "$q.batch"}},
+     "grid":  {"x": {"ceil_div": ["$k.seqlen_k", 64]},
+               "y": "$q.num_heads", "z": "$q.batch"},
      "block": {"x": 256, "y": 1, "z": 1},
      "args_signature": [ /* $q, $k, $v, $do, $D (read), $dk, $dv */ ]},
     {"name": "dq",
-     "grid":  {"x": {"ceil_div": [{"var": "$q.seqlen_q"}, 64]},
-               "y": {"var": "$q.num_heads"}, "z": {"var": "$q.batch"}},
+     "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 64]},
+               "y": "$q.num_heads", "z": "$q.batch"},
      "block": {"x": 256, "y": 1, "z": 1},
      "args_signature": [ /* $q, $k, $v, $do, $D (read), $dq */ ]}
   ]
@@ -1201,7 +1199,7 @@ choices; none is a dependency.
   every child kernel, and reused across packs by ID. (Distinct from a tensor UID, which is an unrelated
   unique identifier.)
 - **Criteria expression:** the declarative `{"op": [args]}` tree that forms a matcher's checks:
-  built-in operators plus custom short-hand tokens and custom operations, over `{"var": "..."}` token
+  built-in operators plus custom short-hand tokens and custom operations, over `"..."` token
   references. The hipDNN schema declares the fields in five namespaces: **Tensor** (`$q.dtype`, dims
   `$y.ho`, evaluated `$q.stride_order`), **Graph** (`$graph.node_count`), **Attributes**
   (`$sdpa_fwd.head_size`), **Kernel metadata** (`$kernel.<field>`), and **Device properties**
