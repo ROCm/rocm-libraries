@@ -837,47 +837,28 @@ validParameters = { # we need to make sure this matches develop
     # 0: use linear reduction
     # 1: use tree reduction
     "StreamKFixupTreeReduction": [0, 1],
-    # Enables the gfx1250 workgroup-cluster reduction fast path for StreamK.
-    # When enabled, a StreamK tile's fixup peers are co-located in a single 1-D
-    # workgroup cluster (ClusterDim = [C,1]) and the cross-CU global-flag
-    # spin-wait is replaced by an intra-cluster split barrier. Barrier-only in
-    # v1 (Multicast stays off); partials remain in the global workspace and the
-    # global-flag reduction is retained as a runtime/compile fallback.
-    # Requires StreamK == 3, ClusterDim == [C,1] with C a power of two in 2..16,
-    # gfx1250 (HasClusterBarrier) with TDMInst != 0, and NOT StreamKAtomic /
-    # NOT StreamKForceDPOnly. See docs/design/streamk-wg-clusters.md.
-    # 0: use the existing global-flag reduction
-    # 1: enable the cluster-barrier reduction fast path
-    "StreamKClusterReduction": [0, 1],
-    # Factored 2-D StreamK cluster mode (gfx1250). Factors the 1-D HW cluster
-    # ClusterDim = [C, 1] into two ORTHOGONAL axes, C = Cs * Ck:
-    #   * Cs = C // StreamKClusterKSplit -- spatial B-multicast peers (process
-    #     M-adjacent DISTINCT tiles sharing the same B N-block over one K-slice);
-    #   * Ck = StreamKClusterKSplit      -- K-split reduction peers (split one
-    #     tile's K range and reduce partials through the cluster split barrier).
-    # StreamKClusterKSplit is the single knob that selects where a cluster sits
-    # on the Cs x Ck plane:
-    #   * Ck == 1  => Cs == C => pure multicast   (identical to StreamKMulticast);
-    #   * Ck == C  => Cs == 1 => pure reduction   (identical to the explicit
-    #                 StreamKClusterReduction opt-in, its Ck==C degenerate);
-    #   * 1<Ck<C   => factored (both axes active) -- one cluster does the spatial
-    #                 multicast AND the K-split reduction in a single kernel.
-    # The derived StreamKMulticast (Cs>1) and StreamKClusterReduction (Ck>1)
-    # booleans fall out of the factoring in Solution.py, so the two features are
-    # composable rather than mutually exclusive. Must be a power of two that
-    # divides ClusterDim[0], with Cs = ClusterDim[0]//Ck also a power of two.
+    # NOTE: StreamKMulticast and StreamKClusterReduction (the gfx1250 StreamK DP
+    # cooperative cluster-load / TDM B-multicast fast path and the cluster split-
+    # barrier K-reduction fast path) are intentionally NOT valid/benchmark
+    # parameters, and there is NO StreamKClusterKSplit knob. The StreamK cluster is
+    # described entirely by the ClusterDim = [Cs, Ck] shape; both features are
+    # DERIVED-ONLY internal state keys (see the ClusterBarrier precedent):
+    # Solution.assignProblemIndependentDerivedParameters auto-enables them for
+    # StreamK==3 purely from the cluster shape (StreamKMulticast iff Cs =
+    # ClusterDim[0] > 1, StreamKClusterReduction iff Ck = ClusterDim[1] > 1) so:
+    #   * [C,1]  => pure multicast  (Cs=C, Ck=1);
+    #   * [1,C]  => pure reduction   (Cs=1, Ck=C);
+    #   * [Cs,Ck] both > 1 => FACTORED -- one cluster does the spatial B-multicast
+    #     (along Cs) AND the K-split reduction (along Ck) in a single kernel; the
+    #     two features are composable ORTHOGONAL axes of C = Cs*Ck rather than
+    #     mutually exclusive. Cs and Ck must each be powers of two with C in [2,16].
+    # _validateStreamKMulticast / _validateStreamKClusterReduction /
+    # _validateStreamKClusterShape then hard-reject any cluster config that cannot
+    # satisfy their constraints. These flags must not be user/YAML-settable, so they
+    # have no entry here (checkParametersAreValid would otherwise accept them as a
+    # fork/constant param). They still serialize to C++ via Contractions.SizeMapping
+    # (streamKMulticast / streamKClusterReduction, read with d.get()).
     # See docs/design/streamk-wg-clusters.md.
-    "StreamKClusterKSplit": [1, 2, 4, 8, 16],
-    # NOTE: StreamKMulticast (the gfx1250 StreamK DP cooperative cluster-load /
-    # TDM B-multicast fast path) is intentionally NOT a valid/benchmark
-    # parameter. It is a DERIVED-ONLY internal state key (see the ClusterBarrier
-    # precedent): Solution.assignProblemIndependentDerivedParameters auto-enables
-    # it for StreamK==3 + ClusterDim != [1,1] (the "bare StreamK cluster"
-    # collapse), and _validateStreamKMulticast then hard-rejects any cluster
-    # config that cannot satisfy its constraints. It must not be user/YAML-
-    # settable, so it has no entry here (checkParametersAreValid would otherwise
-    # accept it as a fork/constant param). It still serializes to C++ via
-    # Contractions.SizeMapping (streamKMulticast, read with d.get()).
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code

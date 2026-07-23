@@ -571,15 +571,13 @@ defaultBenchmarkCommonParameters = [
     {"StreamKAtomic": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
-    {"StreamKClusterReduction": [0]},
-    # StreamKClusterKSplit factors the 1-D [C,1] StreamK cluster into Cs spatial
-    # multicast peers x Ck K-split reduction peers (C = Cs*Ck). Default 1 = pure
-    # multicast (Cs=C), so every existing ClusterDim YAML derives identically to
-    # before. See ValidParameters / Solution.py factored-cluster derivation.
-    {"StreamKClusterKSplit": [1]},
-    # NOTE: StreamKMulticast is a derived-only internal state key (like
-    # ClusterBarrier), auto-enabled by Solution.py for StreamK==3 + ClusterDim
-    # clusters; it is deliberately NOT a benchmark/default parameter here.
+    # NOTE: StreamKMulticast and StreamKClusterReduction are derived-only internal
+    # state keys (like ClusterBarrier), auto-enabled by Solution.py purely from the
+    # cluster shape ClusterDim = [Cs, Ck] for StreamK==3 (StreamKMulticast iff Cs>1,
+    # StreamKClusterReduction iff Ck>1); [C,1]=multicast, [1,C]=reduction,
+    # [Cs,Ck]=factored. There is no StreamKClusterKSplit knob -- the factoring is the
+    # ClusterDim shape. They are deliberately NOT benchmark/default parameters here.
+    # See docs/design/streamk-wg-clusters.md.
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},
     {"ActivationFused": [True]},

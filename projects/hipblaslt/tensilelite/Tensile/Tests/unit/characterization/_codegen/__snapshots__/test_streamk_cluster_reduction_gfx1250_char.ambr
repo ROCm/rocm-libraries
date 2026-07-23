@@ -2,35 +2,35 @@
 # name: test_streamk_cluster_reduction_gfx1250_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArg5n1_UAVQwNvJKjxzq3oOtWaugDzT0nK_8g8EArf7NFg=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArg62q1owsODyzXC8X7Efu3EXRkxqawFaRzI5ca7_U4iHc=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgAuSSqpdzu7alrTkBrgFPyFkqyqpG9E_Ty8RQ1xyXrY8=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgWjLYHCG2SMnL_jqT6CaafjdbEMYUYX1nw8iUcrYvDHc=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgNYnvlbTuQlXSSxlSDUxJPqRmrqmX7nLul8abNN-bcIQ=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgWjM0WH84Xmc1cE5kryVIYHAkaUBSiQt6ExD1UfVH2Uc=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgWhFe1_TqD4ilHRCVYp87SZQz-26l15ntWpD7T0SbtLs=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgiVSGu1fyeQ3iz3745ViFbrv-Ac6DegqDRMOfzlIel-Y=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgchM4NognQc6wGYmCDZqnoSwpxn315nvCI1kv46p3XiY=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgnywtAi6RFkQ9yk67yq-JpbcSFKYGzNFeCaThI116nrU=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgg-XLK9vb4JCnAz8i82mzuI2Kv0jBkS3o1PRsufEAP5k=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgvL2WvRBjVaWcgVUc-X-zFVCBHETYA9IpZmqZxlMcV_k=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgiDkOmo2IiGAh_e-YoomKdpTWhfgU7cQn5f7fD7vSzWM=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgzIhGPbhrxPa5t9L66uS_SPm8s3cIW0oJLQcyN6R1eNw=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgx11GWFngl0eXcIZTb0HUQb4t714WE_KGR2YLqVodM20=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgznA6pD1ccPJCb0pOsW-JH4au2XvCs6fqQOa9sTA-YlA=',
       'err': 0,
     }),
   ])

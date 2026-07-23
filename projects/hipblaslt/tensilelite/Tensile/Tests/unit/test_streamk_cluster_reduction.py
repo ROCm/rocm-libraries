@@ -106,7 +106,7 @@ def _valid_cluster_kernel(C=4):
         "StreamKFixupTreeReduction": 0,
         "StreamKAtomic": 0,
         "StreamKForceDPOnly": 0,
-        "ClusterDim": [C, 1],
+        "ClusterDim": [1, C],
     }
 
 
@@ -252,7 +252,7 @@ class TestReductionValidation:
         st = {
             "StreamKClusterReduction": 1, "StreamKMulticast": 0, "StreamK": 3,
             "StreamKAtomic": 0, "StreamKForceDPOnly": 0, "StreamKXCCMapping": 0,
-            "ClusterDim": [4, 1], "ISA": [12, 5, 0], "TDMInst": 3,
+            "ClusterDim": [1, 4], "ISA": [12, 5, 0], "TDMInst": 3,
         }
         st.update(overrides)
         return st
@@ -285,11 +285,16 @@ class TestReductionValidation:
     def test_reject_xcc3(self):
         assert self._validate(self._state(StreamKXCCMapping=3)) is False
 
-    def test_reject_non_1d_cluster(self):
-        assert self._validate(self._state(ClusterDim=[2, 2])) is False
+    def test_accept_factored_shape(self):
+        # On the factored branch a factored cluster [Cs,Ck] with both axes > 1
+        # carries the reduction (Ck) axis, so the reduction validator accepts it.
+        assert self._validate(self._state(ClusterDim=[2, 2])) is True
 
     def test_reject_non_pow2_cluster(self):
-        assert self._validate(self._state(ClusterDim=[3, 1])) is False
+        # Ck = ClusterDim[1] must be a power of two; C = Cs*Ck must be in [2, 16].
+        assert self._validate(self._state(ClusterDim=[1, 3])) is False
+        assert self._validate(self._state(ClusterDim=[2, 3])) is False
+        assert self._validate(self._state(ClusterDim=[8, 4])) is False  # C=32 > 16
 
     def test_reject_non_gfx1250(self):
         assert self._validate(self._state(ISA=[9, 4, 2])) is False

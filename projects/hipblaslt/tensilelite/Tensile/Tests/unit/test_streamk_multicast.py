@@ -142,39 +142,35 @@ class TestValidation:
             assert st["Multicast"] == 1, st["Multicast"]
 
     def test_reduction_keeps_cooperative_loads_off(self, tmp_path):
-        """Mutual exclusion (reduction wins): adding StreamKClusterReduction=1 to
-        an otherwise auto-multicast SK3 cluster turns the cooperative loads off
-        (StreamKMulticast stays 0, Multicast False) instead of auto-enabling."""
-        from Tensile import LibraryIO
-        import yaml
-        cfg = copy.deepcopy(LibraryIO.read(_STREAMK_CLUSTER_BARE))
-        fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
-        fork.append({"StreamKClusterReduction": [1]})
-        out = tmp_path / "bare_cluster_reduction.yaml"
-        with open(out, "w") as f:
-            yaml.safe_dump(cfg, f, default_flow_style=None)
-        states = _derive_states(str(out))
-        assert states, "expected the SK3 reduction cluster config to derive solutions"
+        """Pure reduction (param-free): a [1, C] cluster (Cs=1, Ck=C) carries only
+        the K-split reduction axis, so StreamKMulticast stays 0 and Multicast is
+        False (there is no B-multicast to co-issue). Reduction is derived from the
+        cluster shape (Ck=ClusterDim[1]>1), not a user opt-in."""
+        cfg = _write_variant(tmp_path, "pure_reduction.yaml",
+                             fork_overrides={"ClusterDim": [[1, 4]]})
+        states = _derive_states(cfg)
+        assert states, "expected the SK3 [1,C] reduction cluster to derive solutions"
         for st in states:
+            assert st["ClusterDim"] == [1, 4], st["ClusterDim"]
             assert not st.get("StreamKMulticast", 0), st.get("StreamKMulticast")
+            assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
             assert st["Multicast"] == 0, st["Multicast"]
 
     def test_factored_composes_multicast_and_reduction(self, tmp_path):
         """Relaxed mutual exclusion (factored 2-D cluster mode): the historic
-        multicast/reduction xor is CONVERTED, not removed. When the [C,1] cluster
-        is factored via StreamKClusterKSplit into 1 < Ck < C (here C=4, Ck=2 =>
-        Cs=2), the two features become ORTHOGONAL axes and co-exist: the collapse
-        derives BOTH StreamKMulticast=1 (Cs>1) and StreamKClusterReduction=1
-        (Ck>1), and the validators accept the combination instead of rejecting
-        it. See docs/design/streamk-wg-clusters.md."""
+        multicast/reduction xor is CONVERTED, not removed. A genuine 2-D cluster
+        ClusterDim=[Cs,Ck] with both axes > 1 (here [2,2] => Cs=2, Ck=2) makes the
+        two features ORTHOGONAL and co-existent: the collapse derives BOTH
+        StreamKMulticast=1 (Cs>1) and StreamKClusterReduction=1 (Ck>1), and the
+        validators accept the combination instead of rejecting it. The factoring
+        is the ClusterDim shape itself (no StreamKClusterKSplit knob). See
+        docs/design/streamk-wg-clusters.md."""
         cfg = _write_variant(tmp_path, "factored.yaml",
-                             fork_overrides={"StreamKClusterKSplit": [2],
-                                             "ClusterDim": [[4, 1]]})
+                             fork_overrides={"ClusterDim": [[2, 2]]})
         states = _derive_states(cfg)
         assert states, "expected >=1 derived solution for the factored config"
         for st in states:
-            assert st["ClusterDim"] == [4, 1], st["ClusterDim"]
-            assert st["StreamKClusterKSplit"] == 2, st.get("StreamKClusterKSplit")
+            assert st["ClusterDim"] == [2, 2], st["ClusterDim"]
             # Both orthogonal axes derived on (Cs=2 spatial multicast, Ck=2 K-split).
             assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
             assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
@@ -259,15 +255,31 @@ class TestValidation:
             assert st["StreamKMulticast"] == 1
             assert st["StreamKXCCMapping"] == 0, st["StreamKXCCMapping"]
 
-    def test_reject_non_1d_cluster(self, tmp_path):
-        # ClusterDim = [2, 2] is not the [C, 1] spatial DP cluster.
+    def test_accept_2d_cluster_probe(self, tmp_path):
+        # 2-D StreamK cluster PROBE (Scheme A): ClusterDim = [2, 2] is now a
+        # SUPPORTED genuine 2-D cluster (Cs=2 spatial B-multicast x Ck=2 K-split
+        # reduction), no longer the pre-probe [C,1]-only reject. It derives valid
+        # solutions with StreamKMulticast (Cs>1) and StreamKClusterReduction (Ck>1)
+        # both auto-enabled.
         cfg = _write_variant(tmp_path, "cd22.yaml",
                              fork_overrides={"ClusterDim": [[2, 2]]})
-        assert _derive_states(cfg) == []
+        states = _derive_states(cfg)
+        assert states, "expected >=1 derived solution for the 2-D cluster probe"
+        for st in states:
+            assert st["ClusterDim"] == [2, 2]
+            assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
+            assert st["StreamKClusterReduction"] == 1, st.get("StreamKClusterReduction")
 
     def test_reject_non_pow2_cluster(self, tmp_path):
         cfg = _write_variant(tmp_path, "cd3.yaml",
                              fork_overrides={"ClusterDim": [[3, 1]]})
+        assert _derive_states(cfg) == []
+
+    def test_reject_non_pow2_2d_cluster(self, tmp_path):
+        # A genuinely-unsupported 2-D shape (Ck=3 not a power of two) is still
+        # rejected: the probe only relaxes to POWER-OF-TWO Cs/Ck with C=Cs*Ck<=16.
+        cfg = _write_variant(tmp_path, "cd23.yaml",
+                             fork_overrides={"ClusterDim": [[2, 3]]})
         assert _derive_states(cfg) == []
 
     # NB: C > 16 is not an expressible ClusterDim (validParameters caps

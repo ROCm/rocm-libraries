@@ -365,6 +365,29 @@ def clusterEnabled(clusterDim):
     """True when a workgroup cluster is requested (ClusterDim [x, y] is not [1, 1])."""
     return (clusterDim[0] * clusterDim[1]) != 1
 
+def streamKClusterFactors(d):
+    """Return (Cs, Ck, C, is2D) for a StreamK workgroup cluster (ClusterDim-driven).
+
+    The StreamK cluster is fully described by ClusterDim = [Cs, Ck]; there are no
+    user factoring/reduction knobs. Cs = ClusterDim[0] is the spatial B-multicast
+    axis (X), Ck = ClusterDim[1] is the K-split reduction axis (Y), and the total
+    cluster is C = Cs * Ck. ``is2D`` is True exactly when Ck > 1, i.e. when the
+    launch grid must be genuinely 2-D ([skGrid/Ck, Ck, 1]) and the linear StreamK
+    index folds the cluster Y rank in (StreamKIdx = WorkGroup0*Ck + WorkGroup1).
+
+    Config expressions:
+      * [C, 1] -> Cs=C, Ck=1  : pure multicast   (1-D launch, byte-identical)
+      * [1, C] -> Cs=1, Ck=C  : pure reduction    (2-D launch)
+      * [Cs,Ck]-> both > 1     : factored          (2-D launch; B-multicast along Cs
+                                                    AND K-split reduction along Ck)
+
+    ``d`` may be a kernel or a solution ``state`` dict; both expose "ClusterDim".
+    See docs/design/streamk-wg-clusters.md.
+    """
+    cd = d["ClusterDim"]
+    cs, ck = cd[0], cd[1]
+    return cs, ck, cs * ck, (ck > 1)
+
 def log2(x):
     return int(log(x, 2) + 0.5)
 

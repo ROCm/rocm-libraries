@@ -64,8 +64,9 @@ BenchmarkProblems:
         - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
-        - StreamKClusterReduction: [1]
-        - ClusterDim: [[2, 1], [4, 1]]
+        # Pure reduction is now derived from the cluster shape ClusterDim = [1, C]
+        # (Ck = ClusterDim[1] > 1); StreamKClusterReduction is no longer a user param.
+        - ClusterDim: [[1, 2], [1, 4]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

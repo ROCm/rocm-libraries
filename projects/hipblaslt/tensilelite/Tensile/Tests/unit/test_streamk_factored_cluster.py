@@ -4,25 +4,29 @@
 ################################################################################
 # Unit tests for the factored 2-D StreamK cluster mode (gfx1250).
 #
-# The 1-D HW cluster ClusterDim=[C,1] is factored into two ORTHOGONAL axes,
-# C = Cs*Ck, via the StreamKClusterKSplit (Ck) parameter:
-#   * Cs = C // Ck  spatial B-multicast peers  -> StreamKMulticast on iff Cs>1
-#   * Ck              K-split reduction peers   -> StreamKClusterReduction iff Ck>1
-# so Ck==1 collapses to pure multicast, Ck==C to pure reduction, and 1<Ck<C is
-# the genuine factored mode where BOTH axes are active.
+# The StreamK workgroup cluster is described ENTIRELY by its shape
+# ClusterDim = [Cs, Ck] (there is no StreamKClusterKSplit / StreamKClusterReduction
+# user knob -- the factoring IS the shape). C = Cs*Ck splits into two ORTHOGONAL
+# axes:
+#   * Cs = ClusterDim[0]  spatial B-multicast peers -> StreamKMulticast iff Cs>1
+#   * Ck = ClusterDim[1]  K-split reduction peers    -> StreamKClusterReduction iff Ck>1
+# so the three canonical expressions are:
+#   * [C, 1] -> pure multicast   (Cs=C, Ck=1)
+#   * [1, C] -> pure reduction    (Cs=1, Ck=C)
+#   * [Cs,Ck] both > 1 -> factored (BOTH axes active; here [2,2])
 #
 # These tests pin (CPU-only, no GPU):
-#   * registration (StreamKClusterKSplit IS a user/benchmark valid parameter);
-#   * the collapse: derived StreamKMulticast / StreamKClusterReduction from
-#     (ClusterDim[0], StreamKClusterKSplit); the relaxed (now composable)
-#     mutual exclusion;
-#   * the validation matrix (Ck power-of-two dividing C, Cs power-of-two; both
-#     degenerate cases accepted; Ck > C / non-dividing rejected);
-#   * the selection predicates: ClusterDimCheck uses Cs, ClusterReductionIterCheck
-#     uses Ck; and
-#   * DEGENERATE BYTE-IDENTITY: the factored path at Ck==1 emits assembly
-#     byte-identical to the shipped pure-multicast path, and at Ck==C
-#     byte-identical to the shipped pure-reduction path.
+#   * de-registration (StreamKClusterKSplit / StreamKClusterReduction are NOT
+#     user/benchmark valid parameters -- both derived-only from ClusterDim);
+#   * the derivation: StreamKMulticast / StreamKClusterReduction from
+#     (ClusterDim[0], ClusterDim[1]); the relaxed (now composable) mutual
+#     exclusion of a factored [Cs,Ck];
+#   * the validation matrix (Cs, Ck each power-of-two with C=Cs*Ck in [2,16];
+#     both degenerate 1-D shapes accepted; non-pow2 / C>16 rejected);
+#   * the selection predicates: ClusterDimCheck uses Cs (value[3]) and pins the
+#     N-divisor value[4]=1 for a genuine 2-D cluster; ClusterReductionIterCheck
+#     uses Ck (value[1]); and
+#   * clean emission of the genuine 2-D factored [2,2] path.
 #
 # Usage:
 #   pytest test_streamk_factored_cluster.py -v
@@ -118,191 +122,180 @@ def _pred(preds, tag):
     return next((p for p in preds if p.tag == tag), None)
 
 
-# --- registration ----------------------------------------------------------
+# --- de-registration -------------------------------------------------------
 
 class TestRegistration:
-    def test_is_a_valid_parameter(self):
-        """Unlike the derived-only StreamKMulticast, StreamKClusterKSplit is a
-        user-settable benchmark parameter (it selects the Cs x Ck factoring)."""
+    def test_ksplit_is_not_a_valid_parameter(self):
+        """The factoring is the ClusterDim shape itself: StreamKClusterKSplit is
+        gone as a user/benchmark parameter."""
         from Tensile.Common.ValidParameters import validParameters
-        assert "StreamKClusterKSplit" in validParameters
-        # Must offer at least the power-of-two factors used for C in [2, 16].
-        assert set(validParameters["StreamKClusterKSplit"]) >= {1, 2, 4}
+        assert "StreamKClusterKSplit" not in validParameters
 
-    def test_is_a_default_benchmark_parameter(self):
+    def test_ksplit_is_not_a_default_benchmark_parameter(self):
         from Tensile.Common.GlobalParameters import defaultSolution
-        assert "StreamKClusterKSplit" in defaultSolution
+        assert "StreamKClusterKSplit" not in defaultSolution
+
+    def test_reduction_is_not_a_valid_parameter(self):
+        """StreamKClusterReduction is derived-only (Ck=ClusterDim[1]>1), not a
+        user opt-in."""
+        from Tensile.Common.ValidParameters import validParameters
+        assert "StreamKClusterReduction" not in validParameters
+
+    def test_reduction_is_not_a_default_benchmark_parameter(self):
+        from Tensile.Common.GlobalParameters import defaultSolution
+        assert "StreamKClusterReduction" not in defaultSolution
 
 
-# --- collapse / derivation -------------------------------------------------
+# --- derivation ------------------------------------------------------------
 
 class TestFactoring:
-    def test_factored_both_axes(self, tmp_path):
-        """C=4, Ck=2 => Cs=2: BOTH StreamKMulticast and StreamKClusterReduction
+    def test_factored_both_axes(self):
+        """[2,2] => Cs=2, Ck=2: BOTH StreamKMulticast and StreamKClusterReduction
         derived on (relaxed, composable mutual exclusion)."""
         states = _derive_states(_FACTORED)
         assert states
         for st in states:
-            assert st["ClusterDim"] == [4, 1]
-            assert st["StreamKClusterKSplit"] == 2
+            assert st["ClusterDim"] == [2, 2]
             assert st["StreamKMulticast"] == 1
             assert st["StreamKClusterReduction"] == 1
             assert st["Multicast"] == 1
             assert st["ClusterBarrier"] is True
 
-    def test_degenerate_multicast(self, tmp_path):
-        """Ck==1 => Cs==C: pure multicast (no reduction)."""
-        cfg = _write_variant(tmp_path, _MULTICAST, "deg_mc.yaml",
-                             fork_overrides={"StreamKClusterKSplit": [1]})
+    def test_pure_multicast(self, tmp_path):
+        """[C,1] => Cs=C, Ck=1: pure multicast (no reduction)."""
+        cfg = _write_variant(tmp_path, _MULTICAST, "pure_mc.yaml",
+                             fork_overrides={"ClusterDim": [[4, 1]]})
         states = _derive_states(cfg)
         assert states
         for st in states:
-            assert st["StreamKClusterKSplit"] == 1
+            assert st["ClusterDim"] == [4, 1]
             assert st["StreamKMulticast"] == 1
             assert not st.get("StreamKClusterReduction", 0)
 
-    def test_degenerate_reduction(self, tmp_path):
-        """Ck==C => Cs==1: pure reduction (no multicast)."""
-        cfg = _write_variant(tmp_path, _MULTICAST, "deg_red.yaml",
-                             fork_overrides={"StreamKClusterKSplit": [4]})
+    def test_pure_reduction(self, tmp_path):
+        """[1,C] => Cs=1, Ck=C: pure reduction (no multicast)."""
+        cfg = _write_variant(tmp_path, _REDUCTION, "pure_red.yaml",
+                             fork_overrides={"ClusterDim": [[1, 4]]})
         states = _derive_states(cfg)
         assert states
         for st in states:
-            assert st["StreamKClusterKSplit"] == 4
+            assert st["ClusterDim"] == [1, 4]
             assert not st.get("StreamKMulticast", 0)
             assert st["StreamKClusterReduction"] == 1
-
-    def test_legacy_reduction_normalizes_ck(self, tmp_path):
-        """The legacy explicit StreamKClusterReduction=1 opt-in (no explicit
-        K-split) is the Ck==C degenerate: StreamKClusterKSplit normalizes to C so
-        the kernel/host read a single, consistent K-split factor."""
-        cfg = _write_variant(tmp_path, _MULTICAST, "legacy_red.yaml",
-                             fork_overrides={"StreamKClusterReduction": [1]})
-        states = _derive_states(cfg)
-        assert states
-        for st in states:
-            assert st["StreamKClusterReduction"] == 1
-            assert not st.get("StreamKMulticast", 0)
-            assert st["StreamKClusterKSplit"] == st["ClusterDim"][0]
 
 
 # --- validation matrix -----------------------------------------------------
 
 class TestValidation:
-    def test_reject_ck_greater_than_c(self, tmp_path):
-        """Ck > C is an invalid factoring -> reject (no derived solutions)."""
-        cfg = _write_variant(tmp_path, _MULTICAST, "ck_gt_c.yaml",
-                             fork_overrides={"StreamKClusterKSplit": [8],
-                                             "ClusterDim": [[4, 1]]})
-        assert _derive_states(cfg) == []
-
     def test_accept_pure_multicast(self, tmp_path):
         cfg = _write_variant(tmp_path, _MULTICAST, "ok_mc.yaml",
-                             fork_overrides={"StreamKClusterKSplit": [1]})
-        assert _derive_states(cfg), "Ck==1 (pure multicast) must be accepted"
+                             fork_overrides={"ClusterDim": [[4, 1]]})
+        assert _derive_states(cfg), "[C,1] pure multicast must be accepted"
 
-    def test_accept_factored(self, tmp_path):
-        assert _derive_states(_FACTORED), "1<Ck<C (factored) must be accepted"
+    def test_accept_pure_reduction(self, tmp_path):
+        cfg = _write_variant(tmp_path, _REDUCTION, "ok_red.yaml",
+                             fork_overrides={"ClusterDim": [[1, 4]]})
+        assert _derive_states(cfg), "[1,C] pure reduction must be accepted"
+
+    def test_accept_factored(self):
+        assert _derive_states(_FACTORED), "[Cs,Ck] factored must be accepted"
 
 
 # --- selection predicates --------------------------------------------------
 
 class TestPredicates:
     def test_cluster_dim_check_uses_cs(self):
-        """ClusterDimCheck's M-adjacency divisor is Cs (not the full cluster C)
-        when multicast is active: value[3] == Cs. For the factored point C=4,
-        Ck=2 => Cs=2."""
+        """ClusterDimCheck's M-adjacency divisor is Cs = ClusterDim[0]: value[3]
+        == Cs. For the factored point [2,2] => Cs=2. The N-tile divisor value[4]
+        is pinned to 1 for a genuine 2-D cluster (Ck>1)."""
         states = _derive_states(_FACTORED)
         assert states
         st = states[0]
         preds = _compound_preds(st)
         p = _pred(preds, "ClusterDimCheck")
         assert p is not None
-        cs = st["ClusterDim"][0] // st["StreamKClusterKSplit"]
+        cs = st["ClusterDim"][0]
         assert cs == 2
         assert p.value[3] == cs, p.value
-        assert p.value[4] == st["ClusterDim"][1]
+        assert p.value[4] == 1, p.value
 
     def test_cluster_reduction_iter_check_uses_ck(self):
         """ClusterReductionIterCheck balances the Ck reduction peers' mainloops:
-        value == [DepthU, Ck]. For the factored point Ck=2."""
+        value == [DepthU, Ck]. For the factored point Ck=ClusterDim[1]=2."""
         states = _derive_states(_FACTORED)
         assert states
         st = states[0]
         preds = _compound_preds(st)
         p = _pred(preds, "ClusterReductionIterCheck")
         assert p is not None
-        assert p.value == [st["DepthU"], st["StreamKClusterKSplit"]], p.value
+        assert p.value == [st["DepthU"], st["ClusterDim"][1]], p.value
         assert p.value[1] == 2
 
 
-# --- degenerate byte-identity (key correctness gate) -----------------------
+# --- direct shape validator matrix -----------------------------------------
 
-class TestDegenerateByteIdentity:
-    def test_ck1_byte_identical_to_pure_multicast(self, tmp_path):
-        """Ck==1 factored path emits assembly BYTE-IDENTICAL to the shipped pure
-        multicast path (explicitly setting StreamKClusterKSplit=1 vs omitting it)."""
-        base = _emit_map(_MULTICAST)
-        cfg = _write_variant(tmp_path, _MULTICAST, "id_mc.yaml",
-                             fork_overrides={"StreamKClusterKSplit": [1]})
-        factored = _emit_map(cfg)
-        assert set(base) == set(factored), (set(base) ^ set(factored))
-        for name in base:
-            assert base[name] == factored[name], (
-                f"Ck==1 assembly diverged from pure multicast for {name}"
-            )
-
-    def test_ckC_byte_identical_to_pure_reduction(self, tmp_path):
-        """Ck==C factored path emits assembly BYTE-IDENTICAL to the shipped pure
-        reduction path (StreamKClusterKSplit=C vs the legacy
-        StreamKClusterReduction=1 opt-in), at a common C=4 point."""
-        red_cfg = _write_variant(tmp_path, _REDUCTION, "red_c4.yaml",
-                                 fork_overrides={"ClusterDim": [[4, 1]]})
-        fac_cfg = _write_variant(tmp_path, _REDUCTION, "fac_c4.yaml",
-                                 fork_overrides={"ClusterDim": [[4, 1]],
-                                                 "StreamKClusterReduction": [0],
-                                                 "StreamKClusterKSplit": [4]})
-        base = _emit_map(red_cfg)
-        factored = _emit_map(fac_cfg)
-        assert set(base) == set(factored), (set(base) ^ set(factored))
-        for name in base:
-            assert base[name] == factored[name], (
-                f"Ck==C assembly diverged from pure reduction for {name}"
-            )
-
-
-class TestKSplitValidation:
-    """Direct _validateStreamKClusterKSplit reject-branch coverage: the divide /
-    Cs-power-of-two branches need a non-power-of-two ClusterDim[0], unreachable
-    through validated configs, so drive them directly."""
+class TestClusterShapeValidation:
+    """Direct _validateStreamK2DClusterShape / _validateStreamKClusterShape
+    coverage: the non-pow2 and C>16 reject branches are unreachable through the
+    ClusterDim valid-parameter enum, so drive them directly."""
 
     @staticmethod
-    def _state(clusterDim, ck):
-        return {"ClusterDim": list(clusterDim), "StreamK": 3, "StreamKClusterKSplit": ck}
+    def _shape(cs, ck):
+        from Tensile.SolutionStructs.Solution import _validateStreamK2DClusterShape
+        return _validateStreamK2DClusterShape(cs, ck)
 
-    def _validate(self, st):
-        from Tensile.SolutionStructs.Solution import _validateStreamKClusterKSplit
-        return _validateStreamKClusterKSplit(st, False)
+    def _validate(self, clusterDim):
+        from Tensile.SolutionStructs.Solution import _validateStreamKClusterShape
+        return _validateStreamKClusterShape(
+            {"ClusterDim": list(clusterDim), "StreamK": 3}, False)
 
+    # accepted shapes
     def test_accept_pure_multicast(self):
-        assert self._validate(self._state([8, 1], 1)) is True
+        assert self._shape(8, 1) is True
+        assert self._validate([8, 1]) is True
+
+    def test_accept_pure_reduction(self):
+        assert self._shape(1, 8) is True
+        assert self._validate([1, 8]) is True
 
     def test_accept_factored(self):
-        assert self._validate(self._state([8, 1], 2)) is True
+        for cs, ck in [(2, 2), (2, 4), (4, 2), (2, 8), (8, 2)]:
+            assert self._shape(cs, ck) is True, (cs, ck)
+            assert self._validate([cs, ck]) is True, (cs, ck)
 
     def test_noop_when_not_cluster(self):
-        assert self._validate(self._state([1, 1], 1)) is True
+        assert self._validate([1, 1]) is True
+
+    def test_noop_when_not_streamk3(self):
+        from Tensile.SolutionStructs.Solution import _validateStreamKClusterShape
+        assert _validateStreamKClusterShape(
+            {"ClusterDim": [3, 1], "StreamK": 0}, False) is True
+
+    # rejected shapes
+    def test_reject_cs_not_pow2(self):
+        assert self._shape(3, 1) is False
+        assert self._validate([3, 1]) is False
 
     def test_reject_ck_not_pow2(self):
-        assert self._validate(self._state([8, 1], 3)) is False
+        assert self._shape(1, 3) is False
+        assert self._validate([1, 3]) is False
 
-    def test_reject_ck_greater_than_c(self):
-        assert self._validate(self._state([8, 1], 16)) is False
+    def test_reject_factored_not_pow2(self):
+        assert self._shape(2, 3) is False
+        assert self._validate([2, 3]) is False
 
-    def test_reject_ck_not_dividing_c(self):
-        # Non-power-of-two C exposes the divisibility branch (Ck=4 does not divide 6).
-        assert self._validate(self._state([6, 1], 4)) is False
+    def test_reject_c_too_large(self):
+        # C = Cs*Ck = 32 > 16.
+        assert self._shape(8, 4) is False
+        assert self._validate([8, 4]) is False
 
-    def test_reject_cs_not_pow2(self):
-        # C=12, Ck=4 -> Cs=3 (not a power of two).
-        assert self._validate(self._state([12, 1], 4)) is False
+
+# --- emission --------------------------------------------------------------
+
+class TestFactoredEmission:
+    def test_factored_emits_clean(self):
+        """The genuine 2-D factored [2,2] path emits assembly with err==0 for
+        every kernel (the 2-D StreamKIdx fold + composed multicast/reduction do
+        not break codegen)."""
+        emitted = _emit_map(_FACTORED)
+        assert emitted, "expected >=1 factored kernel emitted"

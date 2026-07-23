@@ -145,9 +145,6 @@ namespace TensileLite
         int    streamKAtomic              = 0;
         int    streamKClusterReduction    = 0;
         int    streamKMulticast           = 0;
-        // Factored 2-D cluster K-split factor Ck (clusterDim.x = Cs*Ck). 1 =>
-        // pure multicast, clusterDim.x => pure reduction, else factored.
-        int    streamKClusterKSplit       = 1;
         int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
         bool   persistentKernelAlongBatch = false;

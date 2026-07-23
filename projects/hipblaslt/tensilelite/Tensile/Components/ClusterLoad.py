@@ -111,8 +111,15 @@ class ClusterLoadTDM(ClusterLoad):
             return mod
         mod.addComment0("Calculate multicast mask")
 
+        # A-multicast peer count. The dense/subtile path multicasts A across
+        # ClusterDim[1] peers. StreamK keeps A per-workgroup (self-only) -- for the
+        # 1-D [C,1] cluster ClusterDim[1]==1 already yields maskA=1; for the 2-D
+        # StreamK cluster PROBE ClusterDim[1]=Ck is the K-split (reduction) axis,
+        # NOT an A-multicast axis, so force self-only there too. (StreamK's B mask
+        # is recomputed in preLoop regardless; only maskA must stay self-only.)
+        aPeers = 1 if kernel.get("StreamKMulticast", 0) else kernel["ClusterDim"][1]
         maskA = 1
-        for idx in range(kernel["ClusterDim"][1]):
+        for idx in range(aPeers):
             maskA |= (1 << (idx * kernel["ClusterDim"][0]))
 
         maskB = (1 << kernel["ClusterDim"][0]) - 1
