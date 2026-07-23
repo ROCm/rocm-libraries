@@ -4872,6 +4872,68 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
+// Tuning state for the vendored hipconv solver.
+//
+// hipconv exposes its per-shape kernels as an ordered, deterministic list
+// (hipconv::get_valid_configs). We persist the list index as the tuning key, and
+// keep the kernel name as a checksum so a drifted list is rejected on restore.
+// The index is the only field that identifies a config today because most
+// families do not implement describe_config().
+struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipConv>
+{
+    int index               = -1;
+    std::string kernel_name = "";
+
+    PerformanceConfigConvHipConv() = default;
+    PerformanceConfigConvHipConv(bool) {}
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.index, "index");
+        f(self.kernel_name, "kernel_name");
+    }
+
+    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
+    bool IsValidValue() const;
+    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription&) const;
+    bool operator==(const PerformanceConfigConvHipConv& other) const;
+
+private:
+    // Populate index/kernel_name from a resolved arch handle (as const void* to
+    // keep hipconv types out of this header).
+    void InitFromArch(const void* arch, const miopen::conv::ProblemDescription&);
+    static std::string GetCurrentDeviceName();
+};
+
+struct MIOPEN_INTERNALS_EXPORT ConvHipConv final
+    : ConvTunableSolver<PerformanceConfigConvHipConv>
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvHipConv>(); }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&,
+                 const miopen::conv::ProblemDescription&) const override;
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override;
+    bool MayNeedWorkspace() const override { return true; }
+    PerformanceConfigConvHipConv
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::conv::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::conv::ProblemDescription&,
+                                  const PerformanceConfigConvHipConv&) const override;
+    PerformanceConfigConvHipConv Search(const ExecutionContext&,
+                                        const miopen::conv::ProblemDescription&,
+                                        const AnyInvokeParams& invoke_ctx) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&,
+                             const PerformanceConfigConvHipConv&) const override;
+};
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen
