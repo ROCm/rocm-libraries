@@ -125,6 +125,13 @@ endif()
 
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
+    add_hipdnn_sample(
+        hipdnn_sample_cudnn_shim_sdpa_round_trip
+        cudnn_shim/SdpaRoundTrip.cpp
+    )
+endif()
+
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
 
 add_hipdnn_sample(hipdnn_sample_autotune autotune/AutotuneSample.cpp)
@@ -191,12 +198,22 @@ add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
 # Register serialization samples as tests
 add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
+    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_sdpa_round_trip)
+endif()
+
 # Register knobs sample
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Register dynamic backend-loading sample
 add_hipdnn_sample_test(hipdnn_sample_dynamic_backend_loading)
+# Under ASAN the dlopen interceptor ignores the executable RUNPATH, so
+# the bare-name backend .so is only found via LD_LIBRARY_PATH.
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+    set_property(TEST hipdnn_sample_dynamic_backend_loading APPEND PROPERTY
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:hipdnn_backend>")
+endif()
 
 # Register autotune sample
 add_hipdnn_sample_test(hipdnn_sample_autotune)
