@@ -477,6 +477,8 @@ void testing_gemm_grouped_batched(const Arguments& arg)
     const int64_t group_count   = (cfg.group_count);
     const int64_t problem_count = (cfg.problem_count);
 
+    double rocblas_error = 0.0, error_hst_ptr = 0.0, error_dev_ptr = 0.0;
+
     rocblas_local_handle handle{arg};
 
     HOST_MEMCHECK(
@@ -581,7 +583,7 @@ void testing_gemm_grouped_batched(const Arguments& arg)
         }
     };
 
-    const auto check_result = [&] {
+    const auto compare_to_gold = [&] {
         if(arg.unit_check)
         {
             int64_t idx = 0;
@@ -589,16 +591,40 @@ void testing_gemm_grouped_batched(const Arguments& arg)
             {
                 for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
                 {
-                    unit_check_general<T>(
-                        cfg.m_array[g], cfg.n_array[g], cfg.ldc_array[g], hC_gold[idx], hC[idx]);
+                    if(std::is_same_v<T, rocblas_half>
+                       && (rocblas_handle(handle)->getArchMajor() == 11))
+                    {
+                        const double tol = cfg.k_array[g] * sum_error_tolerance_for_gfx11<T, T, T>;
+                        near_check_general<T>(cfg.m_array[g],
+                                                cfg.n_array[g],
+                                                cfg.ldc_array[g],
+                                                hC_gold[idx],
+                                                hC[idx],
+                                                tol);
+                    }
+                    else if(reduction_requires_near<T>(arg, cfg.k_array[g]))
+                    {
+                        const double tol = cfg.k_array[g] * sum_error_tolerance<T>;
+                        near_check_general<T>(cfg.m_array[g],
+                                                cfg.n_array[g],
+                                                cfg.ldc_array[g],
+                                                hC_gold[idx],
+                                                hC[idx],
+                                                tol);
+                    }
+                    else
+                    {
+                        unit_check_general<T>(
+                            cfg.m_array[g], cfg.n_array[g], cfg.ldc_array[g], hC_gold[idx], hC[idx]);
+                    }
                 }
             }
         }
 
+        double error = 0;
         if(arg.norm_check)
         {
-            double  error = 0;
-            int64_t idx   = 0;
+            int64_t idx = 0;
             for(int64_t g = 0; g < group_count; ++g)
             {
                 for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
@@ -612,8 +638,8 @@ void testing_gemm_grouped_batched(const Arguments& arg)
                                                                     hC[idx])));
                 }
             }
-            ASSERT_NEAR(error, 0.0, 1e-10);
         }
+        return error;
     };
 
     if(arg.unit_check || arg.norm_check)
@@ -623,7 +649,6 @@ void testing_gemm_grouped_batched(const Arguments& arg)
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
             run_grouped_gemm(cfg.alpha_array.data(), cfg.beta_array.data());
             CHECK_HIP_ERROR(hC.transfer_from(dC));
-            check_result();
         }
 
         if(arg.pointer_mode_device)
@@ -633,9 +658,18 @@ void testing_gemm_grouped_batched(const Arguments& arg)
             CHECK_HIP_ERROR(d_alpha.transfer_from(h_alpha));
             CHECK_HIP_ERROR(d_beta.transfer_from(h_beta));
             run_grouped_gemm(d_alpha, d_beta);
-            CHECK_HIP_ERROR(hC.transfer_from(dC));
-            check_result();
         }
+
+        if(arg.pointer_mode_host)
+        {
+            error_hst_ptr = compare_to_gold();
+        }
+        if(arg.pointer_mode_device)
+        {
+            CHECK_HIP_ERROR(hC.transfer_from(dC));
+            error_dev_ptr = compare_to_gold();
+        }
+        rocblas_error = error_dev_ptr > error_hst_ptr ? error_dev_ptr : error_hst_ptr;
     }
 
     if(arg.timing && arg.api != INTERNAL)

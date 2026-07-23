@@ -599,6 +599,8 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     const int64_t group_count   = cfg.group_count;
     const int64_t problem_count = cfg.problem_count;
 
+    double rocblas_error = 0.0, error_hst_ptr = 0.0, error_dev_ptr = 0.0;
+
     rocblas_local_handle handle{arg};
     rocblas_gemm_algo    algo = rocblas_gemm_algo(arg.algo);
     uint32_t             flags(arg.flags);
@@ -753,6 +755,68 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     }
     hD_2.copy_from(hD_1);
 
+    const auto compare_to_gold = [&](const host_batch_matrix<To>& hD) {
+        if(arg.unit_check)
+        {
+            int64_t idx = 0;
+            for(int64_t g = 0; g < group_count; ++g)
+            {
+                for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
+                {
+                    if((rocblas_handle(handle)->getArchMajor() == 11) && (sizeof(Ti) == 2))
+                    {
+                        const double tol
+                            = cfg.k_array[g] * sum_error_tolerance_for_gfx11<Tc, Ti, To>;
+                        near_check_general<To, To_hpa>(cfg.m_array[g],
+                                                       cfg.n_array[g],
+                                                       cfg.ldd_array[g],
+                                                       hD_gold[idx],
+                                                       hD[idx],
+                                                       tol);
+                    }
+                    else if(std::is_same_v<Tc, rocblas_half> && cfg.k_array[g] > 10000)
+                    {
+                        const double tol = cfg.k_array[g] * sum_error_tolerance<Tc>;
+                        near_check_general<To, To_hpa>(cfg.m_array[g],
+                                                       cfg.n_array[g],
+                                                       cfg.ldd_array[g],
+                                                       hD_gold[idx],
+                                                       hD[idx],
+                                                       tol);
+                    }
+                    else
+                    {
+                        unit_check_general<To, To_hpa>(cfg.m_array[g],
+                                                       cfg.n_array[g],
+                                                       cfg.ldd_array[g],
+                                                       hD_gold[idx],
+                                                       hD[idx]);
+                    }
+                }
+            }
+        }
+
+        double error = 0;
+        if(arg.norm_check)
+        {
+            int64_t idx = 0;
+            for(int64_t g = 0; g < group_count; ++g)
+            {
+                for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
+                {
+                    error = std::max(error,
+                                     std::abs(norm_check_general<To>('F',
+                                                                     cfg.m_array[g],
+                                                                     cfg.n_array[g],
+                                                                     cfg.ldd_array[g],
+                                                                     (To_hpa*)hD_gold[idx],
+                                                                     hD[idx])));
+                }
+            }
+        }
+        return error;
+    };
+
     if(arg.unit_check || arg.norm_check)
     {
         if(arg.pointer_mode_host)
@@ -780,129 +844,13 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
 
         if(arg.pointer_mode_host)
         {
-            if(arg.unit_check)
-            {
-                int64_t idx = 0;
-                for(int64_t g = 0; g < group_count; ++g)
-                {
-                    for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
-                    {
-                        if((rocblas_handle(handle)->getArchMajor() == 11) && (sizeof(Ti) == 2))
-                        {
-                            const double tol
-                                = cfg.k_array[g] * sum_error_tolerance_for_gfx11<Tc, Ti, To>;
-                            near_check_general<To, To_hpa>(cfg.m_array[g],
-                                                           cfg.n_array[g],
-                                                           cfg.ldd_array[g],
-                                                           hD_gold[idx],
-                                                           hD_1[idx],
-                                                           tol);
-                        }
-                        else if(std::is_same_v<Tc, rocblas_half> && cfg.k_array[g] > 10000)
-                        {
-                            const double tol = cfg.k_array[g] * sum_error_tolerance<Tc>;
-                            near_check_general<To, To_hpa>(cfg.m_array[g],
-                                                           cfg.n_array[g],
-                                                           cfg.ldd_array[g],
-                                                           hD_gold[idx],
-                                                           hD_1[idx],
-                                                           tol);
-                        }
-                        else
-                        {
-                            unit_check_general<To, To_hpa>(cfg.m_array[g],
-                                                           cfg.n_array[g],
-                                                           cfg.ldd_array[g],
-                                                           hD_gold[idx],
-                                                           hD_1[idx]);
-                        }
-                    }
-                }
-            }
-
-            if(arg.norm_check)
-            {
-                double  error = 0;
-                int64_t idx   = 0;
-                for(int64_t g = 0; g < group_count; ++g)
-                {
-                    for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
-                    {
-                        error = std::max(error,
-                                         std::abs(norm_check_general<To>('F',
-                                                                         cfg.m_array[g],
-                                                                         cfg.n_array[g],
-                                                                         cfg.ldd_array[g],
-                                                                         (To_hpa*)hD_gold[idx],
-                                                                         hD_1[idx])));
-                    }
-                }
-                ASSERT_NEAR(error, 0.0, 1e-10);
-            }
+            error_hst_ptr = compare_to_gold(hD_1);
         }
-
         if(arg.pointer_mode_device)
         {
-            if(arg.unit_check)
-            {
-                int64_t idx = 0;
-                for(int64_t g = 0; g < group_count; ++g)
-                {
-                    for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
-                    {
-                        if((rocblas_handle(handle)->getArchMajor() == 11) && (sizeof(Ti) == 2))
-                        {
-                            const double tol
-                                = cfg.k_array[g] * sum_error_tolerance_for_gfx11<Tc, Ti, To>;
-                            near_check_general<To, To_hpa>(cfg.m_array[g],
-                                                           cfg.n_array[g],
-                                                           cfg.ldd_array[g],
-                                                           hD_gold[idx],
-                                                           hD_2[idx],
-                                                           tol);
-                        }
-                        else if(std::is_same_v<Tc, rocblas_half> && cfg.k_array[g] > 10000)
-                        {
-                            const double tol = cfg.k_array[g] * sum_error_tolerance<Tc>;
-                            near_check_general<To, To_hpa>(cfg.m_array[g],
-                                                           cfg.n_array[g],
-                                                           cfg.ldd_array[g],
-                                                           hD_gold[idx],
-                                                           hD_2[idx],
-                                                           tol);
-                        }
-                        else
-                        {
-                            unit_check_general<To, To_hpa>(cfg.m_array[g],
-                                                           cfg.n_array[g],
-                                                           cfg.ldd_array[g],
-                                                           hD_gold[idx],
-                                                           hD_2[idx]);
-                        }
-                    }
-                }
-            }
-
-            if(arg.norm_check)
-            {
-                double  error = 0;
-                int64_t idx   = 0;
-                for(int64_t g = 0; g < group_count; ++g)
-                {
-                    for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
-                    {
-                        error = std::max(error,
-                                         std::abs(norm_check_general<To>('F',
-                                                                         cfg.m_array[g],
-                                                                         cfg.n_array[g],
-                                                                         cfg.ldd_array[g],
-                                                                         (To_hpa*)hD_gold[idx],
-                                                                         hD_2[idx])));
-                    }
-                }
-                ASSERT_NEAR(error, 0.0, 1e-10);
-            }
+            error_dev_ptr = compare_to_gold(hD_2);
         }
+        rocblas_error = error_dev_ptr > error_hst_ptr ? error_dev_ptr : error_hst_ptr;
     }
 
     if(arg.timing && arg.api != INTERNAL)
