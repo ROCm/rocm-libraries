@@ -54,7 +54,7 @@ from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
-from .Common import printWarning, printExit, roundUp, print2, DebugConfig, DataDirection, \
+from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2
 from .Common.GlobalParameters import globalParameters
 from Tensile.SolutionStructs.Naming import getKernelNameMin
@@ -4963,16 +4963,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   @staticmethod
   def _subtileStinkyWaitcntOverrides():
-    """Subtile waitcnt-only ST options (no overlapping passes).
+    """Subtile ST options: matrix reuse + mode2 wait-alu, no GR/LR waitcnt.
 
-    Python LogicalScheduler owns cluster barriers, wait-alu, and instruction
-    scheduling (SIA=3). ST runs at OptLevel 0 with waitcnt insertion only.
+    Python LogicalScheduler owns cluster barriers and instruction scheduling
+    (SIA=3). ST runs at OptLevel 0 with EnableESM2 (matrix reuse + mode2
+    wait-alu) but without GR/LR waitcnt insertion, so it does not strip
+    tensilelite's hand-rolled s_waitcnt.
     """
     return {
-      "EnableWaitCntInsertion": True,
-      "EnableESM2": False,
+      "EnableESM2": True,
+      "EnableWaitCntInsertion": False,
       "ClusterBarrier": False,
-      "EnableLoopCarriedTokenDeps": True,
     }
 
   def _buildStinkyTofuModuleOptions(self, kernel, stinky_opt_level, option_overrides=None):
@@ -5412,19 +5413,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    if kernel.get("_StinkySubtile"):
-      passResult = self._runRocIsaPassOnKernelBody(kernel, moduleKernelBody)
-      kernel["MathClocksUnrolledLoop"] = passResult.cycles
-      self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
+    passResult = self._runRocIsaPassOnKernelBody(kernel, moduleKernelBody)
+    kernel["MathClocksUnrolledLoop"] = passResult.cycles
+    self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
-      waitcnt_overrides = self._subtileStinkyWaitcntOverrides()
-      st_asm = self._runStinkyTofuPipeline(
-        kernel, moduleKernelBody, fs, 0, option_overrides=waitcnt_overrides)
-      if st_asm is not None:
-        return (error, st_asm)
-      printExit(
-        f"StinkySubtile kernel generation failed: StinkyTofu pipeline returned no assembly "
-        f"for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}")
+    waitcnt_overrides = self._subtileStinkyWaitcntOverrides()
+    st_asm = self._runStinkyTofuPipeline(
+      kernel, moduleKernelBody, fs, 0, option_overrides=waitcnt_overrides)
+    if st_asm is not None:
+      return (error, st_asm)
 
     return (error, str(moduleKernelBody))
 

@@ -1472,7 +1472,6 @@
     'StaggerU',
     'StaggerUMapping',
     'StaggerUStride',
-    'StinkySubtile',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -2507,14 +2506,6 @@
         16,
       ]),
       'len': 10,
-      'type': 'list',
-    }),
-    'StinkySubtile': dict({
-      'head': list([
-        False,
-        True,
-      ]),
-      'len': 2,
       'type': 'list',
     }),
     'StorePriorityOpt': dict({

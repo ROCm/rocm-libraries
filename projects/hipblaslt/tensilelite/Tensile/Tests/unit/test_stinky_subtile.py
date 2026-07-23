@@ -9,103 +9,22 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-import pytest
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
-
-from Tensile.SolutionStructs.Solution import Solution
 
 
 GFX1250_ISA = (12, 5, 0)
 
 
-def _minimal_subtile_state(isa=GFX1250_ISA, use_subtile=True, stinky_subtile=False, schedule_iter_alg=3):
-    return {
-        "Valid": True,
-        "AssignedProblemIndependentDerivedParameters": False,
-        "ISA": isa,
-        "ScheduleIterAlg": schedule_iter_alg,
-        "UseSubtileImpl": use_subtile,
-        "StinkySubtile": stinky_subtile,
-        "ProblemType": {
-            "StridedBatched": True,
-            "Batched": True,
-            "OperationType": "GEMM",
-        },
-    }
-
-
-
-def test_subtile_stinky_opt_in_sets_derived_flag():
-    import rocisa
-    state = _minimal_subtile_state(stinky_subtile=True)
-    Solution._assignStinkySubtile(state, False)
-    if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(state["ISA"])):
-        assert state.get("_StinkySubtile") is not True
-        assert state["Valid"] is False
-    else:
-        assert state.get("_StinkySubtile") is True
-
-
-def test_non_subtile_stinky_opt_in_no_derived_flag():
-    state = _minimal_subtile_state(use_subtile=False, stinky_subtile=True)
-    Solution._assignStinkySubtile(state, False)
-    assert "_StinkySubtile" not in state
-
-
-def test_subtile_without_stinky_opt_in_no_derived_flag():
-    state = _minimal_subtile_state(stinky_subtile=False)
-    Solution._assignStinkySubtile(state, False)
-    assert "_StinkySubtile" not in state
-
-
-def test_stinky_opt_in_unsupported_isa_rejects():
-    import rocisa
-    state = _minimal_subtile_state(isa=(9, 5, 0), stinky_subtile=True)
-    Solution._assignStinkySubtile(state, False)
-    if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(state["ISA"])):
-        assert state.get("_StinkySubtile") is not True
-        assert state["Valid"] is False
-    else:
-        assert state.get("_StinkySubtile") is True
-
-
-def test_build_stinky_options_waitcnt_only_overrides():
+def test_subtile_stinky_waitcnt_overrides():
+    """Subtile ST overrides: matrix reuse + mode2 wait-alu, no GR/LR waitcnt."""
     from Tensile.KernelWriter import KernelWriter
 
-    kw = MagicMock(spec=KernelWriter)
-    kw.sgprs = {}
-    kernel = {
-        "EnableStinkyTofuESM2": True,
-        "ThreadTile0": 2,
-        "ThreadTile1": 2,
-        "MacroTile0": 64,
-        "WavefrontSize": 32,
-        "SubGroup0": 4,
-        "SubGroup1": 4,
-        "MIWaveGroup": [1, 1],
-        "VectorWidthA": 1,
-        "VectorWidthB": 1,
-        "GlobalReadVectorWidthA": 8,
-        "GlobalReadVectorWidthB": 8,
-        "DirectToLdsA": False,
-        "DirectToLdsB": False,
-        "_UseSgprForGRO": 0,
-        "ClusterBarrier": True,
-        "PrefetchGlobalRead": 2,
-        "PrefetchLocalRead": 1,
-    }
-
     overrides = KernelWriter._subtileStinkyWaitcntOverrides()
-    opts = KernelWriter._buildStinkyTofuModuleOptions(kw, kernel, 0, option_overrides=overrides)
-
-    assert opts["OptLevel"] == 0
-    assert opts["EnableWaitCntInsertion"] is True
-    assert opts["EnableESM2"] is False
-    assert opts["ClusterBarrier"] is False
-    assert opts["EnableLoopCarriedTokenDeps"] is True
+    assert overrides["EnableESM2"] is True
+    assert overrides["EnableWaitCntInsertion"] is False
+    assert overrides["ClusterBarrier"] is False
 
 
 def test_build_stinky_options_opt0_default_disables_waitcnt():
@@ -141,10 +60,8 @@ def test_build_stinky_options_opt0_default_disables_waitcnt():
 
 
 def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
-    import rocisa
+    """Subtile path unconditionally runs the ST pipeline with waitcnt overrides."""
     from Tensile.KernelWriter import KernelWriter
-    if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(GFX1250_ISA)):
-        pytest.skip("StinkyTofu gfx1250 backend not available")
 
     kw = MagicMock()
     kw.states = MagicMock()
@@ -170,23 +87,21 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
     kw.updateOccupancyFromMaxVgpr = MagicMock()
     kw._runStinkyTofuPipeline = fake_pipeline
 
-    kernel = {"_StinkySubtile": True}
+    kernel = {}
 
     error = kw.states.overflowedResources
-    if kernel.get("_StinkySubtile"):
-        passResult = kw._runRocIsaPassOnKernelBody(kernel, module_kernel_body)
-        kernel["MathClocksUnrolledLoop"] = passResult.cycles
-        kw.updateOccupancyFromMaxVgpr(kernel, module_kernel_body, passResult.maxVgpr)
-        waitcnt_overrides = KernelWriter._subtileStinkyWaitcntOverrides()
-        st_asm = kw._runStinkyTofuPipeline(
-            kernel, module_kernel_body, fs, 0, option_overrides=waitcnt_overrides)
-        assert st_asm == "stinky_asm_output"
+    passResult = kw._runRocIsaPassOnKernelBody(kernel, module_kernel_body)
+    kernel["MathClocksUnrolledLoop"] = passResult.cycles
+    kw.updateOccupancyFromMaxVgpr(kernel, module_kernel_body, passResult.maxVgpr)
+    waitcnt_overrides = KernelWriter._subtileStinkyWaitcntOverrides()
+    st_asm = kw._runStinkyTofuPipeline(
+        kernel, module_kernel_body, fs, 0, option_overrides=waitcnt_overrides)
+    assert st_asm == "stinky_asm_output"
 
     assert captured["opt_level"] == 0
-    assert captured["overrides"]["EnableWaitCntInsertion"] is True
-    assert captured["overrides"]["EnableESM2"] is False
+    assert captured["overrides"]["EnableESM2"] is True
+    assert captured["overrides"]["EnableWaitCntInsertion"] is False
     assert captured["overrides"]["ClusterBarrier"] is False
-    assert captured["overrides"]["EnableLoopCarriedTokenDeps"] is True
     assert kernel["MathClocksUnrolledLoop"] == 42
     kw.updateOccupancyFromMaxVgpr.assert_called_once()
 
@@ -199,180 +114,6 @@ def test_stinky_region_module_name_mapping():
     assert LogicalScheduler._stinkyRegionModuleName("NGLL_C1") == "loopBody"
     assert LogicalScheduler._stinkyRegionModuleName("NLL_C0") == "noLoadLoopBody"
     assert LogicalScheduler._stinkyRegionModuleName("TAILLOOP") == "noLoadLoopBody"
-
-
-def _writer_with_mem_tokens(double_buffer=True):
-    from types import SimpleNamespace
-
-    states = SimpleNamespace(
-        memTokenLdsBuffer0=0,
-        memTokenLdsBuffer1=1 if double_buffer else 0,
-        ldsReadTokenIdx=0,
-        ldsDirectToLDSTokenIdx=0,
-        ldsWriteTokenIdx=0,
-        ldsTensorTokenIdx=0,
-    )
-    return SimpleNamespace(states=states)
-
-
-def test_subtile_mem_token_flip_helpers():
-    from Tensile.Components.Subtile.SubtileMemToken import (
-        flipGrWriteTokens,
-        flipLrReadToken,
-        flipTensorLoadToken,
-    )
-
-    writer = _writer_with_mem_tokens()
-    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
-    flipGrWriteTokens(writer, kernel)
-    assert writer.states.ldsDirectToLDSTokenIdx == 1
-    assert writer.states.ldsWriteTokenIdx == 1
-    flipLrReadToken(writer, kernel)
-    assert writer.states.ldsReadTokenIdx == 1
-    flipTensorLoadToken(writer, kernel)
-    assert writer.states.ldsTensorTokenIdx == 1
-
-
-def test_subtile_mem_token_barrier_tokens():
-    from Tensile.Components.Subtile.SubtileMemToken import barrierTokens
-
-    writer = _writer_with_mem_tokens(double_buffer=True)
-    assert barrierTokens(writer, {"_StinkySubtile": True, "1LDSBuffer": False}) == [0, 1]
-
-    writer = _writer_with_mem_tokens(double_buffer=False)
-    assert barrierTokens(writer, {"_StinkySubtile": True, "1LDSBuffer": True}) == [0]
-
-
-def test_subtile_mem_token_tag_instructions():
-    from rocisa.instruction import BufferLoadB128, DSLoadB128, SBarrier, TensorLoadToLds
-    from rocisa.container import vgpr, sgpr
-
-    from Tensile.Components.Subtile.SubtileMemToken import (
-        tagBarrier,
-        tagDtlLoad,
-        tagDsRead,
-        tagTensorLoad,
-    )
-
-    writer = _writer_with_mem_tokens()
-    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
-
-    dtl = BufferLoadB128(dst=None, vaddr=vgpr(0), saddr=sgpr(0, 4), soffset=0)
-    tagDtlLoad(dtl, writer, kernel)
-    assert dtl.getMemToken() is None
-
-    tdm = TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None)
-    tagTensorLoad(tdm, writer, kernel)
-    assert tdm.getMemToken().tokens == [0]
-
-    ds = DSLoadB128(dst=vgpr(0, 4), src=vgpr(1))
-    tagDsRead(ds, writer, kernel)
-    assert ds.getMemToken().tokens == [0]
-
-    barrier = SBarrier()
-    tagBarrier(barrier, writer, kernel)
-    assert barrier.getMemToken().tokens == [0, 1]
-
-
-def test_subtile_emit_sync_tags_barrier():
-    from rocisa.instruction import SBarrier
-
-    from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
-
-    writer = _writer_with_mem_tokens()
-    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
-    emitter = InstructionEmitter.__new__(InstructionEmitter)
-    emitter.writer = writer
-    emitter.kernel = kernel
-
-    items = emitter.emit_sync()
-    assert len(items) == 1
-    assert isinstance(items[0], SBarrier)
-    assert items[0].getMemToken().tokens == [0, 1]
-
-
-def test_subtile_emit_wait_gr_lr_skipped_for_tdm_when_stinky_subtile():
-    from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
-    from Tensile.Components.Subtile.LogicalScheduler import WaitGROp, WaitGRCounts
-
-    writer = _writer_with_mem_tokens()
-    emitter = InstructionEmitter.__new__(InstructionEmitter)
-    emitter.writer = writer
-    emitter.tileInfoA = MagicMock(loadRatioGR=1.0)
-    emitter.tileInfoB = MagicMock(loadRatioGR=1.0)
-
-    counts = WaitGRCounts(A=1, B=1, SA=0, SB=0)
-    source = WaitGROp(wait_gr_counts=counts)
-
-    emitter.kernel = {
-        "_StinkySubtile": True,
-        "enableTDMA": True,
-        "enableTDMB": True,
-    }
-    assert emitter.emit_wait_gr(source) == []
-    assert emitter.emit_wait_lr() == []
-
-    emitter.kernel = {
-        "_StinkySubtile": True,
-        "enableTDMA": False,
-        "enableTDMB": False,
-    }
-    assert len(emitter.emit_wait_gr(source)) == 1
-    assert len(emitter.emit_wait_lr()) == 1
-
-    emitter.kernel = {"enableTDMA": False, "enableTDMB": False}
-    assert len(emitter.emit_wait_gr(source)) == 1
-    assert len(emitter.emit_wait_lr()) == 1
-
-
-def test_subtile_cluster_barrier_tags_mem_tokens():
-    from rocisa.instruction import SBarrier
-
-    from Tensile.Components.Subtile.ClusterBarrier import (
-        subtileClusterBarrierSignal,
-        subtileClusterBarrierWait,
-    )
-
-    writer = _writer_with_mem_tokens()
-    writer.labels = MagicMock()
-    writer.labels.getUniqueNamePrefix.return_value = "cb"
-    kernel = {"_StinkySubtile": True, "1LDSBuffer": False}
-
-    for mod in (subtileClusterBarrierSignal(writer, kernel),
-                subtileClusterBarrierWait(writer, kernel)):
-        barriers = [i for i in mod.flatitems() if isinstance(i, SBarrier)]
-        assert barriers
-        for barrier in barriers:
-            assert barrier.getMemToken().tokens == [0, 1]
-
-
-def test_subtile_gr_lds_buffer_swap_flips_write_tokens():
-    from Tensile.Components.Subtile.SubtileGREmit import globalReadLDSBufferSwap
-
-    writer = _writer_with_mem_tokens()
-    writer.states.a = MagicMock()
-    writer.states.b = MagicMock()
-    writer.states.a.tileInfo = MagicMock()
-    writer.states.a.tileInfo.emitGRLDSBufferSwap.return_value = MagicMock()
-    writer.states.b.tileInfo = writer.states.a.tileInfo
-
-    kernel = {"_StinkySubtile": True, "enableTDMA": False, "enableTDMB": False}
-    globalReadLDSBufferSwap("A", writer, kernel)
-    assert writer.states.ldsDirectToLDSTokenIdx == 1
-    assert writer.states.ldsWriteTokenIdx == 1
-
-
-def test_subtile_lr_lds_buffer_swap_flips_read_token():
-    from Tensile.Components.Subtile.SubtileLREmit import localReadLDSBufferSwap
-
-    writer = _writer_with_mem_tokens()
-    writer.states.a = MagicMock()
-    writer.states.a.tileInfo = MagicMock()
-    writer.states.a.tileInfo.emitLRLDSBufferSwap.return_value = MagicMock()
-
-    kernel = {"_StinkySubtile": True}
-    localReadLDSBufferSwap("A", writer, kernel)
-    assert writer.states.ldsReadTokenIdx == 1
 
 
 def test_mainloop_exposes_top_level_loop_body_module():
@@ -498,68 +239,3 @@ def test_mainloop_exposes_top_level_tail_no_load_loop_body_module():
         parts = mainLoop(writer, kernel)
 
     assert any(getattr(p, "name", None) == "noLoadLoopBody" for p in parts)
-
-
-def test_subtile_stinky_waitcnt_overrides_disable_overlapping_passes():
-    """Step 5: waitcnt-only overrides must gate off ST scheduler/ESM2/cluster passes."""
-    from Tensile.KernelWriter import KernelWriter
-
-    overrides = KernelWriter._subtileStinkyWaitcntOverrides()
-    assert overrides["EnableWaitCntInsertion"] is True
-    assert overrides["EnableESM2"] is False
-    assert overrides["ClusterBarrier"] is False
-    assert overrides["EnableLoopCarriedTokenDeps"] is True
-
-
-def test_subtile_waitcnt_asm_no_overlapping_st_passes():
-    """Step 5: generated asm must not duplicate Python cluster_barrier/wait_alu."""
-    import re
-    import subprocess
-    from pathlib import Path
-
-    import rocisa
-    if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(GFX1250_ISA)):
-        pytest.skip("StinkyTofu gfx1250 backend not available")
-
-    yaml = Path(TENSILE_ROOT) / "Tensile/Tests/common/gemm/gfx12/subtile_waitcnt_gfx1250.yaml"
-    if not yaml.is_file():
-        pytest.skip(f"missing bring-up yaml: {yaml}")
-
-    out_dir = Path(TENSILE_ROOT) / "tensile-out-step5-test"
-    python = Path(TENSILE_ROOT) / ".venv/bin/python"
-    tensile = Path(TENSILE_ROOT) / "Tensile/bin/Tensile"
-    st_lib = Path(TENSILE_ROOT) / "build_tmp/stinkytofu-install/lib"
-    env = os.environ.copy()
-    if st_lib.is_dir():
-        env["LD_LIBRARY_PATH"] = f"{st_lib}:{env.get('LD_LIBRARY_PATH', '')}"
-
-    subprocess.run(
-        [str(python), str(tensile), str(yaml), str(out_dir),
-         "--build-only", "--rocm-agent-enumerator", "rocm_agent_enumerator"],
-        cwd=TENSILE_ROOT,
-        env=env,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-    asm_files = list(out_dir.glob("**/*.s"))
-    assert asm_files, f"no assembly emitted under {out_dir}"
-    asm = asm_files[0].read_text()
-
-    # ClusterBarrier=False in ST overrides; bring-up yaml also has no cluster barrier.
-    assert "cluster_barrier" not in asm
-
-    # ST InsertWaitAluPass is gated by EnableESM2; subtile Python owns s_wait_alu.
-    wait_alu_lines = [line for line in asm.splitlines() if "s_wait_alu" in line]
-    assert wait_alu_lines, "expected gfx1250 subtile Python wait-alu in main loop"
-    for line in wait_alu_lines:
-        assert "LR offset" in line, (
-            f"unexpected s_wait_alu (ST ESM2 would not use Python LR comment): {line.strip()}")
-
-    # Waitcnt-only path ran: ST-inserted staggered dscnt waits present, hand-rolled gone.
-    assert "Wait for LR to complete" not in asm
-    assert "Wait TDM" not in asm
-    assert re.search(r"s_wait_dscnt \d+\s+// <This is \d+-cycle>", asm), (
-        "expected ST staggered s_wait_dscnt insertion")

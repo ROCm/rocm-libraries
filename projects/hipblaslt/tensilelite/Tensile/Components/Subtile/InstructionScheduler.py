@@ -453,8 +453,7 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
 
 
 def instructionSchedule(emittedModules, multiDU: bool = False,
-                      minGapDsReadToWait=_MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
-                      skipVmcntAdjust: bool = False):
+                      minGapDsReadToWait=_MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules (shared):
@@ -541,7 +540,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
         if _isBufferLoad(inst):
             bufLoadCount += 1
         elif _isWaitCnt(inst) and inst.vlcnt >= 0:
-            if not skipVmcntAdjust and getattr(inst, 'adjustVmcnt', True):
+            if getattr(inst, 'adjustVmcnt', True):
                 inst.vlcnt += bufLoadCount
 
     return scheduled

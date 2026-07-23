@@ -448,8 +448,6 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
-    # Opt in to StinkyTofu waitcnt insertion for subtile kernels (_StinkySubtile).
-    "StinkySubtile": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

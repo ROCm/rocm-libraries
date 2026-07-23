@@ -19,11 +19,6 @@ from Tensile.Components.Subtile.SubtileLREmit import (
 from Tensile.Components.Subtile.SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
-from Tensile.Components.Subtile.SubtileMemToken import (
-    initSubtileMemTokens,
-    tagBarrier,
-    tagDsRead,
-)
 from rocisa.code import Module
 from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
@@ -130,8 +125,6 @@ class InstructionEmitter:
             self._per_uid_k['SA'] = config.numSubIterK // config.numUnroll.get('SA', 1)
             self._per_uid_k['SB'] = config.numSubIterK // config.numUnroll.get('SB', 1)
 
-        initSubtileMemTokens(writer, kernel)
-
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
@@ -152,15 +145,6 @@ class InstructionEmitter:
         # Sentinel for the long-lived per-lane diff vgpr. Set by
         # emit_mask_k_init, consumed by every emit_mask_k call in the tail body.
         self._tail_vDiff = None
-
-    @property
-    def _stinky_owns_waitcnt(self):
-        """True when StinkyTofu replaces hand-rolled TDM tensor waits."""
-        return bool(
-            self.kernel.get("_StinkySubtile")
-            and self.kernel.get("enableTDMA", False)
-            and self.kernel.get("enableTDMB", False)
-        )
 
     def emit_mfma(self, placement, unroll_iter=0):
         """Emit MFMA instructions from MFMAPlacement."""
@@ -244,8 +228,7 @@ class InstructionEmitter:
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile,
-                        swizzled=swizzled, writer=self.writer, kernel=self.kernel))
+                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
@@ -258,13 +241,11 @@ class InstructionEmitter:
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
-                inst = DSLoadB32(
+                module.add(DSLoadB32(
                     dst=vgpr(vdst),
                     src=vgpr(ti.sharedVgprLROffset[0]),
                     ds=DSModifiers(offset=dsOffset),
-                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS")
-                tagDsRead(inst, self.writer, self.kernel)
-                module.add(inst)
+                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
         return list(module.flatitems())
 
     def emit_gr(self, placement):
@@ -278,7 +259,7 @@ class InstructionEmitter:
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // self.subtileShapeK
-                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK, writer=self.writer))
+                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
@@ -286,9 +267,6 @@ class InstructionEmitter:
 
     def emit_wait_gr(self, source):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
-        if self._stinky_owns_waitcnt:
-            return []
-
         counts = source.wait_gr_counts
         if counts is None:
             return []
@@ -324,15 +302,11 @@ class InstructionEmitter:
         return [swait]
 
     def emit_wait_lr(self):
-        if self._stinky_owns_waitcnt:
-            return []
         return [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
                          comment="Wait for LR to complete")]
 
     def emit_sync(self):
-        barrier = SBarrier(comment="Barrier")
-        tagBarrier(barrier, self.writer, self.kernel)
-        return [barrier]
+        return [SBarrier(comment="Barrier")]
 
     def emit_inline(self, source):
         """Emit a writer-built Module supplied by an InlineModuleOp callback."""

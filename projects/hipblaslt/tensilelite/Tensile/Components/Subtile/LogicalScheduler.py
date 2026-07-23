@@ -3436,8 +3436,6 @@ class LogicalScheduler:
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
-        from Tensile.Components.Subtile.WaitAluInsertion import (
-            insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -3468,8 +3466,7 @@ class LogicalScheduler:
                     scheduled = instructionSchedule(
                         em_list,
                         multiDU=self._is_multi_du(),
-                        minGapDsReadToWait=minGapDsReadToWait,
-                        skipVmcntAdjust=bool(kernel.get("_StinkySubtile")))
+                        minGapDsReadToWait=minGapDsReadToWait)
                     module.add(scheduled)
                 else:
                     for em in em_list:
@@ -3493,17 +3490,6 @@ class LogicalScheduler:
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
         module.addComment0(f"{section} end")
-        # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
-        # the final post-schedule order (no-op on other archs).
-        module = insertLRSwapRawWaitAlu(module, writer, kernel)
-        # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
-        module = setMatrixReuse(module, writer, kernel, 'a')
-        module = setMatrixReuse(module, writer, kernel, 'b')
-        # PGR=0 only: the unprefetched loop puts the ds_read of an LR offset
-        # right before the swap that overwrites it.  PGR>=1 prefetch separates
-        # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
-        if self.config.pgr == 0 and section.startswith("MAINLOOP"):
-            module = insertLRSwapWarWaitAlu(module, writer, kernel)
         # Cluster barrier: splice both halves against the final post-schedule order.
         # Signal goes right after the mainloop's existing workgroup barrier (reusing
         # that sync); the wait is appended at the end to hide its cross-CU latency.
