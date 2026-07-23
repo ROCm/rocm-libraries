@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
-"""Run tests with coverage profiling and/or generate coverage reports.
+"""Run tests with coverage profiling and generate coverage reports.
 
-NOTE: This script is currently NOT wired into the CI flow. The coverage report
-job in ``.github/workflows/therock-ci-coverage.yml`` now invokes ``llvm-profdata``
-and ``llvm-cov`` inline instead of going through this wrapper. It is kept here for
-reference / potential reuse; remove it if it is confirmed unnecessary.
-
-This is the report-time half of the coverage flow described in TheRock's coverage
-design docs. It is driven by the ``coverage_metadata.json`` produced by
-``export_coverage_metadata.py`` and can either:
-
-  * run tests to produce profraw files (default), or
-  * skip tests and merge pre-collected profraw files (``--skip-tests``), which is
-    how the GitHub Actions flow uses it (tests run in the shared package-test
-    workflow and upload their profraw).
+Invoked by the coverage ``Test`` step in
+``.github/workflows/therock-test-component.yml``: it sets ``LLVM_PROFILE_FILE``,
+runs the component's tests via ctest to produce profraw files, then merges them
+with ``llvm-profdata`` and renders text/HTML/LCOV reports with ``llvm-cov``. It is
+driven by the ``coverage_metadata.json`` produced by ``export_coverage_metadata.py``.
 
 Object and llvm tool locations are resolved by name within ``--build-dir`` so the
 script works whether it is pointed at a full build/dist tree or a staged artifact.
@@ -38,13 +30,11 @@ def find_tool(build_dir: Path, name: str) -> Path | None:
 
 
 def resolve_objects(build_dir: Path, metadata: dict) -> list[Path]:
-    """Resolve coverage object files (libraries + test binaries) within build_dir."""
+    """Resolve coverage object files (shared libraries) within build_dir."""
     objects: list[Path] = []
 
     # Prefer the explicit relative paths recorded at export time, if present.
-    rel_objects = []
-    for kind in ("libraries", "test_binaries"):
-        rel_objects.extend(metadata.get("coverage_objects", {}).get(kind, []) or [])
+    rel_objects = metadata.get("coverage_objects", {}).get("libraries", []) or []
     for rel in rel_objects:
         candidate = build_dir / rel
         if candidate.is_file():
@@ -52,9 +42,7 @@ def resolve_objects(build_dir: Path, metadata: dict) -> list[Path]:
 
     # Fall back to resolving by basename (handles a different layout than export).
     if not objects:
-        basenames = []
-        for kind in ("libraries", "test_binaries"):
-            basenames.extend(metadata.get("object_basenames", {}).get(kind, []) or [])
+        basenames = metadata.get("object_basenames", {}).get("libraries", []) or []
         for basename in basenames:
             hits = [p for p in build_dir.rglob(f"{basename}*") if p.is_file()]
             # Prefer concrete files (e.g. libhiprand.so.1.1) over bare symlinks,
@@ -200,21 +188,10 @@ def main():
         "--coverage-dir", type=Path, required=True, help="Output directory for reports"
     )
     parser.add_argument(
-        "--profraw-dir",
-        type=Path,
-        default=None,
-        help="Directory of profraw files (default: <coverage-dir>/profraw)",
-    )
-    parser.add_argument(
         "--test-dir",
         type=Path,
         default=None,
         help="ctest directory (default: --build-dir) when running tests",
-    )
-    parser.add_argument(
-        "--skip-tests",
-        action="store_true",
-        help="Do not run tests; merge existing profraw files",
     )
     parser.add_argument(
         "--path-equivalence",
@@ -231,7 +208,7 @@ def main():
     logging.info("Coverage for project: %s", project)
 
     args.coverage_dir.mkdir(parents=True, exist_ok=True)
-    profraw_dir = args.profraw_dir or (args.coverage_dir / "profraw")
+    profraw_dir = args.coverage_dir / "profraw"
 
     # Resolve tooling. Tools link libLLVM and bundled sysdeps that sit next to
     # them, so add their directory to LD_LIBRARY_PATH.
@@ -255,11 +232,10 @@ def main():
         raise RuntimeError("No coverage object files could be resolved.")
     logging.info("Coverage objects: %s", ", ".join(str(o) for o in objects))
 
-    if not args.skip_tests:
-        set_coverage_environment(metadata, args.coverage_dir)
-        rc = run_tests(args.test_dir or args.build_dir, metadata)
-        if rc != 0:
-            logging.warning("Tests exited with %d; continuing with coverage.", rc)
+    set_coverage_environment(metadata, args.coverage_dir)
+    rc = run_tests(args.test_dir or args.build_dir, metadata)
+    if rc != 0:
+        logging.warning("Tests exited with %d; continuing with coverage.", rc)
 
     # Coverage is a gating job: if the tests produced no profraw, fail loudly
     # instead of passing as a silent no-op. An empty result means the library

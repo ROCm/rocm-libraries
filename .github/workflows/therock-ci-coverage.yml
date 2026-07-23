@@ -11,9 +11,6 @@ on:
         type: string
       build_dir:
         type: string
-      coverage_config:
-        description: "Per-project coverage metadata file (test_categories_coverage.yaml)."
-        type: string
       amdgpu_families:
         type: string
       test_runs_on:

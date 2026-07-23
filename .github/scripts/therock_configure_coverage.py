@@ -13,19 +13,15 @@ logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Coverage-enabled projects:
-#   project key -> (cmake_target, build_subdir, cmake_options, coverage_config)
+#   project key -> (cmake_target, build_subdir, cmake_options)
 # Only projects listed here will get coverage jobs. cmake_options pins the build
 # to just this project so the coverage job does not inherit the (possibly merged)
 # mega-group options that would otherwise build unrelated components.
-# coverage_config is the per-project coverage metadata file, kept next to the
-# project's existing test_categories.yaml (the repo's test_categories_*.yaml
-# convention) instead of a single top-level file.
 COVERAGE_PROJECT_METADATA = {
     "hiprand": (
         "hipRAND",
         "ml-libs/hipRAND",
         "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects/hiprand/test_categories_coverage.yaml",
     ),
 }
 
@@ -33,17 +29,15 @@ def get_build_metadata(project_key: str, base_dir: str = "TheRock/build-coverage
     """Get CMake target and build directory for a coverage-enabled project.
 
     Returns:
-        Tuple of (uppercase_name, cmake_target, build_dir, cmake_options,
-        coverage_config) or None if not coverage-enabled
+        Tuple of (uppercase_name, cmake_target, build_dir, cmake_options)
+        or None if not coverage-enabled
     """
     if project_key not in COVERAGE_PROJECT_METADATA:
         return None
 
-    cmake_target, build_subdir, cmake_options, coverage_config = (
-        COVERAGE_PROJECT_METADATA[project_key]
-    )
+    cmake_target, build_subdir, cmake_options = COVERAGE_PROJECT_METADATA[project_key]
     build_dir = f"{base_dir}/{build_subdir}/build"
-    return project_key.upper(), cmake_target, build_dir, cmake_options, coverage_config
+    return project_key.upper(), cmake_target, build_dir, cmake_options
 
 
 def get_changed_subtrees_only():
@@ -83,7 +77,7 @@ def main():
                 continue  # avoid duplicate jobs if a project appears in multiple groups
             seen_projects.add(project_key)
 
-            uppercase_name, cmake_target, build_dir, cmake_options, coverage_config = (
+            uppercase_name, cmake_target, build_dir, cmake_options = (
                 get_build_metadata(project_key)
             )
             # Copy the group entry so each coverage project gets its own job.
@@ -94,8 +88,6 @@ def main():
             # Pin to this project's own options so we don't build the merged
             # mega-group (which pulls in unrelated components like hipdnn/providers).
             entry["cmake_options"] = cmake_options
-            # Per-project coverage metadata file (next to the project's tests).
-            entry["coverage_config"] = coverage_config
             # Only run this project's own tests, so the test stage matches the
             # pinned (single-project) build.
             entry["projects_to_test"] = project_key
