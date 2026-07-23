@@ -111,29 +111,28 @@ namespace rocsparse
             }
         }
 
-#define LAUNCH_GEMMIT(DIM)                                                          \
-    {                                                                               \
-        dim3 gemmit_blocks((m - 1) / (DIM) + 1, std::min(n, (rocsparse_int)65535)); \
-        dim3 gemmit_threads(DIM);                                                   \
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                         \
-            (rocsparse::gemmit_kernel<DIM>),                                        \
-            gemmit_blocks,                                                          \
-            gemmit_threads,                                                         \
-            0,                                                                      \
-            stream,                                                                 \
-            m,                                                                      \
-            n,                                                                      \
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                       \
-            A,                                                                      \
-            lda,                                                                    \
-            csr_row_ptr,                                                            \
-            csr_col_ind,                                                            \
-            csr_val,                                                                \
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                        \
-            C,                                                                      \
-            ldc,                                                                    \
-            descr->base,                                                            \
-            handle->pointer_mode == rocsparse_pointer_mode_host);                   \
+#define LAUNCH_GEMMIT(DIM)                                                                       \
+    {                                                                                            \
+        dim3 gemmit_blocks((m - 1) / (DIM) + 1, std::min(n, (rocsparse_int)65535));              \
+        dim3 gemmit_threads(DIM);                                                                \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gemmit_kernel<DIM>),                      \
+                                           gemmit_blocks,                                        \
+                                           gemmit_threads,                                       \
+                                           0,                                                    \
+                                           stream,                                               \
+                                           m,                                                    \
+                                           n,                                                    \
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),     \
+                                           A,                                                    \
+                                           lda,                                                  \
+                                           csr_row_ptr,                                          \
+                                           csr_col_ind,                                          \
+                                           csr_val,                                              \
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),      \
+                                           C,                                                    \
+                                           ldc,                                                  \
+                                           descr->base,                                          \
+                                           handle->pointer_mode == rocsparse_pointer_mode_host); \
     }
 
         switch(gemmit_dim)
