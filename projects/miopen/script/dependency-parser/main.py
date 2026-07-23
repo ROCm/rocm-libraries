@@ -178,10 +178,11 @@ def _ci_base_from_env():
 
     On GitHub Actions the PR's true base is github.event.pull_request.base.sha (the target
     branch tip at PR time). It is in the event payload at $GITHUB_EVENT_PATH and, for
-    pull_request runs, GITHUB_BASE_REF holds the target branch name. TheRock's own CI reads
-    exactly this. Returns a list of (why, value) to fetch+merge-base against, most
-    authoritative first. Also prints what it found so a real run shows whether the base is
-    even reachable at MIOpen-build time (else we must plumb it down from TheRock)."""
+    pull_request runs, GITHUB_BASE_REF holds the target branch name. This is a nice-to-have
+    shortcut only: even with nothing here, dapper self-serves by fetching develop / base_ref
+    blobless from origin (see resolve_base_sha strategy 3), so no TheRock plumbing is needed.
+    Returns a list of (why, value) to fetch+merge-base against, most authoritative first, and
+    prints what it found."""
     print("--- CI env (base discovery) ---")
     for v in (
         "GITHUB_EVENT_NAME",
@@ -298,15 +299,25 @@ def resolve_base_sha(source_dir, base_ref):
         if mb:
             return mb
 
-    # (3) fetch a base and retry. Try the CI-authoritative base(s) FIRST (the PR's true
-    # base -- github.event.pull_request.base.sha / GITHUB_BASE_REF), then plain develop.
-    # For each target, escalate depth until HEAD and the base share history: shallow fetch,
-    # then deepen, then full unshallow (last resort). merge-base needs the fork point in
-    # local history, so a not-current PR may require deepening -- hence the escalation.
-    fetch_targets = env_bases + [("develop", "develop")]
+    # (3) Self-service fetch straight from rocm-libraries -- no need to plumb anything down
+    # from TheRock. Fetch BLOBLESS (--filter=blob:none): that pulls commits + trees but no
+    # file contents, which is all dapper needs -- merge-base uses the commit graph and
+    # `git diff --name-only` uses trees, not blobs. The base branch is known (develop /
+    # base_ref); try any CI-provided base first, then develop. Escalate depth until HEAD and
+    # the base share history (a not-current PR needs the fork point present); --unshallow
+    # stays cheap because it is blobless.
+    fetch_targets = env_bases + [("develop", "develop"), (base_ref, base_ref)]
     for why, target in fetch_targets:
         for depth in (["--depth=1"], ["--deepen=5000"], ["--unshallow"]):
-            cmd = g + ["fetch", "--no-tags"] + depth + ["origin", target]
+            cmd = (
+                g
+                + ["fetch", "--no-tags", "--filter=blob:none"]
+                + depth
+                + [
+                    "origin",
+                    target,
+                ]
+            )
             print(f"DAPPER base: [{why}] {' '.join(cmd)}")
             rc, out, err = _run_git(cmd)
             print(f"  -> rc={rc} {(err or out)[:300]}")
