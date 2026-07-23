@@ -50,6 +50,21 @@ endif()
 # All sample targets are accumulated into this list for the umbrella build target
 set(HIPDNN_ALL_SAMPLES "")
 
+# Samples favor the explicit `config.<field>.size() > N` form over the .empty()
+# idiom so the parallel dimension-parsing blocks read uniformly. Append a
+# command-line check override to the clang-tidy properties set by
+# clang_tidy_check(); --checks= extends the -config-file= checks list, and the
+# leading '-' disables that single check for sample targets only.
+function(disable_container_size_empty_check TARGET)
+    foreach(_prop CXX_CLANG_TIDY C_CLANG_TIDY HIP_CLANG_TIDY)
+        get_target_property(_cmd ${TARGET} ${_prop})
+        if(_cmd)
+            list(APPEND _cmd "--checks=-readability-container-size-empty")
+            set_target_properties(${TARGET} PROPERTIES ${_prop} "${_cmd}")
+        endif()
+    endforeach()
+endfunction()
+
 # Helper macro to add a hipDNN sample executable NAME: The name of the executable target SOURCE:
 # The source file for the sample
 macro(add_hipdnn_sample NAME SOURCE)
@@ -63,8 +78,30 @@ macro(add_hipdnn_sample NAME SOURCE)
         ${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
     clang_tidy_check(${NAME})
+    disable_container_size_empty_check(${NAME})
     list(APPEND HIPDNN_ALL_SAMPLES ${NAME})
 endmacro()
+
+# Dynamic backend-loading sample. Links ONLY hipdnn_frontend_dynamic --
+# deliberately NOT hipdnn_test_sdk, which links the direct hipdnn_frontend and
+# would pull libhipdnn_backend back onto the link line.
+add_executable(hipdnn_sample_dynamic_backend_loading dynamic/DynamicBackendLoading.cpp)
+target_link_libraries(hipdnn_sample_dynamic_backend_loading
+    PRIVATE Threads::Threads hipdnn_frontend_dynamic)
+target_compile_options(hipdnn_sample_dynamic_backend_loading PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
+set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+# The dynamic sample does not link libhipdnn_backend. In build trees, point its
+# runtime search path at the backend target directory. In installed Linux/ELF
+# layouts, keep the search relative from bin/ to lib/.
+set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+    BUILD_RPATH "$<TARGET_FILE_DIR:hipdnn_backend>"
+)
+clang_tidy_check(hipdnn_sample_dynamic_backend_loading)
+disable_container_size_empty_check(hipdnn_sample_dynamic_backend_loading)
+list(APPEND HIPDNN_ALL_SAMPLES hipdnn_sample_dynamic_backend_loading)
 
 add_hipdnn_sample(hipdnn_sample_bn_inference batchnorm/BnInference.cpp)
 add_hipdnn_sample(hipdnn_sample_bn_inference_with_variance batchnorm/BnInferenceWithVariance.cpp)
@@ -88,7 +125,16 @@ endif()
 
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
+    add_hipdnn_sample(
+        hipdnn_sample_cudnn_shim_sdpa_round_trip
+        cudnn_shim/SdpaRoundTrip.cpp
+    )
+endif()
+
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
+
+add_hipdnn_sample(hipdnn_sample_autotune autotune/AutotuneSample.cpp)
 
 # Enable testing and add sample tests
 enable_testing()
@@ -152,9 +198,25 @@ add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
 # Register serialization samples as tests
 add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 
+if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
+    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_sdpa_round_trip)
+endif()
+
 # Register knobs sample
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Register dynamic backend-loading sample
+add_hipdnn_sample_test(hipdnn_sample_dynamic_backend_loading)
+# Under ASAN the dlopen interceptor ignores the executable RUNPATH, so
+# the bare-name backend .so is only found via LD_LIBRARY_PATH.
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+    set_property(TEST hipdnn_sample_dynamic_backend_loading APPEND PROPERTY
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:hipdnn_backend>")
+endif()
+
+# Register autotune sample
+add_hipdnn_sample_test(hipdnn_sample_autotune)
 
 # Umbrella target for superbuild dependency tracking
 add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
@@ -172,6 +234,24 @@ if(BUILD_ADDRESS_SANITIZER)
         hipdnn_sample_conv_fprop_deterministic
         hipdnn_sample_serialization_roundtrip
         PROPERTIES DISABLED TRUE
+    )
+endif()
+
+# Optional YAML-driven CTest categorization. Guarded so standalone /
+# sparse checkouts without shared/ctest still build (falls back to unlabeled
+# install). apply_ctest_category_labels() scans the add_test() names already
+# written into INSTALLED_CTEST_FILE and appends per-test
+# set_tests_properties(... LABELS ...) lines, so `ctest -L quick` works from
+# the installed bin/hipdnn_samples/ tree that TheRock CI consumes.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+   AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    apply_ctest_category_labels(
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+        "${INSTALLED_CTEST_FILE}"
     )
 endif()
 
@@ -272,6 +352,7 @@ ExternalProject_Add(example_engine_plugin
         "-DCMAKE_PREFIX_PATH:STRING=${_example_plugin_prefix_path}"
         "-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}"
         "-DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}"
+        "-DCMAKE_RC_COMPILER:FILEPATH=${CMAKE_RC_COMPILER}"
         "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
         "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
         "-DEXAMPLEPROVIDER_BUILD_UNIT_TESTS:BOOL=ON"

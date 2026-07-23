@@ -59,6 +59,16 @@ rocsparse_get_git_rev()
 
 .. doxygenfunction:: rocsparse_get_git_rev
 
+rocsparse_get_status_name()
+---------------------------
+
+.. doxygenfunction:: rocsparse_get_status_name
+
+rocsparse_get_status_description()
+----------------------------------
+
+.. doxygenfunction:: rocsparse_get_status_description
+
 rocsparse_destroy_error()
 -------------------------
 
@@ -523,6 +533,11 @@ rocsparse_bsr_set_pointers
 
 .. doxygenfunction:: rocsparse_bsr_set_pointers
 
+rocsparse_bell_set_pointers
+---------------------------
+
+.. doxygenfunction:: rocsparse_bell_set_pointers
+
 rocsparse_spmat_get_size
 ------------------------
 
@@ -657,8 +672,6 @@ rocsparse_dnmat_set_strided_batch
 ---------------------------------
 
 .. doxygenfunction:: rocsparse_dnmat_set_strided_batch
-
-
 
 rocsparse_create_const_spvec_descr
 ----------------------------------

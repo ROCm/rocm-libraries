@@ -1406,6 +1406,7 @@
     'InnerUnroll',
     'InterleaveAlpha',
     'KernelLanguage',
+    'LDSSegmentInterleave',
     'LDSTrInst',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
@@ -1505,6 +1506,7 @@
     'Use64bShadowLimit',
     'Use64bShadowLimitMX',
     'UseCustomMainLoopSchedule',
+    'UseDualFMAC',
     'UseInstOffsetForGRO',
     'UsePLRPack',
     'UseSgprForGRO',
@@ -1613,7 +1615,7 @@
         2,
         4,
       ]),
-      'len': 8,
+      'len': 9,
       'type': 'list',
     }),
     'BufferLoad': dict({
@@ -1934,6 +1936,15 @@
         'Assembly',
       ]),
       'len': 1,
+      'type': 'list',
+    }),
+    'LDSSegmentInterleave': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'LDSTrInst': dict({
@@ -2545,10 +2556,10 @@
     'StreamK': dict({
       'head': list([
         0,
-        1,
-        2,
+        3,
+        4,
       ]),
-      'len': 6,
+      'len': 4,
       'type': 'list',
     }),
     'StreamKAtomic': dict({
@@ -2799,6 +2810,14 @@
         1,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'UseDualFMAC': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'UseInstOffsetForGRO': dict({

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -55,7 +56,8 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
                         bool withStats = false,
                         bool alibiMask = false,
                         bool paddingMask = false,
-                        bool causalMask = false)
+                        bool causalMask = false,
+                        bool overrideShapeEnabled = false)
 {
     if(qDims.size() != 4 || vDims.size() != 4)
     {
@@ -79,7 +81,26 @@ auto createSdpaFwdGraph(const std::vector<int64_t>& qDims = {4, 8, 256, 128},
         withStats,
         alibiMask,
         paddingMask,
-        causalMask);
+        causalMask,
+        overrideShapeEnabled);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = createSdpaFwdGraph({4, 8, 256, 128},
+                                      {4, 8, 256, 128},
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      false,
+                                      /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAvailableKernels)
@@ -507,6 +528,72 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioLeftOnlyDerivesSlidingWindow)
 }
 
 // =============================================================================
+// Byte-stride overflow guard
+// =============================================================================
+
+// Helper: create a forward SDPA graph with explicit strides for all tensors.
+auto createSdpaFwdGraphWithStrides(const std::vector<int64_t>& dims,
+                                   const std::vector<int64_t>& qStrides,
+                                   const std::vector<int64_t>& kStrides,
+                                   const std::vector<int64_t>& vStrides,
+                                   const std::vector<int64_t>& oStrides)
+{
+    const std::vector<int64_t> kDims = {dims[0], dims[1], dims[2], dims[3]};
+    const std::vector<int64_t> oDims = {dims[0], dims[1], dims[2], dims[3]};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        qStrides,
+        kDims,
+        kStrides,
+        dims,
+        vStrides,
+        oDims,
+        oStrides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsOversizedByteStrides)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // A batch stride just above UINT32_MAX / 2 will overflow when scaled to
+    // bytes (stride * sizeof(bf16)).  The engine must decline via isApplicable.
+    constexpr int64_t K_OVERFLOW_STRIDE = static_cast<int64_t>(UINT32_MAX) / 2 + 1;
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> overflowStrides = {K_OVERFLOW_STRIDE, 256 * 128, 128, 1};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    // Q has overflow stride
+    auto builderQ = createSdpaFwdGraphWithStrides(
+        dims, overflowStrides, normalStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwQ(builderQ.GetBufferPointer(),
+                                                                   builderQ.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwQ));
+
+    // K has overflow stride
+    auto builderK = createSdpaFwdGraphWithStrides(
+        dims, normalStrides, overflowStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwK(builderK.GetBufferPointer(),
+                                                                   builderK.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwK));
+
+    // Normal strides pass
+    auto builderOk = createSdpaFwdGraphWithStrides(
+        dims, normalStrides, normalStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(builderOk.GetBufferPointer(),
+                                                                    builderOk.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
+}
+
+// =============================================================================
 // buildPlan exception contract (IPlanBuilder::buildPlan)
 // =============================================================================
 
@@ -528,6 +615,47 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsForUnsupportedDtype)
 
     EXPECT_THROW(_planBuilder.buildPlan(_handle, graphWrapper, mockEngineConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // Use an unsupported head dimension so the kernel registry lookup returns
+    // an empty key.  isApplicable would reject this, but buildPlan must also
+    // throw rather than crashing via cfg_fmha_fwd.at("").
+    auto builder = createSdpaFwdGraph({4, 8, 256, 100});
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                  builder.GetSize());
+
+    // Forward ignores engineConfig — a null-buffer wrapper suffices.
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    Context context;
+    EXPECT_THROW(_planBuilder.buildPlan(_handle, gw, dummyCfg, context),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// =============================================================================
+// initializeExecutionSettings
+// =============================================================================
+
+TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettings_IsNoOp)
+{
+    auto builder = createSdpaFwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                  builder.GetSize());
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    Settings settings;
+    // Must not throw or log an error — forward has no knobs.
+    EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(_handle, gw, dummyCfg, settings));
 }
 
 } // namespace

@@ -53,8 +53,8 @@ struct DumpStinkyModulePassConfig {
 /// Writes Stinky IR text and/or emitted GPU assembly for a Module.
 ///
 /// When constructed with a StinkyAsmModule, the PassManager entry point dumps all Functions in
-/// module emission order (entry first, then callees). Without a module, it dumps the current
-/// Function passed through the PassManager entry point.
+/// module emission order (entry first, then callable functions). Without a module, it dumps the
+/// current Function passed through the PassManager entry point.
 class STINKYTOFU_EXPORT DumpStinkyModulePass : public Pass {
    public:
     static char ID;

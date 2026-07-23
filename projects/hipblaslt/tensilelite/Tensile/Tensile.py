@@ -45,7 +45,7 @@ from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
+from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -53,6 +53,7 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
+from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -107,9 +108,10 @@ def executeStepsInConfig(
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
-    if "BenchmarkProblems" in config:
+    if "BenchmarkProblems" in config:       
         with timing_context("python_benchmark_problems"):
             BenchmarkProblems.main(
+                config.get("Backend", {}),
                 config["BenchmarkProblems"],
                 config["UseCache"],
                 asmToolchain,
@@ -125,6 +127,7 @@ def executeStepsInConfig(
                 buildOnly,
                 solutionPoolFiles,
             )
+        flush_timing_buffer()
         print1("")
 
     if buildOnly:
@@ -155,6 +158,7 @@ def executeStepsInConfig(
                     debugConfig.printIndexAssignmentInfo,
                     isaInfoMap,
                 )
+            flush_timing_buffer()
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -178,6 +182,7 @@ def executeStepsInConfig(
                 deviceId,
                 gfxName,
             )
+        flush_timing_buffer()
         print1("")
 
 
@@ -306,13 +311,12 @@ def get_gpu_max_frequency(device_id):
     try:
         from hip import hip
     except ImportError:
-        print("HIP module not found. Installing it now...")
-        # Install the HIP module using pip
-        subprocess.run("python3 -m pip install --upgrade pip", shell=True)
-        subprocess.run("python3 -m pip install --index-url https://test.pypi.org/simple/ hip-python", shell=True)
-
-        from hip import hip
-        print("HIP module successfully installed.")
+        # hip-python is optional and intentionally NOT auto-installed here.
+        # Auto-installing from a package index at build time is a supply-chain
+        # risk (ROCM-26748 / SEC-00581) and hip-python has no wheel on some
+        # platforms (e.g. Windows). Return None so the caller falls back to
+        # amd-smi (get_gpu_max_frequency_smi) and then the manual prompt.
+        return None
 
     def hip_check(call_result):
         err, result = call_result[0], call_result[1]
@@ -601,9 +605,15 @@ def Tensile(userArgs):
             }]
         }
         config["BenchmarkProblems"] = [[base["ProblemType"], solParams]]
-
+    
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
+
+    # Backend selection precedence:
+    # 1) YAML Backend (with strict validation)
+    # 2) tensile (default)
+    yaml_backend = config.get("Backend", None)
+    config["Backend"] = parse_backend_config(yaml_backend)
 
     asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))
@@ -681,6 +691,9 @@ def Tensile(userArgs):
     for key, value in overrideParameters.items():
         print("Overriding {0}={1}".format(key, value))
         globalParameters[key] = value
+
+    if "MaxFileName" in globalParameters or "MaxFileName" in config:
+        printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
     executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles)
 

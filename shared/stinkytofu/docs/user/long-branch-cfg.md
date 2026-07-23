@@ -281,7 +281,7 @@ flowchart TD
   pass --> remove["removeDuplicatedFunction"]
   remove --> canon["canonical activation labels"]
   canon --> st["StinkyTofu conversion"]
-  st --> funcs["StinkyAsmModule entry + callee Functions"]
+  st --> funcs["StinkyAsmModule entry + callable Functions"]
   st --> call["CallTargetData on IF_Call s_swappc_b64"]
 ```
 
@@ -613,8 +613,8 @@ Without this step, assembly could correctly jump to
 
 ## StinkyTofu module and call semantics
 
-`StinkyAsmModule` owns one entry `Function` plus zero or more callee `Function`s.
-Emission and dumps are deterministic: entry first, then callees. `AsmPrinter`
+`StinkyAsmModule` owns one entry `Function` plus zero or more callable `Function`s.
+Emission and dumps are deterministic: entry first, then callable functions. `AsmPrinter`
 prints a module in an MLIR-like format:
 
 ```text
@@ -642,7 +642,7 @@ actModule.callableName = activationLabelModule.getLabelName()
 Because `removeDuplicatedFunction` runs before StinkyTofu conversion, the
 converter sees the canonical callable body set. `SSwapPCB64.calleeFuncs` lowers
 to `CallTargetData` on `s_swappc_b64`; `CFGBuilderPass` remains per-function and
-does not add CFG edges from entry call sites to activation callee functions.
+does not add CFG edges from entry call sites to activation callable functions.
 
 The practical split is:
 

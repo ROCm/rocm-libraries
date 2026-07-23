@@ -207,7 +207,10 @@ Tests:
   filename: [Chevron4]
 
 - name: csric0_graph_test
-  category: pre_checkin
+  # known_bug: hipGraphLaunch OOMs (hipErrorOutOfMemory) on memory-constrained
+  # GPUs such as the gfx110X family. See ROCm/rocm-libraries#9143. Restore to
+  # pre_checkin once the graph capture/launch memory usage is fixed.
+  category: known_bug
   function: csric0
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
