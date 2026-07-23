@@ -7,8 +7,9 @@ Documentation for hipBLAS is available at
 
 ### Added
 
-* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched forms of `gemv`, `ger`, `geru`, `gerc`, `symv`, `hemv`, `sbmv`, `spmv` and `syr` via `hipblasSetBatchAlphaStride` and/or and `hipblasSetBatchBetaStride` (device pointer mode).
-* Per-batch `alpha` (scalar vector) API support for Level 1 batched and strided-batched forms of `axpy`, `scal` and their `_ex` forms through `hipblasSetBatchAlphaStride` when `hipblasHandle_t` is in mode `HIPBLAS_POINTER_MODE_DEVICE`.
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched forms of `symv`, `hemv`, `sbmv` and `spmv` via `hipblasSetBatchAlphaStride` and/or `hipblasSetBatchBetaStride` (device pointer mode).
+* Per-batch `alpha` support for Level 2 batched and strided-batched forms of `syr` via `hipblasSetBatchAlphaStride` (device pointer mode).
+* Per-batch `alpha` (scalar vector) API support for Level 1 batched and strided-batched forms of `scal` and the `_ex` forms through `hipblasSetBatchAlphaStride` when `hipblasHandle_t` is in mode `HIPBLAS_POINTER_MODE_DEVICE`.
 
 ### Resolved issues
 
@@ -20,6 +21,9 @@ Documentation for hipBLAS is available at
 
 * Added `hipblasSetBatchAlphaStride()` and `hipblasGetBatchAlphaStride()` APIs.
 * Added `hipblasSetBatchBetaStride()` and `hipblasGetBatchBetaStride()` APIs.
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched forms of `gemv` via `hipblasSetBatchAlphaStride` and/or `hipblasSetBatchBetaStride` (device pointer mode).
+* Per-batch `alpha` support for Level 2 batched and strided-batched forms of `ger`, `geru`, `gerc` via `hipblasSetBatchAlphaStride` (device pointer mode).
+* Per-batch `alpha` (scalar vector) API support for Level 1 batched and strided-batched forms of `axpy` and the `_ex` forms through `hipblasSetBatchAlphaStride` when `hipblasHandle_t` is in mode `HIPBLAS_POINTER_MODE_DEVICE`.
 * Added the `hipblasGetVersion()` API.
 * Added the `hipblasGetProperty()` API.
 
