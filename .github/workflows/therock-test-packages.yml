@@ -44,7 +44,7 @@ jobs:
         with:
           sparse-checkout: build_tools
           path: "prejob"
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock"
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -56,7 +56,7 @@ jobs:
       - name: "Checking out repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock"
           ref: ${{ inputs.therock_ref }}
 
       - name: Checkout CI config
