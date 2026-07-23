@@ -581,6 +581,21 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    # Cotenant CU-contention helper: the kernel and its launcher install side by
+    # side in bin/ so hipblaslt-cotenant finds the precompiled kernel next to it.
+    # POSIX-only (see clients/CMakeLists.txt); not built/installed on Windows.
+    if(NOT WIN32)
+        rocm_install(
+            TARGETS hipblaslt-cotenant-kernel
+            COMPONENT benchmarks
+        )
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/cotenant/hipblaslt-cotenant"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT benchmarks
+        )
+    endif()
+
     if(HIPBLASLT_ENABLE_MARKER)
         rocm_package_add_dependencies(DEPENDS "roctracer >= 1.0.0")
     endif()

@@ -24,6 +24,7 @@
 
 import math
 from functools import lru_cache
+from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
 from .Types import IsaVersion
@@ -322,6 +323,23 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
+    # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
+    # Supported: TDMInst=3 (TDM load for A and B), gfx1250, MIWaveGroup [2,2], dtype bf16 / fp16 /
+    # fp8 (incl. MXFP8). Not applied for 1LDSBuffer, subtile, sparse, or TDMSplit kernels.
+    # Mechanism: reorder LDS from the baseline [A0][A1][B0][B1] to [A0][B0][A1][B1]. Only operand A
+    # is helped -- B's halves move too, but both ports can still hit the same B segment.
+    # Two cases:
+    #   tight   (one A-half + one B-half >= 64KiB): [A0][B0] fills a segment, so [A1][B1] land in
+    #            the next one -- no extra LDS.
+    #   aligned (< 64KiB): pad [A0][B0] up to the segment boundary to push [A1][B1] over -- uses
+    #            more LDS, and needs PrefetchGlobalRead=2.
+    # Values:
+    #   -1 = auto: apply "tight" only (skip "aligned").
+    #    0 = off (default): baseline layout.
+    #    1 = force on: apply both "tight" and "aligned" wherever valid.
+    # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
+    "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
@@ -1152,7 +1170,7 @@ newMIValidParameters = {
 # Solution.py and imported back by ValidParameters extensions) would have
 # introduced a Common -> Solution reverse import.
 
-def _getExpectedTypes(validParams):
+def _getExpectedTypes(validParams: dict[str, Union[int, list[Any], Any]]) -> dict[str, set[type]]:
     """Build a map from parameter name to the set of allowed Python types.
 
     Uses the validParameters registry as the source of truth.  For each
@@ -1167,10 +1185,15 @@ def _getExpectedTypes(validParams):
     """
     typeMap = {}
     for name, allowedValues in validParams.items():
-        if allowedValues == -1:
+        if isinstance(allowedValues, list):
+            if len(allowedValues) == 0:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
+        else:  # Sentinel value -1 is allowed for all parameters
+            if allowedValues != -1:
+                raise ValueError(f"Invalid parameter value: {name} = {allowedValues}")
             continue
-        if isinstance(allowedValues, list) and len(allowedValues) > 0:
-            typeMap[name] = set(type(v) for v in allowedValues)
+
+        typeMap[name] = set(type(v) for v in allowedValues)
     return typeMap
 
 # Pre-compute once at import time so the per-Solution cost is a dict lookup.
@@ -1202,7 +1225,7 @@ def checkSpaceFillAlgoIsValid(name, value):
     else:
         maxOrderID = 5
         for orderId in value:
-            if orderId not in range(0,maxOrderID + 1):
+            if orderId not in range(0,maxOrderID + 1):  # pragma: no mutate
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
@@ -1219,7 +1242,7 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nMust be exactly 2 values per level"
                 raise Exception(msgBase.format(name, value))
             for dim in pair:
-                if dim not in range(0,256):
+                if dim not in range(0,256):  # pragma: no mutate
                     msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
                     raise Exception(msgBase.format(name, value, dim))
 
@@ -1336,5 +1359,3 @@ def validateInternalSupportParams(
         expectedTypes = {type(default)}
         if type(value) not in expectedTypes:
             raise ConfigTypeError(formatMismatch(srcFile, f"{keyPathPrefix}.{key}", value, expectedTypes))
-
-
