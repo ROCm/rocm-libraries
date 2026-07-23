@@ -8,21 +8,21 @@ that does **not** depend on nlohmann/json — nlohmann is used only to express t
 rule being compiled.
 
 All names live in namespace `hip_kernel_provider_common::jsonlogic`; the examples
-below assume `namespace jl = hip_kernel_provider_common::jsonlogic;`.
+below assume `namespace jlogic = hip_kernel_provider_common::jsonlogic;`.
 
 ```cpp
 #include "hip_kernel_provider_common/JsonLogic.hpp"
 
-namespace jl = hip_kernel_provider_common::jsonlogic;
+namespace jlogic = hip_kernel_provider_common::jsonlogic;
 
 struct MyData {                                  // your data source
-    jl::Value getData(const std::string& path) const;
+    jlogic::Value getData(const std::string& path) const;
 };
 
 nlohmann::json rule = {{"+", {"$x", "$y"}}};
-auto expr = jl::compile<MyData>(rule);           // parse + build tree once
-jl::Value a = expr(dataA);                        // evaluate - no re-parse
-jl::Value b = expr(dataB);                        // reuse for other data
+auto expr = jlogic::compile<MyData>(rule);       // parse + build tree once
+jlogic::Value a = expr(dataA);                    // evaluate - no re-parse
+jlogic::Value b = expr(dataB);                    // reuse for other data
 ```
 
 ## Data source
@@ -30,7 +30,7 @@ jl::Value b = expr(dataB);                        // reuse for other data
 The evaluator is templated on your data type, which must expose:
 
 ```cpp
-jl::Value getData(const std::string& path) const;
+jlogic::Value getData(const std::string& path) const;
 ```
 
 The compiled expression passes the variable path (e.g. `"a.b.c"`) straight to
@@ -45,8 +45,8 @@ this accessor; your type owns path resolution. Conventions:
 A json-like tagged value with no external dependency. Alternatives: null, bool,
 `int64_t`, `double`, `std::string`, and `Array` (`std::vector<Value>`). Numeric
 results are stored as integers when exactly integral (so `1 + 1` is `2`, not
-`2.0`). Key members: `is_*()`, `as_*()`, `truthy()`, `to_number()`, `dump()`,
-strict `operator==`, and the static `compare`.
+`2.0`). Key members: the `is*()` / `as*()` inspectors, `truthy()`, `toNumber()`,
+`dump()`, strict `operator==`, and the static `compare`.
 
 There is intentionally no object alternative — nested structure is reached
 through the data source's path accessor, not carried in a `Value`.
