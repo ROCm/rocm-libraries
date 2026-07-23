@@ -1286,6 +1286,18 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToVgpr is for MatrixInstruction only")
       return False
 
+    # gfx1250 (HasLDSTrB128B16, LDS-transpose capable) has no local-read tile
+    # assignment component for plain DirectToVgpr: the LraTileAssignmentTransposedMFMA
+    # family requires DirectToVgpr*=False and the catch-all LraTileAssignmentMFMA is
+    # gated on HasLDSTrB128B16=False. On gfx1250 DirectToVgpr is only wired up through
+    # the swizzle / global_load_tr (Tr) path (KernelWriterAssembly isSwizzledOrTr).
+    # Reject plain DTV here so it is filtered at solution time instead of hitting the
+    # "lraTileAssignment Not Found" assertion during kernel generation.
+    isa = tuple(state["ISA"])
+    if isaInfoMap[isa].asmCaps["HasLDSTrB128B16"] and not (isSwizzle or state["enableGLTr%s"%tc]):
+      reject(state, printRejectionReason, "DirectToVgpr%s without swizzle or global_load_tr is not supported on gfx1250 (HasLDSTrB128B16)"%(tc))
+      return False
+
     if state["LocalReadVectorWidth%s" % tc] < state["MIInputPerThread"]:
       reject(state, "LocalReadVectorWidth < MIInputPerThread %d" % state["MIInputPerThread"])
       return False
@@ -1915,6 +1927,17 @@ class Solution(collections.abc.Mapping):
       if isaInfoMap[isa].asmCaps["HasWMMA"]:
         if state["ProblemType"]["DataType"].numRegisters() > 2:
           reject(state, printRejectionReason, "WMMA only support f32, half, bf16 and i8 type")
+          return
+      # WMMA V3 (gfx1250) input VGPR layout only wires up a fixed set of (M,N,K)
+      # shapes (see wmmaV3InputVgprLayout in Common/Utilities.py). Shapes such as
+      # the gfx1200/gfx1201 (16,16,16) WMMA are not handled and would otherwise
+      # hit "Unhandled WMMA" during kernel generation. Reject them at solution time.
+      if isaInfoMap[isa].asmCaps.get("HasWMMA_V3", False):
+        _wmmaV3SupportedMNK = {(16, 16, 4), (16, 16, 32), (16, 16, 64), (16, 16, 128), (32, 16, 128)}
+        if tuple(state["MatrixInstruction"])[:3] not in _wmmaV3SupportedMNK:
+          reject(state, printRejectionReason,
+                 "WMMA V3 (gfx1250) does not support MatrixInstruction %s; supported (M,N,K): %s"
+                 % (tuple(state["MatrixInstruction"])[:3], sorted(_wmmaV3SupportedMNK)))
           return
       if state["ProblemType"]["DataType"].isDouble() and not (isaInfoMap[isa].asmCaps["HasMFMA_f64"] or isaInfoMap[isa].asmCaps["HasWMMA_V3_f64"]):
         reject(state, printRejectionReason, f"isa {isa} doesn't support matrix instruction with type f64")
