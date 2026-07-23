@@ -54,6 +54,7 @@ else()
   FetchContent_MakeAvailable(sqlite_local)
 
   if(NOT TARGET sqlite3)
+    enable_language( C )
     add_library( sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c )
     target_include_directories( sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR} )
     set_target_properties( sqlite3 PROPERTIES
