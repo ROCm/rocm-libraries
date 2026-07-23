@@ -10,7 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "SdpaFwdGraphTestUtils.hpp"
-#include "harness/gpu_graph_executor/detail/GpuSdpaFwdSignatureKey.hpp"
+#include "harness/gpu-graph-executor/detail/GpuSdpaFwdSignatureKey.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;

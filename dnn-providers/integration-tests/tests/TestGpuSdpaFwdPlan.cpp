@@ -12,12 +12,12 @@
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_gpu_ref/GpuFpReferenceSdpa.hpp>
+#include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "SdpaFwdGraphTestUtils.hpp"
-#include "harness/gpu_graph_executor/detail/GpuSdpaFwdPlan.hpp"
+#include "harness/gpu-graph-executor/detail/GpuSdpaFwdPlan.hpp"
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;

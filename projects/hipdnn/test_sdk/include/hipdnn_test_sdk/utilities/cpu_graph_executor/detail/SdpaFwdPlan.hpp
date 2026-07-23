@@ -228,6 +228,8 @@ public:
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 

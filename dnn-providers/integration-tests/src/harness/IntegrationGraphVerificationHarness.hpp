@@ -17,6 +17,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -35,8 +36,8 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/input_init/SynthesisConfig.hpp"
-#include "harness/input_init/SynthesizeInputs.hpp"
+#include "harness/input-init/SynthesisConfig.hpp"
+#include "harness/input-init/SynthesizeInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests
@@ -343,7 +344,16 @@ protected:
         return synthesizeGraphInputs(*fb, bundle);
     }
 
-private:
+    // Ranks engines for `graph` and either pins TestConfig's --test-engine as the
+    // preferred engine (leaving the graph ready for create_execution_plans()/
+    // build_plans(), or for Graph::build()) or GTEST_SKIP()s/FAILs the current
+    // test when no suitable engine is available. GTEST_SKIP()/FAIL() only unwind
+    // this function, not the caller's - callers MUST check
+    // ::testing::Test::IsSkipped() (and, if they don't already ASSERT/FAIL
+    // through to a return, HasFatalFailure()) and return immediately afterward.
+    // Protected (rather than private) so callers that build/serialize a plan
+    // manually instead of going through verifyGraph() (e.g. conv serialize
+    // round-trip) can check engine support themselves first.
     void ensureEngineSupport(hipdnn_frontend::graph::Graph& graph)
     {
         checkEngineSupportOrSkip(graph);
@@ -394,7 +404,7 @@ private:
             }
 
             bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*refTensor, *gpuTensor);
-            ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
+            EXPECT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
                                << ", name: " << _tensorIdToNameMap.at(tensorId);
         }
     }

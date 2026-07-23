@@ -34,6 +34,7 @@
 #include "../conversion/rocsparse_convert_scalar.hpp"
 #include "internal/level2/rocsparse_csrsv.h"
 #include "rocsparse_coosv.hpp"
+#include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv.hpp"
 #include "rocsparse_sptrsv_descr.hpp"
 
@@ -293,6 +294,15 @@ try
         }
 
         case rocsparse_format_csc:
+        {
+            auto csrsv_info = sptrsv_descr->get_csrsv_info();
+            if(csrsv_info != nullptr)
+            {
+                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(csrsv_info);
+                exact_pivot    = csrsv_info->get_singularity_numeric_exact();
+            }
+            break;
+        }
         case rocsparse_format_ell:
         case rocsparse_format_bell:
         case rocsparse_format_sell:
@@ -391,6 +401,17 @@ namespace rocsparse
             }
 
             case rocsparse_format_csc:
+            {
+#ifndef ROCSPARSE_WITH_CSC_TRSV
+                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis_buffer_size(
+                    handle, operation, A, buffer_size_in_bytes));
+                return rocsparse_status_success;
+#endif
+            }
+
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
@@ -424,6 +445,17 @@ namespace rocsparse
             }
 
             case rocsparse_format_csc:
+            {
+#ifndef ROCSPARSE_WITH_CSC_TRSV
+                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve_buffer_size(
+                    handle, operation, A, x, y, buffer_size_in_bytes));
+                return rocsparse_status_success;
+#endif
+            }
+
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
@@ -637,8 +669,54 @@ namespace rocsparse
 
                 return rocsparse_status_success;
             }
-            case rocsparse_format_bsr:
             case rocsparse_format_csc:
+            {
+#ifndef ROCSPARSE_WITH_CSC_TRSV
+                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+                rocsparse_csrsv_info csrsv_info{};
+                switch(analysis_policy)
+                {
+                case rocsparse_analysis_policy_reuse:
+                {
+                    sptrsv_descr->set_shared_csrsv_info(A->info->get_shared_csrsv_info());
+                    csrsv_info = sptrsv_descr->get_csrsv_info();
+                    break;
+                }
+                case rocsparse_analysis_policy_force:
+                {
+                    csrsv_info = nullptr;
+                    break;
+                }
+                }
+
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscsv_analysis(handle,
+                                                                     operation,
+                                                                     A,
+                                                                     analysis_policy,
+                                                                     rocsparse_solve_policy_auto,
+                                                                     &csrsv_info,
+                                                                     buffer)));
+                sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
+                switch(analysis_policy)
+                {
+                case rocsparse_analysis_policy_reuse:
+                {
+                    break;
+                }
+                case rocsparse_analysis_policy_force:
+                {
+                    sptrsv_descr->set_csrsv_info(csrsv_info);
+                    break;
+                }
+                }
+
+                return rocsparse_status_success;
+#endif
+            }
+
+            case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_sell:
@@ -708,6 +786,27 @@ namespace rocsparse
             }
 
             case rocsparse_format_csc:
+            {
+#ifndef ROCSPARSE_WITH_CSC_TRSV
+                // CSC support disabled at build time (BUILD_WITH_CSC_TRSV=OFF).
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve(handle,
+                                                                 operation,
+                                                                 alpha_datatype,
+                                                                 alpha,
+                                                                 static_cast<int64_t>(0),
+                                                                 A,
+                                                                 dnvec_descr_x,
+                                                                 dnvec_descr_y,
+                                                                 rocsparse_solve_policy_auto,
+                                                                 sptrsv_descr->get_csrsv_info(),
+                                                                 buffer));
+                sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
+                return rocsparse_status_success;
+#endif
+            }
+
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
