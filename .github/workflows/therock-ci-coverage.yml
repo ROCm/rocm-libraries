@@ -24,10 +24,10 @@ on:
         type: string
       therock_ref:
         type: string
-        default: c0da1e39f585d699e6dfbf8f0bb7e5b6f8de91f8
+        default: enable-codecov
       test_therock_ref:
         type: string
-        default: c0da1e39f585d699e6dfbf8f0bb7e5b6f8de91f8
+        default: enable-codecov
 
 permissions:
   contents: read
