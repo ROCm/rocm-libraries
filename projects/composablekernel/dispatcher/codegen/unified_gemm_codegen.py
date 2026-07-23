@@ -516,9 +516,10 @@ using GemmMultiDArgs = GemmMultiDHostArgs<NumDTensor>;
             config, self.datatype, self.layout
         ).replace("-", "_")
         return f"""// Multi-D symbol exports for the single-include ctypes lib.
-using ALayout        = {ns_name}::ALayout;
-using BLayout        = {ns_name}::BLayout;
-using CLayout        = {ns_name}::CLayout;
+// NB: ALayout/BLayout/CLayout are already exported by the enclosing
+// CK_TILE_SINGLE_KERNEL_INCLUDE block; re-exporting them here would be a C++
+// redefinition (breaks multi_d_gemm_ctypes_lib.cpp). Only the Multi-D-specific
+// types/macros are added below.
 using DsDataType     = {ns_name}::DsDataType;
 using DsLayout       = {ns_name}::DsLayout;
 using DLayout        = {ns_name}::DLayout;
