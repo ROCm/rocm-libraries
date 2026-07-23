@@ -70,7 +70,13 @@ std::vector<double> BuildPrefix(const nlohmann::json& pin,
                                 const std::string& llvm_target,
                                 bool with_gfx_code)
 {
-    auto P = [&](const char* k) { return pin.at(k).get<double>(); };
+    // Null inputs (exported from perf-DB NaNs) coerce to 0.0, matching
+    // model_fields.build_X's df[_FEATS].fillna(0) / GPU-col .fillna(0). The live
+    // runtime never sees null here (ProblemDescription/Handle return real
+    // numbers); this only reconstructs the training-time encoding for parity.
+    auto num = [](const nlohmann::json& j) { return j.is_null() ? 0.0 : j.get<double>(); };
+    auto P   = [&](const char* k) { return num(pin.at(k)); };
+    auto G   = [&](const char* k) { return num(gin.at(k)); };
 
     const double channels = P("channels");
     const double height   = P("height");
@@ -123,12 +129,12 @@ std::vector<double> BuildPrefix(const nlohmann::json& pin,
     f.push_back(Log1pAbs(farea));
     f.push_back(Log1pAbs(spatial));
     f.push_back(Log1pAbs(bxs));
-    f.push_back(gin.at("cu_count").get<double>());
-    f.push_back(gin.at("wave_size").get<double>());
-    f.push_back(gin.at("lds_size_per_workgroup_kb").get<double>());
-    f.push_back(gin.at("l2_cache_total_kb").get<double>());
-    f.push_back(gin.at("boost_clock_mhz").get<double>());
-    f.push_back(gin.at("vram_bytes").get<double>());
+    f.push_back(G("cu_count"));
+    f.push_back(G("wave_size"));
+    f.push_back(G("lds_size_per_workgroup_kb"));
+    f.push_back(G("l2_cache_total_kb"));
+    f.push_back(G("boost_clock_mhz"));
+    f.push_back(G("vram_bytes"));
     f.push_back(dir);
     f.push_back(dtype_code);
     if(with_gfx_code)
