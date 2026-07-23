@@ -1,0 +1,25 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+// <thread>
+
+// class thread
+
+// thread& operator=(thread&& t);
+
+#include <hip/thread>
+
+#include "force_include_hip.h"
+
+int main(int, char**)
+{
+    hip::thread t0;
+    hip::thread t1;
+    t0 = t1;
+    return 0;
+}

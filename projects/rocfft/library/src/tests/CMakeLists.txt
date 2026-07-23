@@ -18,9 +18,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+include( ../../../cmake/sqlite.cmake )
+
 add_executable( rocfft-internal-test
   function_pool_test.cpp
   is_inner_batched_test.cpp
+  rtc_test.cpp
+  ../rocfft_stub.cpp
 )
 
 target_include_directories( rocfft-internal-test PRIVATE
@@ -42,7 +46,12 @@ target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 # duplicate the function_pool_data singleton).
 target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-function-pool
+  rocfft-rtc-cache
+  rocfft-rtc-common
+  rocfft-rtc-compile
+  rocfft-rtc-subprocess
   hip::host
+  ${ROCFFT_SQLITE_LIB}
 )
 
 # Use installed GTest, or build from source (BUILD_GTEST=ON forces this).
@@ -62,6 +71,9 @@ include( GoogleTest )
 gtest_discover_tests( rocfft-internal-test
   TEST_FILTER ${ROCFFT_INTERNAL_TESTS_FILTER}
 )
+
+add_executable( rtc_helper_crash rtc_helper_crash.cpp )
+add_dependencies( rocfft-internal-test rtc_helper_crash )
 
 # Run at build time; --no-tests=error fails if the filter matched nothing.
 if( ROCFFT_RUN_INTERNAL_TESTS )
