@@ -94,6 +94,19 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         spec->chiplet_chunk_size = 64;
         *arch = "gfx950";
         return 0;
+    case 10:
+        /* v1 pipeline, default epilogue. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "v1";
+        *arch = "gfx950";
+        return 0;
+    case 11:
+        /* v1 pipeline, cshuffle epilogue. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "v1";
+        spec->epilogue = "cshuffle";
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

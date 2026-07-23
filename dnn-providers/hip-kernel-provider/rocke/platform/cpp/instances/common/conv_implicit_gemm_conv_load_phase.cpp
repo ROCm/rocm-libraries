@@ -260,3 +260,52 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
     rocke_coalesced_tile_loader_load(
         b, &ctx->b_sync_loader, ctx->tid, B_dst, rocke_conv_b_descriptor, ctx, ctx->b_rsrc, NULL);
 }
+
+/* ===================================================================== *
+ *  rocke_conv_emit_global_read -- split load, phase 1 of 2.
+ *
+ *  Mirrors Python emit_global_read(k_off) -> (k_off, a_staged, b_staged).
+ *  Sets ctx->k_off_capture = k_off (so the descriptor closures see the
+ *  correct tile offset during load_global), then issues only the
+ *  buffer_load_vN ops for A and B into VGPR SSA values stored in
+ *  *a_staged / *b_staged. The smem_store_vN ops are deferred to
+ *  rocke_conv_emit_lds_write. Only valid on the sync (non-async-DMA) path.
+ * ===================================================================== */
+void rocke_conv_emit_global_read(rocke_conv_build_ctx_t* ctx,
+                                 rocke_value_t* k_off,
+                                 rocke_ctl_staged_t* a_staged,
+                                 rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    /* k_off_capture[0] = k_off */
+    ctx->k_off_capture = k_off;
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->a_sync_loader, ctx->tid,
+        rocke_conv_a_descriptor, ctx,
+        ctx->a_rsrc, NULL, a_staged);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->b_sync_loader, ctx->tid,
+        rocke_conv_b_descriptor, ctx,
+        ctx->b_rsrc, NULL, b_staged);
+}
+
+/* ===================================================================== *
+ *  rocke_conv_emit_lds_write -- split load, phase 2 of 2.
+ *
+ *  Mirrors Python emit_lds_write(staged_tuple, A_dst, B_dst).
+ *  Restores ctx->k_off_capture = k_off (from the staged tuple's recorded
+ *  offset), then emits smem_store_vN for the VGPRs staged by a prior
+ *  rocke_conv_emit_global_read call.
+ * ===================================================================== */
+void rocke_conv_emit_lds_write(rocke_conv_build_ctx_t* ctx,
+                               rocke_value_t* k_off,
+                               const rocke_ctl_staged_t* a_staged,
+                               const rocke_ctl_staged_t* b_staged,
+                               rocke_value_t* A_dst,
+                               rocke_value_t* B_dst)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k_off;
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, A_dst, a_staged);
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, B_dst, b_staged);
+}
