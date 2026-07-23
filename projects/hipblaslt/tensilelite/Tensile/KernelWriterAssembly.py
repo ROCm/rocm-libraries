@@ -15868,7 +15868,17 @@ class KernelWriterAssembly(KernelWriter):
         # Defer activation blocks to end of kernel when other blocks are deferred
         # (called via s_setpc/s_swappc, position-independent).
         if kernel.get("UseSubtileImpl"):
-          self.states.deferredActivationModules = activationModules
+          # globalWriteElements can run more than once per subtile kernel (e.g. the
+          # opt-NLL tail store in closeSumAtLeastUnroll and the main store in
+          # notLocalSplitUGlobalWrite). Each call mints its own activation labels via
+          # getNameInc (base, then _1, ...) and uses its own vgprActCopy, so the blocks
+          # must stay distinct. Overwriting here kept only the last block, orphaning the
+          # earlier call site's label references -> ld.lld undefined symbol at link.
+          # Accumulate instead so every call site's activation block is emitted.
+          if getattr(self.states, "deferredActivationModules", None) is not None:
+            self.states.deferredActivationModules.appendModule(activationModules)
+          else:
+            self.states.deferredActivationModules = activationModules
         else:
           module.appendModule(activationModules)
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
