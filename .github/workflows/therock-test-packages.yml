@@ -45,6 +45,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "reboss/TheRock"
+          ref: ${{ inputs.therock_ref }}
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
