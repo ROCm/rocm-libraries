@@ -499,6 +499,31 @@ TEST(TestCudnnShimGraphNodes, RopeRecordsGraphNotSupported)
     expectGraphNotSupported(graph);
 }
 
+// Two sdpa_fp8 overloads (FP8 vs MXFP8) resolve by tensor-arg count.
+TEST(TestCudnnShimGraphNodes, SdpaFp8Fp8RecordsGraphNotSupported)
+{
+    fe::graph::Graph graph;
+    graph.sdpa_fp8(nullptr,
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   fe::graph::SDPA_fp8_attributes{});
+    expectGraphNotSupported(graph);
+}
+
+TEST(TestCudnnShimGraphNodes, SdpaFp8Mxfp8RecordsGraphNotSupported)
+{
+    fe::graph::Graph graph;
+    graph.sdpa_fp8(
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, fe::graph::SDPA_fp8_attributes{});
+    expectGraphNotSupported(graph);
+}
+
 // A fail-stub records at add time regardless of the built-up graph: even with a
 // valid tier-1 node already present, the recorded error wins at validate().
 TEST(TestCudnnShimGraphNodes, FailStubPoisonsAnOtherwiseValidGraph)
@@ -578,6 +603,7 @@ TEST(TestCudnnShimGraphNodes, AllAttributeClassesConstructAndName)
     expectConstructsAndNames<fe::graph::Transpose_attributes>();
     expectConstructsAndNames<fe::graph::RoPE_attributes>();
     expectConstructsAndNames<fe::graph::RoPE_backward_attributes>();
+    expectConstructsAndNames<fe::graph::SDPA_fp8_attributes>();
     expectConstructsAndNames<fe::graph::SDPA_fp8_backward_attributes>();
     expectConstructsAndNames<fe::graph::DiagonalBandMask_attributes>();
     expectConstructsAndNames<fe::graph::Slice_attributes>();

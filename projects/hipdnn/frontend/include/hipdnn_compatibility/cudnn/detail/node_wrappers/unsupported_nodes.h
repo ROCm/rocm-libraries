@@ -122,6 +122,8 @@ HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_attributes);
 /// @copydoc BN_finalize_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(RoPE_backward_attributes);
 /// @copydoc BN_finalize_attributes
+HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(SDPA_fp8_attributes);
+/// @copydoc BN_finalize_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(SDPA_fp8_backward_attributes);
 /// @copydoc BN_finalize_attributes
 HIPDNN_CUDNN_SHIM_FAIL_STUB_ATTRIBUTES(Softmax_attributes);
