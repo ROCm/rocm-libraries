@@ -28,40 +28,39 @@ include(GoogleTest)
 include(CTest)
 
 add_executable(rpp_tests
-    core/handle_test.cpp
-    core/descriptor_test.cpp
-    image/color/brightness_test.cpp
-    image/color/exposure_test.cpp
-    image/color/blend_test.cpp
-    image/color/contrast_test.cpp
-    image/color/gamma_correction_test.cpp
-    image/color/color_cast_test.cpp
-    image/color/color_temperature_test.cpp
-    image/color/hue_test.cpp
-    image/color/lut_test.cpp
-    image/color/saturation_test.cpp
-    image/color/color_twist_test.cpp
-    image/arithmetic/magnitude_test.cpp
-    image/effects/solarize_test.cpp
-    image/effects/channel_dropout_test.cpp
-    image/bitwise/bitwise_and_test.cpp
-    image/bitwise/bitwise_or_test.cpp
-    image/bitwise/bitwise_xor_test.cpp
-    image/bitwise/bitwise_not_test.cpp
-    image/data_exchange/copy_test.cpp
-    image/geometric/crop_test.cpp
-    image/geometric/warp_affine_test.cpp
-    image/geometric/warp_perspective_test.cpp
-    image/geometric/rotate_test.cpp
-    image/statistical/tensor_sum_test.cpp
-    image/statistical/threshold_test.cpp
-    # TODO: Reduction kernels below are unusually slow on HIP implementations
-    image/statistical/tensor_min_test.cpp
-    image/statistical/tensor_max_test.cpp
-    image/statistical/tensor_mean_test.cpp
-    image/statistical/tensor_stddev_test.cpp
+    src/tests/core/handle_test.cpp
+    src/tests/core/descriptor_test.cpp
+    src/tests/image/color/brightness_test.cpp
+    src/tests/image/color/exposure_test.cpp
+    src/tests/image/color/blend_test.cpp
+    src/tests/image/color/contrast_test.cpp
+    src/tests/image/color/gamma_correction_test.cpp
+    src/tests/image/color/color_cast_test.cpp
+    src/tests/image/color/color_temperature_test.cpp
+    src/tests/image/color/hue_test.cpp
+    src/tests/image/color/lut_test.cpp
+    src/tests/image/color/saturation_test.cpp
+    src/tests/image/color/color_twist_test.cpp
+    src/tests/image/arithmetic/magnitude_test.cpp
+    src/tests/image/effects/solarize_test.cpp
+    src/tests/image/effects/channel_dropout_test.cpp
+    src/tests/image/bitwise/bitwise_and_test.cpp
+    src/tests/image/bitwise/bitwise_or_test.cpp
+    src/tests/image/bitwise/bitwise_xor_test.cpp
+    src/tests/image/bitwise/bitwise_not_test.cpp
+    src/tests/image/data_exchange/copy_test.cpp
+    src/tests/image/geometric/crop_test.cpp
+    src/tests/image/geometric/warp_affine_test.cpp
+    src/tests/image/geometric/warp_perspective_test.cpp
+    src/tests/image/geometric/rotate_test.cpp
+    src/tests/image/statistical/tensor_sum_test.cpp
+    src/tests/image/statistical/threshold_test.cpp
+    src/tests/image/statistical/tensor_min_test.cpp
+    src/tests/image/statistical/tensor_max_test.cpp
+    src/tests/image/statistical/tensor_mean_test.cpp
+    src/tests/image/statistical/tensor_stddev_test.cpp
 )
-target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(rpp_INCLUDE_DIR)
     target_include_directories(rpp_tests PRIVATE ${rpp_INCLUDE_DIR}/rpp)
 endif()
