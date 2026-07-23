@@ -15,8 +15,11 @@ using namespace test_mx_matmul_common;
 namespace
 {
 
-template <typename InputDataType, typename OutputDataType>
-class IntegrationGpuMxMatmul
+// Independent A and B input element types, for mixed-operand cases (e.g. FP8 OCP
+// A + FP4 B), which hipBLASLt supports. The common symmetric A/B case uses the
+// IntegrationGpuMxMatmul alias defined just below.
+template <typename InputDataTypeA, typename InputDataTypeB, typename OutputDataType>
+class IntegrationGpuMxMatmulMixed
     : public IntegrationGpuMatmulBase<OutputDataType, MatmulTestCase, float>
 {
 protected:
@@ -43,7 +46,8 @@ protected:
         initGraph(const MatmulTestCase& testParams,
                   hipdnn_frontend::graph::Graph& graphObj) const override
     {
-        const auto inType = hipdnn_frontend::getDataTypeEnumFromType<InputDataType>();
+        const auto aType = hipdnn_frontend::getDataTypeEnumFromType<InputDataTypeA>();
+        const auto bType = hipdnn_frontend::getDataTypeEnumFromType<InputDataTypeB>();
 
         // Logical matmul dims live in the last two axes; any leading axes are
         // batch (which MX requires to be 1). A is [..., M, K], B is [..., K, N].
@@ -53,7 +57,7 @@ protected:
 
         // A from the case (transA → col-major, opA=T).
         auto aAttr = graph::makeTensorAttributes(
-            "a", inType, aDims, generateInputStrideOrder(aDims, testParams.transA));
+            "a", aType, aDims, generateInputStrideOrder(aDims, testParams.transA));
         auto aTensor = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         // Scale_A mirrors A's shape with the K axis split into 32-wide blocks.
@@ -71,7 +75,7 @@ protected:
 
         // B from the case (transB → row-major, opB=N).
         auto bAttr = graph::makeTensorAttributes(
-            "b", inType, bDims, generateInputStrideOrder(bDims, testParams.transB));
+            "b", bType, bDims, generateInputStrideOrder(bDims, testParams.transB));
         auto bTensor = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         // Scale_B mirrors B's shape with the K axis split into 32-wide blocks.
@@ -104,6 +108,11 @@ protected:
     }
 };
 
+// Symmetric A/B: both operands share one input element type (the common case).
+template <typename InputDataType, typename OutputDataType>
+using IntegrationGpuMxMatmul
+    = IntegrationGpuMxMatmulMixed<InputDataType, InputDataType, OutputDataType>;
+
 // Input (FP8 OCP) × output (FP16 / BF16 / FP32) combinations.
 using IntegrationGpuMxGemmE4M3ToFp16
     = IntegrationGpuMxMatmul<hipdnn_data_sdk::types::fp8_e4m3, hipdnn_data_sdk::types::half>;
@@ -117,6 +126,25 @@ using IntegrationGpuMxGemmE5M2ToBf16
     = IntegrationGpuMxMatmul<hipdnn_data_sdk::types::fp8_e5m2, hipdnn_data_sdk::types::bfloat16>;
 using IntegrationGpuMxGemmE5M2ToFp32
     = IntegrationGpuMxMatmul<hipdnn_data_sdk::types::fp8_e5m2, float>;
+
+// FP4 (E2M1) input × output (FP16 / BF16 / FP32) combinations.
+using IntegrationGpuMxGemmFp4E2M1ToFp16
+    = IntegrationGpuMxMatmul<hipdnn_data_sdk::types::fp4_e2m1, hipdnn_data_sdk::types::half>;
+using IntegrationGpuMxGemmFp4E2M1ToBf16
+    = IntegrationGpuMxMatmul<hipdnn_data_sdk::types::fp4_e2m1, hipdnn_data_sdk::types::bfloat16>;
+using IntegrationGpuMxGemmFp4E2M1ToFp32
+    = IntegrationGpuMxMatmul<hipdnn_data_sdk::types::fp4_e2m1, float>;
+
+// Mixed operands: FP8 OCP A × FP4 B (and the reverse) → FP16, exercising the
+// per-operand layout/type path with a heterogeneous A/B pair.
+using IntegrationGpuMxGemmMixedE4M3Fp4ToFp16
+    = IntegrationGpuMxMatmulMixed<hipdnn_data_sdk::types::fp8_e4m3,
+                                  hipdnn_data_sdk::types::fp4_e2m1,
+                                  hipdnn_data_sdk::types::half>;
+using IntegrationGpuMxGemmMixedFp4E4M3ToFp16
+    = IntegrationGpuMxMatmulMixed<hipdnn_data_sdk::types::fp4_e2m1,
+                                  hipdnn_data_sdk::types::fp8_e4m3,
+                                  hipdnn_data_sdk::types::half>;
 
 } // namespace
 
@@ -150,6 +178,31 @@ TEST_P(IntegrationGpuMxGemmE5M2ToFp32, Correctness)
     runGraphTest(matmul::getMxTolerance<float>());
 }
 
+TEST_P(IntegrationGpuMxGemmFp4E2M1ToFp16, Correctness)
+{
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::half>());
+}
+
+TEST_P(IntegrationGpuMxGemmFp4E2M1ToBf16, Correctness)
+{
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::bfloat16>());
+}
+
+TEST_P(IntegrationGpuMxGemmFp4E2M1ToFp32, Correctness)
+{
+    runGraphTest(matmul::getMxTolerance<float>());
+}
+
+TEST_P(IntegrationGpuMxGemmMixedE4M3Fp4ToFp16, Correctness)
+{
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::half>());
+}
+
+TEST_P(IntegrationGpuMxGemmMixedFp4E4M3ToFp16, Correctness)
+{
+    runGraphTest(matmul::getMxTolerance<hipdnn_data_sdk::types::half>());
+}
+
 INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
                          IntegrationGpuMxGemmE4M3ToFp16,
                          testing::ValuesIn(getMxMatmulTestCases()));
@@ -172,4 +225,24 @@ INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
 
 INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
                          IntegrationGpuMxGemmE5M2ToFp32,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
+                         IntegrationGpuMxGemmFp4E2M1ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
+                         IntegrationGpuMxGemmFp4E2M1ToBf16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
+                         IntegrationGpuMxGemmFp4E2M1ToFp32,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
+                         IntegrationGpuMxGemmMixedE4M3Fp4ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
+                         IntegrationGpuMxGemmMixedFp4E4M3ToFp16,
                          testing::ValuesIn(getMxMatmulTestCases()));

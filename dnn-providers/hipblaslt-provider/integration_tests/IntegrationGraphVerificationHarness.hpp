@@ -235,10 +235,19 @@ private:
             return false;
         }
 
+        // The CPU-reference bundle keeps one element per byte for element-wise
+        // access; the GPU bundle uses the packed device layout for sub-byte types
+        // (e.g. FP4 as two 4-bit values per byte) so the buffer can be consumed
+        // directly by the kernel. Both are filled from the same seed, so they hold
+        // identical logical values.
         cpuBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
+            {tensorId,
+             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr,
+                                                                   /*packSubByteElements=*/false)});
         gpuBundle.tensors.insert(
-            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
+            {tensorId,
+             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr,
+                                                                   /*packSubByteElements=*/true)});
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;
