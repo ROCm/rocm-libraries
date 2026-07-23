@@ -72,9 +72,6 @@ namespace TensileLite
         // Expected byte growth of args after appending the fused segment:
         //   (2*8 + 1) pointers * 8B + 6 scalars * 4B = 160B.
         static constexpr size_t FUSED_A2A_SEGMENT_BYTES  = (2 * FUSED_A2A_MAX_RANKS + 1) * 8 + 6 * 4;
-        // A2A shards along N; kernel epilogue uses 256-wide N-tiles.
-        static constexpr uint32_t FUSED_A2A_N_TILE = 256;
-        static constexpr uint32_t FUSED_A2A_M_TILE = 256;
 
         namespace
         {
@@ -118,7 +115,10 @@ namespace TensileLite
                 args.append<uint32_t>("FusedW", worldSize);
                 args.append<uint32_t>("FusedNShard", nShard);
                 args.append<uint32_t>("FusedDrain", drain);
-                args.append<uint32_t>("FusedAN", an);
+                // Kernarg "FusedAM" (renamed from FusedAN in Task 6 alongside
+                // Signature.py); the value `an` carries AM (A2A width along
+                // FEATURE) from the swapped client.
+                args.append<uint32_t>("FusedAM", an);
 
                 size_t grew = args.size() - before;
                 if(grew != FUSED_A2A_SEGMENT_BYTES)
@@ -192,75 +192,121 @@ namespace TensileLite
             }
             std::cout << "[fused-a2a] solution: " << solution->name() << std::endl;
 
+            // Tile sizes MUST come from THIS solution's macro-tile, not a hardcoded
+            // 256: the kernel epilogue gates PUSH/local and computes dst_rank +
+            // FusedTarget from the compile-time MacroTile0/MacroTile1 (see
+            // GlobalWriteBatch.py _fusedA2ADispatch / _emitFusedA2AHandshake, which
+            // use self.kernel["MacroTile1"]). sizeMapping.macroTile.{x,y} are those
+            // same MT0/MT1 (the runtime WG grid is CeilDivide(M,macroTile.x) x
+            // CeilDivide(N,macroTile.y), ContractionProblem.cpp:795-796). `target`
+            // is an EXACT per-dst-rank count of contributing PUSH workgroups
+            // ((n_shard/MT0)*(N/MT1) = feature-tiles-in-shard * token-tiles, since
+            // post-swap feature=WG0 is scattered and token=WG1 is replicated) compared
+            // for equality kernel-side; a hardcoded 256 against a 128 macro-tile makes
+            // the tile factors wrong and over-restricts admissible shapes via the
+            // M%256/AM%256 guards. macroTile.x = MT0 (M dim), macroTile.y = MT1 (N dim).
+            const uint32_t FUSED_A2A_M_TILE = (uint32_t)solution->sizeMapping.macroTile.x;
+            const uint32_t FUSED_A2A_N_TILE = (uint32_t)solution->sizeMapping.macroTile.y;
+            if(FUSED_A2A_M_TILE == 0 || FUSED_A2A_N_TILE == 0)
+            {
+                std::cerr << "[fused-a2a] solution macro-tile is zero (MT0="
+                          << FUSED_A2A_M_TILE << " MT1=" << FUSED_A2A_N_TILE
+                          << "); cannot derive fused-A2A tile sizes" << std::endl;
+                return 1;
+            }
+            std::cout << "[fused-a2a] macro-tile from solution: MT0(M)=" << FUSED_A2A_M_TILE
+                      << " MT1(N)=" << FUSED_A2A_N_TILE << "\n";
+
             // --- Derive fused shape from the problem (spec §0 relations, but
             //     using THIS problem's real M/N/K, not the big §0 defaults). ---
-            const size_t M = problem->freeSizeA(0); // GEMM free dim M
-            const size_t N = problem->freeSizeB(0); // GEMM free dim N (all output cols)
+            // M/N-swap (col-major first-class, design §3.1): A=w[feature,K],
+            // B=x[token,K]. freeSizeA now carries FEATURE (index-0=M, the
+            // A2A-scattered dim), freeSizeB carries TOKEN. Keep M/N as the working
+            // names for the arithmetic below to minimise churn; nFeature/nToken are
+            // semantic aliases used in comments and log lines.
+            const size_t M = problem->freeSizeA(0); // = nFeature (A2A-scattered dim)
+            const size_t N = problem->freeSizeB(0); // = nToken (all output cols)
             const size_t K = problem->boundSize(0); // GEMM contraction dim K
-            // A2A column count: the FIRST `AN` output columns go all-to-all (PUSH
-            // to remote recv); the remaining [AN, N) columns stay local in `out`.
-            // Task 11 fixes the previously-hardcoded AN (was N-wide) by passing it
-            // as the FusedAN kernarg. Chosen so AN < N (a local segment exists) and
-            // (AN/W)%256==0. See task-11-brief.md (M=256 N=1536 AN=1024 W=4).
-            // AN is supplied via --fused-a2a-an so it can match the shape being run
-            // (medium: AN=2048, full: AN=10240) without editing this source; the
-            // default (1024) preserves the prior hardcoded value for old callers.
-            const size_t AN = (size_t)args["fused-a2a-an"].as<int>();
-            if(AN % (size_t)W != 0)
+            const size_t nFeature = M; // semantic alias: feature = M = index-0
+            const size_t nToken   = N; // semantic alias: token   = N
+            // A2A column count along FEATURE (M, index-0). Was AN (feature=N) before
+            // the col-major swap. The FIRST `AM` FEATURE columns go all-to-all (PUSH
+            // to remote recv); the remaining [AM, M) FEATURE columns stay local in
+            // `out`. Chosen so AM < M (a local segment exists) and (AM/W)%MT0==0.
+            // AM is supplied via --fused-a2a-am so it can match the shape being run
+            // (medium: AM=2048, full: AM=10240) without editing this source. The
+            // pre-swap flag --fused-a2a-an is renamed outright to --fused-a2a-am
+            // (design §0): no in-tree caller passed the old flag, and this client's
+            // program_options has no "defaulted" query, so a value-preserving alias
+            // cannot be implemented reliably. A stale --fused-a2a-an now errors loudly
+            // as an unknown option rather than being silently ignored.
+            const size_t AM = (size_t)args["fused-a2a-am"].as<int>();
+            if(AM % (size_t)W != 0)
             {
-                std::cerr << "[fused-a2a] AN(" << AN << ") not divisible by W(" << W << ")"
+                std::cerr << "[fused-a2a] AM(" << AM << ") not divisible by W(" << W << ")"
                           << std::endl;
                 return 1;
             }
-            const uint32_t nShard       = (uint32_t)(AN / (size_t)W);
-            const uint32_t tilesPerRank = (uint32_t)(nShard / FUSED_A2A_N_TILE);
+            // nShard = AM/W is a FEATURE sub-segment (one rank's slice of feature M).
+            const uint32_t nShard       = (uint32_t)(AM / (size_t)W);
+            // tilesPerRank: whole feature-tiles per rank shard (nShard is feature).
+            const uint32_t tilesPerRank = (uint32_t)(nShard / FUSED_A2A_M_TILE);
+            // tokenTiles: token-tiles across the full token dim N. Post-swap the
+            // A2A-scattered dim is FEATURE (WG0), so TOKEN (WG1) is the replicated
+            // dim -- every token-tile workgroup in a rank's feature shard contributes
+            // one PUSH to that rank. FusedTarget (the per-dst-rank contributing-WG
+            // count, compared for equality kernel-side) is therefore
+            // tilesPerRank (feature-tiles in the shard) * tokenTiles (all N-tiles).
+            const uint32_t tokenTiles   = (uint32_t)(N / FUSED_A2A_N_TILE);
+            // mTiles: feature-tiles across the full feature dim M (diagnostic only).
             const uint32_t mTiles       = (uint32_t)(M / FUSED_A2A_M_TILE);
-            const uint32_t target       = mTiles * tilesPerRank;
+            const uint32_t target       = tilesPerRank * tokenTiles;
 
             // Fail-fast on shapes that violate the fused-A2A design constraints
             // (spec section 0). The kernel maps a whole PUSH workgroup to a
-            // SINGLE dst_rank (n_col_base_wg = WorkGroup1 * MacroTile1), which is
-            // only correct when each rank's shard is an integer number of
-            // N-tiles -- i.e. n_shard is a multiple of the 256-wide macro-tile.
-            // If n_shard < MacroTile1 (or not a multiple), one workgroup spans
-            // several ranks: its lanes are all attributed to one rank, so data
-            // is scattered to the wrong recv buffer AND, under DRAIN, ranks with
-            // no supplying workgroup poll a flag slot no one ever sets -> the
-            // GPU hangs forever. Reject such shapes on the host instead of
-            // launching into a deadlock. Constraints now apply to AN (the A2A
-            // width), not the whole N: AN % W == 0, (AN/W) % 256 == 0
-            // (=> n_shard >= 256, all W ranks covered), M % 256 == 0, AN % 256 == 0
-            // (whole tiles), and AN <= N (local segment fits inside the output).
-            if(AN % (size_t)W != 0 || (nShard % FUSED_A2A_N_TILE) != 0
+            // SINGLE dst_rank, which is only correct when each rank's shard is an
+            // integer number of macro-tiles along the A2A-scattered dim. Post-swap
+            // the scattered dim is FEATURE = M, so the shard (n_shard = AM/W) must be
+            // a multiple of the MacroTile0-wide (feature) tile. If n_shard < MT0 (or
+            // not a multiple), one workgroup spans several ranks: its lanes are all
+            // attributed to one rank, so data is scattered to the wrong recv buffer
+            // AND, under DRAIN, ranks with no supplying workgroup poll a flag slot no
+            // one ever sets -> the GPU hangs forever. Reject such shapes on the host
+            // instead of launching into a deadlock. Constraints apply to AM (the A2A
+            // width along FEATURE), not the whole M: AM % W == 0, (AM/W) % MT0 == 0
+            // (=> n_shard >= MT0, all W ranks covered), M % MT0 == 0, AM % MT0 == 0
+            // (whole feature-tiles), and AM <= M (local segment fits inside output).
+            if(AM % (size_t)W != 0 || (nShard % FUSED_A2A_M_TILE) != 0
                || (M % (size_t)FUSED_A2A_M_TILE) != 0
-               || (AN % (size_t)FUSED_A2A_N_TILE) != 0 || AN > N)
+               || (AM % (size_t)FUSED_A2A_M_TILE) != 0 || AM > M)
             {
                 std::cerr
                     << "[fused-a2a] ERROR: problem shape violates fused-A2A "
                        "constraints (spec section 0).\n"
-                    << "  M=" << M << " N=" << N << " AN=" << AN << " W=" << W
-                    << " n_shard=AN/W=" << nShard << " MacroTile=" << FUSED_A2A_N_TILE
-                    << "\n"
-                    << "  require: AN % W == 0, (AN/W) % " << FUSED_A2A_N_TILE
-                    << " == 0 (so n_shard >= " << FUSED_A2A_N_TILE
+                    << "  M(feature)=" << M << " N(token)=" << N << " AM=" << AM
+                    << " W=" << W << " n_shard=AM/W=" << nShard
+                    << " MacroTile0(feature)=" << FUSED_A2A_M_TILE << "\n"
+                    << "  require: AM % W == 0, (AM/W) % " << FUSED_A2A_M_TILE
+                    << " == 0 (so n_shard >= " << FUSED_A2A_M_TILE
                     << " and every rank is covered), M % " << FUSED_A2A_M_TILE
-                    << " == 0, AN % " << FUSED_A2A_N_TILE << " == 0, AN <= N.\n"
-                    << "  e.g. W=4 needs AN >= " << ((size_t)W * FUSED_A2A_N_TILE)
-                    << " (n_shard >= 256). Refusing to launch (would deadlock in "
-                       "the DRAIN barrier)."
+                    << " == 0, AM % " << FUSED_A2A_M_TILE << " == 0, AM <= M.\n"
+                    << "  e.g. W=4 needs AM >= " << ((size_t)W * FUSED_A2A_M_TILE)
+                    << " (n_shard >= " << FUSED_A2A_M_TILE
+                    << "). Refusing to launch (would deadlock in the DRAIN barrier)."
                     << std::endl;
                 return -1;
             }
 
-            // The fused PUSH store writes the FULL macro-tile (MT0 rows), NOT
-            // just the logical M rows, and the recv SRD uses no edge clamp
-            // (num_records = BufferOOB). So a PUSH WG's lanes address recv rows
-            // up to the padded macro-tile height. Size recv to the M rounded up
-            // to the 256-wide macro-tile so those padding-row writes stay inside
-            // the allocation. (Same reasoning for n_shard rounded to the N-tile.)
-            const size_t Mpad      = ((M + FUSED_A2A_M_TILE - 1) / FUSED_A2A_M_TILE) * FUSED_A2A_M_TILE;
-            const size_t nShardPad = ((size_t)nShard + FUSED_A2A_N_TILE - 1) / FUSED_A2A_N_TILE * FUSED_A2A_N_TILE;
-            const size_t recvBytes    = (size_t)W * Mpad * nShardPad * sizeof(uint16_t); // bf16
+            // recv is feature-contiguous [W, token, feature_shard]: token is the outer
+            // (strided-by-n_shard) axis, feature-shard is the inner stride-1 axis. The
+            // fused PUSH store writes the FULL macro-tile edge (not just the logical
+            // token count) and the recv SRD uses no edge clamp (num_records=BufferOOB),
+            // so a PUSH WG's lanes address token rows up to the padded MT1 tile. Size
+            // token to the MacroTile1-wide tile so those padding-row writes stay inside
+            // the allocation. n_shard is already a multiple of MacroTile0 (host
+            // constraint (AM/W)%MT0==0), so the contiguous feature extent is n_shard.
+            const size_t nTokenPad = ((N + FUSED_A2A_N_TILE - 1) / FUSED_A2A_N_TILE) * FUSED_A2A_N_TILE;
+            const size_t recvBytes    = (size_t)W * nTokenPad * nShard * sizeof(uint16_t); // bf16
             const size_t flagBytes    = (size_t)W * sizeof(uint32_t);
             const size_t counterBytes = (size_t)W * sizeof(uint32_t);
             const size_t aBytes       = problem->a().totalAllocatedBytes();
@@ -268,30 +314,38 @@ namespace TensileLite
             const size_t cBytes       = problem->c().totalAllocatedBytes();
             const size_t dBytes       = problem->d().totalAllocatedBytes();
 
-            std::cout << "[fused-a2a] M=" << M << " N=" << N << " K=" << K << " AN=" << AN
-                      << " nShard=" << nShard << " tilesPerRank=" << tilesPerRank
-                      << " mTiles=" << mTiles << " target=" << target << " drain=" << drain
-                      << "\n";
+            std::cout << "[fused-a2a] nFeature(M)=" << nFeature << " nToken(N)=" << nToken
+                      << " K=" << K << " AM=" << AM << " nShard=" << nShard
+                      << " tilesPerRank=" << tilesPerRank << " tokenTiles=" << tokenTiles
+                      << " mTiles=" << mTiles
+                      << " target=" << target << " drain=" << drain << "\n";
 
             // --- Host golden setup (Task 11 numeric validation) ---------------
             // The GEMM is a TN GEMM (op(A)=A^T, op(B)=B), bf16 in, fp32 accumulate,
-            // alpha=1, beta=0, C=0. Physical layouts come straight from the tensor
-            // descriptors (no hardcoded assumption): A element (m,k) sits at
-            //   m*aFreeStride + k*aBoundStride, similarly for B(k,n) and D(m,n).
-            // Every card runs the SAME A,B, so there is ONE golden Dgold[M,N].
+            // alpha=1, beta=0, C=0. Under the col-major swap, A carries FEATURE (m)
+            // and B carries TOKEN (n): logically A=w[feature,K], B=x[token,K], and the
+            // golden D'=[feature,token]. The golden math Dgold[m,n]=sum_k A[m,k]*B[k,n]
+            // is INVARIANT under the swap -- only the semantic roles of m/n flip and
+            // (for L1) the physical D layout becomes col-major. Physical layouts come
+            // straight from the tensor descriptors (no hardcoded assumption): A element
+            // (m,k) sits at m*aFreeStride + k*aBoundStride, similarly for B(k,n) and
+            // D(m,n); the descriptor-derived strides carry the swapped shapes through
+            // automatically. Every card runs the SAME A,B, so there is ONE golden
+            // Dgold, stored row-major [M,N] (m=feature slow, n=token fast) as before.
             const auto&  aDesc = problem->a();
             const auto&  bDesc = problem->b();
             const auto&  dDesc = problem->d();
-            const size_t aFreeAx  = problem->freeIndicesA()[0].i;   // A axis carrying M
+            const size_t aFreeAx  = problem->freeIndicesA()[0].i;   // A axis carrying M (feature)
             const size_t aBoundAx = problem->boundIndices()[0].a;   // A axis carrying K
-            const size_t bFreeAx  = problem->freeIndicesB()[0].i;   // B axis carrying N
+            const size_t bFreeAx  = problem->freeIndicesB()[0].i;   // B axis carrying N (token)
             const size_t bBoundAx = problem->boundIndices()[0].b;   // B axis carrying K
             const size_t aFreeStride  = aDesc.strides()[aFreeAx];
             const size_t aBoundStride = aDesc.strides()[aBoundAx];
             const size_t bFreeStride  = bDesc.strides()[bFreeAx];
             const size_t bBoundStride = bDesc.strides()[bBoundAx];
             // D free-index axes: freeIndices()[j].d is the D dim for free index j.
-            // Free index 0 is the A(M) index, free index 1 is the B(N) index.
+            // Free index 0 is the A(M=feature) index, free index 1 is the B(N=token)
+            // index. Post-swap D' is col-major, so dMStride==1 (feature contiguous).
             const size_t dMAx = problem->freeIndices()[0].d;
             const size_t dNAx = problem->freeIndices()[1].d;
             const size_t dMStride = dDesc.strides()[dMAx];
@@ -457,18 +511,22 @@ namespace TensileLite
                 float tol  = 1e-2f * std::max(1.0f, std::fabs(want));
                 return diff <= tol;
             };
-            // The kernel's recv scatter uses row stride = n_shard (FusedNShard)
-            // and slot stride = M * n_shard (M = logical SizeI), matching the
-            // _emitFusedA2APushStore offset formula. recv is a bf16 buffer.
-            const size_t slotStride = (size_t)M * (size_t)nShard; // elems per src slot
-            const size_t rowStride  = (size_t)nShard;             // elems per M-row
+            // recv is feature-contiguous [W, token, feature_shard]: the kernel's PUSH
+            // store uses token stride = n_shard (FusedNShard) and slot stride =
+            // N_token * n_shard (N = logical SizeJ = nToken), with feature-shard as the
+            // stride-1 inner axis. This mirrors the _emitFusedA2APushStore offset formula
+            // (slotElem + t*n_shard + f_local). recv is a bf16 buffer. slotStride uses the
+            // UNPADDED N to match the kernel's SizeJ slot multiply. See
+            // task3-index-derivation.md.
+            const size_t slotStride = (size_t)N * (size_t)nShard; // elems per src slot (nToken*nShard)
+            const size_t rowStride  = (size_t)nShard;             // per-token stride (feature-shard contiguous)
 
             // Persistent host scratch (reused each iteration, no per-iter alloc).
             // Only sized when validating; empty otherwise (no D2H copy-back either).
             std::vector<uint16_t> hRecv, hOut;
             if(validate)
             {
-                hRecv.resize((size_t)W * Mpad * nShardPad);
+                hRecv.resize((size_t)W * nTokenPad * nShard);
                 hOut.resize(dBytes / sizeof(uint16_t));
             }
 
@@ -554,7 +612,9 @@ namespace TensileLite
                                        (uint32_t)W,
                                        nShard,
                                        (uint32_t)drain,
-                                       (uint32_t)AN);
+                                       // kernarg "FusedAM" (Signature.py); pass AM as
+                                       // the value to keep the client/kernel ABI matched.
+                                       (uint32_t)AM);
                     // Print kernarg size only on iter 0 to avoid log spam; a constant
                     // size across iterations confirms exactly one fused segment.
                     if(it == 0)
@@ -604,9 +664,13 @@ namespace TensileLite
                 bool l1Pass = ok;
                 if(ok && validate)
                 {
-                    // ---- L2: recv (PUSH segment). For destination card dst, slot
-                    // src must hold columns [dst*nShard, dst*nShard+nShard) of Dgold
-                    // as [src, m, n_local]. All W src slots carry the identical shard.
+                    // ---- L2: recv (PUSH segment). recv is feature-contiguous
+                    // [W, token, feature_shard]. For destination card dst, slot src must
+                    // hold the feature sub-segment [dst*nShard, dst*nShard+nShard) of
+                    // Dgold across all N tokens, laid out as [src, t(token, outer),
+                    // f(feature-local, inner/contiguous)]. Token is NOT sharded -- every
+                    // rank holds all N tokens. All W src slots carry the identical shard
+                    // in single-card emulation. See task3-index-derivation.md.
                     for(int dst = 0; dst < W && l2Pass; dst++)
                     {
                         HIP_CHECK_EXC(hipSetDevice(dst));
@@ -615,21 +679,23 @@ namespace TensileLite
                         size_t mism = 0;
                         for(int src = 0; src < W; src++)
                         {
-                            for(size_t m = 0; m < M; m++)
+                            for(size_t t = 0; t < N; t++)
                             {
-                                for(uint32_t nl = 0; nl < nShard; nl++)
+                                for(uint32_t f = 0; f < nShard; f++)
                                 {
-                                    size_t   off = (size_t)src * slotStride + m * rowStride + nl;
+                                    size_t   off = (size_t)src * slotStride + t * rowStride + f;
                                     BFloat16 g;
                                     g.data     = hRecv[off];
                                     float got  = (float)g;
-                                    float want = (float)Dgold[m * N + (size_t)dst * nShard + nl];
+                                    // global feature = dst*nShard + f, token = t;
+                                    // Dgold row-major [M,N] -> Dgold[feature*N + token].
+                                    float want = (float)Dgold[((size_t)dst * nShard + f) * N + t];
                                     if(!closeBf16(got, want))
                                     {
                                         if(mism < 5)
                                             std::cerr << "[fused-a2a] L2 MISMATCH iter=" << it
                                                       << " card=" << dst << " src=" << src
-                                                      << " m=" << m << " nl=" << nl << " got=" << got
+                                                      << " t=" << t << " f=" << f << " got=" << got
                                                       << " want=" << want << "\n";
                                         mism++;
                                     }
@@ -644,38 +710,37 @@ namespace TensileLite
                             l2Pass = false;
                     }
 
-                    // ---- L1: out (local segment). out[M,N] columns [AN, N) must
-                    // equal Dgold; columns [0, AN) went to recv (not written) -> skip.
+                    // ---- L1: out (local segment). Under the col-major swap the A2A
+                    // slice runs along FEATURE (M): the first AM feature columns PUSH
+                    // to recv (not written to out), the remaining feature columns
+                    // [AM, M) stay local in out. Every token has such a tail value, so
+                    // this checks out[m in [AM,M), n in [0,N)] against Dgold[m,n].
                     //
                     // TWO checks per card, both must pass (l1Pass &= both):
                     //   (a) descriptor-driven: off = m*dMStride + n*dNStride. This
                     //       reads out through the SAME strides the kernel was told
                     //       to write with. It confirms out matches golden UNDER the
-                    //       descriptor's own layout -- but it CANNOT distinguish a
-                    //       true row-major out from a column-major out that the
-                    //       descriptor also happens to describe column-major (the
-                    //       original bug's disguise: descriptor and kernel agree on
-                    //       a layout the DOWNSTREAM does not want, so numeric PASS
-                    //       is a false green).
-                    //   (b) raw-bytes row-major: off = m*N + n, HARDCODED row-major
-                    //       physical stride (N contiguous), independent of the
+                    //       descriptor's own layout -- but it CANNOT distinguish the
+                    //       intended col-major out from some other layout the
+                    //       descriptor also happens to describe (a false green).
+                    //   (b) raw-bytes col-major: off = n*M + m, HARDCODED col-major
+                    //       physical stride (M/feature contiguous), independent of the
                     //       descriptor. This proves the physical byte layout of out
-                    //       really is [M,N] with N contiguous, which is what the
-                    //       A2A downstream consumes. If out were physically
-                    //       column-major, (a) could still pass while (b) fails --
-                    //       so (b) is the anti-false-green proof required by scheme
-                    //       D (ROCM-27524 gemm-a2a-out-rowmajor-plan.md validation
-                    //       point 2). When the descriptor is row-major (dNStride==1,
-                    //       dMStride==N) the two offset formulas coincide and both
-                    //       read the same bytes; (b) still stands as an explicit,
-                    //       descriptor-independent statement of the physical layout.
-                    const bool descRowMajor = (dNStride == 1 && dMStride == N);
+                    //       really is [M,N] col-major with FEATURE contiguous, which is
+                    //       what the A2A downstream consumes post-swap. If out were
+                    //       physically row-major, (a) could still pass while (b) fails
+                    //       -- so (b) is the anti-false-green proof (ROCM-27524
+                    //       gemm-a2a plan validation point 2). When the descriptor is
+                    //       col-major (dMStride==1, dNStride==M) the two offset formulas
+                    //       coincide; (b) still stands as an explicit, descriptor-
+                    //       independent statement of the physical layout.
+                    const bool descColMajor = (dMStride == 1 && dNStride == M);
                     if(verbose)
                         std::cout << "[fused-a2a] D descriptor layout: dMStride=" << dMStride
                                   << " dNStride=" << dNStride << " -> "
-                                  << (descRowMajor ? "ROW-MAJOR [M,N] (N contiguous)"
-                                                   : "NOT row-major (column-major or padded)")
-                                  << "  (raw-bytes L1 check uses hardcoded off=m*N+n"
+                                  << (descColMajor ? "COL-MAJOR [M,N] (M/feature contiguous)"
+                                                   : "NOT col-major (row-major or padded)")
+                                  << "  (raw-bytes L1 check uses hardcoded off=n*M+m"
                                      " regardless)\n";
                     for(int d = 0; d < W && l1Pass; d++)
                     {
@@ -683,10 +748,10 @@ namespace TensileLite
                         HIP_CHECK_EXC(
                             hipMemcpy(hOut.data(), outD[d], dBytes, hipMemcpyDeviceToHost));
                         size_t mismDesc = 0; // (a) descriptor-driven
-                        size_t mismRaw  = 0; // (b) raw-bytes row-major (off=m*N+n)
-                        for(size_t m = 0; m < M; m++)
+                        size_t mismRaw  = 0; // (b) raw-bytes col-major (off=n*M+m)
+                        for(size_t m = AM; m < M; m++) // feature-local tail beyond A2A slice
                         {
-                            for(size_t n = AN; n < N; n++)
+                            for(size_t n = 0; n < N; n++) // all tokens
                             {
                                 float want = (float)Dgold[m * N + n];
 
@@ -706,18 +771,18 @@ namespace TensileLite
                                     }
                                 }
 
-                                // (b) raw-bytes row-major read: hardcoded off=m*N+n,
-                                //     NOT via the descriptor strides. Proves N is
-                                //     physically contiguous in out.
+                                // (b) raw-bytes col-major read: hardcoded off=n*M+m,
+                                //     NOT via the descriptor strides. Proves M/feature
+                                //     is physically contiguous in out.
                                 {
-                                    size_t   off = m * N + n;
+                                    size_t   off = n * M + m;
                                     BFloat16 g;
                                     g.data    = hOut[off];
                                     float got = (float)g;
                                     if(!closeBf16(got, want))
                                     {
                                         if(mismRaw < 5)
-                                            std::cerr << "[fused-a2a] L1(raw row-major m*N+n) "
+                                            std::cerr << "[fused-a2a] L1(raw col-major n*M+m) "
                                                          "MISMATCH iter="
                                                       << it << " card=" << d << " m=" << m
                                                       << " n=" << n << " got=" << got
@@ -730,7 +795,7 @@ namespace TensileLite
                         if(verbose || mismDesc || mismRaw)
                             std::cout << "[fused-a2a] L1 out card " << d
                                       << ": desc=" << (mismDesc == 0 ? "PASS" : "FAIL") << "("
-                                      << mismDesc << ") rawRowMajor="
+                                      << mismDesc << ") rawColMajor="
                                       << (mismRaw == 0 ? "PASS" : "FAIL") << "(" << mismRaw << ")\n";
                         if(mismDesc || mismRaw)
                             l1Pass = false;

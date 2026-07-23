@@ -75,7 +75,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Components.GL2Prefetch import GL2PrefetchLoad
-from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
+from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
@@ -16533,38 +16533,91 @@ class KernelWriterAssembly(KernelWriter):
             if _elStopIdx < len(element):
               next_rowInc_per_batch[_bIdx] = _coord1All[_elStopIdx] - _coord1All[_elStopIdx - 1]
 
-        for batchIdx in range(0, numBatchesCLS):
-          elementStartIdx = batchIdx * numElementsPerBatch
-          elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
-          elementsThisBatch = element[elementStartIdx:elementStopIdx]
-          #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
-          # elementVgprs can be large and should be perfectly tuned to the number of available
-          # VGPRS.  We do not want to accidentally overflow and grow the pool here:
+        # The store batch loop mutates `ss` (StoreState) and `biasLocalBarrierInit`.
+        # For FusedGemmA2A we regenerate the loop body TWICE (PUSH + LOCAL) under a
+        # single hoisted runtime gate, so factor the body into a closure that returns
+        # a Module (rather than adding directly to actLoopModule) and can be replayed
+        # from the same codegen-state after an explicit ss/biasLocalBarrierInit reset.
+        def _emit_batch_loop():
+          nonlocal biasLocalBarrierInit
+          m = Module("storeBatchLoop")
+          # codeAccVgprRead / codeMulAlpha are consumed in-place (popFirstItem) by
+          # globalWriteBatch. For the FusedGemmA2A two-pass replay each pass must start
+          # from an unconsumed queue, so take a per-pass deepcopy. Single-pass paths are
+          # unaffected (one deepcopy of the same starting queue yields identical output).
+          passAccVgprRead = deepcopy(codeAccVgprRead) if codeAccVgprRead is not None else None
+          passMulAlpha    = deepcopy(codeMulAlpha) if codeMulAlpha is not None else None
+          for batchIdx in range(0, numBatchesCLS):
+            elementStartIdx = batchIdx * numElementsPerBatch
+            elementStopIdx = min( elementStartIdx + numElementsPerBatch, len(element) )
+            elementsThisBatch = element[elementStartIdx:elementStopIdx]
+            #print("BATCH[%u/%u]: element[%u:%u] VGPRs=%u" % (batchIdx, numBatches, elementStartIdx, elementStopIdx,ss.numVgprsPerElement ))
+            # elementVgprs can be large and should be perfectly tuned to the number of available
+            # VGPRS.  We do not want to accidentally overflow and grow the pool here:
 
-          if kernel["StoreRemapVectorWidth"]:
-            #Indication if this batch is last batch for this column block shape
-            self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
+            if kernel["StoreRemapVectorWidth"]:
+              #Indication if this batch is last batch for this column block shape
+              self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
 
-          # Look ahead through next_rowInc_per_batch for the first non-zero
-          # transition: SRVW path skips batches whose `addrCalc.rowInc == 0`,
-          # so the chain primer at the current batch primes for the NEXT
-          # firing consumer (= first batch with a real row transition).
-          # Cumulative skip is implicit since skipped transitions are 0 and
-          # contribute nothing to the sum.
-          _next_firing_rowInc = 0
-          for _k in range(batchIdx, numBatches):
-            if next_rowInc_per_batch[_k] != 0:
-              _next_firing_rowInc = next_rowInc_per_batch[_k]
-              break
-          _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
-          actLoopModule.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
-              applyAlpha, beta, edge, atomic, gwvw, atomicW, \
-              elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
-              self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
-              biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
-              activationTypeStr, elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
-              _next_firing_rowInc, _direct_next_rowInc))
-          biasLocalBarrierInit = True
+            # Look ahead through next_rowInc_per_batch for the first non-zero
+            # transition: SRVW path skips batches whose `addrCalc.rowInc == 0`,
+            # so the chain primer at the current batch primes for the NEXT
+            # firing consumer (= first batch with a real row transition).
+            # Cumulative skip is implicit since skipped transitions are 0 and
+            # contribute nothing to the sum.
+            _next_firing_rowInc = 0
+            for _k in range(batchIdx, numBatches):
+              if next_rowInc_per_batch[_k] != 0:
+                _next_firing_rowInc = next_rowInc_per_batch[_k]
+                break
+            _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
+            m.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
+                applyAlpha, beta, edge, atomic, gwvw, atomicW, \
+                elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
+                self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
+                biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
+                activationTypeStr, elementSgprs, tmpSgpr, passAccVgprRead, passMulAlpha, factorDim, numBatches, \
+                _next_firing_rowInc, _direct_next_rowInc))
+            biasLocalBarrierInit = True
+          return m
+
+        if kernel["FusedGemmA2A"]:
+          # Hoist the PUSH/local dispatch gate out of the per-store body: emit ONE
+          # runtime gate, then the whole store body twice -- once with only the PUSH
+          # version (mode "PUSH"), once with only the local version (mode "LOCAL").
+          # Between the two passes, roll back the codegen-time StoreState (ss) and
+          # biasLocalBarrierInit to the batch-loop start so the LOCAL pass regenerates
+          # identical addresses/waitcnts from the same starting state.
+          localLabel = Label(self.labels.getNameInc("fusedA2A_hoist_local"),
+                             "fused-A2A hoisted: WG>=AM_tiles -> local")
+          afterLabel = Label(self.labels.getNameInc("fusedA2A_hoist_after"),
+                             "fused-A2A hoisted: after PUSH/local")
+          emitFusedA2AGate(actLoopModule, self.argLoader, self.sgprPool,
+                           self.states.fusedA2AKernArgBase, kernel["MacroTile0"],
+                           localLabel.getLabelName())
+          # try/finally guarantees the dispatch mode is restored to "BOTH" even if
+          # codegen raises mid-pass, so the flag never leaks "PUSH"/"LOCAL" into a
+          # subsequent kernel.
+          try:
+            # PUSH pass
+            self.states.fusedA2ADispatchMode = "PUSH"
+            actLoopModule.add(_emit_batch_loop())
+            actLoopModule.add(SBranch(labelName=afterLabel.getLabelName(), comment="skip local store"))
+            # rollback codegen-time ss state so LOCAL pass regenerates from batch-loop start.
+            # resetState() clears singleCol*AddrUpdated + lastCoordOffset1 but NOT firstBatch,
+            # so set firstBatch manually; biasLocalBarrierInit must match the pass-1 start (False).
+            ss.resetState()
+            ss.firstBatch = True
+            biasLocalBarrierInit = False
+            actLoopModule.add(localLabel)
+            # LOCAL pass
+            self.states.fusedA2ADispatchMode = "LOCAL"
+            actLoopModule.add(_emit_batch_loop())
+            actLoopModule.add(afterLabel)
+          finally:
+            self.states.fusedA2ADispatchMode = "BOTH"
+        else:
+          actLoopModule.add(_emit_batch_loop())
 
         ss.resetState()
         actLoopModuleList.append(actLoopModule)

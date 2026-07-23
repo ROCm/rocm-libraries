@@ -438,6 +438,11 @@ class StateValues:
 
     self.nonPostLoopSgpr = []
 
+    # FusedGemmA2A store dispatch mode (codegen-time): "BOTH" emits the per-store
+    # runtime gate + both push/local versions (default, unchanged behavior);
+    # "PUSH"/"LOCAL" emit only that single version (gate hoisted to caller).
+    self.fusedA2ADispatchMode = "BOTH"
+
     self.preloadGuard = []
     self.tmpvgpr = {}
     self.freeSgprVarPool = set()
