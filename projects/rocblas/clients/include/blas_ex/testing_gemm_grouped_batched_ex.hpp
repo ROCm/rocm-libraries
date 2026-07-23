@@ -755,7 +755,7 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
     }
     hD_2.copy_from(hD_1);
 
-    const auto compare_to_gold = [&](const host_batch_matrix<To>& hD) {
+    const auto compare_to_gold = [&](host_batch_matrix<To>& hD) {
         if(arg.unit_check)
         {
             int64_t idx = 0;
@@ -810,7 +810,7 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
                                                                      cfg.n_array[g],
                                                                      cfg.ldd_array[g],
                                                                      (To_hpa*)hD_gold[idx],
-                                                                     hD[idx])));
+                                                                     (To*)hD[idx])));
                 }
             }
         }
