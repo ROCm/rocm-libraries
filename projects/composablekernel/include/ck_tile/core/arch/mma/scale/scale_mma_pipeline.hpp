@@ -302,7 +302,6 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     }
 
     // No-scale execImpl() without explicit scale args.
-    // If no dense specialisation found => fallback to MmaOp with identity scale = 127
     template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
     {
@@ -314,16 +313,16 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);
         auto& c_buf = reinterpret_cast<CThreadBufType&>(c);
 
-        if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
-        {
-            // check types
-            static_assert(
-                std::is_same_v<typename UnscaledMmaOp::AVecType, typename MmaOp::AVecType> &&
-                    std::is_same_v<typename UnscaledMmaOp::BVecType, typename MmaOp::BVecType> &&
-                    std::is_same_v<typename UnscaledMmaOp::CVecType, typename MmaOp::CVecType>,
-                "UnscaledMmaOp vector layout must match MmaOp's for the fragments to alias "
-                "correctly");
-        }
+        // check non-scale MmaOp support
+        static_assert(MmaOpTraits<UnscaledMmaOp>::IsSupported,
+                      "No UnscaledMmaOp available for this MmaOp's type/shape");
+        // check types
+        static_assert(
+            std::is_same_v<typename UnscaledMmaOp::AVecType, typename MmaOp::AVecType> &&
+                std::is_same_v<typename UnscaledMmaOp::BVecType, typename MmaOp::BVecType> &&
+                std::is_same_v<typename UnscaledMmaOp::CVecType, typename MmaOp::CVecType>,
+            "UnscaledMmaOp vector layout must match MmaOp's for the fragments to alias "
+            "correctly");
 
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {
@@ -333,26 +332,12 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
-                        {
-                            // UnscaledMmaOp::exec is not templated on Params
-                            c_buf.at(bm * FragsN + bn) =
-                                UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                    b_buf.at(bn * FragsK + bk),
-                                                    c_buf.at(bm * FragsN + bn));
-                        }
-                        else
-                        {
-                            // MmaOpFamily::SCALE, therefore 4 bytes
-                            constexpr int32_t identity_scale = 0x7F7F7F7F;
-                            // MmaOp::exec
-                            c_buf.at(bm * FragsN + bn) =
-                                MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
-                                                                b_buf.at(bn * FragsK + bk),
-                                                                c_buf.at(bm * FragsN + bn),
-                                                                identity_scale,
-                                                                identity_scale);
-                        }
+                        // UnscaledMmaOp::exec is not templated on Params
+                        // (no op_sel/reuse dependency for a plain unscaled op).
+                        c_buf.at(bm * FragsN + bn) =
+                            UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                b_buf.at(bn * FragsK + bk),
+                                                c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
@@ -365,33 +350,13 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        if constexpr(MmaOpTraits<UnscaledMmaOp>::IsSupported)
-                        {
-                            // UnscaledMmaOp::exec is not templated on Params
-                            c_buf.at(bm * FragsN + bn) =
-                                UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                    b_buf.at(bn * FragsK + bk),
-                                                    c_buf.at(bm * FragsN + bn));
-                        }
-                        else
-                        {
-                            constexpr int32_t identity_scale = 0x7F7F7F7F;
-                            // MmaOp::exec
-                            c_buf.at(bm * FragsN + bn) =
-                                MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
-                                                                b_buf.at(bn * FragsK + bk),
-                                                                c_buf.at(bm * FragsN + bn),
-                                                                identity_scale,
-                                                                identity_scale);
-                        }
+                        c_buf.at(bm * FragsN + bn) =
+                            UnscaledMmaOp::exec(a_buf.at(bm * FragsK + bk),
+                                                b_buf.at(bn * FragsK + bk),
+                                                c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
-        }
-        else
-        {
-            // throw error
-            static_assert(false, "Invalid accumulation policy");
         }
     }
 };
