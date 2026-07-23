@@ -268,6 +268,8 @@ bool hipsparse_routine::is_routine_supported(hipsparse_routine::value_type FNAME
         return routine_support::is_csrmv_supported();
     case csrsv:
         return routine_support::is_csrsv_supported();
+    case cscsv:
+        return routine_support::is_cscsv_supported();
     case gemvi:
         return routine_support::is_gemvi_supported();
     case hybmv:
@@ -287,6 +289,8 @@ bool hipsparse_routine::is_routine_supported(hipsparse_routine::value_type FNAME
         return routine_support::is_coosm_supported();
     case csrsm:
         return routine_support::is_csrsm_supported();
+    case cscsm:
+        return routine_support::is_cscsm_supported();
     case gemmi:
         return routine_support::is_gemmi_supported();
     // Extra
@@ -394,6 +398,9 @@ void hipsparse_routine::print_routine_support_info(hipsparse_routine::value_type
     case csrsv:
         routine_support::print_csrsv_support_warning();
         break;
+    case cscsv:
+        routine_support::print_cscsv_support_warning();
+        break;
     case gemvi:
         routine_support::print_gemvi_support_warning();
         break;
@@ -421,6 +428,9 @@ void hipsparse_routine::print_routine_support_info(hipsparse_routine::value_type
         break;
     case csrsm:
         routine_support::print_csrsm_support_warning();
+        break;
+    case cscsm:
+        routine_support::print_cscsm_support_warning();
         break;
     case gemmi:
         routine_support::print_gemmi_support_warning();
