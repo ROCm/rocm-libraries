@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
@@ -271,6 +272,25 @@ TEST(TestGpuReferenceGraphExecutor, CanBeConstructed)
 
     const GpuReferenceGraphExecutor executor;
     static_cast<void>(executor);
+}
+
+TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRuntimePassByValueGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        /*withMeanVariance=*/true,
+        /*overrideShapeEnabled=*/false,
+        /*runtimeEpsilon=*/true);
+    GpuReferenceGraphExecutor executor;
+    EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, IsApplicableForBakedScalarGraph)
+{
+    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
 TEST(TestGpuReferenceGraphExecutor, CustomOpThrows)
