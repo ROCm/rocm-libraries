@@ -36,6 +36,18 @@ class TestWmmaFmhaFwdSweepProfile(unittest.TestCase):
         got = subject._parse_perfjson('noise\nPerfJSON: {"ms": 0.25, "tflops": 2.0}\n')
         self.assertEqual(got["ms"], 0.25)
 
+    def test_parse_perfjson_rejects_missing_timing(self):
+        with self.assertRaisesRegex(RuntimeError, "valid PerfJSON timing"):
+            subject._parse_perfjson('PerfJSON: {"tflops": 2.0}\n')
+
+    def test_parse_perfjson_rejects_malformed_json(self):
+        with self.assertRaises(json.JSONDecodeError):
+            subject._parse_perfjson("PerfJSON: {not-json}\n")
+
+    def test_variant_args_rejects_unknown_variant(self):
+        with self.assertRaisesRegex(ValueError, "unknown variant"):
+            subject._variant_args("unknown")
+
     def test_benchmark_command_selects_vlds(self):
         cmd = subject._benchmark_command(_args(causal=True), "vlds")
         self.assertIn("--v-lds-stage", cmd)
