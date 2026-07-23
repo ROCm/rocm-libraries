@@ -193,6 +193,19 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
                     "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 )
+                # Also apply rocKE's pre-registered CTest categories now that
+                # the platform's staged add_test() entries (folded above) are
+                # present in the file. This overwrites -- rather than merges
+                # with -- the ad hoc "ckc;unit;host" / "ckc;python;..." labels
+                # rocke/platform/CMakeLists.txt bakes into its install text:
+                # ctest's install-tree script interpreter only honors the
+                # last set_tests_properties() call per test, and
+                # quick/standard/comprehensive/full is the RFC0010-standardized
+                # replacement for those ad hoc tags (see ALMIOPEN-2278).
+                apply_ctest_category_labels(
+                    "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
             endif()
             # Build tree.
             apply_ctest_category_labels(
