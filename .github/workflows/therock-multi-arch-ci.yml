@@ -112,9 +112,11 @@ jobs:
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # HARDCODED: Use prebuilt stages from known good TheRock run
-      # rocm-libraries only affects math-libs, so we can reuse all other stages
-      # TODO(geomin12): Make dynamic once automatic baseline selection works
-      prebuilt_stages: ${{ inputs.prebuilt_stages || 'compiler-runtime,runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,media-libs,profiler-apps' }}
+      # Note: compiler-runtime is NOT copied because its CMake config files have
+      # hardcoded absolute paths from TheRock's build environment. Building it
+      # locally ensures correct paths. Other stages don't have this issue.
+      # TODO(geomin12): Add CMake config path relocation to enable compiler-runtime reuse
+      prebuilt_stages: ${{ inputs.prebuilt_stages || 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,media-libs,profiler-apps' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '29947789954' }}
       # Enable cross-repo artifact reuse: query TheRock for baseline runs
       stage_reuse_baseline_repository: "ROCm/TheRock"
