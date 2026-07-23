@@ -82,8 +82,8 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     auto checkedStride = [&](int64_t s, const char* name) -> int {
         if(s > static_cast<int64_t>(std::numeric_limits<int>::max()) || s < 0)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlan::execute -- stride '"
-                                    << name << "'=" << s << " out of int range");
+            HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlan::execute -- stride '" << name << "'=" << s
+                                                                            << " out of int range");
             throw std::overflow_error(std::string("HipFlash2FwdPlan: stride overflow '") + name
                                       + "'");
         }

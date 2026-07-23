@@ -67,8 +67,7 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
          [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
              -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
              auto engine = std::make_unique<hip_flash2_engine::HipFlash2Engine>();
-             engine->addPlanBuilder(
-                 std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
              return engine;
          }},
 #endif // HIPDNN_ENGINE_HIP_FLASH2
@@ -120,8 +119,7 @@ Container::Container()
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
-        _engineManager->addEngine(
-            engineDefinition.createEngine(*_devicePropertyProvider));
+        _engineManager->addEngine(engineDefinition.createEngine(*_devicePropertyProvider));
     }
 }
 

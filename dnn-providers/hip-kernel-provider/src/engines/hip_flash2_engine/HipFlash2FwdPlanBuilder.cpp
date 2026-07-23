@@ -209,7 +209,7 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     }
 
     HIPDNN_PLUGIN_LOG_INFO("HipFlash2FwdPlanBuilder::buildPlan -- loading " << coPath
-                                                                           << " fn=" << funcName);
+                                                                            << " fn=" << funcName);
 
     auto kernelOpt = loadKernelModule(coPath, funcName);
     if(!kernelOpt)
