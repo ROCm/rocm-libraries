@@ -16,7 +16,10 @@ LIBRARY_LOGIC_DIR: str = "3_LibraryLogic"
 LIBRARY_CLIENT_DIR: str = "4_LibraryClient"
 
 # If a file name is longer than this value, and `--short-filenames` is set, shorten it with a hash.
-MAX_FILENAME_LENGTH: int = 64
+# Local debug bump (was 64): keep more of the readable min-name in .s/.o filenames so ls shows
+# MT dims / MI / early params; stays under the ext4 255-char filename limit. Full name is always
+# in the .s .amdhsa_kernel directive regardless. Not for upstream.
+MAX_FILENAME_LENGTH: int = 200
 
 # Characters to use for GEMM naming, e.g., C[ij]=Sum[k] A[ik]*B[jk]
 INDEX_CHARS: str = "IJKLMNOPQRSTUVWXYZ"
