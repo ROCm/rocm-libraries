@@ -1857,18 +1857,24 @@ def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool:
-    # The sliced-K ring (32-wide K slices -> k_groups = HD/32) wins on BOTH head
-    # sizes: D128 (k_groups=4) and D64 (k_groups=2). Measured T=64+ring+cfvst+
-    # mask-limit (nw4) vs the prior per-head bests: D64 13-17% faster (beats Torch
-    # at S2048, ~parity elsewhere); D128 beats Torch S2048/S4096. So D64 and D128
-    # prefill now share the ring path.
-    # bf16 D128 now shares the ring path: the earlier exclusion attached the ring
-    # to the non-ring bf16-WIDE geometry (nw=2, no cfvst), which the ring cannot
-    # use -- the ring requires the conflict-free-V store (cfvst) and the wide nw=4
-    # flash geometry. The spec builder's ring branch instead uses the fp16-flash
-    # geometry (nw=4, tile=64, cfvst) -- verified numerically correct on gfx942
-    # (max_abs 0.00049, no NaN/Inf, GQA + MHA) on both the Python and C++ engines,
-    # with the byte-identity gate GREEN. So D64 and D128 bf16 prefill share the ring.
+    # The sliced-K ring (32-wide K slices -> k_groups = HD/32) is correctness-
+    # verified only for D64 (k_groups=2): measured T=64+ring+cfvst+mask-limit (nw4)
+    # is 13-17% faster than the prior D64 best (beats Torch at S2048, ~parity
+    # elsewhere).
+    #
+    # D128 (k_groups=4) is EXCLUDED for BOTH dtypes. The k_groups=4 ring produces
+    # numerically wrong results at realistic input magnitude -- max_abs ~0.5-1.3
+    # vs the fp32 oracle (bf16 AND fp16, GQA), even at S512 when the ring is forced
+    # -- while the non-ring D128 path (nw2/nw4, T=64, no ring) passes at max_abs
+    # ~0.0156 (bf16) / ~0.002 (fp16) on every S. #9198's "max_abs 0.00049 verified"
+    # claim was measured against a uniform_(-0.1,0.1) oracle whose near-uniform
+    # softmax never exercises the online-softmax running-max rescale across the four
+    # K slices, so the defect was masked; it reproduces immediately with randn
+    # (unit-variance) inputs (study s34_..._ring_correctness_regression). Until the
+    # k_groups=4 sliced-K accumulation is fixed in attention_tiled_2d.py, D128 stays
+    # on the non-ring flash geometry (correct-but-slower).
+    if _resolve_attention_arch() == "gfx942" and problem.head_size == 128:
+        return False
     if not (
         (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
         and problem.head_size in (64, 128)
