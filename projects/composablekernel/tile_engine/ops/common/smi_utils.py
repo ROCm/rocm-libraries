@@ -149,7 +149,11 @@ def _gpu_ids_amd_smi() -> list[str]:
 
 
 def detect_gpu_ids() -> list[str]:
-    """Return visible GPU id strings (best-effort)."""
+    """Return visible GPU id strings (best-effort).
+
+    Returns an empty list when no GPUs can be detected (no visibility env var
+    set and neither amd-smi nor rocm-smi is available or succeeds).
+    """
     env_ids = _gpu_ids_from_env()
     if env_ids is not None:
         return env_ids
@@ -165,7 +169,7 @@ def detect_gpu_ids() -> list[str]:
             return fetchers[tool]()
         except Exception:
             continue
-    return ["0"]
+    return []
 
 
 def count_gpus() -> int:
