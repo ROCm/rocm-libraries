@@ -894,12 +894,13 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         }
     }
 
-#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
     // LGBM-based short-circuit: cross-arch dispatcher trained on perf-DB data.
     // Preempts the ND TunaNet model. Returns the full solver vocabulary ranked
     // by predicted speed; the caller (GetSolutionsFallback) walks this list and
     // applies IsApplicable lazily, exactly like the TunaNet path -- so no
     // applicability check is done here.
+    // (No #if guard needed: PredictSolver is already inside the file-level
+    // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK block.)
     if(!env::disabled(MIOPEN_DEBUG_LGBM_PICK))
     {
         const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
@@ -919,7 +920,6 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         MIOPEN_LOG_I2("lgbm: disabled via MIOPEN_DEBUG_LGBM_PICK=0; using TunaNet/WTI for "
                       << device);
     }
-#endif
 
     // Strategy:
     // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
