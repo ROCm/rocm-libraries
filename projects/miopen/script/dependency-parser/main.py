@@ -436,6 +436,22 @@ def _atomic_write(path, text):
     os.replace(tmp, path)
 
 
+def _category_filter(cfg, name):
+    """Build a gtest filter (positives '-' excludes) for a yaml category, using BOTH
+    test_patterns and exclude (plus exclude_linux, since TheRock finalize runs on the linux
+    builder). Returns None if the category has no positive patterns."""
+    info = (cfg.get("test_categories") or {}).get(name) or {}
+    pos = [p for p in (info.get("test_patterns") or []) if p]
+    if not pos:
+        return None
+    exc = [e for e in (info.get("exclude") or []) if e]
+    exc += [e for e in (info.get("exclude_linux") or []) if e]
+    f = ":".join(pos)
+    if exc:
+        f += "-" + ":".join(exc)
+    return f
+
+
 def run_finalize_ctest(args):
     """TheRock builder step: burn each Dapper-enabled category's union filter into the
     install CTestTestfile, and retain the full category as a '<name>_unfiltered_suite'.
@@ -487,6 +503,13 @@ def run_finalize_ctest(args):
     dapper_filter = data.get("dapper_filter", "")
     fallback_mode = data.get("fallback_mode", "union")
 
+    # On TheRock the 'minimal' fallback (nothing test-relevant changed) runs the 'quick'
+    # category instead of the near-empty smoke default -- so a no-op change still exercises
+    # a small real suite. Built from quick's test_patterns and exclude (finalize runs on the
+    # linux builder, so include exclude_linux too).
+    quick_filter = _category_filter(cfg, "quick")
+    print(f"finalize-ctest: minimal fallback = 'quick' filter: {quick_filter}")
+
     add_test_re = re.compile(r"^\s*add_test\((\S+)\s")
     setprops_re = re.compile(r"^\s*set_tests_properties\((\S+)\s")
     filter_re = re.compile(r"--gtest_filter=([^\s)]+)")
@@ -523,7 +546,11 @@ def run_finalize_ctest(args):
             if cat and fm:
                 original_filter = fm.group(1)
                 union = resolve_filter(
-                    dapper_filter, fallback_mode, cat, original_filter
+                    dapper_filter,
+                    fallback_mode,
+                    cat,
+                    original_filter,
+                    minimal_filter=quick_filter,
                 )
                 name_unfiltered = unfiltered_name(name)
                 out.append(
