@@ -26,63 +26,12 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG)
 #include <unordered_map>
 #include <vector>
 
-// Each solver's Treelite-generated C is compiled with -Dpredict=lgbm_pcfg_<slug>_predict
-// (see src/CMakeLists.txt), so every model exports a distinct predict symbol. We
-// declare them all here and dispatch by solver name. The signature mirrors the
-// generated header.h: predict(union Entry*, int pred_margin, double* result),
-// where union Entry == LgbmEntry (see lgbm_predict.hpp).
-extern "C" {
-// LgbmEntry is declared at global scope in lgbm_predict.hpp (inside its own
-// extern "C"). Reference it unqualified here (we are at global scope too).
-#define MIOPEN_LGBM_PCFG_DECL(slug) void lgbm_pcfg_##slug##_predict(LgbmEntry*, int, double*);
-
-MIOPEN_LGBM_PCFG_DECL(ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
-MIOPEN_LGBM_PCFG_DECL(ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC)
-MIOPEN_LGBM_PCFG_DECL(ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC)
-MIOPEN_LGBM_PCFG_DECL(ConvBinWinogradRxSf2x3)
-MIOPEN_LGBM_PCFG_DECL(ConvBinWinogradRxSf3x2)
-MIOPEN_LGBM_PCFG_DECL(ConvHipImplicitGemm3DGroupBwdXdlops)
-MIOPEN_LGBM_PCFG_DECL(ConvHipImplicitGemm3DGroupFwdXdlops)
-MIOPEN_LGBM_PCFG_DECL(ConvHipImplicitGemm3DGroupWrwXdlops)
-MIOPEN_LGBM_PCFG_DECL(ConvHipImplicitGemmGroupBwdXdlops)
-MIOPEN_LGBM_PCFG_DECL(ConvHipImplicitGemmGroupFwdXdlops)
-MIOPEN_LGBM_PCFG_DECL(ConvHipImplicitGemmGroupWrwXdlops)
-
-#undef MIOPEN_LGBM_PCFG_DECL
-} // extern "C"
-
 namespace miopen {
 namespace ai {
 namespace lgbm {
 namespace pcfg {
 
 namespace {
-
-using PredictFn = void (*)(LgbmEntry*, int, double*);
-
-// solver name -> its renamed predict symbol.
-const std::unordered_map<std::string, PredictFn>& PredictTable()
-{
-#define MIOPEN_LGBM_PCFG_ENTRY(slug)       \
-    {                                      \
-        #slug, &lgbm_pcfg_##slug##_predict \
-    }
-    static const std::unordered_map<std::string, PredictFn> table = {
-        MIOPEN_LGBM_PCFG_ENTRY(ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvBinWinogradRxSf2x3),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvBinWinogradRxSf3x2),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvHipImplicitGemm3DGroupBwdXdlops),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvHipImplicitGemm3DGroupFwdXdlops),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvHipImplicitGemm3DGroupWrwXdlops),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvHipImplicitGemmGroupBwdXdlops),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvHipImplicitGemmGroupFwdXdlops),
-        MIOPEN_LGBM_PCFG_ENTRY(ConvHipImplicitGemmGroupWrwXdlops),
-    };
-#undef MIOPEN_LGBM_PCFG_ENTRY
-    return table;
-}
 
 inline void SetNumeric(LgbmEntry& e, double v)
 {
@@ -236,7 +185,7 @@ void FillProblemPrefix(std::vector<double>& prefix,
 // the caller treats as a walk terminator. Empty result iff the bucket is empty.
 // See FIRST_VALID_FIX.md: the caller walks this order and takes the first config
 // that passes IsValidPerformanceConfig.
-std::vector<std::string> RankBucket(PredictFn predict,
+std::vector<std::string> RankBucket(const LgbmForest& forest,
                                     const SolverModel& model,
                                     const std::vector<double>& prefix,
                                     const std::vector<Candidate>& cands)
@@ -257,9 +206,7 @@ std::vector<std::string> RankBucket(PredictFn predict,
         for(std::size_t a = 0; a < static_cast<std::size_t>(model.arg_count); ++a)
             SetNumeric(row[prob_n + a], args[a]);
 
-        double s = 0.0;
-        predict(row.data(), /*pred_margin=*/0, &s);
-        scores[c] = s;
+        scores[c] = forest.Score(row.data(), row.size());
     }
 
     std::vector<std::size_t> order(cands.size());
@@ -288,12 +235,8 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
         return {};
 
     const SolverModel* model = meta.Find(solver_name);
-    if(model == nullptr)
+    if(model == nullptr || !model->forest)
         return {}; // no perf-config model for this solver
-
-    const auto pit = PredictTable().find(solver_name);
-    if(pit == PredictTable().end())
-        return {}; // no compiled predictor (model/predictor mismatch)
 
     const std::string gfx_id = handle.GetDeviceName();
 
@@ -323,7 +266,7 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     std::vector<double> prefix;
     FillProblemPrefix(prefix, problem, handle, gfx_id, model->has_gfx_code);
 
-    auto ranked = RankBucket(pit->second, *model, prefix, bit->second);
+    auto ranked = RankBucket(*model->forest, *model, prefix, bit->second);
     if(!ranked.empty())
         MIOPEN_LOG_I2("lgbm_pcfg: "
                       << solver_name << " ranked " << ranked.size() << " configs, top=\""
@@ -340,10 +283,7 @@ std::vector<std::string> ScorePickForTest(const std::string& solver_name,
     if(!meta.IsReady())
         return {};
     const SolverModel* model = meta.Find(solver_name);
-    if(model == nullptr)
-        return {};
-    const auto pit = PredictTable().find(solver_name);
-    if(pit == PredictTable().end())
+    if(model == nullptr || !model->forest)
         return {};
     if(prob_feature_prefix.size() != static_cast<std::size_t>(model->prob_feat_count) ||
        cand_descs.size() != cand_args.size() || cand_descs.empty())
@@ -357,7 +297,7 @@ std::vector<std::string> ScorePickForTest(const std::string& solver_name,
             return {};
         cands.push_back(Candidate{cand_descs[i], cand_args[i]});
     }
-    return RankBucket(pit->second, *model, prob_feature_prefix, cands);
+    return RankBucket(*model->forest, *model, prob_feature_prefix, cands);
 }
 
 std::vector<std::string> MaybePickConfig(const std::string& solver_db_id,

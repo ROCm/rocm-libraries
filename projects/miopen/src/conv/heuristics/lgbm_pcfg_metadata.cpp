@@ -59,11 +59,24 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
                 continue;
             }
 
+            // Load the solver's LightGBM forest asset. A solver whose model
+            // file is missing/unparseable is dropped here (the picker abstains
+            // for it) rather than kept with no way to score.
+            const auto model_file = GetSystemDbPath() / ("lgbm_pcfg_" + it.key() + "_model.txt");
+            auto forest           = std::make_shared<const LgbmForest>(model_file.string());
+            if(!forest->IsReady())
+            {
+                MIOPEN_LOG_W("lgbm_pcfg: skipping " << it.key() << " (model file "
+                                                    << model_file.string() << " unavailable)");
+                continue;
+            }
+
             SolverModel m;
             m.feat_count      = static_cast<int>(n_feat);
             m.prob_feat_count = static_cast<int>(n_prob);
             m.arg_count       = static_cast<int>(n_arg);
             m.has_gfx_code    = has_gfx_code;
+            m.forest          = std::move(forest);
             models.emplace(it.key(), std::move(m));
         }
 

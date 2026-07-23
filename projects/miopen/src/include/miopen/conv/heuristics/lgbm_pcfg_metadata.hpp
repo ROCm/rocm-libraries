@@ -8,7 +8,9 @@
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
 #include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
+#include <miopen/conv/heuristics/lgbm_forest.hpp>
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -37,10 +39,14 @@ struct Candidate
 // prefix one longer.
 struct SolverModel
 {
-    int feat_count      = 0;     // total columns the predict() consumes
+    int feat_count      = 0;     // total columns the model consumes
     int prob_feat_count = 0;     // problem+GPU prefix length (base, or base+1)
     int arg_count       = 0;     // per-solver candidate arg columns
     bool has_gfx_code   = false; // prefix ends with the gfx_code categorical
+
+    // The solver's LightGBM forest, walked at runtime (lgbm_forest.hpp). Held
+    // by pointer so SolverModel stays cheap to move within the model map.
+    std::shared_ptr<const LgbmForest> forest;
 
     // bucket key "<gfx_id>|<direction>|<data_type>" -> candidate list
     std::unordered_map<std::string, std::vector<Candidate>> buckets;

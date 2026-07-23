@@ -333,40 +333,14 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     # (kernels/lgbm_rank_model.txt, installed with the other model assets
     # below) and is walked at runtime by lgbm_forest.cpp -- no generated C.
 
-    # Perf-config picker: one Treelite-compiled lambdarank model PER tuneable
-    # solver, under lgbm_pcfg_models/<solver_name>/. Each package exports the same
-    # generic Treelite symbols, so every solver's generated C is compiled with a
-    # distinct -Dpredict=lgbm_pcfg_<solver>_predict (etc.) prefix to avoid ODR
-    # collisions; the dispatch table in lgbm_pcfg_pick.cpp references the renamed
-    # predict symbols by the same per-solver name. (No quantize/is_categorical in
-    # these packages; defining a rename for an absent symbol is harmless.)
+    # Perf-config picker: one LightGBM lambdarank model PER tuneable solver.
+    # Each model ships as its native text dump (kernels/lgbm_pcfg_<solver>_
+    # model.txt, installed with the other model assets below) and is loaded +
+    # walked at runtime by lgbm_forest.cpp via the pcfg metadata loader. No
+    # generated C, so no per-solver symbol-rename / ODR machinery is needed.
     list(APPEND MIOpen_Source
         conv/heuristics/lgbm_pcfg_pick.cpp
         conv/heuristics/lgbm_pcfg_metadata.cpp)
-    set(LGBM_PCFG_EXPORT_SYMS
-        predict postprocess quantize
-        predict_unit0 predict_unit1 predict_unit2 predict_unit3
-        predict_unit4 predict_unit5 predict_unit6 predict_unit7
-        get_num_target get_num_class get_num_feature
-        get_threshold_type get_leaf_output_type
-        is_categorical)
-    file(GLOB LGBM_PCFG_MODEL_DIRS
-        LIST_DIRECTORIES true
-        ${CMAKE_CURRENT_SOURCE_DIR}/conv/heuristics/lgbm_pcfg_models/*)
-    foreach(model_dir ${LGBM_PCFG_MODEL_DIRS})
-        if(IS_DIRECTORY ${model_dir})
-            get_filename_component(slug "${model_dir}" NAME)
-            file(GLOB pcfg_srcs ${model_dir}/*.c)
-            list(APPEND MIOpen_Source ${pcfg_srcs})
-            set(pcfg_defs "-w")
-            foreach(sym ${LGBM_PCFG_EXPORT_SYMS})
-                list(APPEND pcfg_defs "-D${sym}=lgbm_pcfg_${slug}_${sym}")
-            endforeach()
-            set_source_files_properties(${pcfg_srcs} PROPERTIES
-                COMPILE_OPTIONS "${pcfg_defs}"
-                MIOPEN_SKIP_TIDY ON) # machine-generated Treelite C; not lintable
-        endif()
-    endforeach()
 endif()
 
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
@@ -998,16 +972,20 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         kernels/lgbm_model_meta.json
         kernels/lgbm_pcfg_model_meta.json
         kernels/lgbm_pcfg_catalog.json
-        kernels/lgbm_rank_model.txt)
+        kernels/lgbm_rank_model.txt
+        kernels/lgbm_pcfg_*_model.txt)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()
-    # Test-only golden-vector fixture for the LGBM forest walker parity gate
-    # (test/gtest/lgbm_picker.cpp). Copied next to the model assets so the test
-    # finds it via GetSystemDbPath(), but NOT installed into the package.
+    # Test-only golden-vector fixtures for the LGBM forest walker parity gates
+    # (test/gtest/lgbm_picker.cpp, lgbm_pcfg_picker.cpp). Copied next to the
+    # model assets so the tests find them via GetSystemDbPath(), but NOT
+    # installed into the package.
     if(BUILD_TESTING)
         configure_file("kernels/lgbm_rank_golden.json"
             "${KERNELS_BINARY_DIR}/lgbm_rank_golden.json" COPYONLY)
+        configure_file("kernels/lgbm_pcfg_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_pcfg_golden.json" COPYONLY)
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)
