@@ -1365,6 +1365,14 @@ try
     hipfftIOType iotype;
     HIPFFT_EXPECT_SUCCESS(iotype.init(type));
 
+    // Creating a plan with multiple devices is not supported if the batch size is
+    // smaller than the number of devices: investigations are required to match
+    // source-of-truth behavior (cufft) for this case
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+    if(plan->device_contexts.size() > 1 && static_cast<int>(plan->device_contexts.size()) > batch)
+        return HIPFFT_NOT_IMPLEMENTED;
+
     return hipfftMakePlan_internal(plan,
                                    lengths,
                                    iotype,
