@@ -197,8 +197,6 @@ Every descriptor also carries a stable, opaque `id` used for cross-references an
 logging and diagnostics; both appear in the examples. The examples are illustrative, and the
 `schema`/version plumbing is shown once here and elided elsewhere.
 
-![Descriptor formats: a KDP binding a shared matcher set and one UDD over a vector of child UKDs, each referencing reusable UED and UHD by ID](../images/ukd_descriptor_formats.svg)
-
 **UED, an engine with its knobs and notes:**
 
 ```jsonc
