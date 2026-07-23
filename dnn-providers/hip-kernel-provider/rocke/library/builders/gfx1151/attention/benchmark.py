@@ -65,6 +65,12 @@ from kernels.gfx1151.wmma_fmha_swapqk_persistent import (
     num_work_items,
     persistent_grid,
 )
+from kernels.gfx1151.wmma_fmha_swapqk_pmq import (
+    SwapQKPersistentCfg,
+    build_wmma_fmha_swapqk_pmq,
+    swapqk_pmq_grid,
+)
+from kernels.gfx1151.wmma_fmha_swapqk_pmq import num_work_items as pmq_num_work_items
 from kernels.gfx1151.wmma_fmha_multiwave import (
     MultiWaveCfg,
     build_wmma_fmha_multiwave,
@@ -218,6 +224,24 @@ KERNELS = {
         persistent=True,
         extra_result=lambda cfg, shape: {
             "num_tiles": num_work_items(cfg, seqlen_q=shape.seqlen_q, batch=shape.batch)
+        },
+    ),
+    # PMQ = persistent work-queue + MQ2 register query-blocking + f16 O-carry.
+    # The large-Sq D128 winner (MALL-resident KV reuse via qb_major traversal).
+    "pmq": KernelSpec(
+        SwapQKPersistentCfg,
+        lambda cfg, arch, shape: build_wmma_fmha_swapqk_pmq(
+            cfg,
+            arch=arch,
+            num_q_blocks=shape.seqlen_q // cfg.q_rows_per_cta,
+            batch=shape.batch,
+        ),
+        lambda cfg, shape: swapqk_pmq_grid(cfg),
+        persistent=True,
+        extra_result=lambda cfg, shape: {
+            "num_tiles": pmq_num_work_items(
+                cfg, seqlen_q=shape.seqlen_q, batch=shape.batch
+            )
         },
     ),
     "multiwave": KernelSpec(

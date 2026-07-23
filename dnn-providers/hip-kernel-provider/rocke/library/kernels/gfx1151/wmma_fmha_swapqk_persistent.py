@@ -489,7 +489,11 @@ def build_wmma_fmha_persistent(
         with b.scf_if(is_lead):
             v = b.global_atomic_add(Counter, c0, c_one)
             b.smem_store_vN(brd, [c0], v, 1)
-        b.sync()
+        # LDS-only barrier (lgkmcnt + s_barrier) publishes ``brd`` without a
+        # full vmcnt drain, so the previous work-item's outstanding V-gathers /
+        # O-stores keep flowing across the work-item boundary (avoids the
+        # per-tile memory-pipeline stall a full ``b.sync()`` would impose).
+        b.sync_lds_only()
         return b.vec_extract(b.smem_load_vN(brd, c0, dtype=I32, n=1), 0)
 
     ploop = b.scf_for_iter(

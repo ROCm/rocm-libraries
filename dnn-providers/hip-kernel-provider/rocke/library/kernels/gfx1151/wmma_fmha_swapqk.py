@@ -99,6 +99,39 @@ class SwapQKCfg:
     # = more DRAM MLP), only ~3% behind w1 at L2048 (19.0 vs 19.5). +11-15% over
     # the gather winner in the compute-bound regime.
     n_waves: int = 2
+    # q_block (MQ): query-blocking factor. Each wave processes MQ 16-row query
+    # tiles per K-loop iteration, REUSING the loaded K fragment (QK) and V
+    # fragment (PV) across all MQ groups -> the KV DRAM read is amortized over
+    # MQ x more queries, raising arithmetic intensity to lift the L>=4096 kernel
+    # off the DRAM roofline (the barrier-free alternative to the coop/LDS
+    # dead-ends). Costs MQ live O accumulators (MQ x n_dk x c_frag), so it only
+    # fits where O is small: D64 (n_dk=4 -> 32 VGPR/group, 141 VGPR baseline has
+    # room for MQ=2) -- at D128 (64 VGPR/group) MQ=2 hits the 256-VGPR wall.
+    # Requires the default (non-pipeline) dual-gather PV path.
+    # MEASURED WIN (hardware, gfx1151 stx-halo, D64 dense H24 B1, w2 bn64 ilp2;
+    # correct -- max_abs 3.05e-5): MQ=2 (vgpr 141->246, spill 0) breaks the DRAM
+    # roofline and stays compute-bound where the baseline craters --
+    #     L2048  23.8 -> 26.4 TF (+11%)
+    #     L4096  13.0 -> 26.9 TF (+106%)   <-- beats 23 TF at L>=4096
+    #     L8192   4.1 -> 20.5 TF (+404%)
+    # MQ=4 register-trim attempt (block_n/ilp down cuts spill 268->67 since the
+    # p_tiles/scores liveness scales with n_kv_sub=block_n/16): still LOSES to
+    # MQ=2 at every L -- MQ4 bn16/ilp1/of16 gets 14.7/9.3/7.0 TF @ L8k/16k/32k vs
+    # MQ2 bn64's 22.8/18.3/11.5. Can't reach spill=0 (the carried f16 O 64 VGPR +
+    # f32 PV transient 64 VGPR are irreducible without 2x V traffic), and the
+    # bn16 needed to shrink spill carries its own throughput penalty. The extra
+    # reuse and the register cost fight each other -> MQ=2 is the hard ceiling.
+    # MQ=4 spills (381 f32 / 268 even with o_f16 O-carry) and craters: each
+    # extra query group costs ~105 VGPR (O + P-tiles + scores/Q transients), and
+    # o_f16 only trims the O part (~11 VGPR), so MQ=4 (~456 VGPR) can't fit 256.
+    # MQ=2 is the register ceiling at D64 (sustained win to ~L8K, tapering to
+    # ~14-18 TF by L16-32K); sustained 25-26 beyond that needs the persistent
+    # KV-stationary kernel, not more MQ. D128 MQ=2 does NOT fit -- vgpr=256 +
+    # spill=235 -> 11.6 TF @ L4096 (worse than the 18 TF baseline); the wall is
+    # far past what o_f16 O-carry (~64 VGPR saved) could recover. So query-
+    # blocking is a D64 (and smaller-head) win; D128 L>=4096 stays DRAM-bound
+    # (~17-18 TF), register-wall-limited as throughout the campaign.
+    q_block: int = 1
     waves_per_eu: Optional[int] = None
     sched_mode: str = "pingpong"  # "none" | "pingpong"
     # iglp: -1 = off; >=0 = emit llvm.amdgcn.iglp_opt(level) at the loop-body top
@@ -221,6 +254,32 @@ class SwapQKCfg:
     # pingpong), while LDS staging breaks the clause/pipeline structure -- vmcnt(0)
     # drains EXPLODE 20->77 and instr 1215->1689. L1-hit >= LDS here.
     q_lds: bool = False
+    # kv_lds: PROTOTYPE (large-L / DRAM-bound regime). Keep the ENTIRE swapqk
+    # architecture (transposed QK, in-lane softmax, register P-transpose, dual,
+    # pingpong) unchanged, but source the per-K-loop K and V tile from a
+    # cooperatively-staged LDS copy instead of re-reading it from global every
+    # iteration. All W waves in the CTA share one LDS-resident K/V tile, so the
+    # DRAM read of that tile is amortized across the CTA's query rows (cuts the
+    # cross-wave KV re-reads that make the kernel DRAM-bound at L>=4096, where the
+    # per-head KV working set spills L2 to a ~47% hit rate). Costs one cooperative
+    # load + 2 s_barriers per K-tile (which partially fight pingpong). Forces the
+    # flat LDS V-read path (buffer_gather is a global-only lever).
+    # DEAD-END (hardware, gfx1151 stx-halo, dense H24 B1 D128, w2 bn64 ilp2;
+    # correct -- max_abs 3.05e-5 == gather): loses badly AND the gap WIDENS with
+    # L, the opposite of the hypothesis --
+    #     L512  24.2 -> 9.1 TF (0.38x)
+    #     L2048 22.4 -> 7.7 TF (0.35x)
+    #     L4096 17.5 -> 5.1 TF (0.29x)
+    # Root causes: (1) vgpr 197->256 + spill=16 (coop loader's div/mod addressing
+    # + LDS staging), (2) dsld 0->320 -- the flat V read is 16 uncoalesced scalar
+    # ds_loads/fragment, far worse than the strided buffer gather it replaces,
+    # (3) 2 s_barriers/tile serialize the waves and kill the pingpong 2.25x lever.
+    # Crucially the per-tile overhead scales with the K-loop trip count, so it
+    # gets RELATIVELY worse as L grows -- the DRAM savings (gld 80->48, only ~w2x
+    # since 2 waves share) never approach offsetting it. Confirms the README
+    # lesson holds even in the L4096 DRAM-bound regime: on this large-cache APU,
+    # barriers + LDS traffic cost more than the KV re-reads they remove.
+    kv_lds: bool = False
     # o_f16: carry the O accumulator across the K-loop as f16 (32 VGPR for D128)
     # instead of f32 (64 VGPR), and REORDER the PV to d-pair-outer / ns-inner so
     # each O d-pair is fully accumulated (both kv sub-tiles) then immediately
@@ -279,7 +338,7 @@ class SwapQKCfg:
 
     @property
     def q_rows_per_cta(self) -> int:
-        return 16 * self.n_waves
+        return 16 * self.n_waves * self.q_block
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -304,6 +363,8 @@ class SwapQKCfg:
             "pipe" if self.pipeline else "nopipe",
             "qh" if self.q_hoist else "noqh",
             "qlds" if self.q_lds else "qglob",
+            "kvlds" if self.kv_lds else "kvglob",
+            f"qb{self.q_block}",
             "of16" if self.o_f16 else "of32",
             "d16hi" if self.d16hi else "d16lo",
             f"iglp{self.iglp}" if self.iglp >= 0 else "noiglp",
@@ -411,16 +472,27 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         O, shape=(qh, hs, 1), dtype=dtype_ir, strides=(soh, 1, so)
     )
 
+    MQ = cfg.q_block  # query-blocking factor (16-row query tiles per wave)
+    if MQ > 1 and cfg.pipeline:
+        raise ValueError("q_block>1 is incompatible with pipeline")
     q_rows_per_cta = b.const_i32(cfg.q_rows_per_cta)
     cta_row0 = b.mul(q_group, q_rows_per_cta)
-    wave_row0 = b.add(cta_row0, b.mul(wave_id, c16))
+    # this wave owns MQ contiguous 16-row query tiles.
+    wave_base = b.add(cta_row0, b.mul(wave_id, b.const_i32(16 * MQ)))
     batch_tok_q = b.mul(batch, seqlen_q)
     batch_tok_k = b.mul(batch, seqlen_k)
-    q_pos_base = wave_row0
-    q_token_base = b.add(wave_row0, batch_tok_q)
-
-    # Q window is loop-invariant (this wave's 16 query rows); loaded as the B operand.
-    qwin = make_tile_window(Q_view, (1, 16, hs), origin=(head, q_token_base, c0))
+    # per query-group (g) row bases; MQ==1 reduces to the original single group.
+    q_pos_base_g = [b.add(wave_base, b.const_i32(g * 16)) for g in range(MQ)]
+    q_token_base_g = [b.add(qpb, batch_tok_q) for qpb in q_pos_base_g]
+    # Q windows are loop-invariant (each group's 16 query rows); the B operand.
+    qwin_g = [
+        make_tile_window(Q_view, (1, 16, hs), origin=(head, qtb, c0))
+        for qtb in q_token_base_g
+    ]
+    # single-group aliases (used by the MQ==1 fast path unchanged).
+    q_pos_base = q_pos_base_g[0]
+    q_token_base = q_token_base_g[0]
+    qwin = qwin_g[0]
 
     pingpong = cfg.sched_mode == "pingpong"
 
@@ -517,8 +589,9 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
     n_i32 = a_frag // 2  # 8 dwords per <16 x f16> fragment
 
     def _load_col(k_base, vwin, d_col):
-        """Gather V[kv=0..15, d_col] (per-lane d_col) via buffer or flat path."""
-        if cfg.buffer_gather:
+        """Gather V[kv=0..15, d_col] (per-lane d_col) via buffer or flat path.
+        kv_lds forces the flat path so it reads the shared-LDS window."""
+        if cfg.buffer_gather and not cfg.kv_lds:
             elem0 = b.add(b.add(kvh_off, b.mul(k_base, sv)), d_col)
             voff = b.mul(elem0, c2)
 
@@ -630,18 +703,84 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         hi = Q_lds.load_vec(b, [wave_id, col, b.const_i32(d * 16 + 8)], n=8)
         return WmmaTensor(atom, "b", b.vec_concat(lo, hi), arch)
 
+    # ---- kv_lds: cooperative K/V tile staging in shared LDS (large-L prototype) ----
+    K_lds = V_lds = None
+    if cfg.kv_lds:
+        _KVPAD = 8  # bank-pad on the d row (K/V read consecutive d per token)
+        _kv_strides = (block_n * (hs + _KVPAD), hs + _KVPAD, 1)
+        K_lds = make_lds_view(
+            b,
+            dtype=dtype_ir,
+            shape=(1, block_n, hs),
+            strides=_kv_strides,
+            name_hint="Ksh",
+        )
+        V_lds = make_lds_view(
+            b,
+            dtype=dtype_ir,
+            shape=(1, block_n, hs),
+            strides=_kv_strides,
+            name_hint="Vsh",
+        )
+        _nthreads = wave * W
+        _tot = block_n * hs
+        if _tot % (_nthreads * 8) != 0:
+            raise ValueError(
+                f"kv_lds coop loader needs block_n*hs ({_tot}) divisible by "
+                f"n_threads*8 ({_nthreads * 8}); block_n={block_n} hs={hs} W={W}"
+            )
+        _kv_chunks = _tot // (_nthreads * 8)
+        _c8 = b.const_i32(8)
+        _c_hs = b.const_i32(hs)
+
+    def coop_load_kv(k_block_base):
+        """All W waves cooperatively stream this K-tile's K and V (block_n x hs)
+        from global -> shared LDS once; every wave then reads from LDS. Two
+        barriers/tile: before overwrite (prev readers done) + after store (tile
+        visible to all waves)."""
+        b.sync_lds_only()  # prev iter's LDS readers finish before we overwrite
+        kbase_tok = b.add(batch_tok_k, k_block_base)
+        for i in range(_kv_chunks):
+            c = b.add(tid, b.const_i32(i * (wave * W)))
+            base = b.mul(c, _c8)
+            row = b.div(base, _c_hs)
+            colc = b.mod(base, _c_hs)
+            gtok = b.add(kbase_tok, row)
+            k8 = K_view.load_vec(b, [kv_head, gtok, colc], n=8)
+            K_lds.store_vec(b, [c0, row, colc], k8, 8)
+            v8 = V_view.load_vec(b, [kv_head, gtok, colc], n=8)
+            V_lds.store_vec(b, [c0, row, colc], v8, 8)
+        b.sync_lds_only()  # freshly-staged tile visible to all waves
+
+    def k_lds_read(ns, d):
+        # WMMA "a" fragment = 16 consecutive d-values at row = kv = ns*16 + lane%16.
+        # LDS ds_read caps at vec8, so read it as 2 vec8 + concat (cf. q_lds_read).
+        row = b.add(b.const_i32(ns * 16), col)
+        lo = K_lds.load_vec(b, [c0, row, b.const_i32(d * 16)], n=8)
+        hi = K_lds.load_vec(b, [c0, row, b.const_i32(d * 16 + 8)], n=8)
+        return WmmaTensor(atom, "a", b.vec_concat(lo, hi), arch)
+
+    def v_window_lds(ns):
+        return make_tile_window(
+            V_lds, (1, 16, hs), origin=(c0, b.const_i32(ns * 16), c0)
+        )
+
     def compute_qk(k_block_base):
         """S^T = K @ Q^T for all n_kv_sub sub-tiles -> list of score WmmaTensors."""
         if pingpong:
             b.s_setprio(1)
         subs = []
         for ns in range(n_kv_sub):
-            kwin = k_window(b.add(k_block_base, b.const_i32(ns * 16)))
+            if not cfg.kv_lds:
+                kwin = k_window(b.add(k_block_base, b.const_i32(ns * 16)))
             acc_ilp = [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(ilp)]
             for d in range(n_dk):
-                k_tile = load_wmma_tile(
-                    b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
-                )
+                if cfg.kv_lds:
+                    k_tile = k_lds_read(ns, d)  # K from shared LDS (2x vec8)
+                else:
+                    k_tile = load_wmma_tile(
+                        b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
+                    )
                 if cfg.q_hoist:
                     q_tile = q_hoisted[d]
                 elif cfg.q_lds:
@@ -661,6 +800,220 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             b.s_setprio(0)
         return subs
 
+    # ================= q_block (MQ>1): query-blocked, shared K/V loads =========
+    # Self-contained path (eager rescale, f32 O, dual-gather). Reuses the same
+    # helper closures; only the state is MQ-group-indexed and the K (QK) / V (PV)
+    # fragment loads are hoisted so all MQ groups share them -> KV DRAM amortized
+    # MQ x. MQ==1 falls through to the tuned single-group code below untouched.
+    if MQ > 1:
+        _exp2 = b.exp2_fast if cfg.fast_exp2 else b.exp2
+        gs = 2 + n_dk  # iter-arg stride per group: m, l, n_dk O tiles
+        qb_iter = []
+        for g in range(MQ):
+            qb_iter.append((f"qm{g}", neg_inf))
+            qb_iter.append((f"ql{g}", zero_f))
+            for d in range(n_dk):
+                o0 = b.zero_vec(dtype_ir, c_frag) if cfg.o_f16 else atom.zero_acc(b)
+                qb_iter.append((f"qo{g}_{d}", o0))
+        kloop = b.scf_for_iter(
+            b.const_i32(0), loop_stop, b.const_i32(1), iter_args=qb_iter, iv_name="kt"
+        )
+        with kloop as (kt, state):
+            m_i = [state[g * gs] for g in range(MQ)]
+            l_i = [state[g * gs + 1] for g in range(MQ)]
+            accs = [list(state[g * gs + 2 : g * gs + 2 + n_dk]) for g in range(MQ)]
+            k_block_base = b.mul(kt, c_block_n)
+            k_bases = [
+                b.add(b.add(batch_tok_k, k_block_base), b.const_i32(ns * 16))
+                for ns in range(n_kv_sub)
+            ]
+            vwins = [
+                v_window(b.add(k_block_base, b.const_i32(ns * 16)))
+                for ns in range(n_kv_sub)
+            ]
+
+            # ---- QK: load each K fragment ONCE, reuse across MQ query groups ----
+            if pingpong:
+                b.s_setprio(1)
+            subs = [[None] * n_kv_sub for _ in range(MQ)]
+            for ns in range(n_kv_sub):
+                kwin = k_window(b.add(k_block_base, b.const_i32(ns * 16)))
+                acc = [
+                    [WmmaTensor.zero_acc(b, atom, arch=arch) for _ in range(ilp)]
+                    for _ in range(MQ)
+                ]
+                for d in range(n_dk):
+                    k_tile = load_wmma_tile(
+                        b, kwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
+                    )
+                    for g in range(MQ):
+                        q_tile = load_wmma_tile(
+                            b,
+                            qwin_g[g],
+                            atom,
+                            lane,
+                            role="b",
+                            k_offset=d * 16,
+                            lead=[c0],
+                        )
+                        acc[g][d % ilp] = wmma_mma(b, k_tile, q_tile, acc[g][d % ilp])
+                for g in range(MQ):
+                    sc = acc[g][0]
+                    for si in range(1, ilp):
+                        sc = WmmaTensor(
+                            atom, "c", b.vector_add(sc.value, acc[g][si].value), arch
+                        )
+                    subs[g][ns] = sc
+            if pingpong:
+                b.s_setprio(0)
+
+            # ---- per-group online softmax (eager) + register P-transpose ----
+            p_tiles = [None] * MQ
+            alpha_vec = [None] * MQ
+            m_new = [None] * MQ
+            l_new = [None] * MQ
+            for g in range(MQ):
+                s_sub = []
+                for ns in range(n_kv_sub):
+                    kv_base = b.add(k_block_base, b.const_i32(ns * 16))
+                    row = []
+                    for i in range(c_frag):
+                        kv_rel, q_rel = subs[g][ns].coord(b, lane, i)
+                        s_i = b.fmul(subs[g][ns].slot(b, i), scale_log2)
+                        s_i = apply_attention_mask(
+                            b,
+                            s_i,
+                            mask_mode=cfg.mask_mode,
+                            k_idx=b.add(kv_base, kv_rel),
+                            query_pos=b.add(q_pos_base_g[g], q_rel),
+                            sliding_window=0,
+                        )
+                        row.append(s_i)
+                    s_sub.append(row)
+                all_s = [v for r in s_sub for v in r]
+                local_max = _tree(list(all_s), b.fmax)
+                tile_max = b.fmax(local_max, permx16_f32(local_max))
+                mn = b.fmax(m_i[g], tile_max)
+                al = _exp2(b.fsub(m_i[g], mn))
+                ps = [
+                    [_exp2(b.fsub(s_sub[ns][i], mn)) for i in range(c_frag)]
+                    for ns in range(n_kv_sub)
+                ]
+                all_p = [v for r in ps for v in r]
+                local_sum = _tree(list(all_p), b.fadd)
+                tile_sum = b.fadd(local_sum, permx16_f32(local_sum))
+                m_new[g] = mn
+                l_new[g] = b.fadd(b.fmul(l_i[g], al), tile_sum)
+                av = b.zero_vec_f32(c_frag)
+                for i in range(c_frag):
+                    av = b.vec_insert(av, al, i)
+                alpha_vec[g] = av
+                p_tiles[g] = [
+                    WmmaTensor(atom, "b", p_transpose_reg(ps[ns]), arch)
+                    for ns in range(n_kv_sub)
+                ]
+
+            # ---- PV: rescale O[g] by alpha[g], then share each V fragment across groups ----
+            if pingpong:
+                b.s_setprio(1)
+            new_accs = [[None] * n_dk for _ in range(MQ)]
+            if cfg.o_f16:
+                # d-pair-outer: only the current d-pair is upgraded to f32 (per
+                # group); carried O stays f16 -> halves the live O register peak,
+                # which is what lets a higher MQ fit at D64/D128.
+                for dp in range(0, n_dk, 2):
+                    t0 = [
+                        WmmaTensor(
+                            atom,
+                            "c",
+                            b.vector_mul(b.vec_ext_to_f32(accs[g][dp]), alpha_vec[g]),
+                            arch,
+                        )
+                        for g in range(MQ)
+                    ]
+                    t1 = [
+                        WmmaTensor(
+                            atom,
+                            "c",
+                            b.vector_mul(
+                                b.vec_ext_to_f32(accs[g][dp + 1]), alpha_vec[g]
+                            ),
+                            arch,
+                        )
+                        for g in range(MQ)
+                    ]
+                    for ns in range(n_kv_sub):
+                        frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
+                        a0 = WmmaTensor(atom, "a", frag_d, arch)
+                        a1 = WmmaTensor(atom, "a", frag_d1, arch)
+                        for g in range(MQ):
+                            t0[g] = wmma_mma(b, a0, p_tiles[g][ns], t0[g])
+                            t1[g] = wmma_mma(b, a1, p_tiles[g][ns], t1[g])
+                    for g in range(MQ):
+                        new_accs[g][dp] = b.vec_trunc_f32_to_f16(t0[g].value)
+                        new_accs[g][dp + 1] = b.vec_trunc_f32_to_f16(t1[g].value)
+            else:
+                new_accs = [
+                    [
+                        WmmaTensor(atom, "c", accs[g][d], arch).scale(b, alpha_vec[g])
+                        for d in range(n_dk)
+                    ]
+                    for g in range(MQ)
+                ]
+                for ns in range(n_kv_sub):
+                    for dp in range(0, n_dk, 2):
+                        frag_d, frag_d1 = dual_gather(k_bases[ns], vwins[ns], dp)
+                        a0 = WmmaTensor(atom, "a", frag_d, arch)
+                        a1 = WmmaTensor(atom, "a", frag_d1, arch)
+                        for g in range(MQ):
+                            new_accs[g][dp] = wmma_mma(
+                                b, a0, p_tiles[g][ns], new_accs[g][dp]
+                            )
+                            new_accs[g][dp + 1] = wmma_mma(
+                                b, a1, p_tiles[g][ns], new_accs[g][dp + 1]
+                            )
+            if pingpong:
+                b.s_setprio(0)
+
+            yields = []
+            for g in range(MQ):
+                yields.append(m_new[g])
+                yields.append(l_new[g])
+                if cfg.o_f16:
+                    yields.extend(new_accs[g])  # already raw f16 values
+                else:
+                    yields.extend(a.value for a in new_accs[g])
+            b.scf_yield(*yields)
+
+        res = kloop.results
+        for g in range(MQ):
+            l_f = res[g * gs + 1]
+            inv_l = b.select(b.fcmp("oeq", l_f, zero_f), zero_f, b.rcp(l_f))
+
+            def _rescale(bld, val, slot, row, colv, _inv=inv_l):
+                return bld.fmul(val, _inv)
+
+            accs_g = res[g * gs + 2 : g * gs + 2 + n_dk]
+            for d in range(n_dk):
+                owin = make_tile_window(
+                    O_T_view,
+                    (1, 16, 16),
+                    origin=(head, b.const_i32(d * 16), q_token_base_g[g]),
+                )
+                ov = b.vec_ext_to_f32(accs_g[d]) if cfg.o_f16 else accs_g[d]
+                store_wmma_tile(
+                    b,
+                    owin,
+                    WmmaTensor(atom, "c", ov, arch),
+                    lane,
+                    col_offset=0,
+                    lead=[c0],
+                    align=2,
+                    transform=_rescale,
+                )
+        b.ret()
+        return b.kernel
+
     if cfg.pipeline:
         # prologue: tile 0's QK, carried as iter-args (current-tile scores).
         for ns, sc in enumerate(compute_qk(c0)):
@@ -674,6 +1027,11 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
         k_block_base = b.mul(kt, c_block_n)
         if cfg.iglp >= 0:
             b.iglp_opt(cfg.iglp)
+
+        # kv_lds: cooperatively stage this K-tile's K and V into shared LDS
+        # BEFORE the QK/PV read them (all W waves then share the one copy).
+        if cfg.kv_lds:
+            coop_load_kv(k_block_base)
 
         # ---- QK: S^T = K @ Q^T. Pipelined -> consume the carried current-tile
         # scores and issue the NEXT tile's QK now (overlaps this tile's softmax/
@@ -693,17 +1051,22 @@ def build_wmma_fmha_swapqk(cfg: SwapQKCfg, arch: str = "gfx1151") -> KernelDef:
             b.s_setprio(0)
 
         # ---- flattened PV step order + V gather dispatch (flat window | buffer SRD) ----
-        vwins = [
-            v_window(b.add(k_block_base, b.const_i32(ns * 16)))
-            for ns in range(n_kv_sub)
-        ]
+        # kv_lds sources V from the shared-LDS tile via the flat window path
+        # (buffer_gather is a global-only lever, so it's bypassed here).
+        if cfg.kv_lds:
+            vwins = [v_window_lds(ns) for ns in range(n_kv_sub)]
+        else:
+            vwins = [
+                v_window(b.add(k_block_base, b.const_i32(ns * 16)))
+                for ns in range(n_kv_sub)
+            ]
         k_bases = [
             b.add(b.add(batch_tok_k, k_block_base), b.const_i32(ns * 16))
             for ns in range(n_kv_sub)
         ]
 
         def do_gather(ns, d):
-            if cfg.buffer_gather:
+            if cfg.buffer_gather and not cfg.kv_lds:
                 return gather_v_a_frag_buf(k_bases[ns], d)
             return gather_v_a_frag(vwins[ns], d)
 
