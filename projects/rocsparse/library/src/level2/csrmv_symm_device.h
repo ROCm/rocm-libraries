@@ -345,7 +345,7 @@ namespace rocsparse
                 {
                     const I local_first_val = (csr_row_ptr[row + st] - csr_row_ptr[row]);
                     const I local_last_val  = csr_row_ptr[row + st + 1] - csr_row_ptr[row];
-                    const I workForEachThread 
+                    const I workForEachThread
                         = (local_last_val - local_first_val) / numThreadsForRed;
 
                     // only works when numThreadsForRed is a power of 2
