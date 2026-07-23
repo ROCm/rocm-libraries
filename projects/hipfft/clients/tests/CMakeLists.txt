@@ -369,28 +369,11 @@ endif()
 find_package( GTest 1.17 QUIET )
 
 if( GTest_FOUND )
-  target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
   target_link_libraries( hipfft-test PRIVATE GTest::gtest )
 else()
-  set(googletest_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/googletest/lib/libgtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
-  message(STATUS "googletest_LIBRARY: ${googletest_LIBRARY}")
-  include( ExternalProject )
-  ExternalProject_Add(googletest
-    URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
-    URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
-    CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/googletest
-    BUILD_BYPRODUCTS ${googletest_LIBRARY}
-    DOWNLOAD_NO_PROGRESS YES
-  )
-
-  ExternalProject_Get_Property(googletest install_dir)
-  set(Gtest_INCLUDE_DIR "${install_dir}/include")
-  target_include_directories(hipfft-test PRIVATE "${Gtest_INCLUDE_DIR}")
-  
-  set(Gtest_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest/include )
-  include_directories(${Gtest_INCLUDE_DIR})
-  
-  add_dependencies(hipfft-test googletest)
+  set( GTEST_TARGET hipfft-test )
+  set( GTEST_LINK_MAIN OFF )
+  include( ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/build-gtest.cmake )
 endif()
 
 # tests have callback functions, which need to be built as relocatable device code
