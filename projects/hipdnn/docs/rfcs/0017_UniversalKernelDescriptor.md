@@ -33,7 +33,7 @@ kernel's behavior as code creates four problems that compound as the library gro
 - **Scale.** Kernels multiply combinatorially: a variant per architecture, data type, and problem
   shape, and again per fused form. rocKE (ROCm's kernel engine) already carries three to four scaled
   dot-product attention (SDPA) forward variants per architecture, and convolution alone spans several
-  algorithm families (implicit and explicit general matrix multiply (GEMM),
+  algorithm families (implicit GEMM, explicit GEMM,
   direct, and Winograd). Ten variants per architecture is a near-term floor, with hundreds looming as
   coverage grows toward every algorithm and architecture. Each variant is another hand-written engine.
 - **Staleness.** These kernels come from upstream authors who revise them continuously, but every
@@ -101,7 +101,7 @@ designed in its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)). The fir
 single-kernel path. Multi-kernel launch and composition
 ([Section 13](#13-multiple-kernels-and-composition)) are fast-follows, not part of this initial design.
 A named escape hatch covers a step that genuinely needs C++ (Sections [5](#5-matching-and-the-umd) and
-[6](#6-dispatch-and-workspace)); anything needing a new C application programming interface (C-API) surface or runtime dependency stays a
+[6](#6-dispatch-and-workspace)); anything needing a new C-API surface or runtime dependency stays a
 full provider. This complements build-time codegen rather than replacing it.
 
 ### 1.1 What Ships Now Versus Later
@@ -308,7 +308,7 @@ kernel that differs in any of them belongs in a different pack.
 
 Matching turns a hand-coded applicability check into declarative data. Today the check is a C++ switch
 over the graph; the same intent becomes a **UMD (Universal Match Descriptor)**, a reusable **matcher**:
-a **structural pattern** (named op nodes and their operand/result edges over the op graph, a directed acyclic graph (DAG), when the check
+a **structural pattern** (named op nodes and their operand/result edges over the op DAG, when the check
 is about graph shape) plus a **criteria expression** over the fields the pattern binds. A KDP lists a
 **set of matcher IDs**; a kernel is applicable only when **all** pass, and matchers are shared by ID
 across packs. A validated study of MIOpen CK convolution and rocKE SDPA applicability found that over a
@@ -340,7 +340,7 @@ namespaces, and every criteria and dispatch expression draws from the same set:
   ([Section 4](#4-descriptor-formats)), so a check binds a kernel to the graph, e.g.
   `divisible($q.head_size, $kernel.tile_d)`.
 - **Device properties:** `$device.<field>` such as `$device.lds_size` or `$device.warp_size`, for a
-  check like a local data share (LDS) budget `<=($kernel.lds_per_block, $device.lds_size)`.
+  check like an LDS budget `<=($kernel.lds_per_block, $device.lds_size)`.
 
 New fields are added to the schema and referenced the same way; the full field and operator vocabulary,
 the operand-property set (broadcast, alignment, sparse and ragged kinds), and the interpreter profile
@@ -416,9 +416,8 @@ produces.
 
 ![A live graph is matched against a declarative pattern, binding named variables](../images/ukd_criteria_match.svg)
 
-**Variable-rank tensors.** Naming every dim in `shape` pins an exact rank. When rank varies (2D `NCHW`
-vs 3D `NCDHW`: batch and channels, then 2 or 3 spatial dims), the pattern names the fixed dims and binds
-the variable run as a single vector, e.g.
+**Variable-rank tensors.** Naming every dim in `shape` pins an exact rank. When rank varies (NCHW vs
+NCDHW), the pattern names the fixed dims and binds the variable run as a single vector, e.g.
 `["n", "c", "$spatial"]` where `$spatial` captures the 2 or 3 spatial dims, so one matcher accepts both
 ranks and still reaches those dims through `all` or a product (`*($spatial)`). Per-dim names like `$x.h`
 are the fixed-rank shorthand; the vector is the general form. (This is variable dims within one tensor,
@@ -471,7 +470,7 @@ be matched and reused inside a larger graph.)
   ],
   "criteria": {"and": [
     {"in":    [{"var": "$x.dtype"}, ["FLOAT16"]]},
-    {"==":    [{"var": "$x.stride_order"}, [0, 2, 3, 1]]}, {"var": "$x.packed"},  // NHWC (channels-last)
+    {"==":    [{"var": "$x.stride_order"}, [0, 2, 3, 1]]}, {"var": "$x.packed"},  // NHWC
     {"in":    [{"var": "$y.dtype"}, ["FLOAT16"]]},
     {"==":    [{"var": "$y.stride_order"}, [0, 2, 3, 1]]}, {"var": "$y.packed"},  // NHWC
     {"shape": [{"var": "$y"}, ["batch", "out_h", "out_w", "out_channels"]]},
@@ -615,7 +614,7 @@ time.
 Adapters come in two delivery classes, which decides where a target is available:
 
 - **Build-only.** The adapter needs extra dependencies not available in the shipped runtime (for
-  example a domain-specific language (DSL) compiler or toolchain). It runs during the build (AOT) and emits a prebuilt
+  example a DSL's compiler or toolchain). It runs during the build (AOT) and emits a prebuilt
   artifact; the runtime never needs the dependency.
 - **Build and runtime drop-in.** The adapter is self-contained enough to also run at load, so its
   targets work on the drop-in path as well as AOT.
@@ -644,7 +643,7 @@ UHDs extend the same way. A UHD names a `kind`, and an adapter interprets that c
 The first adapter is a **LightGBM model** ([Section 4](#4-descriptor-formats)); alongside it, a
 **custom heuristic library** adapter satisfies a small C-API, so a provider can supply a bespoke
 selector without a model file. Further adapters extend what a UHD can reference (other model formats,
-or plain file types such as a static comma-separated-values (CSV) lookup or a fixed static order) without changing the spec. A
+or plain file types such as a static CSV lookup or a fixed static order) without changing the spec. A
 heuristic runs at selection time, so its adapter is always build-and-runtime, never build-only.
 
 ### 8.3 Future: JIT and Normalized Providers
@@ -663,7 +662,7 @@ build, so the heuristic ranks over that space.
 
 ![JIT reuses the whole KDP; only a UKD's kernel source swaps](../images/ukd_jit_seam.svg)
 
-Because JIT is bound to a JIT engine and its source technology, it belongs in the provider **software development kit (SDK)**:
+Because JIT is bound to a JIT engine and its source technology, it belongs in the **provider SDK**:
 each provider reuses this same descriptor system to describe its own provider matches, so a JIT source
 may be custom function sources or a specific technology (rocKE, a provider-specific DSL). JIT sources
 need their own extensible adapters to register and describe them. For rocKE, for example, a template
@@ -865,7 +864,7 @@ Three areas are new to UKD:
 
 - **Fuzzing the descriptor pipeline.** The loader, matcher, and expression interpreter parse input
   that is untrusted on the drop-in path. UKD adds a seed corpus and a fuzzer over them, run under the
-  existing AddressSanitizer (ASAN) build, backing the fail-closed requirement of [Section 14](#14-risks).
+  existing ASAN build, backing the fail-closed requirement of [Section 14](#14-risks).
 - **Generic-vs-hand-written parity.** A cross-engine test runs the same graph through the generic path
   and a hand-written engine and asserts numerical agreement, proving the generic launch and argument
   packing equivalent to the code they replace, and that a loaded UKD leaves the selection unchanged
