@@ -343,9 +343,10 @@ namespace rocsparse
                 // but faults on unified-memory APUs (e.g. gfx1151).
                 if(st < (stop_row - row))
                 {
-                    const I local_first_val   = (csr_row_ptr[row + st] - csr_row_ptr[row]);
-                    const I local_last_val    = csr_row_ptr[row + st + 1] - csr_row_ptr[row];
-                    const I workForEachThread = (local_last_val - local_first_val) / numThreadsForRed;
+                    const I local_first_val = (csr_row_ptr[row + st] - csr_row_ptr[row]);
+                    const I local_last_val  = csr_row_ptr[row + st + 1] - csr_row_ptr[row];
+                    const I workForEachThread 
+                        = (local_last_val - local_first_val) / numThreadsForRed;
 
                     // only works when numThreadsForRed is a power of 2
                     for(I i = 0; i < workForEachThread; i++)
