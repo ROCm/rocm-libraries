@@ -55,6 +55,8 @@ add_executable(rpp_tests
     src/tests/image/geometric/warp_affine_test.cpp
     src/tests/image/geometric/warp_perspective_test.cpp
     src/tests/image/geometric/rotate_test.cpp
+    src/tests/image/geometric/remap_test.cpp
+    src/tests/image/geometric/crop_and_patch_test.cpp
     src/tests/image/statistical/tensor_sum_test.cpp
     src/tests/image/statistical/threshold_test.cpp
     src/tests/image/statistical/tensor_min_test.cpp
