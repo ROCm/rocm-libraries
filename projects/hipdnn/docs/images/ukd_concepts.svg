@@ -23,9 +23,9 @@
   <rect x="333" y="239" width="194" height="24" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
   <text x="430" y="255" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD #2 · source + metadata</text>
   <text x="430" y="278" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD ... (N)</text>
-  <text x="430" y="300" text-anchor="middle" font-size="9.5" fill="#555">one engine / heuristic / UDD per KDP;</text>
-  <text x="430" y="314" text-anchor="middle" font-size="9.5" fill="#555">all kernels share them; they differ only in source + metadata</text>
-  <text x="430" y="328" text-anchor="middle" font-size="9.5" fill="#555">a kernel is applicable iff all matchers pass</text>
+  <text x="430" y="300" text-anchor="middle" font-size="9.5" fill="#555">one engine / heuristic / UDD per KDP</text>
+  <text x="430" y="314" text-anchor="middle" font-size="9.5" fill="#555">kernels differ only in source + metadata</text>
+  <text x="430" y="328" text-anchor="middle" font-size="9.5" fill="#555">applicable iff all matchers pass</text>
 
   <!-- LEFT: one-each shared pieces, named by the KDP -->
   <text x="142" y="110" text-anchor="middle" font-size="10" fill="#333">engine: many KDPs &#8594; 1</text>
@@ -60,17 +60,17 @@
   <line x1="315" y1="159" x2="252" y2="152" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
   <text x="286" y="149" text-anchor="middle" font-size="10" fill="#333">engine</text>
   <line x1="315" y1="174" x2="252" y2="270" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="280" y="235" text-anchor="middle" font-size="10" fill="#333">heuristic</text>
+  <text x="270" y="225" text-anchor="middle" font-size="10" fill="#333">heuristic</text>
 
   <line x1="545" y1="144" x2="608" y2="126" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="576" y="130" text-anchor="middle" font-size="10" fill="#333">matchers</text>
+  <text x="576" y="127" text-anchor="middle" font-size="10" fill="#333">matchers</text>
   <line x1="545" y1="189" x2="608" y2="209" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
   <text x="576" y="186" text-anchor="middle" font-size="10" fill="#333">dispatch (1)</text>
   <line x1="545" y1="227" x2="608" y2="290" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="576" y="262" text-anchor="middle" font-size="10" fill="#333">src + meta</text>
+  <text x="576" y="272" text-anchor="middle" font-size="10" fill="#333">src + meta</text>
 
   <!-- caption -->
-  <text x="430" y="372" text-anchor="middle" font-size="12" fill="#333">One engine, one selector, one dispatch descriptor, a shared matcher set, one source + metadata per kernel, but many kernels.</text>
-  <text x="430" y="392" text-anchor="middle" font-size="12" fill="#333">The KDP binds the matchers, engine, heuristic, and the one UDD; each child kernel adds only its source and metadata. Everything is by ID.</text>
-  <text x="430" y="408" text-anchor="middle" font-size="12" fill="#555">Engine-level selection picks the engine; the UHD then picks the kernel within it.</text>
+  <text x="430" y="377" text-anchor="middle" font-size="12" fill="#333">One engine, one selector, one dispatch descriptor, a shared matcher set, one source + metadata per kernel, but many kernels.</text>
+  <text x="430" y="397" text-anchor="middle" font-size="12" fill="#333">The KDP binds the matchers, engine, heuristic, and the one UDD; each child kernel adds only its source and metadata. Everything is by ID.</text>
+  <text x="430" y="413" text-anchor="middle" font-size="12" fill="#555">Engine-level selection picks the engine; the UHD then picks the kernel within it.</text>
 </svg>
