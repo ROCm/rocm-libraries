@@ -90,6 +90,13 @@ if(TARGET tile_example_flatmm_basic)
 endif()
 
 if(TARGET tile_example_jenga_sparse_attn)
+    # ROCm 7.12 can allocate the 64-bit LDS pointer operand to an SGPR pair for
+    # the legacy m0 inline-assembly path, which makes s_mov_b32 ill-formed on
+    # gfx942. Use the equivalent compiler builtin for this quick payload.
+    target_compile_definitions(
+        tile_sparse_attn_jenga_instances
+        PRIVATE CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM=0
+    )
     add_ck_tile_category_test(
         test_ck_tile_jenga_sparse_attn_quick
         tile_example_jenga_sparse_attn

@@ -53,6 +53,11 @@ using BQuantDimensionTypesQuick = ::testing::Types<std::tuple<RowMajor,
                                                               GemmConfigBase,
                                                               GroupSize2D>>;
 
+template <typename Tuple>
+class TestCkTileGemmBQuantDimension : public TestCkTileGemmBQuant<Tuple>
+{
+};
+
 TYPED_TEST_SUITE(TestCkTileGemmBQuantDimension, BQuantDimensionTypesQuick);
 
 TYPED_TEST(TestCkTileGemmBQuantDimension, DimensionQuant)
