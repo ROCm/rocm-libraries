@@ -27,7 +27,9 @@ int main(int argc, char** argv)
     static_cast<void>(argc);
     static_cast<void>(argv);
 
-    const int64_t b = 4, s = 1024, d = 128;
+    const int64_t b = 4;
+    const int64_t s = 1024;
+    const int64_t d = 128;
 
     cudnn_frontend::graph::Graph graph;
     graph.set_io_data_type(cudnn_frontend::DataType_t::BFLOAT16)

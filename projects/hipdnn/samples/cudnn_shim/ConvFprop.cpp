@@ -27,7 +27,13 @@ int main(int argc, char** argv)
     static_cast<void>(argc);
     static_cast<void>(argv);
 
-    const int64_t n = 16, c = 128, h = 64, w = 64, k = 256, r = 1, s = 1;
+    const int64_t n = 16;
+    const int64_t c = 128;
+    const int64_t h = 64;
+    const int64_t w = 64;
+    const int64_t k = 256;
+    const int64_t r = 1;
+    const int64_t s = 1;
 
     cudnn_frontend::graph::Graph graph;
     graph.set_io_data_type(cudnn_frontend::DataType_t::HALF)
