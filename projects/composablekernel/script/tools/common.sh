@@ -201,12 +201,18 @@ ck_smi_show_version()  { _ck_smi_cli show-version; }
 ck_smi_show_gpu_info_in_container() {
     local container="$1"
     local head="${2:-10}"
-    docker exec "${container}" bash -c "
+
+    # Prevent command injection via the bash -c string.
+    if ! [[ "${head}" =~ ^[0-9]+$ ]]; then
+        head=10
+    fi
+
+    docker exec "${container}" bash -c '
         if [ -f /workspace/script/tools/common.sh ]; then
             source /workspace/script/tools/common.sh
-            ck_smi_show_gpu_info ${head} 2>/dev/null || echo 'No GPU detected'
+            ck_smi_show_gpu_info "$1" 2>/dev/null || echo "No GPU detected"
         else
-            echo 'No GPU detected (project not mounted at /workspace)'
+            echo "No GPU detected (project not mounted at /workspace)"
         fi
-    "
+    ' -- "${head}"
 }
