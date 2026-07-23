@@ -112,31 +112,31 @@ namespace rocsparse
                 // crossover on gfx1201; below it we reproduce the baseline
                 // launch exactly.
                 constexpr int64_t GEMVI_SATURATION_NBLOCKS = 1024;
-                const int64_t gemvi_nblocks = (static_cast<int64_t>(m) - 1) / 32 + 1;
-                uint32_t      gemvi_dim     = GEMVI_DIM;
+                const int64_t     gemvi_nblocks            = (static_cast<int64_t>(m) - 1) / 32 + 1;
+                uint32_t          gemvi_dim                = GEMVI_DIM;
                 if(gemvi_nblocks >= GEMVI_SATURATION_NBLOCKS)
                 {
                     gemvi_dim = (nnz <= static_cast<I>(handle->wavefront_size)) ? 256 : 512;
                 }
 
-#define LAUNCH_GEMVI_WAVE32(DIM_)                                                    \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                              \
-        (rocsparse::gemvi_kernel<DIM_, 32>),                                         \
-        gemvi_blocks,                                                                \
-        dim3(DIM_),                                                                  \
-        0,                                                                           \
-        handle->stream,                                                             \
-        m,                                                                          \
-        n,                                                                          \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                \
-        A,                                                                          \
-        lda,                                                                        \
-        nnz,                                                                        \
-        x_val,                                                                      \
-        x_ind,                                                                      \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                 \
-        y,                                                                          \
-        idx_base,                                                                   \
+#define LAUNCH_GEMVI_WAVE32(DIM_)                                     \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+        (rocsparse::gemvi_kernel<DIM_, 32>),                          \
+        gemvi_blocks,                                                 \
+        dim3(DIM_),                                                   \
+        0,                                                            \
+        handle->stream,                                               \
+        m,                                                            \
+        n,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        A,                                                            \
+        lda,                                                          \
+        nnz,                                                          \
+        x_val,                                                        \
+        x_ind,                                                        \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        idx_base,                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
                 switch(gemvi_dim)
