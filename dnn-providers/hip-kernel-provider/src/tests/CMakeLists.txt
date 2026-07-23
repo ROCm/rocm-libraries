@@ -13,6 +13,12 @@ endif()
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
+# TestJsonLogic.cpp expresses rules as nlohmann::json. Available transitively via
+# the hipdnn SDKs when HIPDNN_SKIP_JSON_LIB=OFF; link explicitly so the suite also
+# builds standalone and with HIPDNN_SKIP_JSON_LIB=ON.
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    find_package(nlohmann_json CONFIG REQUIRED)
+endif()
 
 add_executable(
     hip_kernel_provider_tests
@@ -22,6 +28,7 @@ add_executable(
     core/TestContext.cpp
     core/TestUtils.cpp
     core/TestPluginPublic.cpp
+    core/TestJsonLogic.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
@@ -64,7 +71,7 @@ target_compile_options(hip_kernel_provider_tests PRIVATE ${HIPDNN_WARNING_COMPIL
 
 target_link_libraries(
     hip_kernel_provider_tests PUBLIC GTest::gtest GTest::gmock hip::host
-                                   hip_kernel_provider_private hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
+                                   hip_kernel_provider_private hipdnn_test_sdk hipdnn_plugin_sdk nlohmann_json::nlohmann_json Threads::Threads
 )
 
 # make it so tests inside folders can find files without having to use a relative path.
