@@ -21,12 +21,14 @@ govern what you commit and how you describe it.
   **Restricted** (and Confidential) data must never appear in the repo, git history,
   PRs, logs, or any lower-classification or public artifact; store and share it only
   through AMD-approved, access-controlled systems on a need-to-know basis. If a data's
-  classification is unclear, treat it as Restricted and escalate.
+  classification is unclear, treat it as Restricted and escalate. Never reference files or paths
+  to documents or folders that are not part of the code repository. Locations of confidential
+  files should remain confidential.
 - **No NPI.** Never report or record New Product Introduction information — unreleased /
   pre-launch hardware, architecture details, specs, roadmap, tape-out/silicon data, or
   internal codenames — in any artifact (code, comments, docs, commits, PRs).
 - **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
-  `gfx950`, …) only.
+  `gfx950`, …) only. No customers or related data shall ever be mentioned (e.g., model architectures, operator shapes, labeling or codenames, IP, confidential data).
 - **No public software-performance data.** No **software-achieved** performance —
   benchmarks, achieved TFLOP/s, MFU, latencies, or throughputs — in the repo, git
   history, PRs, or anything that can become public. While in development these numbers
