@@ -154,6 +154,8 @@ public:
                           nodeAttributes->epsilon_tensor_uid(),
                           hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE);
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 

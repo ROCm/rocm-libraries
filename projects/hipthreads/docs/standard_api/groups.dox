@@ -1,0 +1,35 @@
+/**
+@defgroup standard_api Standard API
+User-facing interfaces.
+
+@defgroup c_library C library style utilities (GPU-adapted)
+@ingroup standard_api
+Wrappers mirroring portions of the C library with HIP/GPU semantics.
+
+@defgroup c_memory Memory allocation functions
+@ingroup c_library
+Malloc/free style GPU allocation helpers.
+
+@defgroup c_bytestring Byte and string manipulation
+@ingroup c_library
+Low-level raw memory / byte sequence utilities.
+
+@defgroup threading Threading primitives
+@ingroup standard_api
+Thread objects, synchronization and waiting primitives adapted for HIP execution.
+
+@defgroup condition_variable Condition variable primitives
+@ingroup threading
+Blocking/waiting mechanisms allowing one or more threads to wait
+until they are notified. Includes standard semantics (`condition_variable_any`)
+and a lightweight spinning variant (`spin_condition_variable`).
+
+@defgroup mutex Mutex primitives
+@ingroup threading
+Mutual exclusion types preventing simultaneous access to shared data. Includes
+a spinning mutex (`spin_mutex`) and RAII lock wrappers (`lock_guard`, `unique_lock`).
+
+@defgroup thread Thread management primitives
+@ingroup threading
+Creation, identification and control of GPU threads.
+*/

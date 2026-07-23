@@ -282,7 +282,7 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     std::map<std::string, int> rv;
 
     rv["MaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 256;
-    rv["MaxSgpr"] = 102;
+    rv["MaxSgpr"] = (v[0] == 12 && v[1] == 5) ? 106 : 102;
     rv["PhysicalMaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 512;
     rv["PhysicalMaxSgpr"] = 800;
     rv["maxLDSConstOffset"] = 65536;

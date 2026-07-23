@@ -38,15 +38,18 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         std::cout << " [BATCH_STATS_ONLY mode]...\n";
     }
 
-    const int64_t n = 16; // BATCH SIZE
-    const int64_t c = 16; // CHANNELS (FEATURES)
-    const int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    const int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    // Input dimensions
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    setPreferredEngine(graph, config);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
@@ -320,6 +323,8 @@ int main(int argc, char* argv[])
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         auto config = parseCommandLineArgs(argc, argv, SampleType::BN_TRAINING);
 
         auto [handle, handleError] = createHipdnnHandle();
