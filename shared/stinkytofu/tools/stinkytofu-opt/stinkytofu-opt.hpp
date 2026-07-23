@@ -54,6 +54,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/WaitCntValidationCheckPass.hpp"
 
 using namespace stinkytofu;
 
@@ -119,6 +120,8 @@ const std::vector<PassInfo> availablePasses = {
     {"LoopRegionRemarkPass", [](const auto&) { return createLoopRegionRemarkPass(); }},
     {"MemTokenConsistencyCheckPass",
      [](const auto&) { return createMemTokenConsistencyCheckPass(); }},
+    {"WaitCntValidationCheckPass",
+     [](const auto&) { return createWaitCntValidationCheckPass(); }},
     {"RaiseVgprMsbPass", [](const auto&) { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},

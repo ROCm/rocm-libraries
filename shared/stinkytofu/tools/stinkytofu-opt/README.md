@@ -194,6 +194,27 @@ register indices and can move or rewrite instructions, which leaves stale
 symbolic names and orphaned comments. If you need to combine round-trip
 with passes, expect manual review of the output.
 
+#### Example 6: Validate existing s_wait_* counts
+
+`WaitCntValidationCheckPass` is a read-only checker: it does *not* insert or
+remove any `s_wait_*`, it only verifies that the waits already present in the IR
+satisfy every register (RAW) and LDS memtoken dependency. On a missing wait it
+prints a `MISSING:` diagnostic and aborts (`report_fatal_error`), mirroring
+`MemTokenConsistencyCheckPass`.
+
+```bash
+# Insert waits, then validate them in the same invocation (should pass)
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --StinkyWaitCntInsertionPass \
+    --WaitCntValidationCheckPass
+
+# Validate hand-written / already-scheduled IR (aborts if a wait is missing)
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --WaitCntValidationCheckPass
+```
+
 ### Output Files
 
 The tool generates debug output files in the same directory as the input:

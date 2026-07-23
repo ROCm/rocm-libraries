@@ -17,8 +17,10 @@ target_sources(stinkytofu_objs PRIVATE
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
+    WaitCntValidationCheckPass.cpp
     waitcnt/WaitDataflow.cpp
     waitcnt/WaitCntDataflowUtils.cpp
+    waitcnt/WaitCntValidator.cpp
     waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
     StinkyRemoveNopPass.cpp
