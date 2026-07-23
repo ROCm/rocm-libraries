@@ -296,7 +296,20 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
         return {}; // no compiled predictor (model/predictor mismatch)
 
     const std::string gfx_id = handle.GetDeviceName();
-    const std::string key    = gfx_id + "|" +
+
+    // Architecture exclusion: gfx942 and gfx950 (all SKUs in each range) defer to
+    // the existing perf-db/default heuristics, which outperform the learned
+    // perf-config picker there. GetDeviceName() strips the SKU suffix, so a bare
+    // prefix match covers every SKU (gfx942-mi300x, gfx950-mi355x, ...). Matches
+    // the same exclusion in the layer-1 solver picker (lgbm_pick.cpp).
+    if(gfx_id.rfind("gfx942", 0) == 0 || gfx_id.rfind("gfx950", 0) == 0)
+    {
+        MIOPEN_LOG_I2("lgbm_pcfg: abstain (arch " << gfx_id
+                                                  << " excluded; using existing heuristics)");
+        return {};
+    }
+
+    const std::string key = gfx_id + "|" +
                             std::to_string(DirectionPerfDbCode(problem.GetDirection())) + "|" +
                             DataTypeName(problem.GetInDataType());
 

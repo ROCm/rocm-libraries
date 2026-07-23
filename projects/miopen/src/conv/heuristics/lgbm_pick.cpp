@@ -290,10 +290,22 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     }
 
     // GetDeviceName() already returns the normalized gfx_id (no
-    // :sramecc+:xnack- suffix). Architecture gating: only run on gfx_ids the
-    // model was trained on; otherwise fall through to TunaNet.
+    // :sramecc+:xnack- suffix).
     const std::string gfx_id = handle.GetDeviceName();
-    const int gfx_code       = meta.CategoricalCode("gfx_id", gfx_id);
+
+    // Architecture exclusion: gfx942 and gfx950 (all SKUs in each range) have
+    // well-tuned existing heuristics (TunaNet + perf-db) that outperform the LGBM
+    // picker, so defer to them. GetDeviceName() strips the SKU suffix, so a bare
+    // prefix match covers every SKU (gfx942-mi300x, gfx950-mi355x, ...).
+    if(gfx_id.rfind("gfx942", 0) == 0 || gfx_id.rfind("gfx950", 0) == 0)
+    {
+        MIOPEN_LOG_I2("lgbm: abstain (arch " << gfx_id << " excluded; using existing heuristics)");
+        return {};
+    }
+
+    // Architecture gating: only run on gfx_ids the model was trained on;
+    // otherwise fall through to TunaNet.
+    const int gfx_code = meta.CategoricalCode("gfx_id", gfx_id);
     MIOPEN_LOG_I2("lgbm: engaged for gfx_id=\"" << gfx_id << "\" (vocab code " << gfx_code
                                                 << "), groups=" << problem.GetGroupCount());
     if(gfx_code < 0)
