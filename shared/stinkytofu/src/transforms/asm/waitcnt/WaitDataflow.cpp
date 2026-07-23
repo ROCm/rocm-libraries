@@ -30,11 +30,14 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/transforms/asm/waitcnt/WaitCntDataflowUtils.hpp"
 
 #define DEBUG_TYPE "WaitDataflow"
 
 namespace stinkytofu {
 namespace waitcnt {
+
+using namespace utils;
 
 // ---------------------------------------------------------------------------
 // Per-counter policy
@@ -83,35 +86,6 @@ CounterKind classifyMemOp(const StinkyInstruction& inst) {
     }
     return CK_Count;
 }
-
-namespace {
-
-constexpr size_t kMaxInFlight = 64;
-
-bool isPhi(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::PHI;
-}
-
-bool isTensorAnchor(const StinkyInstruction& inst) {
-    return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
-}
-
-bool isLdsWriterAnchor(const StinkyInstruction& inst) {
-    return isTensorLoad(inst) || isDSWrite(inst);
-}
-
-bool isOnSamePipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
-    return classifyMemOp(a) == CK_DS && classifyMemOp(b) == CK_DS;
-}
-
-bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
-    for (int t : a) {
-        if (std::find(b.begin(), b.end(), t) != b.end()) return true;
-    }
-    return false;
-}
-
-}  // namespace
 
 // ---------------------------------------------------------------------------
 // PerPredQueue / DataflowState
@@ -182,8 +156,9 @@ DataflowState WaitDataflow::mergeFromPredecessors(
     // tail drains. Self-preds (back-edges) are seeded too: at fixed point
     // the back-edge's exit is the loop body's true exit, which is what
     // the header should see.
-    //
-    // Also forward each pred's PhiSummary table -- PHI summaries live with
+    seedQueuesFromPredecessors(bb, exitState, entry);
+
+    // Forward each pred's PhiSummary table -- PHI summaries live with
     // their defining block but must reach every downstream consumer. If
     // the same PHI is summarised differently on different paths (transient
     // during fixed-point iteration), keep the strictest (min) wait per
@@ -192,30 +167,6 @@ DataflowState WaitDataflow::mergeFromPredecessors(
         auto it = exitState.find(p);
         if (it == exitState.end()) continue;
         const auto& predState = it->second;
-        for (int c = 0; c < CK_Count; ++c) {
-            for (const auto& predQ : predState.queues[c]) {
-                PerPredQueue q;
-                q.pred = p;
-                q.ops = predQ.ops;
-                // Dedup identical (pred, ops) queues. A back-edge otherwise
-                // re-copies the same per-pred queue on every fixed-point
-                // iteration: the predecessor's exit already contains the
-                // queues it inherited from this block last round, so the
-                // queue COUNT grows by one each iteration and the state
-                // never stabilises (hitting the iteration cap and forcing
-                // the conservative s_wait_* 0 fallback). Identical queues
-                // yield identical countFrom() results, so collapsing them
-                // is loss-free and restores convergence.
-                bool dup = false;
-                for (const auto& existing : entry.queues[c]) {
-                    if (existing.pred == q.pred && existing.ops == q.ops) {
-                        dup = true;
-                        break;
-                    }
-                }
-                if (!dup) entry.queues[c].push_back(std::move(q));
-            }
-        }
         for (const auto& kv : predState.phiSummaries) {
             auto [sit, inserted] = entry.phiSummaries.emplace(kv.first, kv.second);
             if (!inserted) {
@@ -304,38 +255,6 @@ struct CounterEmitState {
         opsSinceLastWait = 0;
     }
 };
-
-// Trim every per-pred queue in a counter to keep at most `keep` tail ops.
-void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
-    for (auto& q : qs) {
-        if (keep <= 0) {
-            q.ops.clear();
-        } else if (static_cast<int>(q.ops.size()) > keep) {
-            q.ops.erase(q.ops.begin(), q.ops.end() - keep);
-        }
-    }
-}
-
-// Append a local in-block memop to every per-pred queue. Local ops are in
-// flight on every CFG path through this block, so they join every path's
-// tail. If no per-pred queue exists yet, create a synthetic one
-// (pred == nullptr) so the in-block prefix is still tracked. The queue is
-// capped at kMaxInFlight so an undrained counter cannot grow it forever.
-// Returns true if the cap had to drop an op -- i.e. the queue exceeded the
-// hardware in-flight window -- so the caller can flag the overflow for an
-// end-of-solve diagnostic.
-bool appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
-    if (qs.empty()) qs.push_back(PerPredQueue{});
-    bool dropped = false;
-    for (auto& q : qs) {
-        q.ops.push_back(op);
-        while (q.ops.size() > kMaxInFlight) {
-            q.ops.pop_front();
-            dropped = true;
-        }
-    }
-    return dropped;
-}
 
 // Human-readable name for a counter, for diagnostics.
 const char* counterName(CounterKind c) {
@@ -460,181 +379,6 @@ WaitCountSpec mergePlanAndComputed(const WaitInsertionPlan& plan, StinkyInstruct
         emit[c].recordEmittedWait(w);
     }
     return applySpec;
-}
-
-int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowState& state,
-                        std::unordered_set<StinkyInstruction*>& seen);
-
-// Compute per-counter required waits for `inst` against the live `state`.
-void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
-                          const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& rawNeedsWait,
-                          int required[CK_Count]) {
-    // Required wait per counter. -1 = no constraint yet.
-    for (int c = 0; c < CK_Count; ++c) required[c] = WaitCountSpec::kUnused;
-
-    // Tighten required[c] = min(required[c], w). The min across deps on
-    // the same counter is what's safe: it drains the closest-to-tail
-    // dep, which is the most permissive wait that still satisfies it.
-    auto tightenRequired = [&](CounterKind c, int w) {
-        if (w < 0) return;
-        if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
-    };
-
-    // For each src dep on counter `c` that appears in some per-pred
-    // queue, contribute its (countFrom - 1) wait via tightenRequired.
-    // The final required[c] is min over all (dep, pred) hits because
-    // the emitted wait must drain on every constrained path.
-    for (StinkyInstruction* src : inst->getSources()) {
-        if (src == nullptr) continue;
-
-        if (isPhi(*src)) {
-            for (int c = 0; c < CK_Count; ++c) {
-                if (!rawNeedsWait[c](*inst)) continue;
-                std::unordered_set<StinkyInstruction*> seen;
-                int w = phiCurrentQueueWait(src, static_cast<CounterKind>(c), state, seen);
-                tightenRequired(static_cast<CounterKind>(c), w);
-            }
-            continue;
-        }
-
-        CounterKind c = classifyMemOp(*src);
-        if (c == CK_Count) continue;
-        // No same-pipeline filter here: an SSA RAW edge (e.g. ds_store
-        // consuming ds_load's vreg output) needs the wait even though
-        // both live on the same hardware FIFO. Same-pipeline only
-        // skips ANTI-deps; see scanDsAntiDeps below.
-
-        // Per-counter emit constraint (e.g. tlcnt only drains at a
-        // barrier). Overridable via WaitDataflow::setRawNeedsWait();
-        // defaults come from defaultCounterPolicy().
-        if (!rawNeedsWait[c](*inst)) continue;
-
-        for (const auto& q : state.queues[c]) {
-            int n = q.countFrom(src);
-            if (n > 0) tightenRequired(c, n - 1);
-        }
-    }
-
-    auto anyOpInFlight = [&](CounterKind c) {
-        for (const auto& q : state.queues[c]) {
-            if (!q.ops.empty()) return true;
-        }
-        return false;
-    };
-
-    // WAR-on-LDS / barrier ordering: the SSA def-use chain captures
-    // RAW (consumer's src == producer) but NOT anti-dependencies. An
-    // LDS writer must wait for prior LDS readers on the same token,
-    // and a barrier must wait for any prior DS op on a matching
-    // token. Scan per-pred DS queues for token overlap and treat each
-    // hit as an extra DS dep that flows through tightenRequired.
-    //
-    // Same-pipeline pairs (ds_write writer vs ds_read reader) are
-    // skipped: the DS FIFO orders them in hardware.
-    //
-    // Conservative fallbacks live below: if either side lacks
-    // MemTokenData we cannot prove disjointness and force wait 0.
-    auto scanDsAntiDeps = [&](const StinkyInstruction& anchor, const std::vector<int>& anchorTokens,
-                              bool barrierMode) {
-        for (const auto& q : state.queues[CK_DS]) {
-            const int qsize = static_cast<int>(q.ops.size());
-            for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
-                if (op == inst) continue;
-                // Barrier guards every DS op on a matching token; LDS
-                // writer guards only readers/atomics.
-                if (!barrierMode && !isDSRead(*op) && !isDSAtomic(*op)) continue;
-                if (isOnSamePipeline(anchor, *op)) continue;
-                auto* opTokens = op->getModifier<MemTokenData>();
-                bool overlap =
-                    (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
-                if (!overlap) continue;
-                tightenRequired(CK_DS, qsize - idx - 1);
-            }
-        }
-    };
-
-    if (isLdsWriterAnchor(*inst)) {
-        const auto* tk = inst->getModifier<MemTokenData>();
-        if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
-    }
-    if (isBarrier(*inst)) {
-        const auto* tk = inst->getModifier<MemTokenData>();
-        if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
-    }
-
-    // Tensor-side conservative scan: any tensor_load_to_lds in flight
-    // that lacks MemTokenData cannot be proven disjoint from a tensor
-    // anchor, so treat it as an extra dep. Tagged overlaps are already
-    // covered by the SSA UD chain through LDS<token> pseudo-regs.
-    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() != nullptr) {
-        for (const auto& q : state.queues[CK_Tensor]) {
-            const int qsize = static_cast<int>(q.ops.size());
-            for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
-                if (op == inst) continue;
-                if (op->getModifier<MemTokenData>() == nullptr) {
-                    tightenRequired(CK_Tensor, qsize - idx - 1);
-                }
-            }
-        }
-    }
-
-    // Conservative MemTokenData fallbacks. An untagged anchor or
-    // untagged producer means we cannot prove disjointness, so we
-    // force the matching counter to 0.
-    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
-        anyOpInFlight(CK_Tensor)) {
-        required[CK_Tensor] = 0;
-    }
-    if (isLdsWriterAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
-        anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {
-        required[CK_DS] = 0;
-    }
-    if (isBarrier(*inst) && anyOpInFlight(CK_DS)) {
-        bool needs = inst->getModifier<MemTokenData>() == nullptr;
-        if (!needs) {
-            for (const auto& q : state.queues[CK_DS]) {
-                for (StinkyInstruction* op : q.ops) {
-                    if (op->getModifier<MemTokenData>() == nullptr) {
-                        needs = true;
-                        break;
-                    }
-                }
-                if (needs) break;
-            }
-        }
-        if (needs) required[CK_DS] = 0;
-    }
-}
-
-// Tightest wait for counter `c` from a (possibly nested) PHI consumer source.
-// Recurses through the PHI inputs to the leaf memops and scans the LIVE per-pred
-// queues for each leaf via countFrom() (countFrom == 1 => tail => wait 0). We
-// scan the live queue rather than the frozen PhiSummary depth so intervening
-// ops are counted, keeping the pipeline full. A leaf that has already drained
-// out of the queue contributes no wait. `seen` guards against PHI cycles.
-int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowState& state,
-                        std::unordered_set<StinkyInstruction*>& seen) {
-    if (!seen.insert(phi).second) return WaitCountSpec::kUnused;
-    int best = WaitCountSpec::kUnused;
-    auto tighten = [&](int w) {
-        if (w < 0) return;
-        if (best == WaitCountSpec::kUnused || w < best) best = w;
-    };
-    for (StinkyInstruction* src : phi->getSources()) {
-        if (src == nullptr) continue;
-        if (isPhi(*src)) {
-            tighten(phiCurrentQueueWait(src, c, state, seen));
-            continue;
-        }
-        if (classifyMemOp(*src) != c) continue;
-        for (const auto& q : state.queues[c]) {
-            int n = q.countFrom(src);
-            if (n > 0) tighten(n - 1);
-        }
-    }
-    return best;
 }
 
 }  // namespace

@@ -66,6 +66,10 @@ namespace waitcnt {
 /// Hardware counters we track. Index matches arrays in DataflowState.
 enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Count = 4 };
 
+/// Predicate deciding whether a RAW dependency on a counter must drain at
+/// consumer `inst`. Shared by WaitDataflow and WaitCntValidator.
+using RawWaitPredicate = std::function<bool(const StinkyInstruction& inst)>;
+
 /// Map a tracked async memop to its hardware counter. Returns CK_Count when
 /// `inst` is not tracked by the waitcnt pass.
 CounterKind classifyMemOp(const StinkyInstruction& inst);
@@ -127,12 +131,6 @@ struct DataflowResult {
 
 class WaitDataflow {
    public:
-    /// Predicate deciding whether a RAW dependency carried on a given counter
-    /// must be drained at consumer `inst`. This is the per-counter "constraint
-    /// to emit a wait": return true to force the dataflow to consider draining
-    /// this counter for `inst`, false to skip it.
-    using RawWaitPredicate = std::function<bool(const StinkyInstruction& inst)>;
-
     WaitDataflow(Function& func, const DominanceInfo& domInfo, const std::vector<BasicBlock*>& rpo);
 
     /// Solve to a fixed point. Returns true on convergence; false if the

@@ -18,6 +18,7 @@ target_sources(stinkytofu_objs PRIVATE
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp
     waitcnt/WaitDataflow.cpp
+    waitcnt/WaitCntDataflowUtils.cpp
     waitcnt/ShallowPredPromotion.cpp
     StinkyRemoveWaitCntPass.cpp
     StinkyRemoveNopPass.cpp
