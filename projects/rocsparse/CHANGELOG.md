@@ -17,7 +17,9 @@ Documentation for rocSPARSE is available at
 * Fixed an issue with `rocsparse_spmm`, which produced incorrect results for the Blocked ELL sparse format.
 
 ### Removed
-* Deprecated the `rocsparse_indextype_u16` enum.
+* The deprecated the `rocsparse_indextype_u16` enum.
+
+### Deprecated
 * Deprecated the `rocsparse_spildlt0_input_diag` enum value used to dump the diagonal `D` of the ILDLT(0) factorization.
 
 ## rocSPARSE 4.7.0 for ROCm 7.14
