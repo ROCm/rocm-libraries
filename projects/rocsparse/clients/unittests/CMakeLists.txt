@@ -45,6 +45,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_enum_traits.cpp
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
+  unit_test_csrmv_adaptive_analysis.cpp
 )
 
 # Host-pure library translation units under test. These are compiled directly
