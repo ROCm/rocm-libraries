@@ -661,7 +661,7 @@ things do grow for JIT, in the JIT follow-up: the matcher gains the general-patt
 and a generated kernel's metadata describes the space of variants it can emit rather than one fixed
 build, so the heuristic ranks over that space.
 
-![JIT reuses the same descriptors; only the source half of a Launch changes](../images/ukd_jit_seam.svg)
+![JIT reuses the whole KDP; only a UKD's kernel source swaps](../images/ukd_jit_seam.svg)
 
 Because JIT is bound to a JIT engine and its source technology, it belongs in the **provider SDK**:
 each provider reuses this same descriptor system to describe its own provider matches, so a JIT source

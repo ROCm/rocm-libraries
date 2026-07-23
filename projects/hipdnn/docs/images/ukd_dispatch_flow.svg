@@ -49,10 +49,6 @@
   <text x="617" y="267" text-anchor="middle" font-family="Consolas, monospace" font-size="11">workspace</text>
   <text x="500" y="302" font-size="10" fill="#555">resolves each argument slot against symbols</text>
 
-  <!-- symbol table feeds both (a) and (b): arrows from UDD top edge down into each sub-box -->
-  <line x1="240" y1="130" x2="240" y2="166" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
-  <line x1="660" y1="130" x2="660" y2="166" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
-
   <!-- arrow down to pack arguments -->
   <line x1="450" y1="330" x2="450" y2="356" stroke="#444" stroke-width="1.5" marker-end="url(#arrowDF)"/>
 
