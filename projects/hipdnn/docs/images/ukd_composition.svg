@@ -7,13 +7,13 @@
   </defs>
 
   <!-- ===================== LEFT PANEL: execution composition ===================== -->
-  <text x="237" y="26" text-anchor="middle" font-weight="600">Multi-launch pack: one shared UDD holds several Launches, one selection</text>
+  <text x="237" y="26" text-anchor="middle" font-weight="600">Multi-launch pack: one shared UDD, several Launches, one selection</text>
   <rect x="15" y="40" width="445" height="395" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
 
   <!-- UKD -->
   <rect x="70" y="64" width="250" height="46" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
-  <text x="195" y="84" text-anchor="middle" font-family="Consolas, monospace" font-size="12">UDD  sdpa_bwd (shared, one per pack)</text>
-  <text x="195" y="102" text-anchor="middle" font-size="11">holds the Launches; each UKD fills a source</text>
+  <text x="195" y="84" text-anchor="middle" font-family="Consolas, monospace" font-size="12">UDD  sdpa_bwd (one per pack)</text>
+  <text x="195" y="102" text-anchor="middle" font-size="11">holds Launches; each UKD fills a source</text>
   <line x1="195" y1="110" x2="195" y2="150" stroke="#444" stroke-width="1.5" marker-end="url(#arrowCX)"/>
 
   <!-- launches -->

@@ -8,7 +8,8 @@
 
   <!-- TITLE -->
   <text x="430" y="28" text-anchor="middle" font-weight="600" font-size="15">The descriptor family: many kernels, few shared pieces</text>
-  <text x="430" y="48" text-anchor="middle" fill="#555" font-size="12">A KDP binds shared descriptors (matchers, engine, dispatch) over a vector of child kernels; the engine carries the heuristic and metadata schema</text>
+  <text x="430" y="46" text-anchor="middle" fill="#555" font-size="12">A KDP binds a matcher set, one engine, and one dispatch over a vector of child kernels.</text>
+  <text x="430" y="63" text-anchor="middle" fill="#555" font-size="12">The engine carries the heuristic (UHD) and metadata schema (KMD); many KDPs may share one engine.</text>
 
   <!-- CENTER: KDP = matchers + engine + UDD + kernel vector -->
   <rect x="315" y="104" width="230" height="262" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
@@ -22,7 +23,7 @@
   <rect x="333" y="229" width="194" height="22" rx="6" fill="#fffdf5" stroke="#c99a2e" stroke-width="1.2"/>
   <text x="430" y="244" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD #2 · source + metadata</text>
   <text x="430" y="266" text-anchor="middle" font-family="Consolas, monospace" font-size="10">UKD ... (N)</text>
-  <text x="430" y="288" text-anchor="middle" font-size="9.5" fill="#555">one engine + UDD per KDP; engine carries UHD + KMD</text>
+  <text x="430" y="288" text-anchor="middle" font-size="9.5" fill="#555">engine + UDD per KDP; engine carries UHD + KMD</text>
   <text x="430" y="302" text-anchor="middle" font-size="9.5" fill="#555">kernels differ only in source + metadata</text>
   <text x="430" y="316" text-anchor="middle" font-size="9.5" fill="#555">applicable iff all matchers pass</text>
 
@@ -30,7 +31,7 @@
   <rect x="35" y="120" width="215" height="70" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
   <text x="50" y="144" font-weight="600">UED: Engine Descriptor</text>
   <text x="50" y="164" font-size="12" fill="#333">one group of kernels</text>
-  <text x="50" y="180" font-size="11" fill="#555">owns one UHD + one KMD; named by the KDP</text>
+  <text x="50" y="180" font-size="11" fill="#555">owns one UHD + one KMD</text>
 
   <rect x="35" y="250" width="103" height="86" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
   <text x="46" y="272" font-weight="600" font-size="12">UHD</text>
@@ -50,12 +51,12 @@
   <rect x="610" y="92" width="215" height="66" rx="8" fill="#e0f2f1" stroke="#2a9d8f" stroke-width="1.5"/>
   <text x="625" y="116" font-weight="600">UMD: matcher (shared)</text>
   <text x="625" y="136" font-size="12" fill="#333">a set, referenced by ID</text>
-  <text x="625" y="152" font-size="11" fill="#555">pattern + criteria expression; binds $vars</text>
+  <text x="625" y="152" font-size="11" fill="#555">pattern + criteria; binds $vars</text>
 
   <rect x="610" y="176" width="215" height="66" rx="8" fill="#f3e8fd" stroke="#8e5bc4" stroke-width="1.5"/>
   <text x="625" y="200" font-weight="600">UDD: Dispatch Descriptor</text>
   <text x="625" y="220" font-size="12" fill="#333">one per KDP, shared</text>
-  <text x="625" y="236" font-size="11" fill="#555">args &amp; ordering, grid/block, shmem, ws</text>
+  <text x="625" y="236" font-size="11" fill="#555">args, grid/block, shmem, ws</text>
 
   <rect x="610" y="260" width="215" height="66" rx="8" fill="#eef1f5" stroke="#7f8a99" stroke-width="1.5"/>
   <text x="625" y="284" font-weight="600">kernel source + metadata</text>

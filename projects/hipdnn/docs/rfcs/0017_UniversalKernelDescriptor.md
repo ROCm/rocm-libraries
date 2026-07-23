@@ -447,9 +447,9 @@ them:
     {"==":    ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed",  // contiguous bhsd
     {"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]},  // binds these dims
     {"in":    ["$k.dtype", ["BFLOAT16"]]},
-    {"shape": ["$k", ["batch", "num_heads", "seqlen_k", "head_size"]]},
+    {"shape": ["$k", ["batch", "num_heads", "seqlen_k", "head_size"]]},  // reuses head_size: must equal $q's
     {"in":    ["$v.dtype", ["BFLOAT16"]]},
-    {"hipdnn.same_head_dim": ["$q", "$k", "$v"]},      // custom operation
+    {"shape": ["$v", ["batch", "num_heads", "seqlen_k", "head_size"]]},  // same head_size across Q, K, V
     {"==":    ["$sdpa_fwd.head_size", 128]},
     {"in":    ["$sdpa_fwd.mask_mode", ["none"]]},
     {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
@@ -461,7 +461,10 @@ Matching does double duty: it decides the kernel applies and binds the fields th
 field is **declared** in the pattern (a dim named in a `shape`, or an op attribute), **bound** when the
 graph matches, then **used** in the UDD's formulas ([Section 6](#6-dispatch-and-workspace)): `$q.seqlen_q`
 binds here and feeds `ceil_div($q.seqlen_q, 16)` there. A formula can only reference fields the match
-produces.
+produces. A capture name reused across patterns binds once and requires the matches to agree, so
+`head_size` naming a dim in the Q, K, and V shapes expresses equal head dim across the three tensors as
+ordinary data, no escape hatch, the same way `batch` and `num_heads` shared across them require those to
+agree too.
 
 ![A live graph is matched against a declarative pattern, binding named variables](../images/ukd_criteria_match.svg)
 
@@ -473,11 +476,14 @@ are the fixed-rank shorthand; the vector is the general form. (This is variable 
 distinct from variadic *operands*; exact `shape` syntax is in the UMD follow-up.)
 
 **Escape hatch.** When the built-ins cannot express a check, a criterion invokes a **custom operation**,
-a native predicate resolved from the provider's registry (`hipdnn.same_head_dim` above), carried as a
-symbol name and typed arguments, never inline code. A file that names a predicate the provider does not
-ship fails to resolve, so the registry is part of its published contract. The dispatch layer has an
-analogous custom plan ([Section 6](#6-dispatch-and-workspace)); together they form a graded ladder from
-declarative data, to a named escape hatch for a step that needs real C++, to a full provider.
+a native predicate resolved from the provider's registry (for example a probe into a backing library's
+own support query, whose logic lives in vendor code and cannot be reduced to schema fields), carried as a
+symbol name and typed arguments, never inline code. It is a deliberate last resort, not a routine tool:
+the validated catalog of MIOpen CK convolution and rocKE SDPA applicability was fully expressible with
+the built-ins and needed no custom operation. A file that names a predicate the provider does not ship
+fails to resolve, so the registry is part of its published contract. The dispatch layer has an analogous
+custom plan ([Section 6](#6-dispatch-and-workspace)); together they form a graded ladder from declarative
+data, to a named escape hatch for a step that needs real C++, to a full provider.
 
 **Applicability is a cheap, shared-matcher pass.** A matcher that reads only graph fields
 (Tensor/Graph/Attributes/Device) runs **once for the whole graph**; on failure it disqualifies every
