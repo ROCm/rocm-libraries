@@ -231,13 +231,13 @@ if(_moe_sq_quick_targets)
     add_executable(
         tile_example_moe_smoothquant_quick EXCLUDE_FROM_ALL
         "${_moe_sq_source_dir}/moe_smoothquant.cpp"
-        "${_moe_sq_source_dir}/instances/moe_smoothquant_fwd_api.cpp"
+        moe_smoothquant_quick_api.cpp
         "${_moe_sq_source_dir}/instances/moe_smoothquant_fp16_n64_n128_instance.cpp"
         "${_moe_sq_source_dir}/instances/moe_smoothquant_bf16_n64_n128_instance.cpp"
     )
     set_source_files_properties(
         "${_moe_sq_source_dir}/moe_smoothquant.cpp"
-        "${_moe_sq_source_dir}/instances/moe_smoothquant_fwd_api.cpp"
+        moe_smoothquant_quick_api.cpp
         "${_moe_sq_source_dir}/instances/moe_smoothquant_fp16_n64_n128_instance.cpp"
         "${_moe_sq_source_dir}/instances/moe_smoothquant_bf16_n64_n128_instance.cpp"
         PROPERTIES LANGUAGE HIP
