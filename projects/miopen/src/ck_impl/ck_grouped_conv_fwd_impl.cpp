@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// dapper test: dummy touch to the CK grouped-conv-forward solver impl for PR
+// #9617, to validate that dapper's symbol bridge narrows the run to the
+// conv unit tests that reference this solver, not the whole standard category
 #include <vector>
 #include <cstdint>
 #include <string>
