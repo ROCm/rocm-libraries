@@ -36,7 +36,7 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
-from ..Common import print2, ceilDivide, log2, clusterEnabled
+from ..Common import print2, ceilDivide, log2, clusterEnabled, streamKClusterFactors
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -1620,7 +1620,10 @@ class StreamK(Component):
         (deadlock-safe). See docs/design/streamk-wg-clusters.md.
         """
         module = Module("StreamK cluster intra-cluster check")
-        C = kernel["ClusterDim"][0]
+        # Whole-cluster size C spans every co-resident peer WG. 1-D pure-multicast
+        # [C,1]: C = Cs = ClusterDim[0] (byte-identical). 2-D pure-reduction [1,C]:
+        # C = Ck = ClusterDim[1]. In general C = Cs*Ck.
+        _, _, C, _ = streamKClusterFactors(kernel)
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
         sClusterLast = writer.sgprPool.checkOut(1, "SKClusterLast")
         sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
@@ -2839,6 +2842,23 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
+
+        # Genuine 2-D StreamK cluster (Ck = ClusterDim[1] > 1, e.g. pure reduction
+        # [1, C]): the K-split reduction axis is the HW cluster Y rank (WorkGroup1
+        # in [0, Ck)). The launch grid is 2-D [skGrid/Ck, Ck, 1], so fold the Y rank
+        # into the linear StreamK index:
+        #   StreamKIdx = WorkGroup0*Ck + WorkGroup1   (k = WorkGroup1 fastest)
+        # This keeps StreamKIdx a dense unique index whose (s,k) decode matches the
+        # 1-D [C,1] scheme (StreamKIdx & (Ck-1) = wg_y = k, StreamKIdx & (C-1) = the
+        # within-cluster rank). The fold is written into WorkGroup0 so the SMov/VMov
+        # save below (unchanged) still copies the final index; the 1-D Ck==1 path is
+        # byte-identical (no fold emitted). See docs/design/streamk-wg-clusters.md.
+        _, ck2d, _, is2d = streamKClusterFactors(kernel)
+        if is2d:
+            module.add(SMulI32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=hex(ck2d),
+                               comment="2-D cluster: WorkGroup0 * Ck"))
+            module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr("WorkGroup1"),
+                               comment="2-D cluster: StreamKIdx = WorkGroup0*Ck + WorkGroup1 (K/Y rank)"))
 
         if skConstsInVgprs:
             module.add(VMovB32(dst=vgpr(self._skv(writer, "StreamKIdx")), src=sgpr("WorkGroup0"),

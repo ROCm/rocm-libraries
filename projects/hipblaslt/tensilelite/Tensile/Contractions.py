@@ -590,21 +590,33 @@ class ProblemPredicate(Properties.Predicate):
         valuepredicates.append(state["MacroTile0"])
         valuepredicates.append(state["MacroTile1"])
         valuepredicates.append(state["GlobalSplitU"])
+        # value[3] is the M-adjacency (shared-B) alignment axis Cs = ClusterDim[0].
+        # Pure multicast [C,1]: Cs = C (byte-identical to historic value). Pure
+        # reduction [1,C]: Cs = 1 (no M-alignment constraint).
         valuepredicates.append(state["ClusterDim"][0])
-        valuepredicates.append(state["ClusterDim"][1])
+        # value[4] is the N-tile divisor. For a genuine 2-D StreamK cluster
+        # (Ck = ClusterDim[1] > 1, e.g. pure reduction [1,C]) the Y-extent is the
+        # K-split reduction / index-generation axis, NOT an N-tiling axis, so it
+        # must NOT constrain the N-tile grid -> pin to 1. 1-D StreamK ([C,1]) and
+        # dense (non-StreamK) clusters keep ClusterDim[1] (byte-identical).
+        if state.get("StreamK", 0) == 3 and state["ClusterDim"][1] > 1:
+            valuepredicates.append(1)
+        else:
+            valuepredicates.append(state["ClusterDim"][1])
         rv += [cls('ClusterDimCheck', value=valuepredicates)]
 
-        # StreamK cluster-reduction split-barrier safety (gfx1250). The C =
-        # ClusterDim[0] peers split a tile's itersPerTile = ceil(K/DepthU)
+        # StreamK cluster-reduction split-barrier safety (gfx1250). The Ck =
+        # ClusterDim[1] reduction peers split a tile's itersPerTile = ceil(K/DepthU)
         # K-iterations and hand off through an intra-cluster split barrier; if
-        # itersPerTile % C != 0 (incl. C > itersPerTile) the split barrier
+        # itersPerTile % Ck != 0 (incl. Ck > itersPerTile) the split barrier
         # over-signals -> hang. itersPerTile depends on runtime K, so this is a
-        # per-problem HARD REJECT (not a build-time reject, not a silent
-        # fallback). Only the K-split reduction path needs it; StreamKMulticast
-        # (no K-split) relies on ClusterDimCheck instead.
-        if state.get("StreamKClusterReduction", 0) and state["ClusterDim"][0] > 1:
+        # per-problem HARD REJECT (not a build-time reject, not a silent fallback).
+        # Reduction is derived from the cluster shape: pure reduction is [1, C]
+        # (Ck = ClusterDim[1] = C > 1). Pure multicast (no K-split) relies on
+        # ClusterDimCheck instead.
+        if state.get("StreamKClusterReduction", 0) and state["ClusterDim"][1] > 1:
             rv += [cls('ClusterReductionIterCheck',
-                       value=[state["DepthU"], state["ClusterDim"][0]])]
+                       value=[state["DepthU"], state["ClusterDim"][1]])]
 
         return rv
 

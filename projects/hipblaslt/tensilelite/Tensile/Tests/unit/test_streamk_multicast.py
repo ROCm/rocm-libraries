@@ -62,6 +62,15 @@ class TestRegistration:
         from Tensile.Common.GlobalParameters import defaultSolution
         assert "StreamKMulticast" not in defaultSolution
 
+    def test_reduction_also_derived_only(self):
+        """StreamKClusterReduction is now derived-only too (param-free migration):
+        it is derived purely from ClusterDim = [1, C] (Ck>1), so it must NOT be a
+        user/benchmark-settable parameter either."""
+        from Tensile.Common.ValidParameters import validParameters
+        from Tensile.Common.GlobalParameters import defaultSolution
+        assert "StreamKClusterReduction" not in validParameters
+        assert "StreamKClusterReduction" not in defaultSolution
+
 
 # --- config -> Solution derivation helpers ---------------------------------
 
@@ -141,31 +150,39 @@ class TestValidation:
             assert st["StreamKMulticast"] == 1, st.get("StreamKMulticast")
             assert st["Multicast"] == 1, st["Multicast"]
 
-    def test_reduction_keeps_cooperative_loads_off(self, tmp_path):
-        """Mutual exclusion (reduction wins): adding StreamKClusterReduction=1 to
-        an otherwise auto-multicast SK3 cluster turns the cooperative loads off
-        (StreamKMulticast stays 0, Multicast False) instead of auto-enabling."""
+    def test_reduction_shape_keeps_cooperative_loads_off(self, tmp_path):
+        """Param-free derivation: expressing the cluster as ClusterDim = [1, C]
+        (pure reduction) derives StreamKClusterReduction=1 and leaves the spatial
+        cooperative-load multicast off (StreamKMulticast=0, Multicast False),
+        since Cs = ClusterDim[0] = 1. Reduction is no longer a user param."""
         from Tensile import LibraryIO
         import yaml
         cfg = copy.deepcopy(LibraryIO.read(_STREAMK_CLUSTER_BARE))
         fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
-        fork.append({"StreamKClusterReduction": [1]})
+        replaced = False
+        for entry in fork:
+            if "ClusterDim" in entry:
+                entry["ClusterDim"] = [[1, 4]]
+                replaced = True
+                break
+        if not replaced:
+            fork.append({"ClusterDim": [[1, 4]]})
         out = tmp_path / "bare_cluster_reduction.yaml"
         with open(out, "w") as f:
             yaml.safe_dump(cfg, f, default_flow_style=None)
         states = _derive_states(str(out))
-        assert states, "expected the SK3 reduction cluster config to derive solutions"
+        assert states, "expected the SK3 [1,C] reduction cluster config to derive solutions"
         for st in states:
             assert not st.get("StreamKMulticast", 0), st.get("StreamKMulticast")
+            assert st.get("StreamKClusterReduction", 0) == 1, st.get("StreamKClusterReduction")
             assert st["Multicast"] == 0, st["Multicast"]
 
     def test_xor_streamk_cluster_reduction(self):
         """The mutual-exclusion invariant is enforced at the validator: a state
-        that (hypothetically) has BOTH StreamKMulticast and StreamKClusterReduction
-        is rejected. Through config this is now unreachable -- the collapse gives
-        reduction precedence and leaves the derived StreamKMulticast off (see
-        test_reduction_keeps_cooperative_loads_off) -- but the validator keeps the
-        xor as a hard invariant the collapse depends on."""
+        that has BOTH StreamKMulticast (Cs>1) and StreamKClusterReduction (Ck>1)
+        is the FACTORED cluster [Cs,Ck], which lives on the factored-cluster-mode
+        branch and is rejected in the SK cluster guard on this branch. The
+        validator keeps the xor as a hard defensive invariant regardless."""
         from Tensile.SolutionStructs.Solution import _validateStreamKMulticast
         st = {
             "StreamKMulticast": 1,

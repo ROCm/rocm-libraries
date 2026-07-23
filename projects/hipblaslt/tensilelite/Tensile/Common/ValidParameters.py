@@ -837,28 +837,20 @@ validParameters = { # we need to make sure this matches develop
     # 0: use linear reduction
     # 1: use tree reduction
     "StreamKFixupTreeReduction": [0, 1],
-    # Enables the gfx1250 workgroup-cluster reduction fast path for StreamK.
-    # When enabled, a StreamK tile's fixup peers are co-located in a single 1-D
-    # workgroup cluster (ClusterDim = [C,1]) and the cross-CU global-flag
-    # spin-wait is replaced by an intra-cluster split barrier. Barrier-only in
-    # v1 (Multicast stays off); partials remain in the global workspace and the
-    # global-flag reduction is retained as a runtime/compile fallback.
-    # Requires StreamK == 3, ClusterDim == [C,1] with C a power of two in 2..16,
-    # gfx1250 (HasClusterBarrier) with TDMInst != 0, and NOT StreamKAtomic /
-    # NOT StreamKForceDPOnly. See docs/design/streamk-wg-clusters.md.
-    # 0: use the existing global-flag reduction
-    # 1: enable the cluster-barrier reduction fast path
-    "StreamKClusterReduction": [0, 1],
-    # NOTE: StreamKMulticast (the gfx1250 StreamK DP cooperative cluster-load /
-    # TDM B-multicast fast path) is intentionally NOT a valid/benchmark
-    # parameter. It is a DERIVED-ONLY internal state key (see the ClusterBarrier
+    # NOTE: StreamKMulticast and StreamKClusterReduction (the gfx1250 StreamK DP
+    # cooperative cluster-load / TDM B-multicast fast path and the cluster split-
+    # barrier K-reduction fast path) are intentionally NOT valid/benchmark
+    # parameters. They are DERIVED-ONLY internal state keys (see the ClusterBarrier
     # precedent): Solution.assignProblemIndependentDerivedParameters auto-enables
-    # it for StreamK==3 + ClusterDim != [1,1] (the "bare StreamK cluster"
-    # collapse), and _validateStreamKMulticast then hard-rejects any cluster
-    # config that cannot satisfy its constraints. It must not be user/YAML-
-    # settable, so it has no entry here (checkParametersAreValid would otherwise
-    # accept it as a fork/constant param). It still serializes to C++ via
-    # Contractions.SizeMapping (streamKMulticast, read with d.get()).
+    # them for StreamK==3 purely from the cluster shape ClusterDim = [Cs, Ck]
+    # (StreamKMulticast iff Cs = ClusterDim[0] > 1, StreamKClusterReduction iff
+    # Ck = ClusterDim[1] > 1) -- so [C,1] = pure multicast, [1,C] = pure reduction.
+    # _validateStreamKMulticast / _validateStreamKClusterReduction then hard-reject
+    # any cluster config that cannot satisfy their constraints. They must not be
+    # user/YAML-settable, so they have no entry here (checkParametersAreValid would
+    # otherwise accept them as a fork/constant param). They still serialize to C++
+    # via Contractions.SizeMapping (streamKMulticast / streamKClusterReduction, read
+    # with d.get()). See docs/design/streamk-wg-clusters.md.
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code

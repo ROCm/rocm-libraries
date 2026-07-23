@@ -235,23 +235,26 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
   """Validate the gfx1250 StreamK workgroup-cluster reduction fast path.
 
   StreamKClusterReduction co-locates a StreamK tile's fixup peers in a single
-  1-D workgroup cluster (ClusterDim = [C, 1]) and replaces the cross-CU
-  global-flag spin-wait with an intra-cluster split barrier. It is an explicit,
-  opt-in fast path (barrier-only in v1); solution-level requirements are rejected
-  here at build time. The runtime requirement itersPerTile = ceil(K/DepthU) % C
-  == 0 (unknown at build time, else the split barrier over-signals) is instead a
-  per-problem selection reject via the ClusterReductionIterCheck predicate
-  (Contractions.py). See docs/design/streamk-wg-clusters.md.
+  workgroup cluster and replaces the cross-CU global-flag spin-wait with an
+  intra-cluster split barrier. It is DERIVED (not a user opt-in) from the cluster
+  shape ClusterDim = [1, C] (Ck = ClusterDim[1] > 1); solution-level requirements
+  are rejected here at build time. The runtime requirement itersPerTile =
+  ceil(K/DepthU) % C == 0 (unknown at build time, else the split barrier
+  over-signals) is instead a per-problem selection reject via the
+  ClusterReductionIterCheck predicate (Contractions.py).
+  See docs/design/streamk-wg-clusters.md.
   """
   if not state.get("StreamKClusterReduction", 0):
     return True
 
-  # Mutually exclusive with the cooperative-load multicast fast path: the two
-  # features want incompatible cluster semantics (K-split reduction peers vs.
-  # M-adjacent shared-B multicast peers) on the same 1-D cluster.
+  # Pure reduction ([1, C]) has Cs = ClusterDim[0] = 1, so StreamKMulticast is
+  # off. Factored ([Cs,Ck] with BOTH axes > 1) would turn both on, but that is
+  # rejected in the SK cluster guard on this branch (it lives on the factored
+  # branch). Defensive: reject the combination here too.
   if state.get("StreamKMulticast", 0):
     reject(state, printRejectionReason,
-           "StreamKMulticast and StreamKClusterReduction are mutually exclusive")
+           "StreamKMulticast (Cs>1) + StreamKClusterReduction (Ck>1) is the "
+           "factored cluster; not supported on this branch")
     return False
 
   # SK3 (StreamKTwoTileDPFirst) only; SK4/SK5 dynamic/atomic peer sets can not
@@ -278,17 +281,19 @@ def _validateStreamKClusterReduction(state, printRejectionReason, isaInfoMap):
            "StreamKClusterReduction is not supported with StreamKXCCMapping=3 (SGPR overflow)")
     return False
 
-  # 1-D cluster [C, 1] with C a power of two in [2, 16]. A ClusterDim[1] > 1
-  # would require gridDimY % ClusterDim[1] == 0 while the StreamK grid is 1-D.
+  # Pure reduction is expressed as ClusterDim = [1, C] (Cs = ClusterDim[0] = 1,
+  # Ck = ClusterDim[1] = C the K-split peer count), a genuine 2-D cluster whose
+  # launch grid is [skGrid/C, C, 1] (so gridDimY % C == 0 holds). C must be a
+  # power of two in [2, 16].
   clusterDim = state["ClusterDim"]
-  c = clusterDim[0]
-  if clusterDim[1] != 1:
+  c = clusterDim[1]
+  if clusterDim[0] != 1:
     reject(state, printRejectionReason,
-           "StreamKClusterReduction requires ClusterDim = [C, 1] (got %s)" % clusterDim)
+           "StreamKClusterReduction requires ClusterDim = [1, C] (got %s)" % clusterDim)
     return False
   if c < 2 or c > 16 or (c & (c - 1)) != 0:
     reject(state, printRejectionReason,
-           "StreamKClusterReduction requires ClusterDim[0] a power of two in [2, 16] (got %d)" % c)
+           "StreamKClusterReduction requires ClusterDim[1] a power of two in [2, 16] (got %d)" % c)
     return False
 
   # gfx1250 with the cluster split barrier capability.
@@ -330,12 +335,15 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
   if not state.get("StreamKMulticast", 0):
     return True
 
-  # Mutually exclusive with the cluster split-barrier reduction fast path: the
-  # two features want incompatible cluster semantics on the same 1-D cluster and
-  # must never be enabled together.
+  # Multicast (Cs>1) and reduction (Ck>1) both on is the FACTORED cluster
+  # [Cs,Ck] with both axes > 1 -- that lives on the streamk-factored-cluster-mode
+  # branch and is rejected in the SK cluster guard on this branch. Defensive
+  # reject here too: on this (multicast/reduction-only) branch the two derived
+  # roles are mutually exclusive (pure multicast [C,1] xor pure reduction [1,C]).
   if state.get("StreamKClusterReduction", 0):
     reject(state, printRejectionReason,
-           "StreamKMulticast and StreamKClusterReduction are mutually exclusive")
+           "StreamKMulticast (Cs>1) + StreamKClusterReduction (Ck>1) is the "
+           "factored cluster; not supported on this branch")
     return False
 
   # StreamKMulticast is auto-enabled by ClusterDim on SK3, but the multicast mask
@@ -1238,31 +1246,35 @@ class Solution(collections.abc.Mapping):
     # ClusterBarrier default above) so it is always present on state; the collapse
     # below is the ONLY place it is turned on.
     state["StreamKMulticast"] = 0
-    # Collapse the bare StreamK cluster state: on StreamK=3 a non-[1,1] ClusterDim
-    # AUTO-ENABLES the DP cooperative B-multicast path. A StreamK cluster with no
-    # cooperative loads no longer exists -- "ClusterDim without cluster loads" is
-    # not a supported state. StreamKMulticast is derived-only (no user/YAML
-    # opt-in): this collapse is its sole enable site.
+    # StreamKClusterReduction is a DERIVED-ONLY internal state key (like
+    # StreamKMulticast): reduction is no longer a user opt-in, it is expressed
+    # purely by the cluster shape ClusterDim = [1, C] (Ck = ClusterDim[1] > 1).
+    # Seed it off here (mirroring StreamKMulticast); the collapse below is its
+    # sole enable site.
+    state["StreamKClusterReduction"] = 0
+    # ClusterDim-driven StreamK cluster derivation (fully param-free). On StreamK=3
+    # a non-[1,1] ClusterDim = [Cs, Ck] AUTO-ENABLES the cooperative cluster path;
+    # both derived booleans fall out of the cluster shape:
+    #   * Cs = ClusterDim[0] spatial B-multicast peers -> StreamKMulticast iff Cs>1
+    #   * Ck = ClusterDim[1] K-split reduction peers    -> StreamKClusterReduction iff Ck>1
+    # Config expressions:  [C,1] = pure multicast,  [1,C] = pure reduction.
+    # Factored (both axes > 1) is the streamk-factored-cluster-mode branch and is
+    # rejected here (see the SK cluster guard in assignDerivedParameters).
     #
-    # If the resulting cooperative-load config cannot be satisfied (e.g. TDMInst!=3
-    # or non-gfx1250), _validateStreamKMulticast (called later in
-    # assignDerivedParameters) rejects it at build time rather than silently
-    # degrading to a no-op cluster -- an unusable cluster is a hard reject.
-    #
-    # Scope note: the TDM B-multicast fast path is StreamK=3-only, so there is
-    # nothing to auto-enable for the dynamic (SK4) / hybrid (SK5) queue modes.
-    # SK4/SK5 with a non-[1,1] ClusterDim is rejected later in
-    # assignDerivedParameters (no cluster-load impl for those modes).
-    # ClusterDim is tested first so this (like the legacy Multicast auto branch
-    # below) never dereferences StreamK for the common non-clustered state, which
-    # some partial-state derivation call sites construct without a StreamK key.
-    #
-    # StreamKClusterReduction claims the [C,1] cluster for its own split-barrier
-    # K-split reduction (mutually exclusive with the cooperative-load multicast),
-    # so a reduction cluster must NOT auto-enable StreamKMulticast here.
-    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3 \
-       and not state.get("StreamKClusterReduction", 0):
-      state["StreamKMulticast"] = 1
+    # A StreamK cluster with no cooperative role no longer exists -- "ClusterDim
+    # without cluster loads" is not a supported state. If the resulting config
+    # cannot be satisfied (e.g. TDMInst!=3 or non-gfx1250), _validateStreamKMulticast
+    # / _validateStreamKClusterReduction reject it at build time rather than
+    # silently degrading. The TDM/cluster fast paths are StreamK=3-only; SK4/SK5
+    # with a non-[1,1] ClusterDim is rejected later in assignDerivedParameters.
+    # ClusterDim is tested first so this never dereferences StreamK for the common
+    # non-clustered state, which some partial-state derivation call sites construct
+    # without a StreamK key. See docs/design/streamk-wg-clusters.md.
+    if state["ClusterDim"] != [1, 1] and state.get("StreamK", 0) == 3:
+      cs = state["ClusterDim"][0]
+      ck = state["ClusterDim"][1]
+      state["StreamKMulticast"] = 1 if cs > 1 else 0
+      state["StreamKClusterReduction"] = 1 if ck > 1 else 0
     # Multicast tri-state (see ValidParameters): -1 auto (legacy), 0 off, 1 on.
     # Default -1 reproduces the historic ClusterDim-coupled derivation, so YAML
     # that omits Multicast is byte-identical.
@@ -1953,12 +1965,20 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason,
                  "StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim "
                  "(cluster support is SK3-only)")
-        # Stream-K launches a 1-D grid in X, so StreamKIdx = WorkGroup0 = cluster_x*nwg_x
-        # + wg_x must stay a unique linear index. A Y-extent > 1 collides WorkGroup0 across
-        # WGs that differ only in Y, so restrict clustering to the X dimension.
-        if state["ClusterDim"][1] != 1:
+        # ClusterDim-driven cluster shape (SK3). A genuine 2-D cluster ([Cs,Ck]
+        # with Ck=ClusterDim[1]>1) launches a 2-D grid [skGrid/Ck, Ck, 1] and folds
+        # the Y rank into the index (StreamKIdx = WorkGroup0*Ck + WorkGroup1, see
+        # StreamK.preLoop), so a Y-extent > 1 no longer collides WorkGroup0. On this
+        # (reduction) branch only the pure-reduction shape [1, C] is supported;
+        # factored [Cs,Ck] with BOTH axes > 1 (spatial multicast AND K-split in one
+        # cluster) lives on the streamk-factored-cluster-mode branch -- reject it
+        # here. Pure multicast stays [C, 1] (Ck==1, 1-D launch, byte-identical).
+        if state["ClusterDim"][1] > 1 and state["ClusterDim"][0] > 1:
           reject(state, printRejectionReason,
-                 "Stream-K + ClusterDim requires ClusterDim Y-extent == 1")
+                 "Factored StreamK cluster [Cs,Ck] with both axes > 1 is not "
+                 "supported on this branch; use ClusterDim=[C,1] (multicast) or "
+                 "[1,C] (reduction), or the streamk-factored-cluster-mode branch "
+                 "(got %s)" % state["ClusterDim"])
         # StreamKXCCMapping remaps WorkGroup0 with no cluster awareness; disable it.
         state["StreamKXCCMapping"] = 0
       if not state["EnableMatrixInstruction"]:

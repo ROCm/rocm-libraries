@@ -940,15 +940,23 @@ namespace TensileLite
                 // grid, so DISABLE this path and fall through to the standard SK3
                 // accounting (the kernel's intra_cluster runtime guard already
                 // routes partially-filled clusters to the global-flag reduction).
-                if(sizeMapping.streamKClusterReduction && sizeMapping.clusterDim.x > 1
-                   && sk.grid == static_cast<size_t>(sizeMapping.clusterDim.x) * tiles)
+                // Pure reduction is expressed as ClusterDim = [1, C] (Cs=1,
+                // Ck=clusterDim.y=C), so the whole cluster C = clusterDim.x *
+                // clusterDim.y. The launch grid contract is skGrid == C*tiles
+                // (one tile per cluster, split C ways); a workspace/DP fallback in
+                // solve() that re-rounds sk.grid off that contract disables this
+                // path (fall through to standard SK3 accounting).
+                size_t cCluster = static_cast<size_t>(sizeMapping.clusterDim.x)
+                                  * static_cast<size_t>(sizeMapping.clusterDim.y);
+                if(sizeMapping.streamKClusterReduction && cCluster > 1
+                   && sk.grid == cCluster * tiles)
                 {
-                    // Fixed even split / one-tile-per-cluster: the C = clusterDim.x
-                    // consecutive StreamKIdx of one cluster (its contiguous
-                    // WorkGroup0 range [c*C, c*C + C)) are exactly the fixup peers of
-                    // tile c; each peer runs itersPerTile/C iterations (skSplit == C)
-                    // and skTiles == tiles (every tile split C ways).
-                    uint32_t c            = static_cast<uint32_t>(sizeMapping.clusterDim.x);
+                    // Fixed even split / one-tile-per-cluster: the C consecutive
+                    // StreamKIdx of one cluster (its contiguous WorkGroup0 range
+                    // [c*C, c*C + C), after the 2-D index fold) are exactly the
+                    // fixup peers of tile c; each peer runs itersPerTile/C iterations
+                    // (skSplit == C) and skTiles == tiles (every tile split C ways).
+                    uint32_t c            = static_cast<uint32_t>(cCluster);
                     uint32_t skItersPerWG = static_cast<uint32_t>(itersPerTile) / c;
 
                     args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
@@ -1786,9 +1794,25 @@ namespace TensileLite
 
         if(sizeMapping.streamK != 0)
         {
-            rv.numWorkGroups.x = sk.grid;
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
+            if(sizeMapping.clusterDim.y > 1)
+            {
+                // Genuine 2-D StreamK cluster (Ck = clusterDim.y > 1, e.g. pure
+                // reduction [1, C]): launch a 2-D grid so the cluster Y-extent is
+                // legal (gridDimY % Ck == 0) and every WG gets a unique index via
+                // StreamKIdx = WorkGroup0*Ck + WorkGroup1 (kernel preLoop). sk.grid
+                // is rounded to a multiple of C = Cs*Ck (getSKGridImpl), so
+                // gridDimX = skGrid/Ck is a whole number.
+                uint32_t ck        = sizeMapping.clusterDim.y;
+                rv.numWorkGroups.x = sk.grid / ck;
+                rv.numWorkGroups.y = ck;
+                rv.numWorkGroups.z = 1;
+            }
+            else
+            {
+                rv.numWorkGroups.x = sk.grid;
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
         }
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
@@ -3225,9 +3249,14 @@ namespace TensileLite
             // is handled by the kernel's runtime guard (clusterMulticastValid for
             // multicast, intra_cluster for cluster reduction) + global-flag fallback.
             if((sizeMapping.streamKMulticast || sizeMapping.streamKClusterReduction)
-               && sizeMapping.clusterDim.x > 1)
+               && (static_cast<size_t>(sizeMapping.clusterDim.x)
+                   * static_cast<size_t>(sizeMapping.clusterDim.y))
+                      > 1)
             {
-                size_t c = sizeMapping.clusterDim.x;
+                // C = Cs*Ck. Pure multicast [C,1]: c = clusterDim.x (byte-identical).
+                // Pure reduction [1,C]: c = clusterDim.y.
+                size_t c = static_cast<size_t>(sizeMapping.clusterDim.x)
+                           * static_cast<size_t>(sizeMapping.clusterDim.y);
                 sk.grid  = ((sk.grid + c - 1) / c) * c;
             }
         }
@@ -4120,20 +4149,24 @@ namespace TensileLite
             }
 
             // StreamKClusterReduction (gfx1250): fixed even split / one-tile-per-cluster
-            // (design docs/design/streamk-wg-clusters.md, section 2.3). Each of the
-            // `tiles` output tiles is owned by exactly one cluster of C = clusterDim.x
-            // peer WGs, so the launched grid is C * tiles. The HW WG-id remap gives
-            // WorkGroup0 = cluster_x*C + wg_x, so the C WGs of cluster c occupy the
+            // (design docs/design/streamk-wg-clusters.md, section 2.3). Pure reduction is
+            // expressed as ClusterDim = [1, C] (Cs=1, Ck=clusterDim.y=C), so the whole
+            // cluster C = clusterDim.x * clusterDim.y. Each of the `tiles` output tiles is
+            // owned by exactly one cluster of C peer WGs, so the launched grid is C * tiles.
+            // The 2-D launch [skGrid/Ck, Ck, 1] + the kernel index fold gives
+            // StreamKIdx = WorkGroup0*Ck + WorkGroup1, so the C WGs of cluster c occupy the
             // contiguous StreamK index range [c*C, c*C + C) -- exactly the consecutive
             // fixup peers of tile c. C * tiles is inherently a multiple of C, satisfying
-            // the clustered-launch requirement that gridDimX be a multiple of the cluster
-            // size (see HipSolutionAdapter cluster launch). This override intentionally
-            // supersedes the grid-selection heuristics above so the alignment invariant
-            // always holds; residual/partial clusters fall back to the global-flag path
-            // via the kernel's intra_cluster runtime guard.
-            if(self.sizeMapping.streamKClusterReduction && self.sizeMapping.clusterDim.x > 1)
+            // the clustered-launch requirement that gridDimX*gridDimY be a multiple of the
+            // cluster size. This override intentionally supersedes the grid-selection
+            // heuristics above so the alignment invariant always holds; residual/partial
+            // clusters fall back to the global-flag path via the kernel's intra_cluster
+            // runtime guard.
+            size_t cReduction = static_cast<size_t>(self.sizeMapping.clusterDim.x)
+                                * static_cast<size_t>(self.sizeMapping.clusterDim.y);
+            if(self.sizeMapping.streamKClusterReduction && cReduction > 1)
             {
-                skGrid = static_cast<size_t>(self.sizeMapping.clusterDim.x) * tiles;
+                skGrid = cReduction * tiles;
             }
 
             return skGrid;

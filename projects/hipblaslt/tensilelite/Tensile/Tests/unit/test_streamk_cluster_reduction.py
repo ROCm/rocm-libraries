@@ -99,14 +99,18 @@ def _make_writer(has_cluster_barrier=True):
 
 
 def _valid_cluster_kernel(C=4):
-    """A kernel dict that satisfies _streamKClusterReductionEnabled."""
+    """A kernel dict that satisfies _streamKClusterReductionEnabled.
+
+    Pure reduction is expressed as ClusterDim = [1, C] (Cs=1, Ck=C): the whole
+    cluster C = Cs*Ck = ClusterDim[1] reduction peers.
+    """
     return {
         "StreamKClusterReduction": 1,
         "StreamK": 3,
         "StreamKFixupTreeReduction": 0,
         "StreamKAtomic": 0,
         "StreamKForceDPOnly": 0,
-        "ClusterDim": [C, 1],
+        "ClusterDim": [1, C],
     }
 
 
@@ -252,7 +256,7 @@ class TestReductionValidation:
         st = {
             "StreamKClusterReduction": 1, "StreamKMulticast": 0, "StreamK": 3,
             "StreamKAtomic": 0, "StreamKForceDPOnly": 0, "StreamKXCCMapping": 0,
-            "ClusterDim": [4, 1], "ISA": [12, 5, 0], "TDMInst": 3,
+            "ClusterDim": [1, 4], "ISA": [12, 5, 0], "TDMInst": 3,
         }
         st.update(overrides)
         return st
@@ -289,11 +293,16 @@ class TestReductionValidation:
     def test_reject_xcc3(self):
         assert self._validate(self._state(StreamKXCCMapping=3)) is False
 
-    def test_reject_non_1d_cluster(self):
+    def test_reject_non_reduction_shape_cluster(self):
+        # Pure reduction requires [1, C]; a factored [Cs,Ck] with Cs>1 (here
+        # [2,2]) is not supported on this branch and is rejected.
         assert self._validate(self._state(ClusterDim=[2, 2])) is False
+        # Pure multicast [C,1] is not a reduction shape either.
+        assert self._validate(self._state(ClusterDim=[4, 1])) is False
 
     def test_reject_non_pow2_cluster(self):
-        assert self._validate(self._state(ClusterDim=[3, 1])) is False
+        # Ck = ClusterDim[1] must be a power of two in [2, 16].
+        assert self._validate(self._state(ClusterDim=[1, 3])) is False
 
     def test_reject_non_gfx1250(self):
         assert self._validate(self._state(ISA=[9, 4, 2])) is False

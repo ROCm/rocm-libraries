@@ -1480,7 +1480,6 @@
     'StoreVectorWidth',
     'StreamK',
     'StreamKAtomic',
-    'StreamKClusterReduction',
     'StreamKFixupTreeReduction',
     'StreamKForceDPOnly',
     'StreamKXCCMapping',
@@ -2574,14 +2573,6 @@
       'type': 'list',
     }),
     'StreamKAtomic': dict({
-      'head': list([
-        0,
-        1,
-      ]),
-      'len': 2,
-      'type': 'list',
-    }),
-    'StreamKClusterReduction': dict({
       'head': list([
         0,
         1,
