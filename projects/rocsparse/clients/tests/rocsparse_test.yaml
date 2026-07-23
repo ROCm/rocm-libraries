@@ -131,8 +131,10 @@ include: test_sptrsv_csr.yaml
 include: test_sptrsv_csc.yaml
 include: test_sptrsv_coo.yaml
 include: test_spsm_csr.yaml
+include: test_spsm_csc.yaml
 include: test_spsm_coo.yaml
 include: test_sptrsm_csr.yaml
+include: test_sptrsm_csc.yaml
 include: test_sptrsm_coo.yaml
 include: test_spmm_bsr.yaml
 include: test_spmm_csr.yaml
