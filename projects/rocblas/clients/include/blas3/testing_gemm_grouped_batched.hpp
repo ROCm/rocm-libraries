@@ -591,31 +591,35 @@ void testing_gemm_grouped_batched(const Arguments& arg)
             {
                 for(int64_t p = 0; p < cfg.group_size[g]; ++p, ++idx)
                 {
-                    if(std::is_same_v<T, rocblas_half>
-                       && (rocblas_handle(handle)->getArchMajor() == 11))
+                    if(std::is_same_v<
+                           T,
+                           rocblas_half> && (rocblas_handle(handle)->getArchMajor() == 11))
                     {
                         const double tol = cfg.k_array[g] * sum_error_tolerance_for_gfx11<T, T, T>;
                         near_check_general<T>(cfg.m_array[g],
-                                                cfg.n_array[g],
-                                                cfg.ldc_array[g],
-                                                hC_gold[idx],
-                                                hC[idx],
-                                                tol);
+                                              cfg.n_array[g],
+                                              cfg.ldc_array[g],
+                                              hC_gold[idx],
+                                              hC[idx],
+                                              tol);
                     }
                     else if(reduction_requires_near<T>(arg, cfg.k_array[g]))
                     {
                         const double tol = cfg.k_array[g] * sum_error_tolerance<T>;
                         near_check_general<T>(cfg.m_array[g],
-                                                cfg.n_array[g],
-                                                cfg.ldc_array[g],
-                                                hC_gold[idx],
-                                                hC[idx],
-                                                tol);
+                                              cfg.n_array[g],
+                                              cfg.ldc_array[g],
+                                              hC_gold[idx],
+                                              hC[idx],
+                                              tol);
                     }
                     else
                     {
-                        unit_check_general<T>(
-                            cfg.m_array[g], cfg.n_array[g], cfg.ldc_array[g], hC_gold[idx], hC[idx]);
+                        unit_check_general<T>(cfg.m_array[g],
+                                              cfg.n_array[g],
+                                              cfg.ldc_array[g],
+                                              hC_gold[idx],
+                                              hC[idx]);
                     }
                 }
             }
