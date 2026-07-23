@@ -641,7 +641,30 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
+# gfx1250 ds_load offset is a 16-bit unsigned immediate. Large subtile tiles produce
+# LDS byte offsets past 65535 (e.g. SubtileB[8,0] at 67584) -> "expected a 16-bit
+# unsigned offset" assembler error. Fold the 64KB-aligned excess into a scratch address
+# VGPR (offset is a compile-time constant) and keep the remainder in the offset field.
+_DS_OFFSET_MAX = 0xFFFF  # 65535
+
+def _addDsReadB128(module, dstVgpr, numRegsRead, addrVgpr, offset, writer, comment):
+  if offset <= _DS_OFFSET_MAX:
+    module.add(DSLoadB128(dst=vgpr(dstVgpr, numRegsRead), src=vgpr(addrVgpr),
+                          ds=DSModifiers(offset=offset), comment=comment))
+    return
+  assert writer is not None, \
+      "emitDsRead: LDS offset %d exceeds 16-bit ds field and no writer for scratch VGPR" % offset
+  highOff = (offset // 0x10000) * 0x10000  # 64KB-aligned block to fold into the address
+  lowOff = offset - highOff                # remainder, guaranteed <= 0xFFFF
+  scratch = writer.vgprPool.checkOut(1, tag="dsReadHighOffset")
+  module.add(VAddU32(dst=vgpr(scratch), src0=vgpr(addrVgpr), src1=hex(highOff),
+                     comment="fold LDS offset %d: base += %d" % (offset, highOff)))
+  module.add(DSLoadB128(dst=vgpr(dstVgpr, numRegsRead), src=vgpr(scratch),
+                        ds=DSModifiers(offset=lowOff), comment=comment + " (hi-offset folded)"))
+  writer.vgprPool.checkIn(scratch)
+
+
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True, writer=None):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -653,6 +676,8 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
       subIterK:  subIterK index within the subtile (maps to mfmaC; subtileShape[0]=1 so mfmaR=0)
       dstTile:   RegisterTileInfo \u2014 destination vgpr tile for the load
       swizzled:  If True, LDS uses swizzled subtile layout; if False, contiguous K-row layout
+      writer:    KernelWriter, needed only to check out a scratch VGPR when the LDS byte
+                 offset exceeds the 16-bit ds_load offset field (large subtile tiles).
 
   Returns a Module. For tiles with numRegs > 4 (e.g. FP8 8-VGPR tiles), emits
   multiple ds_read_b128 instructions (one per 4 VGPRs), each using the next
@@ -689,11 +714,9 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
   module = Module()
   for readIdx in range(numReadsForTile):
     addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
-    module.add(DSLoadB128(
-        dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
-        src=vgpr(addrVgpr),
-        ds=DSModifiers(offset=offset),
-        comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
+    _addDsReadB128(module, dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ,
+                   addrVgpr, offset, writer,
+                   "Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx))
   return module
 
 
@@ -720,11 +743,9 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
     numReadsForTile = numRegs // REGS_PER_DS_READ
     for readIdx in range(numReadsForTile):
       addrVgpr = tileInfo.sharedVgprLROffset[lrOffsetIdx]
-      module.add(DSLoadB128(
-          dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
-          src=vgpr(addrVgpr),
-          ds=DSModifiers(offset=offset),
-          comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, du, readIdx)))
+      _addDsReadB128(module, dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ,
+                     addrVgpr, offset, writer,
+                     "Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, du, readIdx))
       lrOffsetIdx += 1
 
   return module

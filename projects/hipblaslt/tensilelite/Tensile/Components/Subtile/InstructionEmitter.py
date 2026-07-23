@@ -228,7 +228,8 @@ class InstructionEmitter:
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
+                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled,
+                        writer=self.writer))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
