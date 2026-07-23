@@ -1265,7 +1265,7 @@ private:
         if(get_num_used_gpus() > 1)
         {
             // TODO: enable below once hipfftXtSetWorkArea is enabled
-#if(0)
+#if 0
             ret = hipfftXtSetWorkArea(plan, workareas.data);
 #else
             throw unimplemented_exception(
@@ -1288,10 +1288,14 @@ private:
     // allocation and plan init
     bool need_separate_create_make() const
     {
-        // scale factor and multi-GPU and disabled auto-allocation need API
-        // calls between create + init
+        // several features require API calls between create + init:
+        // - result scaling
+        // - multi-GPU
+        // - disabling auto work buffer alloc
+        // - JIT callbacks
         return scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none
-               || auto_allocate == fft_auto_allocation_off || vram_footprint_workspace_probe_mode;
+               || auto_allocate == fft_auto_allocation_off || run_callbacks == fft_callback_type_jit
+               || vram_footprint_workspace_probe_mode;
     }
 
     // Not all plan options work with all creation types.  Return a
@@ -1372,6 +1376,121 @@ private:
                              *hipfft_transform_type,
                              nbatch);
         return ret;
+    }
+
+    hipfftResult_t set_jit_callbacks()
+    {
+        if(run_callbacks != fft_callback_type_jit)
+        {
+            return HIPFFT_SUCCESS;
+        }
+        throw unimplemented_exception("jit callbacks not implemented");
+#if 0
+        hipfftResult_t       ret{HIPFFT_INVALID_PLAN};
+        hipfftXtCallbackType cbtype = HIPFFT_CB_UNDEFINED;
+        switch(itype)
+        {
+        case fft_array_type_complex_interleaved:
+        case fft_array_type_hermitian_interleaved:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_LD_COMPLEX;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_LD_COMPLEX_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_real:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_LD_REAL;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_LD_REAL_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_complex_planar:
+        case fft_array_type_hermitian_planar:
+        case fft_array_type_unset:
+        {
+            throw std::runtime_error("unsupported data type for load callback");
+        }
+        }
+
+        check_jit_callback_state();
+        ret = hipfftXtSetJITCallback(plan,
+                                     load_jit_cb_state->symbol,
+                                     load_jit_cb_state->func.data(),
+                                     load_jit_cb_state->func.size(),
+                                     cbtype,
+                                     load_jit_cb_state->data.empty()
+                                         ? nullptr
+                                         : load_jit_cb_state->get_raw_data_ptrs().data());
+        if(ret != HIPFFT_SUCCESS)
+            return ret;
+
+        switch(otype)
+        {
+        case fft_array_type_complex_interleaved:
+        case fft_array_type_hermitian_interleaved:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_ST_COMPLEX;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_ST_COMPLEX_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_real:
+        {
+            switch(precision)
+            {
+            case fft_precision_single:
+                cbtype = HIPFFT_CB_ST_REAL;
+                break;
+            case fft_precision_double:
+                cbtype = HIPFFT_CB_ST_REAL_DOUBLE;
+                break;
+            case fft_precision_half:
+                throw std::runtime_error("half-precision callbacks are not supported");
+            }
+            break;
+        }
+        case fft_array_type_complex_planar:
+        case fft_array_type_hermitian_planar:
+        case fft_array_type_unset:
+        {
+            throw std::runtime_error("unsupported data type for store callback");
+        }
+        }
+        ret = hipfftXtSetJITCallback(plan,
+                                     store_jit_cb_state->symbol,
+                                     store_jit_cb_state->func.data(),
+                                     store_jit_cb_state->func.size(),
+                                     cbtype,
+                                     store_jit_cb_state->data.empty()
+                                         ? nullptr
+                                         : store_jit_cb_state->get_raw_data_ptrs().data());
+        return ret;
+#endif
     }
 
     // call hipfftCreate + hipfftMake* functions, inserting calls to
@@ -1473,6 +1592,9 @@ private:
             if(ret != HIPFFT_SUCCESS)
                 return ret;
         }
+        ret = set_jit_callbacks();
+        if(ret != HIPFFT_SUCCESS)
+            return ret;
         if(is_preventing_auto_allocation_at_generation())
         {
             ret = hipfftSetAutoAllocation(plan, 0);
