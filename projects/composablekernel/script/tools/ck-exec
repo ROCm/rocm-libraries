@@ -36,7 +36,7 @@ Environment:
   CK_CONTAINER_NAME - Override default container name
 
 Examples:
-  ck-exec ck_smi_show_gpu_info            # GPU info (auto: rocm-smi or amd-smi by ROCm version)
+  ck-exec ck_smi_show_gpu_info            # GPU info (prefers amd-smi; falls back to rocm-smi)
   ck-exec rocminfo                      # Run rocminfo
   ck-exec ls -la build/bin              # List build binaries
   ck-exec -w /workspace/build ninja -t commands # Run ninja commands
