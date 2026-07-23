@@ -154,6 +154,7 @@ foreach(test_src ${hipRAND_TEST_SRCS})
             hiprand
             roc::rocrand
             hip::device
+            ${CMAKE_DL_LIBS}
         )
     endif()
     set_target_properties(${test_name}

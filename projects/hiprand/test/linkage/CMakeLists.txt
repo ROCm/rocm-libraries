@@ -60,6 +60,7 @@ function(add_hiprand_link_test TEST_SOURCES)
         target_link_libraries(${TEST_TARGET}
             hiprand
             roc::rocrand
+            ${CMAKE_DL_LIBS}
         )
         target_link_libraries(${TEST_TARGET} hip::device)
     endif()
