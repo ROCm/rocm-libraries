@@ -21,7 +21,9 @@
 #ifndef ROCFFT_CLIENT_EXCEPT_H
 #define ROCFFT_CLIENT_EXCEPT_H
 
+#include <hip/hiprtc.h>
 #include <stdexcept>
+#include <string>
 
 // exception type to throw when we want to skip a problem
 struct ROCFFT_SKIP : public std::runtime_error
@@ -33,6 +35,17 @@ struct ROCFFT_SKIP : public std::runtime_error
 struct ROCFFT_FAIL : public std::runtime_error
 {
     using std::runtime_error::runtime_error;
+};
+
+// errors specifically from hiprtc APIs
+struct hiprtc_runtime_error : public std::runtime_error
+{
+    const hiprtcResult hiprtc_error;
+    hiprtc_runtime_error(const std::string& info, hiprtcResult hiprtc_status)
+        : std::runtime_error::runtime_error(info)
+        , hiprtc_error(hiprtc_status)
+    {
+    }
 };
 
 // catch exceptions that may occur in test cases
@@ -49,6 +62,10 @@ struct ROCFFT_FAIL : public std::runtime_error
             GTEST_SKIP() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
         else                                                                        \
             GTEST_FAIL() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
+    }                                                                               \
+    catch(const hiprtc_runtime_error& e)                                            \
+    {                                                                               \
+        GTEST_FAIL() << e.what() << "\nHIPRTC error: " << e.hiprtc_error << ".";    \
     }                                                                               \
     catch(const HOSTBUF_MEM_USAGE& e)                                               \
     {                                                                               \
