@@ -79,6 +79,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/WaitCntValidationCheckPass.hpp"
 
 using namespace stinkytofu;
 
@@ -256,6 +257,7 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createInsertDelayAluPass(), nullptr);
     EXPECT_NE(createLoopRegionRemarkPass(), nullptr);
     EXPECT_NE(createMemTokenConsistencyCheckPass(), nullptr);
+    EXPECT_NE(createWaitCntValidationCheckPass(), nullptr);
     EXPECT_NE(createRaiseVgprMsbPass(), nullptr);
     EXPECT_NE(createInsertVgprMsbPass(), nullptr);
     EXPECT_NE(createLongBranchLoweringPass(), nullptr);
