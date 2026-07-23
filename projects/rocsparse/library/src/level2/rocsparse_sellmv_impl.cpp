@@ -214,22 +214,22 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    rocsparse_status sellmvn_launch(rocsparse_handle    handle,
-                                    hipStream_t         stream,
-                                    int32_t             blocks_x,
-                                    int32_t             blocks_y,
-                                    J                   m,
-                                    J                   n,
-                                    I                   nnz,
-                                    J                   sell_slice_size,
-                                    I                   sell_colval_size,
-                                    const T*            alpha_device_host,
-                                    const I*            sell_slice_offsets,
-                                    const J*            sell_col_ind,
-                                    const A*            sell_val,
-                                    const X*            x,
-                                    const T*            beta_device_host,
-                                    Y*                  y,
+    rocsparse_status sellmvn_launch(rocsparse_handle     handle,
+                                    hipStream_t          stream,
+                                    int32_t              blocks_x,
+                                    int32_t              blocks_y,
+                                    J                    m,
+                                    J                    n,
+                                    I                    nnz,
+                                    J                    sell_slice_size,
+                                    I                    sell_colval_size,
+                                    const T*             alpha_device_host,
+                                    const I*             sell_slice_offsets,
+                                    const J*             sell_col_ind,
+                                    const A*             sell_val,
+                                    const X*             x,
+                                    const T*             beta_device_host,
+                                    Y*                   y,
                                     rocsparse_index_base base)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -311,9 +311,9 @@ namespace rocsparse
                     // widest slices' work, so we avoid the shallowest reduction
                     // (same philosophy as the csrmv nnzsplit skew guard, but
                     // from an O(1) signal already available here).
-                    const bool skewed
-                        = (nnz > 0
-                           && static_cast<int64_t>(sell_colval_size) > 2 * static_cast<int64_t>(nnz));
+                    const bool skewed = (nnz > 0
+                                         && static_cast<int64_t>(sell_colval_size)
+                                                > 2 * static_cast<int64_t>(nnz));
 
                     if(avg_nnz_per_row <= 4)
                     {
@@ -329,24 +329,24 @@ namespace rocsparse
                     }
                 }
 
-#define LAUNCH_SELLMVN(TPR)                                             \
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<TPR>(handle,   \
-                                                             stream,    \
-                                                             blocks_x,  \
-                                                             blocks_y,  \
-                                                             m,         \
-                                                             n,         \
-                                                             nnz,       \
-                                                             sell_slice_size,    \
-                                                             sell_colval_size,   \
-                                                             alpha_device_host,  \
-                                                             sell_slice_offsets, \
-                                                             sell_col_ind,       \
-                                                             sell_val,           \
-                                                             x,                  \
-                                                             beta_device_host,   \
-                                                             y,                  \
-                                                             descr->base)))
+#define LAUNCH_SELLMVN(TPR)                                                       \
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::sellmvn_launch<TPR>(handle,             \
+                                                              stream,             \
+                                                              blocks_x,           \
+                                                              blocks_y,           \
+                                                              m,                  \
+                                                              n,                  \
+                                                              nnz,                \
+                                                              sell_slice_size,    \
+                                                              sell_colval_size,   \
+                                                              alpha_device_host,  \
+                                                              sell_slice_offsets, \
+                                                              sell_col_ind,       \
+                                                              sell_val,           \
+                                                              x,                  \
+                                                              beta_device_host,   \
+                                                              y,                  \
+                                                              descr->base)))
                 switch(threads_per_row)
                 {
                 case 2:
