@@ -44,6 +44,8 @@ add_executable(rpp_tests
     src/tests/image/arithmetic/magnitude_test.cpp
     src/tests/image/effects/solarize_test.cpp
     src/tests/image/effects/channel_dropout_test.cpp
+    src/tests/image/effects/snow_test.cpp
+    src/tests/image/effects/rain_test.cpp
     src/tests/image/bitwise/bitwise_and_test.cpp
     src/tests/image/bitwise/bitwise_or_test.cpp
     src/tests/image/bitwise/bitwise_xor_test.cpp
