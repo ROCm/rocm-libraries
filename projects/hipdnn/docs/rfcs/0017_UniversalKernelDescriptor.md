@@ -327,9 +327,9 @@ vocabulary up front and the interpreter fails closed on anything undeclared. The
 namespaces, and every criteria and dispatch expression draws from the same set:
 
 - **Tensor:** a bound operand's fields: `$q.dtype`, `$q.rank`, its named dims (`$q.seqlen_q`, `$w.c`),
-  and evaluated properties the schema computes from the descriptor (`$q.stride_order`, `$q.packed`).
-- **Graph:** structural facts of the matched subgraph, e.g. `$graph.node_count` or a tensor's
-  `$conv_out.use_count` (its role in the graph, not its data).
+  and evaluated flags the schema computes (`$q.stride_order`, `$q.packed`, and `$q.virtual`, set when the
+  tensor is internal to the matched subgraph rather than a graph input or output).
+- **Graph:** structural facts of the matched subgraph, e.g. `$graph.node_count`.
 - **Attributes:** a matched op node's attributes, named by the node's pattern `id`: an SDPA node
   `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.head_size`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
 - **Kernel metadata:** `$kernel.<field>`, the current UKD's build features and values (tile and vector
@@ -446,11 +446,11 @@ graph shape, so bounded matching covers it, and operand optionality is handled b
 
 **A fused match.** The same UMD form matches several ops as one fusable unit. This UMD matches a Conv,
 Bias, and ReLU chain. Its `$graph.node_count == 3` makes the fusion legal: the pattern is a closed,
-exact match of the whole graph, so the intermediates (`$conv_out`, `$bias_out`) have no consumer outside
-these three ops and one UKD serves the whole chain as a single kernel. (To fuse the same chain embedded
-in a larger graph, drop the count and instead assert each intermediate's `use_count == 1`, i.e. it has
-no consumer outside the pattern; that exclusivity check is the general form, and is what lets a subgraph
-be matched and reused inside a larger graph.)
+exact match of the whole graph (any extra node means no match), so the intermediates (`$conv_out`,
+`$bias_out`) cannot be read elsewhere and one UKD serves the whole chain as a single kernel. (To fuse
+the same chain embedded in a larger graph, drop the count and instead require each intermediate be
+`$conv_out.virtual`, internal to the pattern; that is the general form, and is what lets a subgraph be
+matched and reused inside a larger graph.)
 
 ```jsonc
 {
