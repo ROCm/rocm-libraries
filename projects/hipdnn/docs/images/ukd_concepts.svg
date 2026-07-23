@@ -28,13 +28,11 @@
   <text x="430" y="328" text-anchor="middle" font-size="9.5" fill="#555">applicable iff all matchers pass</text>
 
   <!-- LEFT: one-each shared pieces, named by the KDP -->
-  <text x="142" y="110" text-anchor="middle" font-size="10" fill="#333">engine: many KDPs &#8594; 1</text>
   <rect x="35" y="118" width="215" height="72" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
   <text x="50" y="142" font-weight="600">UED: Engine Descriptor</text>
   <text x="50" y="162" font-size="12" fill="#333">one group of kernels</text>
   <text x="50" y="180" font-size="11" fill="#555">named by the KDP; shared by its kernels</text>
 
-  <text x="142" y="230" text-anchor="middle" font-size="10" fill="#333">heuristic: many KDPs &#8594; 1</text>
   <rect x="35" y="238" width="215" height="72" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
   <text x="50" y="262" font-weight="600">UHD: Heuristic Descriptor</text>
   <text x="50" y="282" font-size="12" fill="#333">one kernel selector</text>
@@ -56,18 +54,18 @@
   <text x="625" y="304" font-size="12" fill="#333">one per UKD (unique)</text>
   <text x="625" y="320" font-size="11" fill="#555">kpack/hsaco/hip + build features</text>
 
-  <!-- arrows: the KDP references every shared piece by ID -->
-  <line x1="315" y1="159" x2="252" y2="152" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="286" y="149" text-anchor="middle" font-size="10" fill="#333">engine</text>
-  <line x1="315" y1="174" x2="252" y2="270" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="270" y="225" text-anchor="middle" font-size="10" fill="#333">heuristic</text>
+  <!-- arrows: the KDP references every shared piece by ID (straight across, label above) -->
+  <text x="283" y="148" text-anchor="middle" font-size="10" fill="#333">engine</text>
+  <line x1="315" y1="154" x2="252" y2="154" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="283" y="268" text-anchor="middle" font-size="10" fill="#333">heuristic</text>
+  <line x1="315" y1="274" x2="252" y2="274" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
 
-  <line x1="545" y1="144" x2="608" y2="126" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="576" y="127" text-anchor="middle" font-size="10" fill="#333">matchers</text>
-  <line x1="545" y1="189" x2="608" y2="209" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="576" y="186" text-anchor="middle" font-size="10" fill="#333">dispatch (1)</text>
-  <line x1="545" y1="227" x2="608" y2="290" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="576" y="272" text-anchor="middle" font-size="10" fill="#333">src + meta</text>
+  <text x="577" y="119" text-anchor="middle" font-size="10" fill="#333">matchers</text>
+  <line x1="545" y1="125" x2="608" y2="125" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="577" y="203" text-anchor="middle" font-size="10" fill="#333">dispatch (1)</text>
+  <line x1="545" y1="209" x2="608" y2="209" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="577" y="287" text-anchor="middle" font-size="10" fill="#333">source</text>
+  <line x1="545" y1="293" x2="608" y2="293" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
 
   <!-- caption -->
   <text x="430" y="377" text-anchor="middle" font-size="12" fill="#333">One engine, one selector, one dispatch descriptor, a shared matcher set, one source + metadata per kernel, but many kernels.</text>
