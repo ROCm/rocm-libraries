@@ -30,6 +30,7 @@ add_executable(
     core/TestPluginPublic.cpp
     core/TestJsonLogic.cpp
     core/TestJsonDataSource.cpp
+    core/TestUniversalGraphMatcher.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp

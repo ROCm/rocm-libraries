@@ -1,0 +1,341 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+// BindingContext.hpp - the queryable "bindings object" for RFC 0018 (UMD).
+//
+// All names below live in namespace hip_kernel_provider_common::umd; these
+// examples assume `namespace umd = hip_kernel_provider_common::umd;`.
+//
+// After a UniversalGraphMatcher structurally matches a graph, it builds one
+// BindingContext per match. The context is both:
+//
+//   1. the JsonLogic data source the criteria expression evaluates against
+//      (it satisfies the `Value getData(const std::string&) const` contract), and
+//   2. the queryable bindings object the caller inspects post-match
+//      (`ctx.get("$q.head_size")`).
+//
+// It resolves the RFC's five `$`-namespaces over a live flatbuffer graph
+// (RFC 0018 §4):
+//   - Tensor    `$q`, `$q.uid`, `$q.rank`, `$q.dtype`, `$q.dims[i]`,
+//               `$q.strides[i]`, `$q.<named-dim>`, `$q.stride_order`,
+//               `$q.packed`, `$q.virtual`, `$q.present`
+//   - Graph     `$graph.node_count`
+//   - Attributes `$<node_id>.<attr>`, `$<node_id>.<attr>.present`
+//   - Device    `$device.<field>`
+//   (Kernel namespace omitted: SDPA-forward criteria references none.)
+//
+// The two resolvers (RFC 0018 §4, "binding architecture"): edge (name->UID->
+// tensor) and scalar-attribute reads use the Phase 0 *generated* typed
+// accessors carried on the op-schema registry entry; the Tensor-namespace path
+// resolver (dims/strides/rank/stride_order/packed/virtual/uid) is hand-written
+// once over the single TensorAttributes shape. jlogic::Value is the sole
+// type-erasure boundary.
+//
+// Fail-closed (RFC 0018 §4/§14): every unresolved reference -- an unknown root,
+// an out-of-range `dims[i]`, an unknown dim-name, or a read of a field on an
+// absent optional operand -- resolves to null, which makes the enclosing
+// criterion false, declining the match rather than matching on a wrong value.
+
+#include "hip_kernel_provider_common/JsonLogic.hpp"
+#include "hip_kernel_provider_common/umd/UmdPathParse.hpp"
+
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/umd/op_schema_registry_generated.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace hip_kernel_provider_common::umd
+{
+
+namespace jlogic = hip_kernel_provider_common::jsonlogic;
+
+// A tensor pattern-variable bound to a concrete graph tensor. `tensor` is null
+// only for an optional operand the graph omitted; `dimNames` points at the
+// UMD-static name->index map the compiler's `shape` lowering produced (owned by
+// the CompiledUmd, which outlives every BindingContext it spawns).
+struct BoundTensor
+{
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor = nullptr;
+    bool optional = false;
+    const std::unordered_map<std::string, std::size_t>* dimNames = nullptr;
+};
+
+// A pattern node bound to a concrete graph node's attributes, resolving the
+// Attributes namespace `$<node_id>.<attr>` for that node.
+struct BoundNode
+{
+    const hipdnn_flatbuffers_sdk::umd::OpSchemaEntry* schema = nullptr;
+    const void* attributes = nullptr;
+};
+
+class BindingContext
+{
+public:
+    using TensorAttributes = hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
+    using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
+    using OpSchemaEntry = hipdnn_flatbuffers_sdk::umd::OpSchemaEntry;
+
+    BindingContext() = default;
+
+    BindingContext(const IGraph* graph, std::unordered_map<std::string, jlogic::Value> device)
+        : _graph(graph)
+        , _device(std::move(device))
+    {
+    }
+
+    // Bind a pattern node id (`$sdpa_fwd`) to a graph node's attributes. A UMD
+    // may declare several nodes, each resolving its own Attributes namespace.
+    void bindNode(const std::string& nodeId, const OpSchemaEntry* schema, const void* attributes)
+    {
+        _nodes[nodeId] = BoundNode{schema, attributes};
+    }
+
+    // Bind a tensor pattern variable (`$q`) to a graph tensor. A null `tensor`
+    // records an absent optional operand (`$q.present` reads false; any other
+    // field read declines).
+    void bindTensor(const std::string& tvar,
+                    const TensorAttributes* tensor,
+                    bool optional,
+                    const std::unordered_map<std::string, std::size_t>* dimNames)
+    {
+        _tensors[tvar] = BoundTensor{tensor, optional, dimNames};
+    }
+
+    // JsonLogic data-source contract: resolve a sigil-stripped variable path
+    // (`q.head_size`, `graph.node_count`, `sdpa_fwd.dropout_probability.present`)
+    // to a Value. Unresolved -> null (fail closed).
+    jlogic::Value getData(const std::string& varPath) const
+    {
+        std::string root;
+        std::string rest;
+        path::splitRoot(varPath, root, rest);
+
+        if(root == "graph")
+        {
+            return resolveGraph(rest);
+        }
+        if(root == "device")
+        {
+            return resolveDevice(rest);
+        }
+        const auto nit = _nodes.find(root);
+        if(nit != _nodes.end())
+        {
+            return resolveAttr(nit->second, rest);
+        }
+        const auto it = _tensors.find(root);
+        if(it != _tensors.end())
+        {
+            return resolveTensor(it->second, rest);
+        }
+        return {}; // unknown root -> decline
+    }
+
+    // Query helper for post-match inspection: accepts a leading `$` sigil.
+    jlogic::Value get(const std::string& ref) const
+    {
+        if(!ref.empty() && ref.front() == '$')
+        {
+            return getData(ref.substr(1));
+        }
+        return getData(ref);
+    }
+
+    // The tensor pattern variables bound in this match, for symbol-table
+    // enumeration (RFC 0018 §15). `tensor` is null for an absent optional.
+    const std::unordered_map<std::string, BoundTensor>& boundTensors() const
+    {
+        return _tensors;
+    }
+
+    // The pattern nodes bound in this match, keyed by node id.
+    const std::unordered_map<std::string, BoundNode>& boundNodes() const
+    {
+        return _nodes;
+    }
+
+private:
+    static std::vector<std::int64_t> toVector(const ::flatbuffers::Vector<std::int64_t>* v)
+    {
+        if(v == nullptr)
+        {
+            return {};
+        }
+        // NOLINTNEXTLINE(modernize-return-braced-init-list) - iterator-range ctor, not initializer_list
+        return std::vector<std::int64_t>(v->begin(), v->end());
+    }
+
+    jlogic::Value resolveGraph(const std::string& rest) const
+    {
+        if(rest == "node_count" && _graph != nullptr)
+        {
+            return {static_cast<std::int64_t>(_graph->nodeCount())};
+        }
+        return {};
+    }
+
+    jlogic::Value resolveDevice(const std::string& rest) const
+    {
+        const auto it = _device.find(rest);
+        return it != _device.end() ? it->second : jlogic::Value();
+    }
+
+    static jlogic::Value resolveAttr(const BoundNode& node, const std::string& rest)
+    {
+        if(node.schema == nullptr || node.attributes == nullptr)
+        {
+            return {};
+        }
+        if(rest.empty())
+        {
+            return {}; // a bare node id is not a value reference (compiler-rejected)
+        }
+
+        std::string attr = rest;
+        const bool wantPresent = path::stripPresentSuffix(attr);
+
+        const hipdnn_flatbuffers_sdk::umd::AttrBinding* binding = nullptr;
+        for(std::size_t i = 0; i < node.schema->attributeCount; ++i)
+        {
+            if(node.schema->attributes[i].name == attr)
+            {
+                binding = &node.schema->attributes[i];
+                break;
+            }
+        }
+        if(binding == nullptr || binding->read == nullptr)
+        {
+            return {};
+        }
+
+        const hipdnn_flatbuffers_sdk::umd::ScalarValue sv = binding->read(node.attributes);
+        if(wantPresent)
+        {
+            return {sv.present};
+        }
+        if(!sv.present)
+        {
+            return {}; // absent optional attribute read -> decline
+        }
+        switch(sv.type)
+        {
+        case hipdnn_flatbuffers_sdk::umd::AttrType::INT:
+            return {sv.i};
+        case hipdnn_flatbuffers_sdk::umd::AttrType::FLOAT:
+            return {sv.f};
+        case hipdnn_flatbuffers_sdk::umd::AttrType::BOOL:
+            return {sv.b};
+        case hipdnn_flatbuffers_sdk::umd::AttrType::DTYPE:
+            return {std::string(sv.dtype != nullptr ? sv.dtype : "")};
+        default:
+            break;
+        }
+        return {};
+    }
+
+    static jlogic::Value resolveTensor(const BoundTensor& bt, const std::string& rest)
+    {
+        if(rest == "present")
+        {
+            if(!bt.optional)
+            {
+                return {}; // present on a required operand is refused (compiler-gated)
+            }
+            return {bt.tensor != nullptr};
+        }
+        if(bt.tensor == nullptr)
+        {
+            return {}; // field read on an absent optional operand -> decline
+        }
+        const TensorAttributes* t = bt.tensor;
+
+        if(rest.empty() || rest == "uid")
+        {
+            return {static_cast<std::int64_t>(t->uid())};
+        }
+        if(rest == "rank")
+        {
+            return {static_cast<std::int64_t>(t->dims() != nullptr ? t->dims()->size() : 0)};
+        }
+        if(rest == "dtype")
+        {
+            return {std::string(
+                hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(t->data_type()))};
+        }
+        if(rest == "virtual")
+        {
+            return {t->virtual_()};
+        }
+        if(rest == "packed")
+        {
+            return {hipdnn_data_sdk::utilities::isTensorPacked(toVector(t->dims()),
+                                                               toVector(t->strides()))};
+        }
+        if(rest == "stride_order")
+        {
+            const std::vector<std::int64_t> order
+                = hipdnn_data_sdk::utilities::extractStrideOrder(toVector(t->strides()));
+            jlogic::Value::Array arr;
+            arr.reserve(order.size());
+            for(const std::int64_t v : order)
+            {
+                arr.emplace_back(v);
+            }
+            return {std::move(arr)};
+        }
+
+        std::size_t idx = 0;
+        if(path::parseSubscript(rest, "dims", idx))
+        {
+            const auto* dims = t->dims();
+            if(dims == nullptr || idx >= dims->size())
+            {
+                return {};
+            }
+            return {
+                static_cast<std::int64_t>(dims->Get(static_cast<::flatbuffers::uoffset_t>(idx)))};
+        }
+        if(path::parseSubscript(rest, "strides", idx))
+        {
+            const auto* strides = t->strides();
+            if(strides == nullptr || idx >= strides->size())
+            {
+                return {};
+            }
+            return {static_cast<std::int64_t>(
+                strides->Get(static_cast<::flatbuffers::uoffset_t>(idx)))};
+        }
+
+        // Named dim introduced by a `shape` short-hand.
+        if(bt.dimNames != nullptr)
+        {
+            const auto dit = bt.dimNames->find(rest);
+            if(dit != bt.dimNames->end())
+            {
+                const auto* dims = t->dims();
+                if(dims == nullptr || dit->second >= dims->size())
+                {
+                    return {};
+                }
+                return {static_cast<std::int64_t>(
+                    dims->Get(static_cast<::flatbuffers::uoffset_t>(dit->second)))};
+            }
+        }
+        return {}; // unknown tensor field -> decline
+    }
+
+    const IGraph* _graph = nullptr;
+    std::unordered_map<std::string, jlogic::Value> _device;
+    std::unordered_map<std::string, BoundNode> _nodes;
+    std::unordered_map<std::string, BoundTensor> _tensors;
+};
+
+} // namespace hip_kernel_provider_common::umd

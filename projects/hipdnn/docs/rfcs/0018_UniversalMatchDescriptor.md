@@ -156,7 +156,7 @@ variables (`$q`, `$conv_out`).
   "name": "SDPA forward (d128, bf16) match",
   "nodes": [
     {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
-     "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
+     "operands": {"q": "$q", "k": "$k", "v": "$v"}, "results": {"o": "$o"}}
   ],
   "criteria": { /* Section 6: one JsonLogic boolean expression */ }
 }
@@ -197,11 +197,11 @@ expressed by requiring each intermediate `virtual` and pinning the op count with
   "name": "Conv-Bias-ReLU (NHWC, f16) match",
   "nodes": [
     {"kind": "op", "id": "conv", "op": "convolution_fwd",
-     "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
+     "operands": {"x": "$x", "w": "$w"},           "results": {"y": "$conv_out"}},
     {"kind": "op", "id": "bias", "op": "pointwise_add",
-     "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
+     "operands": {"a": "$conv_out", "b": "$bias"},  "results": {"y": "$bias_out"}},
     {"kind": "op", "id": "act",  "op": "pointwise_relu",
-     "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
+     "operands": {"a": "$bias_out"},                "results": {"y": "$y"}}
   ],
   "criteria": {"and": [
     {"==": ["$x.dtype", "FLOAT16"]}, {"==": ["$x.stride_order", [0, 2, 3, 1]]}, "$x.packed",  // NHWC
@@ -700,10 +700,10 @@ non-declarative gates (uint32 stride fit, mask self-consistency) remain as custo
   "name": "SDPA forward (d128, bf16/fp8) match",
   "nodes": [
     {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
-     "operands": {"Q": "$q", "K": "$k", "V": "$v",
+     "operands": {"q": "$q", "k": "$k", "v": "$v",
                   "attn_mask": "$attn_mask?", "page_table_k": "$page_table_k?",
                   "page_table_v": "$page_table_v?"},   // optional operands carry a ? suffix
-     "results":  {"O": "$o"}}
+     "results":  {"o": "$o"}}
   ],
   "criteria": {"and": [
     {"==": ["$graph.node_count", 1]},                              // exact: this kernel is the whole graph
