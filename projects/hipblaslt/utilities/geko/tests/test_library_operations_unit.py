@@ -31,6 +31,20 @@ def _make_min_library() -> Library:
     return Library(data, "test_lib.yaml")
 
 
+def _make_min_dict_library() -> Library:
+    data = {
+        "ArchitectureName": "gfx950",
+        "ProblemType": {"TransposeA": 0, "TransposeB": 0, "DataType": 0, "DestDataType": 0},
+        "DefaultSolution": {"StaggerU": 0},
+        "Solutions": [{"SolutionIndex": 0, "StaggerU": 0}],
+        "IndexOrder": [2, 3, 0, 1],
+        "ExactLogic": [[[16, 16, 1, 16], [0, 0.0]]],
+        "PerfMetric": "DeviceEfficiency",
+        "LibraryType": "Equality",
+    }
+    return Library(data, "dict_test_lib.yaml")
+
+
 def _write_library_yaml(path: Path, lib_name: str = "lib.yaml") -> Path:
     data = [
         None,
@@ -266,6 +280,39 @@ def test_prune_library_uses_non_cluster_path(monkeypatch: pytest.MonkeyPatch, tm
     hip = tmp_path / "hip"
     hip.mkdir()
     lib = _make_min_library()
+
+    monkeypatch.setattr(operations, "create", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        operations._bank,
+        "min_assigment",
+        lambda *_a, **_k: (lib.solutions, lib.sizes),
+    )
+
+    class _PassRunner:
+        def __init__(self, items, worker_impl, devices, n_slots=1):
+            self.items = items
+            self.worker_impl = worker_impl
+            self.device = devices[0]
+
+        def __call__(self, workdir):
+            for item in self.items:
+                w = self.worker_impl(item, self.device, 0, None, None)
+                w.setup()
+                w.run()
+                w.teardown()
+            return self.items
+
+    monkeypatch.setattr(operations, "Runner", _PassRunner)
+    monkeypatch.setattr(operations, "merge_solutions", lambda *_a, **_k: [lib])
+
+    out = operations.prune_library(hip, lib, workdir=tmp_path / "w", cluster=False, devices=[0])
+    assert out.name == lib.name
+
+
+def test_prune_library_uses_non_cluster_path_with_dict_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    lib = _make_min_dict_library()
 
     monkeypatch.setattr(operations, "create", lambda *_a, **_k: None)
     monkeypatch.setattr(
