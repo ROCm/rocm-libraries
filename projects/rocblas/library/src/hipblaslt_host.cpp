@@ -1033,9 +1033,18 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         {
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             std::vector<hipblasOperation_t> ops = {HIPBLAS_OP_N, HIPBLAS_OP_T, HIPBLAS_OP_C};
-            hipblaslt_ext::GemmType         gemmType
-                = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+            hipblaslt_ext::GemmType         gemmType;
+#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
+    && defined(HIPBLASLT_VERSION_PATCH)                                  \
+    && (HIPBLASLT_VERSION_MAJOR > 1                                      \
+        || (HIPBLASLT_VERSION_MAJOR == 1                                 \
+            && (HIPBLASLT_VERSION_MINOR > 4                              \
+                || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
+            gemmType = hipblaslt_ext::GemmType::HIPBLASLT_GEMM;
+#else
+            gemmType = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                          : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+#endif
             for(auto op1 : ops)
             {
                 for(auto op2 : ops)
@@ -1093,9 +1102,18 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, 
         }
         else if(option == CAN_SOLVE)
         {
-            hipblaslt_ext::GemmType gemmType
-                = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
-                                     : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+            hipblaslt_ext::GemmType gemmType;
+#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
+    && defined(HIPBLASLT_VERSION_PATCH)                                  \
+    && (HIPBLASLT_VERSION_MAJOR > 1                                      \
+        || (HIPBLASLT_VERSION_MAJOR == 1                                 \
+            && (HIPBLASLT_VERSION_MINOR > 4                              \
+                || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
+            gemmType = hipblaslt_ext::GemmType::HIPBLASLT_GEMM;
+#else
+            gemmType = prob.strided_batch ? hipblaslt_ext::GemmType::HIPBLASLT_GEMM
+                                          : hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM;
+#endif
             std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
             auto                                          fetch = hipblaslt_ext::getAllAlgos(handle,
                                                     gemmType,
