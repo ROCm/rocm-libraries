@@ -14,6 +14,7 @@ namespace hipdnn_flatbuffers_sdk::umd
 namespace generated
 {
 
+// BatchnormInferenceAttributes
 namespace op0 {
 inline const AttrBinding attributes[] = {
     {"bias_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes*>(a)->bias_tensor_uid()); return s; }},
@@ -25,6 +26,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op0
 
+// PointwiseAttributes
 namespace op1 {
 inline const AttrBinding attributes[] = {
     {"axis_tensor_uid", true, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes*>(a)->axis_tensor_uid(); s.present = v.has_value(); if(v) s.i = static_cast<std::int64_t>(*v); return s; }},
@@ -42,6 +44,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op1
 
+// BatchnormBackwardAttributes
 namespace op2 {
 inline const AttrBinding attributes[] = {
     {"dbias_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes*>(a)->dbias_tensor_uid()); return s; }},
@@ -55,6 +58,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op2
 
+// BatchnormAttributes
 namespace op3 {
 inline const AttrBinding attributes[] = {
     {"bias_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes*>(a)->bias_tensor_uid()); return s; }},
@@ -72,6 +76,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op3
 
+// ConvolutionFwdAttributes
 namespace op4 {
 inline const AttrBinding attributes[] = {
     {"conv_mode", false, AttrType::Dtype, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Dtype; s.present = true; s.dtype = ::hipdnn_flatbuffers_sdk::data_objects::EnumNameConvMode(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes*>(a)->conv_mode()); return s; }},
@@ -81,6 +86,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op4
 
+// ConvolutionBwdAttributes
 namespace op5 {
 inline const AttrBinding attributes[] = {
     {"conv_mode", false, AttrType::Dtype, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Dtype; s.present = true; s.dtype = ::hipdnn_flatbuffers_sdk::data_objects::EnumNameConvMode(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes*>(a)->conv_mode()); return s; }},
@@ -90,6 +96,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op5
 
+// ConvolutionWrwAttributes
 namespace op6 {
 inline const AttrBinding attributes[] = {
     {"conv_mode", false, AttrType::Dtype, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Dtype; s.present = true; s.dtype = ::hipdnn_flatbuffers_sdk::data_objects::EnumNameConvMode(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes*>(a)->conv_mode()); return s; }},
@@ -99,6 +106,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op6
 
+// BatchnormInferenceAttributesVarianceExt
 namespace op7 {
 inline const AttrBinding attributes[] = {
     {"bias_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt*>(a)->bias_tensor_uid()); return s; }},
@@ -111,6 +119,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op7
 
+// MatmulAttributes
 namespace op8 {
 inline const AttrBinding attributes[] = {
     {"a_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes*>(a)->a_tensor_uid()); return s; }},
@@ -119,6 +128,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op8
 
+// RMSNormAttributes
 namespace op9 {
 inline const AttrBinding attributes[] = {
     {"bias_tensor_uid", true, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes*>(a)->bias_tensor_uid(); s.present = v.has_value(); if(v) s.i = static_cast<std::int64_t>(*v); return s; }},
@@ -131,6 +141,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op9
 
+// LayernormAttributes
 namespace op10 {
 inline const AttrBinding attributes[] = {
     {"bias_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes*>(a)->bias_tensor_uid()); return s; }},
@@ -145,6 +156,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op10
 
+// SdpaAttributes
 namespace op11 {
 inline const InputTensorBinding inputTensors[] = {
     {"attn_mask", true, +[](const void* a, std::int64_t& out) -> bool { auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes*>(a)->attn_mask_tensor_uid(); if(!v) return false; out = *v; return true; }},
@@ -195,6 +207,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op11
 
+// BlockScaleDequantizeAttributes
 namespace op12 {
 inline const AttrBinding attributes[] = {
     {"is_negative_scale", false, AttrType::Bool, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Bool; s.present = true; s.b = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::BlockScaleDequantizeAttributes*>(a)->is_negative_scale(); return s; }},
@@ -204,6 +217,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op12
 
+// BlockScaleQuantizeAttributes
 namespace op13 {
 inline const AttrBinding attributes[] = {
     {"axis", true, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::BlockScaleQuantizeAttributes*>(a)->axis(); s.present = v.has_value(); if(v) s.i = static_cast<std::int64_t>(*v); return s; }},
@@ -215,6 +229,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op13
 
+// SdpaBackwardAttributes
 namespace op14 {
 inline const AttrBinding attributes[] = {
     {"alibi_mask", false, AttrType::Bool, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Bool; s.present = true; s.b = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes*>(a)->alibi_mask(); return s; }},
@@ -248,6 +263,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op14
 
+// RMSNormBackwardAttributes
 namespace op16 {
 inline const AttrBinding attributes[] = {
     {"dbias_tensor_uid", true, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes*>(a)->dbias_tensor_uid(); s.present = v.has_value(); if(v) s.i = static_cast<std::int64_t>(*v); return s; }},
@@ -260,6 +276,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op16
 
+// ReductionAttributes
 namespace op17 {
 inline const AttrBinding attributes[] = {
     {"in_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ReductionAttributes*>(a)->in_tensor_uid()); return s; }},
@@ -269,6 +286,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op17
 
+// ResampleFwdAttributes
 namespace op18 {
 inline const AttrBinding attributes[] = {
     {"generate_index", true, AttrType::Bool, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Bool; auto v = static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes*>(a)->generate_index(); s.present = v.has_value(); if(v) s.b = *v; return s; }},
@@ -280,6 +298,7 @@ inline const AttrBinding attributes[] = {
 };
 } // namespace op18
 
+// LayernormBackwardAttributes
 namespace op19 {
 inline const AttrBinding attributes[] = {
     {"dbias_tensor_uid", false, AttrType::Int, +[](const void* a) -> ScalarValue { ScalarValue s; s.type = AttrType::Int; s.present = true; s.i = static_cast<std::int64_t>(static_cast<const ::hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes*>(a)->dbias_tensor_uid()); return s; }},

@@ -336,7 +336,7 @@ int main(int argc, char** argv)
         std::string attrsRef = "nullptr";
         const bool anyTable = em.inputTensorCount || em.outputTensorCount || em.attributeCount;
         if(anyTable)
-            body << "namespace " << tag << " {\n";
+            body << "// " << table << "\nnamespace " << tag << " {\n";
         if(em.inputTensorCount)
         {
             body << "inline const InputTensorBinding inputTensors[] = {\n"
