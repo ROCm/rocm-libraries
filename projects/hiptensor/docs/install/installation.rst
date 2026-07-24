@@ -30,7 +30,7 @@ Package manager
    development package needs, and AMD GPU architecture. Package names use the
    following format:
 
-    .. code-block:: shell-session
+   .. code-block:: shell-session
 
       amdrocm-hiptensor<rocm_version><-llvm_target> amdrocm-hiptensor<-dev/-devel><rocm_version>
 
