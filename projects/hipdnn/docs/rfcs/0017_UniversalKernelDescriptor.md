@@ -60,12 +60,12 @@ works from a small family of reusable descriptors, bound together for a family o
 - **UDD (Universal Dispatch Descriptor).** How to invoke a kernel, the dispatch application binary interface (ABI): argument binding
   and ordering, grid, block, shared memory, and workspace.
 - **UED (Universal Engine Descriptor).** One engine: a stable identity plus the knobs it exposes and its
-  behavior and numerical notes. It also names the engine's **one heuristic (UHD)** and **one metadata
-  schema (KMD)**, since a single selector ranks all the engine's kernels over one feature space. An
-  engine is a named group of kernels.
+  behavior and numerical notes. It also names the engine's **one heuristic (UHD)** and **one kernel
+  metadata schema (KMD)**, since a single selector ranks all the engine's kernels over one feature space.
+  An engine is a named group of kernels.
 - **UHD (Universal Heuristic Descriptor).** One kernel-selection model, one per engine: given the
-  kernels that fit a graph, it picks the best for the problem, ranking on their metadata and the problem
-  shape.
+  kernels that fit a graph, it picks the best for the problem, ranking on their metadata, the problem
+  shape, and device details.
 - **KMD (Kernel Metadata Descriptor).** The engine's metadata schema: the variant fields every kernel in
   the engine carries, each with a type and an optional default (tile size, block size, and the like).
   Each UKD supplies concrete values; the engine's heuristic ranks the catalog on them, and matchers read
@@ -106,7 +106,7 @@ follow-on ([Section 8.3](#83-future-jit-and-normalized-providers)).
 engine, heuristic) and subsystem (the matcher, the expression language, packaging, and the drop-in loader) is
 designed in its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)). The first deliverable is the
 single-kernel path. Multi-kernel launch and composition
-([Section 13](#13-multiple-kernels-and-composition)) are fast-follows, not part of this initial design.
+([Section 13](#13-multiple-kernels-and-composition)) are separate follow-ups, not part of this initial design.
 A named escape hatch covers a step that genuinely needs C++ (Sections [5](#5-matching-and-the-umd) and
 [6](#6-dispatch-and-workspace)); anything needing a new C-API surface or runtime dependency stays a
 full provider. This complements build-time codegen rather than replacing it.
@@ -235,12 +235,27 @@ The examples are illustrative, and the `schema`/version plumbing is shown once h
   "kind":   "model",          // "model" | "static_order" | "custom_library"
   "model": {
     "framework": "lightgbm",  // tagged so other frameworks are additive
-    "artifact":  "example_attn/model.bin",
-    "features":  "example_attn/features.json"
+    "artifact":  "example_attn/model.bin"
   },
+  "features_signature": [     // ordered model inputs, bound like a UDD args_signature; order and form must match training
+    "$device.cu_count",                          // device property
+    "$device.lds_size",                          // device property
+    "$kernel.tile_m",                            // kernel metadata
+    "$kernel.split_k",                           // kernel metadata
+    "$sdpa_fwd.head_size",                       // graph node attribute
+    "$q.seqlen_q",                               // graph tensor dim
+    {"*": ["$q.batch", "$q.num_heads"]}          // a derived feature (expression)
+  ],
   "objective": "max"          // higher predicted score wins
 }
 ```
+
+The `features_signature` binds the model's inputs the same way a UDD's `args_signature` binds a kernel's
+arguments: an ordered list where each entry is a token or an expression over the schema's declared fields,
+drawing on device properties (`$device.*`), kernel metadata (`$kernel.*`), and graph and node properties
+(tensor dims and attributes the match bound). Every value the model was trained on is bound here, in the
+same order and form as training, so the feature vector the provider assembles at selection time is exactly
+what the model expects.
 
 **KMD, the metadata schema:** the variant fields every kernel in the engine carries, each with a type and
 an optional default. It declares upfront which variants the engine spans; each UKD fills in concrete
@@ -248,9 +263,8 @@ values. When the engine's KDPs span different axes, the schema is their union an
 their defaults.
 
 The KMD is the feature space the engine's heuristic ranks over, which is why the UED owns both the KMD
-and the one UHD: changing the KMD changes the features the UHD sees, so it requires retraining and
-rebinding the UHD. The coupling is intentional, and it also means a pack that starts populating a field
-that was previously always default shifts those features and calls for the same retraining.
+and the one UHD. This coupling is intentional: if you mutate the KMD, you must also retrain and update
+the UHD, because a field the UHD was not trained on is not selected against until the model learns it.
 
 ```jsonc
 {
@@ -258,9 +272,8 @@ that was previously always default shifts those features and calls for the same 
   "id":     "9ae0b215-32a7-49d1-96df-e9b05e1927ea",       // stable, unique; referenced by the UED (one per engine)
   "name":   "Example attention variant fields",
   "fields": [
-    {"name": "tile_m",  "type": "int",    "optional": true, "default": 1},
-    {"name": "split_k", "type": "int",    "optional": true, "default": 1},
-    {"name": "dtype",   "type": "string"}   // required: no default
+    {"name": "tile_m",  "type": "int", "optional": true, "default": 1},
+    {"name": "split_k", "type": "int", "optional": true, "default": 1}
   ]
 }
 ```
@@ -307,7 +320,7 @@ so it names none of them.
   "id":        "15b02840-05ba-40cf-ac17-384b50f56a7d",
   "name":      "Example attention prefill d128 bf16 (gfx942)",
   "kernel_source": { ... },                       // Section 7: a compiled kernel, or how to build it AOT
-  "metadata":  {"tile_m": 128, "split_k": 1, "dtype": "bf16"},  // concrete values for the KMD's fields
+  "metadata":  {"tile_m": 128},                    // tile_m set; split_k omitted, takes the KMD default
   "priority":  100                                // tie-break when the UHD is not decisive
 }
 ```
@@ -563,8 +576,8 @@ fail-closed remains a backstop, not the first line of defense.
   "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 16]},
             "y": "$q.num_heads", "z": "$q.batch"},
   "block": {"x": 256, "y": 1, "z": 1},
-  "shared_mem_bytes": 32768,
-  "workspace_bytes": {"*": [{"*": ["$q.batch", "$q.num_heads"]},  // batch*num_heads*seqlen_q*4
+  "shared_mem_bytes": 32768,                        // dynamic LDS per workgroup: on-chip launch config
+  "workspace_bytes": {"*": [{"*": ["$q.batch", "$q.num_heads"]},  // global scratch (provider-allocated) = batch*num_heads*seqlen_q*4
                            {"*": ["$q.seqlen_q", 4]}]}
 }
 ```
@@ -900,7 +913,7 @@ a hand-written engine and its descriptor-backed replacement coexist until the ge
 parity on the graphs that engine covers, at which point the hand-written code is retired.
 
 Multi-kernel launch and composition ([Section 13](#13-multiple-kernels-and-composition)) are
-fast-follows, not committed in this plan.
+separate follow-ups, not committed in this plan.
 
 ### 12.1 Testing and Performance
 

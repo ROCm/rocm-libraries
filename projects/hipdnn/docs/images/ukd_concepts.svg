@@ -70,8 +70,8 @@
   <!-- arrows: the engine owns its one heuristic and one metadata schema -->
   <text x="70" y="223" text-anchor="middle" font-size="10" fill="#333">heuristic</text>
   <line x1="100" y1="190" x2="86" y2="248" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
-  <text x="212" y="223" text-anchor="middle" font-size="10" fill="#333">metadata</text>
-  <line x1="185" y1="190" x2="199" y2="248" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
+  <text x="226" y="223" text-anchor="middle" font-size="10" fill="#333">metadata</text>
+  <line x1="192" y1="190" x2="208" y2="248" stroke="#444" stroke-width="1.4" marker-end="url(#arrow4)"/>
 
   <!-- arrows: the KDP references its shared matcher set, dispatch, and per-kernel source -->
   <text x="577" y="119" text-anchor="middle" font-size="10" fill="#333">matchers</text>
