@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn-gpu-ref/detail/HipRtcTypeName.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
 #include <cmath>
 #include <cstdint>
