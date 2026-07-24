@@ -315,26 +315,26 @@ inline const AttrBinding attributes[] = {
 } // namespace op19
 
 inline const OpSchemaEntry entries[] = {
-    {"BatchnormInferenceAttributes", "BatchnormInferenceAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes), nullptr, 0u, nullptr, 0u, op0::attributes, 6u},
-    {"PointwiseAttributes", "PointwiseAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes), nullptr, 0u, nullptr, 0u, op1::attributes, 12u},
-    {"BatchnormBackwardAttributes", "BatchnormBackwardAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes), nullptr, 0u, nullptr, 0u, op2::attributes, 8u},
-    {"BatchnormAttributes", "BatchnormAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes), nullptr, 0u, nullptr, 0u, op3::attributes, 12u},
-    {"ConvolutionFwdAttributes", "ConvolutionFwdAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes), nullptr, 0u, nullptr, 0u, op4::attributes, 4u},
-    {"ConvolutionBwdAttributes", "ConvolutionBwdAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes), nullptr, 0u, nullptr, 0u, op5::attributes, 4u},
-    {"ConvolutionWrwAttributes", "ConvolutionWrwAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes), nullptr, 0u, nullptr, 0u, op6::attributes, 4u},
-    {"BatchnormInferenceAttributesVarianceExt", "BatchnormInferenceAttributesVarianceExt", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt), nullptr, 0u, nullptr, 0u, op7::attributes, 7u},
-    {"MatmulAttributes", "MatmulAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes), nullptr, 0u, nullptr, 0u, op8::attributes, 3u},
-    {"RMSNormAttributes", "RMSNormAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes), nullptr, 0u, nullptr, 0u, op9::attributes, 7u},
-    {"LayernormAttributes", "LayernormAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes), nullptr, 0u, nullptr, 0u, op10::attributes, 9u},
-    {"sdpa_fwd", "SdpaAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes), op11::inputTensors, 21u, op11::outputTensors, 7u, op11::attributes, 13u},
-    {"BlockScaleDequantizeAttributes", "BlockScaleDequantizeAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes), nullptr, 0u, nullptr, 0u, op12::attributes, 4u},
-    {"BlockScaleQuantizeAttributes", "BlockScaleQuantizeAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes), nullptr, 0u, nullptr, 0u, op13::attributes, 6u},
-    {"SdpaBackwardAttributes", "SdpaBackwardAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes), nullptr, 0u, nullptr, 0u, op14::attributes, 28u},
-    {"CustomOpAttributes", "CustomOpAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::CustomOpAttributes), nullptr, 0u, nullptr, 0u, nullptr, 0u},
-    {"RMSNormBackwardAttributes", "RMSNormBackwardAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes), nullptr, 0u, nullptr, 0u, op16::attributes, 7u},
-    {"ReductionAttributes", "ReductionAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes), nullptr, 0u, nullptr, 0u, op17::attributes, 4u},
-    {"ResampleFwdAttributes", "ResampleFwdAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes), nullptr, 0u, nullptr, 0u, op18::attributes, 6u},
-    {"LayernormBackwardAttributes", "LayernormBackwardAttributes", static_cast<int>(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes), nullptr, 0u, nullptr, 0u, op19::attributes, 10u},
+    {"BatchnormInferenceAttributes", "BatchnormInferenceAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes, nullptr, 0u, nullptr, 0u, op0::attributes, 6u},
+    {"PointwiseAttributes", "PointwiseAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes, nullptr, 0u, nullptr, 0u, op1::attributes, 12u},
+    {"BatchnormBackwardAttributes", "BatchnormBackwardAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes, nullptr, 0u, nullptr, 0u, op2::attributes, 8u},
+    {"BatchnormAttributes", "BatchnormAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes, nullptr, 0u, nullptr, 0u, op3::attributes, 12u},
+    {"ConvolutionFwdAttributes", "ConvolutionFwdAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes, nullptr, 0u, nullptr, 0u, op4::attributes, 4u},
+    {"ConvolutionBwdAttributes", "ConvolutionBwdAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes, nullptr, 0u, nullptr, 0u, op5::attributes, 4u},
+    {"ConvolutionWrwAttributes", "ConvolutionWrwAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes, nullptr, 0u, nullptr, 0u, op6::attributes, 4u},
+    {"BatchnormInferenceAttributesVarianceExt", "BatchnormInferenceAttributesVarianceExt", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt, nullptr, 0u, nullptr, 0u, op7::attributes, 7u},
+    {"MatmulAttributes", "MatmulAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes, nullptr, 0u, nullptr, 0u, op8::attributes, 3u},
+    {"RMSNormAttributes", "RMSNormAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes, nullptr, 0u, nullptr, 0u, op9::attributes, 7u},
+    {"LayernormAttributes", "LayernormAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes, nullptr, 0u, nullptr, 0u, op10::attributes, 9u},
+    {"sdpa_fwd", "SdpaAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes, op11::inputTensors, 21u, op11::outputTensors, 7u, op11::attributes, 13u},
+    {"BlockScaleDequantizeAttributes", "BlockScaleDequantizeAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes, nullptr, 0u, nullptr, 0u, op12::attributes, 4u},
+    {"BlockScaleQuantizeAttributes", "BlockScaleQuantizeAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes, nullptr, 0u, nullptr, 0u, op13::attributes, 6u},
+    {"SdpaBackwardAttributes", "SdpaBackwardAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaBackwardAttributes, nullptr, 0u, nullptr, 0u, op14::attributes, 28u},
+    {"CustomOpAttributes", "CustomOpAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::CustomOpAttributes, nullptr, 0u, nullptr, 0u, nullptr, 0u},
+    {"RMSNormBackwardAttributes", "RMSNormBackwardAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes, nullptr, 0u, nullptr, 0u, op16::attributes, 7u},
+    {"ReductionAttributes", "ReductionAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes, nullptr, 0u, nullptr, 0u, op17::attributes, 4u},
+    {"ResampleFwdAttributes", "ResampleFwdAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes, nullptr, 0u, nullptr, 0u, op18::attributes, 6u},
+    {"LayernormBackwardAttributes", "LayernormBackwardAttributes", ::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes, nullptr, 0u, nullptr, 0u, op19::attributes, 10u},
 };
 
 } // namespace generated
@@ -356,7 +356,7 @@ inline const OpSchemaEntry* lookupOpByName(std::string_view opcode)
 inline const OpSchemaEntry* lookupOpByType(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attributesType)
 {
     for(const auto& e : generated::entries)
-        if(e.attributesType == static_cast<int>(attributesType))
+        if(e.attributesType == attributesType)
             return &e;
     return nullptr;
 }

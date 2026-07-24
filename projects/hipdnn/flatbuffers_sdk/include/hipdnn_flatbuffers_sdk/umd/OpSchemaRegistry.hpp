@@ -22,6 +22,18 @@
 #include <cstdint>
 #include <string_view>
 
+// Opaque forward declaration of the FlatBuffers NodeAttributes union discriminant
+// (fully defined in the generated graph_generated.h). Declaring it here with its
+// fixed underlying type makes it a complete type, so OpSchemaEntry can carry the
+// real enum value -- no int laundering -- while this neutral header stays free of
+// the generated schema include. The generated registry TU sees both this
+// declaration and the real definition, so any underlying-type mismatch is a
+// compile error there.
+namespace hipdnn_flatbuffers_sdk::data_objects
+{
+enum class NodeAttributes : std::uint8_t;
+} // namespace hipdnn_flatbuffers_sdk::data_objects
+
 namespace hipdnn_flatbuffers_sdk::umd
 {
 
@@ -85,15 +97,14 @@ struct AttrBinding
 // One op's schema: its `opcode` (the UMD-facing shorthand from the table's
 // `umd_opcode` attribute, e.g. "sdpa_fwd", falling back to the table type name
 // when the attribute is absent), the `tableName` (the NodeAttributes union member,
-// e.g. "SdpaAttributes", for diagnostics), and the integer `attributesType` (the
-// value of the NodeAttributes enum, for O(1) lookup against
-// Node::attributes_type()), plus its input-tensor, output-tensor, and scalar
-// bindings.
+// e.g. "SdpaAttributes", for diagnostics), and the `attributesType` (the
+// NodeAttributes enum value, for O(1) lookup against Node::attributes_type()),
+// plus its input-tensor, output-tensor, and scalar bindings.
 struct OpSchemaEntry
 {
     std::string_view opcode;
     std::string_view tableName;
-    int attributesType = 0;
+    data_objects::NodeAttributes attributesType{};
     const InputTensorBinding* inputTensors = nullptr;
     std::size_t inputTensorCount = 0;
     const OutputTensorBinding* outputTensors = nullptr;

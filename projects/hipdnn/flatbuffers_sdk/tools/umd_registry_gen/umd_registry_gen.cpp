@@ -357,8 +357,8 @@ int main(int argc, char** argv)
         if(anyTable)
             body << "} // namespace " << tag << "\n\n";
 
-        entries << "    {\"" << opcode << "\", \"" << member << "\", static_cast<int>(" << kNs
-                << "::NodeAttributes::" << member << "), " << inputTensorsRef << ", "
+        entries << "    {\"" << opcode << "\", \"" << member << "\", " << kNs
+                << "::NodeAttributes::" << member << ", " << inputTensorsRef << ", "
                 << em.inputTensorCount << "u, " << outputTensorsRef << ", " << em.outputTensorCount
                 << "u, " << attrsRef << ", " << em.attributeCount << "u},\n";
         ++opCount;
@@ -384,7 +384,7 @@ int main(int argc, char** argv)
            "lookupOpByType(::hipdnn_flatbuffers_sdk::data_objects::NodeAttributes "
            "attributesType)\n{\n"
         << "    for(const auto& e : generated::entries)\n        if(e.attributesType == "
-           "static_cast<int>(attributesType))\n"
+           "attributesType)\n"
         << "            return &e;\n    return nullptr;\n}\n\n"
         << "} // namespace hipdnn_flatbuffers_sdk::umd\n";
 
