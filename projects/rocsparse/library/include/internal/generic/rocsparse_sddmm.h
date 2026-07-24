@@ -230,7 +230,8 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *
 *  \note
 *  Batched computation is supported for the \ref rocsparse_format_csr,
-*  \ref rocsparse_format_coo and \ref rocsparse_format_ell formats when
+*  \ref rocsparse_format_coo, \ref rocsparse_format_coo_aos and
+*  \ref rocsparse_format_ell formats when
 *  \p alg == \ref rocsparse_sddmm_alg_default.
 *  The batch count is taken from the sparse matrix \f$C\f$. Each of the dense
 *  matrices \f$A\f$ and \f$B\f$ must either use the same batch count as \f$C\f$,
@@ -250,6 +251,7 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  sparse output \f$C\f$ are configured with the format-specific routine:
 *  \ref rocsparse_csr_set_strided_batch for \ref rocsparse_format_csr,
 *  \ref rocsparse_coo_set_strided_batch for \ref rocsparse_format_coo and
+*  \ref rocsparse_format_coo_aos, and
 *  \ref rocsparse_ell_set_strided_batch for \ref rocsparse_format_ell.
 *
 *  For CSR, \ref rocsparse_csr_set_strided_batch sets two independent per-batch
@@ -266,6 +268,15 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  values); i.e. the row-index, column-index and value buffers of batch \f$i\f$
 *  are obtained from the base pointers by adding \p i * \p batch_stride, and must
 *  therefore be laid out with the same stride. The stride must be at least the
+*  per-batch nnz of \f$C\f$, and may be larger to allow padding.
+*
+*  For COO AoS, \ref rocsparse_coo_set_strided_batch sets a single per-batch
+*  stride \p batch_stride that is interpreted as the per-batch nnz stride of the
+*  value buffer. Because the row and column indices are stored interleaved in a
+*  single buffer (two index entries per nonzero), the interleaved index buffer of
+*  batch \f$i\f$ is obtained from the base pointer by adding
+*  \p i * (2 * \p batch_stride), while the value buffer of batch \f$i\f$ is
+*  obtained by adding \p i * \p batch_stride. The stride must be at least the
 *  per-batch nnz of \f$C\f$, and may be larger to allow padding.
 *
 *  For ELL, \ref rocsparse_ell_set_strided_batch sets a single per-batch stride

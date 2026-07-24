@@ -157,7 +157,11 @@ namespace rocsparse
         // buffers (row indices, column indices and values). The caller is
         // therefore required to lay out the three buffers with that same
         // stride, and to broadcast A or B across batches the caller passes
-        // batch_stride_A == 0 or batch_stride_B == 0.
+        // batch_stride_A == 0 or batch_stride_B == 0. For COO AoS the row and
+        // column indices are interleaved in a single buffer (two index entries
+        // per nonzero), so the row/column index strides are twice the value
+        // stride; these strides are computed by the caller and passed in
+        // separately here.
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
             rocsparse::sddmm_coox_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT, AOS>(
