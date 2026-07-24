@@ -354,12 +354,14 @@ int run_flatmm_example(int argc, char* argv[])
     {
         if(data_type == "fp16")
         {
-            run_flatmm_example_with_layouts<ck_tile::half_t, FlatmmConfig<ck_tile::half_t>>(
+            return run_flatmm_example_with_layouts<ck_tile::half_t,
+                                                   FlatmmConfig<ck_tile::half_t>>(
                 argc, argv, Row{}, Col{}, Row{});
         }
         else if(data_type == "bf16")
         {
-            run_flatmm_example_with_layouts<ck_tile::bf16_t, FlatmmConfig<ck_tile::bf16_t>>(
+            return run_flatmm_example_with_layouts<ck_tile::bf16_t,
+                                                   FlatmmConfig<ck_tile::bf16_t>>(
                 argc, argv, Row{}, Col{}, Row{});
         }
         else if(data_type == "fp8")
@@ -368,34 +370,35 @@ int run_flatmm_example(int argc, char* argv[])
             {
                 if(persistent_opt == 0)
                 {
-                    run_flatmm_example_with_layouts<ck_tile::fp8_t, FlatmmConfig<ck_tile::fp8_t>>(
+                    return run_flatmm_example_with_layouts<ck_tile::fp8_t,
+                                                           FlatmmConfig<ck_tile::fp8_t>>(
                         argc, argv, Row{}, Col{}, Row{});
                 }
                 else
                 {
-                    run_flatmm_example_with_layouts<ck_tile::fp8_t,
-                                                    FlatmmConfig<ck_tile::fp8_t>,
-                                                    -1,
-                                                    -1,
-                                                    true>(argc, argv, Row{}, Col{}, Row{});
+                    return run_flatmm_example_with_layouts<ck_tile::fp8_t,
+                                                           FlatmmConfig<ck_tile::fp8_t>,
+                                                           -1,
+                                                           -1,
+                                                           true>(argc, argv, Row{}, Col{}, Row{});
                 }
             }
             else
             {
                 if(persistent_opt == 0)
                 {
-                    run_flatmm_example_with_layouts<ck_tile::fp8_t,
-                                                    FlatmmConfig<ck_tile::fp8_t>,
-                                                    1,
-                                                    1>(argc, argv, Row{}, Col{}, Row{});
+                    return run_flatmm_example_with_layouts<ck_tile::fp8_t,
+                                                           FlatmmConfig<ck_tile::fp8_t>,
+                                                           1,
+                                                           1>(argc, argv, Row{}, Col{}, Row{});
                 }
                 else
                 {
-                    run_flatmm_example_with_layouts<ck_tile::fp8_t,
-                                                    FlatmmConfig<ck_tile::fp8_t>,
-                                                    1,
-                                                    1,
-                                                    true>(argc, argv, Row{}, Col{}, Row{});
+                    return run_flatmm_example_with_layouts<ck_tile::fp8_t,
+                                                           FlatmmConfig<ck_tile::fp8_t>,
+                                                           1,
+                                                           1,
+                                                           true>(argc, argv, Row{}, Col{}, Row{});
                 }
             }
         }
@@ -403,13 +406,16 @@ int run_flatmm_example(int argc, char* argv[])
         {
             if(scale_opt == 0)
             {
-                run_flatmm_example_with_layouts<ck_tile::bf8_t, FlatmmConfig<ck_tile::bf8_t>>(
+                return run_flatmm_example_with_layouts<ck_tile::bf8_t,
+                                                       FlatmmConfig<ck_tile::bf8_t>>(
                     argc, argv, Row{}, Col{}, Row{});
             }
             else
             {
-                run_flatmm_example_with_layouts<ck_tile::bf8_t, FlatmmConfig<ck_tile::bf8_t>, 1, 1>(
-                    argc, argv, Row{}, Col{}, Row{});
+                return run_flatmm_example_with_layouts<ck_tile::bf8_t,
+                                                       FlatmmConfig<ck_tile::bf8_t>,
+                                                       1,
+                                                       1>(argc, argv, Row{}, Col{}, Row{});
             }
         }
         else

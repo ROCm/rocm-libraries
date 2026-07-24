@@ -78,13 +78,13 @@ if(TARGET tile_example_flatmm_basic)
         test_ck_tile_flatmm_fp16_quick
         tile_example_flatmm_basic
         -m=128 -n=256 -k=128 -prec=fp16 -wave_tile=16 -split_k=1
-        -persistent=0 -scale=0 -v=1 -warmup=0 -repeat=1 -init=1
+        -persistent=0 -scale=0 -v=1 -warmup=0 -repeat=1 -init=0
     )
     add_ck_tile_category_test(
         test_ck_tile_flatmm_fp8_persistent_quick
         tile_example_flatmm_basic
         -m=256 -n=256 -k=256 -prec=fp8 -wave_tile=16 -split_k=1
-        -persistent=1 -scale=0 -v=1 -warmup=0 -repeat=1 -init=1
+        -persistent=1 -scale=0 -v=1 -warmup=0 -repeat=1 -init=0
     )
     rocm_install(TARGETS tile_example_flatmm_basic COMPONENT tests)
 endif()
