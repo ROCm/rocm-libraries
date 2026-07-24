@@ -71,6 +71,7 @@ class Result:
     ms: float
     tflops: float
     gbps: float
+    passed: bool | None = None  # None when --verify was not requested
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +610,7 @@ def _run_sweep(
             "fp16": (1e-3, 1e-3),
             "fp32": (1e-5, 3e-6),
         }
+        kernel_passed: bool | None = None
         if args.verify:
             launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
             D_out = torch.empty_like(D_t)
@@ -623,6 +625,7 @@ def _run_sweep(
             abs_err = d_f32.sub(r_f32).abs()
             err = float(abs_err.max())
             failed = bool((abs_err > atol + rtol * r_f32.abs()).any())
+            kernel_passed = not failed
             status = f"FAIL(err={err:.2e})" if failed else "PASS"
             print(f"  verify {artifact.kernel_name}: {status}", flush=True)
             rt.memset(D_dev, 0, D_t.nbytes)
@@ -653,6 +656,7 @@ def _run_sweep(
                 ms=ms,
                 tflops=cur_tflops,
                 gbps=cur_gbps,
+                passed=kernel_passed,
             )
         )
 
@@ -682,12 +686,18 @@ def _run_sweep(
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
 
-    print(f"\n{'='*72}")
+    show_verify = args.verify
+    width = 84 if show_verify else 72
+    print(f"\n{'='*width}")
     print(f"Top {top_n} configurations for {arch} {dtype} {p.short()}")
-    print(f"{'='*72}")
-    hdr = f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    print(f"{'='*width}")
+    hdr = (
+        f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'verify':>6}  config"
+        if show_verify
+        else f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  config"
+    )
     print(hdr)
-    print("-" * 72)
+    print("-" * width)
     for rank, r in enumerate(results[:top_n], 1):
         cfg_str = (
             f"tile={r.tile_m}x{r.tile_n}x{r.tile_k} "
@@ -695,7 +705,15 @@ def _run_sweep(
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"{r.pipeline}/{r.epilogue}"
         )
-        print(f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}")
+        if show_verify:
+            v = "PASS" if r.passed else "FAIL"
+            print(
+                f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {v:>6}  {cfg_str}"
+            )
+        else:
+            print(
+                f"{rank:>4}  {r.tflops:>7.1f}  {r.ms:>8.3f}  {r.gbps:>7.1f}  {cfg_str}"
+            )
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS — {best.kernel_name}")
