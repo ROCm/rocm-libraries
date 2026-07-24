@@ -61,7 +61,11 @@
 "ci:hipsparselt-fast":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
-
+  
+"project: hipthreads":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipthreads/**/*'
+  
 "project: miopen":
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
