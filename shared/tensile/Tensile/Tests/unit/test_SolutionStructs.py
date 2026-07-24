@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import pytest
+
 from Tensile.Common import globalParameters
 from Tensile.DataType import DataType
 from Tensile.SolutionStructs import Solution, disablePreloadKernelArguments
@@ -84,3 +86,36 @@ def test_gfx11_wmma_mi_input_per_thread_keeps_full_k():
             globalParameters["AsmCaps"] = oldAsmCaps
 
     assert state["MIInputPerThread"] == 16
+
+
+@pytest.mark.parametrize("tc", ["A", "B"])
+def test_direct_to_lds_rejects_x2_b64_load(tc):
+    # An 8-byte (b64 / dwordx2) DirectToLds load has no valid hardware
+    # instruction: the lds modifier is only legal on the x1 (dword) and
+    # x4 (dwordx4) buffer loads. isDirectToLdsDoable must reject it so the
+    # kernel falls back to the non-DTL path (gfx950 previously emitted an
+    # illegal buffer_load_dwordx2 ... lds that failed to assemble).
+    # The stub is intentionally minimal: the x2 reject fires before any other
+    # field is read, so only the values needed to reach it are provided.
+    isa = (9, 5, 0)
+    oldArchCaps = globalParameters.get("ArchCaps")
+    globalParameters["ArchCaps"] = {isa: {"HasDTLx4": True}}
+    state = {
+        "ISA": isa,
+        "ProblemType": {"DataType": DataType("S")},  # fp32 -> 4 bytes/element
+        "AssertSummationElementMultiple": 1,
+        "GlobalSplitU": 1,
+        "GlobalLoadVectorWidthA": 2,  # 2 * 4 = 8 bytes/load -> x2 (b64)
+        "GlobalLoadVectorWidthB": 2,
+    }
+
+    try:
+        doable = Solution.isDirectToLdsDoable(state, tc)
+    finally:
+        if oldArchCaps is None:
+            del globalParameters["ArchCaps"]
+        else:
+            globalParameters["ArchCaps"] = oldArchCaps
+
+    assert doable is False
+    assert state["Valid"] is False
