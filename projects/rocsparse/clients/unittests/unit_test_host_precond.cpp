@@ -568,13 +568,13 @@ static void run_bsrilu0_pipeline(rocsparse_handle handle)
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
     device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
     device_vector<T>             val{std::vector<T>{scalar<T>(4),
-                                                    scalar<T>(1),
-                                                    scalar<T>(1),
-                                                    scalar<T>(4),
-                                                    scalar<T>(4),
-                                                    scalar<T>(1),
-                                                    scalar<T>(1),
-                                                    scalar<T>(4)}};
+                                        scalar<T>(1),
+                                        scalar<T>(1),
+                                        scalar<T>(4),
+                                        scalar<T>(4),
+                                        scalar<T>(1),
+                                        scalar<T>(1),
+                                        scalar<T>(4)}};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     rocsparse_mat_descr descr = nullptr;
@@ -914,37 +914,37 @@ static void run_gtsv_no_pivot_strided_batch_pipeline(rocsparse_handle handle)
 {
     const rocsparse_int m = 4, batch_count = 2, batch_stride = 4;
     device_vector<T>    dl{std::vector<T>{scalar<T>(0),
-                                          scalar<T>(1),
-                                          scalar<T>(1),
-                                          scalar<T>(1),
-                                          scalar<T>(0),
-                                          scalar<T>(1),
-                                          scalar<T>(1),
-                                          scalar<T>(1)}};
+                                       scalar<T>(1),
+                                       scalar<T>(1),
+                                       scalar<T>(1),
+                                       scalar<T>(0),
+                                       scalar<T>(1),
+                                       scalar<T>(1),
+                                       scalar<T>(1)}};
     device_vector<T>    d{std::vector<T>{scalar<T>(4),
-                                         scalar<T>(4),
-                                         scalar<T>(4),
-                                         scalar<T>(4),
-                                         scalar<T>(4),
-                                         scalar<T>(4),
-                                         scalar<T>(4),
-                                         scalar<T>(4)}};
+                                      scalar<T>(4),
+                                      scalar<T>(4),
+                                      scalar<T>(4),
+                                      scalar<T>(4),
+                                      scalar<T>(4),
+                                      scalar<T>(4),
+                                      scalar<T>(4)}};
     device_vector<T>    du{std::vector<T>{scalar<T>(1),
-                                          scalar<T>(1),
-                                          scalar<T>(1),
-                                          scalar<T>(0),
-                                          scalar<T>(1),
-                                          scalar<T>(1),
-                                          scalar<T>(1),
-                                          scalar<T>(0)}};
+                                       scalar<T>(1),
+                                       scalar<T>(1),
+                                       scalar<T>(0),
+                                       scalar<T>(1),
+                                       scalar<T>(1),
+                                       scalar<T>(1),
+                                       scalar<T>(0)}};
     device_vector<T>    x{std::vector<T>{scalar<T>(1),
-                                         scalar<T>(2),
-                                         scalar<T>(3),
-                                         scalar<T>(4),
-                                         scalar<T>(1),
-                                         scalar<T>(2),
-                                         scalar<T>(3),
-                                         scalar<T>(4)}};
+                                      scalar<T>(2),
+                                      scalar<T>(3),
+                                      scalar<T>(4),
+                                      scalar<T>(1),
+                                      scalar<T>(2),
+                                      scalar<T>(3),
+                                      scalar<T>(4)}};
     ASSERT_TRUE(dl.ptr && d.ptr && du.ptr && x.ptr);
 
     size_t           buffer_size = 0;

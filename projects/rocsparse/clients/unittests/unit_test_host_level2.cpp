@@ -1408,8 +1408,8 @@ namespace
         // fill/diag descr settings, and block_dim 1 and 2.
         const rocsparse_direction dirs[]  = {rocsparse_direction_row, rocsparse_direction_column};
         const rocsparse_operation ops[]   = {rocsparse_operation_none,
-                                             rocsparse_operation_transpose,
-                                             rocsparse_operation_conjugate_transpose};
+                                           rocsparse_operation_transpose,
+                                           rocsparse_operation_conjugate_transpose};
         const rocsparse_fill_mode fills[] = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
         const rocsparse_diag_type diags[]
             = {rocsparse_diag_type_non_unit, rocsparse_diag_type_unit};

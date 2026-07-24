@@ -84,9 +84,9 @@ namespace rocsparse
         }
     }
 
-    void warning_message(const char*, const char*, const char*, int) { }
+    void warning_message(const char*, const char*, const char*, int) {}
 
-    void error_message(rocsparse_status, const char*, const char*, const char*, int) { }
+    void error_message(rocsparse_status, const char*, const char*, const char*, int) {}
 }
 
 //

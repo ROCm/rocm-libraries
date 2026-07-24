@@ -93,7 +93,7 @@ static rocsparse_status csrilu0(rocsparse_handle          handle_,
     return rocsparse_status_success;
 }
 
-void testing_csritilu0_extra(const Arguments& arg) { }
+void testing_csritilu0_extra(const Arguments& arg) {}
 
 template <typename T>
 void testing_csritilu0_bad_arg(const Arguments& arg)
@@ -220,7 +220,7 @@ struct csritilu0_params_t
         , options(options_)
         , maxiter(maxiter_)
         , tol(tol_)
-        , datatype(rocsparse_datatype_t::get<T>()) { };
+        , datatype(rocsparse_datatype_t::get<T>()){};
 };
 
 template <typename T>
@@ -358,19 +358,19 @@ void testing_csritilu0(const Arguments& arg)
 
         p.maxiter = arg.nmaxiter;
         status    = rocsparse_csritilu0_preprocess(handle,
-                                                   p.alg,
-                                                   p.options,
-                                                   p.maxiter,
-                                                   //
-                                                   dA.m,
-                                                   dA.nnz,
-                                                   dA.ptr,
+                                                p.alg,
+                                                p.options,
+                                                p.maxiter,
+                                                //
+                                                dA.m,
+                                                dA.nnz,
+                                                dA.ptr,
 
-                                                   dA.ind,
-                                                   dA.base,
-                                                   p.datatype,
-                                                   buffer_size,
-                                                   buffer);
+                                                dA.ind,
+                                                dA.base,
+                                                p.datatype,
+                                                buffer_size,
+                                                buffer);
 
         //
         // Must be consistent with csrilu0_analysis, i.e. if a zero pivot is found.
@@ -603,19 +603,19 @@ void testing_csritilu0(const Arguments& arg)
             p.maxiter                          = arg.nmaxiter;
             double gpu_presolve_time_used_iter = get_time_us();
             status                             = rocsparse_csritilu0_preprocess(handle,
-                                                                                p.alg,
-                                                                                p.options,
-                                                                                p.maxiter,
+                                                    p.alg,
+                                                    p.options,
+                                                    p.maxiter,
 
-                                                                                dA.m,
-                                                                                dA.nnz,
-                                                                                dA.ptr,
-                                                                                dA.ind,
-                                                                                dA.base,
+                                                    dA.m,
+                                                    dA.nnz,
+                                                    dA.ptr,
+                                                    dA.ind,
+                                                    dA.base,
 
-                                                                                p.datatype,
-                                                                                buffer_size,
-                                                                                buffer);
+                                                    p.datatype,
+                                                    buffer_size,
+                                                    buffer);
             gpu_presolve_time_used_iter        = (get_time_us() - gpu_presolve_time_used_iter);
             gpu_presolve_time_used += gpu_presolve_time_used_iter;
             CHECK_ROCSPARSE_ERROR(status);

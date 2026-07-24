@@ -1077,9 +1077,9 @@ static inline void host_bsr_lsolve(rocsparse_direction  dir,
                     for(rocsparse_int bj = 0; bj < bsr_dim; ++bj)
                     {
                         rocsparse_int local_col = bsr_col * bsr_dim + bj;
-                        T local_val = (dir == rocsparse_direction_row)
-                                          ? bsr_val[bsr_dim * bsr_dim * j + bi * bsr_dim + bj]
-                                          : bsr_val[bsr_dim * bsr_dim * j + bi + bj * bsr_dim];
+                        T             local_val = (dir == rocsparse_direction_row)
+                                                      ? bsr_val[bsr_dim * bsr_dim * j + bi * bsr_dim + bj]
+                                                      : bsr_val[bsr_dim * bsr_dim * j + bi + bj * bsr_dim];
 
                         if(local_val == static_cast<T>(0) && local_col == local_row
                            && diag_type == rocsparse_diag_type_non_unit)
@@ -1188,9 +1188,9 @@ static inline void host_bsr_usolve(rocsparse_direction  dir,
                     for(rocsparse_int bj = bsr_dim - 1; bj >= 0; --bj)
                     {
                         rocsparse_int local_col = bsr_col * bsr_dim + bj;
-                        T local_val = dir == rocsparse_direction_row
-                                          ? bsr_val[bsr_dim * bsr_dim * j + bi * bsr_dim + bj]
-                                          : bsr_val[bsr_dim * bsr_dim * j + bi + bj * bsr_dim];
+                        T             local_val = dir == rocsparse_direction_row
+                                                      ? bsr_val[bsr_dim * bsr_dim * j + bi * bsr_dim + bj]
+                                                      : bsr_val[bsr_dim * bsr_dim * j + bi + bj * bsr_dim];
 
                         // Ignore all entries that are below the diagonal
                         if(local_col < local_row)
@@ -4516,7 +4516,8 @@ void host_bsrgemm(rocsparse_direction  dir,
                                         }
 
                                         bsr_val_C[block_dim * block_dim * row_end_C + block_dim * r
-                                                  + c] = *alpha * val_C;
+                                                  + c]
+                                            = *alpha * val_C;
                                     }
                                     else
                                     {
@@ -4530,7 +4531,8 @@ void host_bsrgemm(rocsparse_direction  dir,
                                         }
 
                                         bsr_val_C[block_dim * block_dim * row_end_C + block_dim * c
-                                                  + r] = *alpha * val_C;
+                                                  + r]
+                                            = *alpha * val_C;
                                     }
                                 }
                             }
@@ -4994,8 +4996,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int nthreads = 1;
-        int tid      = 0;
+        int           nthreads = 1;
+        int           tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -5088,8 +5090,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int nthreads = 1;
-        int tid      = 0;
+        int           nthreads = 1;
+        int           tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -6226,9 +6228,9 @@ void host_bsrilu0(rocsparse_direction               dir,
 
                 if(boost)
                 {
-                    diag = (boost_tol >= std::abs(diag))
-                               ? host_assign_ilu0_boost_value(diag, boost_val)
-                               : diag;
+                    diag                             = (boost_tol >= std::abs(diag))
+                                                           ? host_assign_ilu0_boost_value(diag, boost_val)
+                                                           : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
                 else
@@ -8423,12 +8425,14 @@ void host_csr_to_gebsr(rocsparse_direction               direction,
             if(direction == rocsparse_direction_row)
             {
                 bsr_val[row_block_dim * col_block_dim * index + col_block_dim * local_row
-                        + local_col] = csr_val[j];
+                        + local_col]
+                    = csr_val[j];
             }
             else
             {
                 bsr_val[row_block_dim * col_block_dim * index + row_block_dim * local_col
-                        + local_row] = csr_val[j];
+                        + local_row]
+                    = csr_val[j];
             }
         }
     }
@@ -9474,388 +9478,388 @@ template struct rocsparse_host<rocsparse_double_complex,
 
 #define INSTANTIATE_T(TYPE)                                                                                   \
     template void             host_gthrz<TYPE>(rocsparse_int nnz,                                             \
-                                               TYPE * y,                                                      \
-                                               TYPE * x_val,                                                  \
-                                               const rocsparse_int* x_ind,                                    \
-                                               rocsparse_index_base base);                                    \
+                                   TYPE * y,                                                      \
+                                   TYPE * x_val,                                                  \
+                                   const rocsparse_int* x_ind,                                    \
+                                   rocsparse_index_base base);                                    \
     template void             host_bsrsv<TYPE>(rocsparse_operation  trans,                                    \
-                                               rocsparse_direction  dir,                                      \
-                                               rocsparse_int        mb,                                       \
-                                               rocsparse_int        nnzb,                                     \
-                                               TYPE                 alpha,                                    \
-                                               const rocsparse_int* bsr_row_ptr,                              \
-                                               const rocsparse_int* bsr_col_ind,                              \
-                                               const TYPE*          bsr_val,                                  \
-                                               rocsparse_int        bsr_dim,                                  \
-                                               const TYPE*          x,                                        \
-                                               TYPE*                y,                                        \
-                                               rocsparse_diag_type  diag_type,                                \
-                                               rocsparse_fill_mode  fill_mode,                                \
-                                               rocsparse_index_base base,                                     \
-                                               rocsparse_int*       struct_pivot,                             \
-                                               rocsparse_int*       numeric_pivot);                           \
+                                   rocsparse_direction  dir,                                      \
+                                   rocsparse_int        mb,                                       \
+                                   rocsparse_int        nnzb,                                     \
+                                   TYPE                 alpha,                                    \
+                                   const rocsparse_int* bsr_row_ptr,                              \
+                                   const rocsparse_int* bsr_col_ind,                              \
+                                   const TYPE*          bsr_val,                                  \
+                                   rocsparse_int        bsr_dim,                                  \
+                                   const TYPE*          x,                                        \
+                                   TYPE*                y,                                        \
+                                   rocsparse_diag_type  diag_type,                                \
+                                   rocsparse_fill_mode  fill_mode,                                \
+                                   rocsparse_index_base base,                                     \
+                                   rocsparse_int*       struct_pivot,                             \
+                                   rocsparse_int*       numeric_pivot);                                 \
     template void             host_hybmv<TYPE>(rocsparse_operation  trans,                                    \
-                                               rocsparse_int        M,                                        \
-                                               rocsparse_int        N,                                        \
-                                               TYPE                 alpha,                                    \
-                                               rocsparse_int        ell_nnz,                                  \
-                                               const rocsparse_int* ell_col_ind,                              \
-                                               const TYPE*          ell_val,                                  \
-                                               rocsparse_int        ell_width,                                \
-                                               rocsparse_int        coo_nnz,                                  \
-                                               const rocsparse_int* coo_row_ind,                              \
-                                               const rocsparse_int* coo_col_ind,                              \
-                                               const TYPE*          coo_val,                                  \
-                                               const TYPE*          x,                                        \
-                                               TYPE                 beta,                                     \
-                                               TYPE*                y,                                        \
-                                               rocsparse_index_base base);                                    \
+                                   rocsparse_int        M,                                        \
+                                   rocsparse_int        N,                                        \
+                                   TYPE                 alpha,                                    \
+                                   rocsparse_int        ell_nnz,                                  \
+                                   const rocsparse_int* ell_col_ind,                              \
+                                   const TYPE*          ell_val,                                  \
+                                   rocsparse_int        ell_width,                                \
+                                   rocsparse_int        coo_nnz,                                  \
+                                   const rocsparse_int* coo_row_ind,                              \
+                                   const rocsparse_int* coo_col_ind,                              \
+                                   const TYPE*          coo_val,                                  \
+                                   const TYPE*          x,                                        \
+                                   TYPE                 beta,                                     \
+                                   TYPE*                y,                                        \
+                                   rocsparse_index_base base);                                    \
     template void             host_gebsrmv<TYPE>(rocsparse_direction  dir,                                    \
-                                                 rocsparse_operation  trans,                                  \
-                                                 rocsparse_int        mb,                                     \
-                                                 rocsparse_int        nb,                                     \
-                                                 rocsparse_int        nnzb,                                   \
-                                                 TYPE                 alpha,                                  \
-                                                 const rocsparse_int* bsr_row_ptr,                            \
-                                                 const rocsparse_int* bsr_col_ind,                            \
-                                                 const TYPE*          bsr_val,                                \
-                                                 rocsparse_int        row_block_dim,                          \
-                                                 rocsparse_int        col_block_dim,                          \
-                                                 const TYPE*          x,                                      \
-                                                 TYPE                 beta,                                   \
-                                                 TYPE*                y,                                      \
-                                                 rocsparse_index_base base);                                  \
+                                     rocsparse_operation  trans,                                  \
+                                     rocsparse_int        mb,                                     \
+                                     rocsparse_int        nb,                                     \
+                                     rocsparse_int        nnzb,                                   \
+                                     TYPE                 alpha,                                  \
+                                     const rocsparse_int* bsr_row_ptr,                            \
+                                     const rocsparse_int* bsr_col_ind,                            \
+                                     const TYPE*          bsr_val,                                \
+                                     rocsparse_int        row_block_dim,                          \
+                                     rocsparse_int        col_block_dim,                          \
+                                     const TYPE*          x,                                      \
+                                     TYPE                 beta,                                   \
+                                     TYPE*                y,                                      \
+                                     rocsparse_index_base base);                                  \
     template void             host_bsrxmv<TYPE>(rocsparse_direction  dir,                                     \
-                                                rocsparse_operation  trans,                                   \
-                                                rocsparse_int        size_of_mask,                            \
-                                                rocsparse_int        mb,                                      \
-                                                rocsparse_int        nb,                                      \
-                                                rocsparse_int        nnzb,                                    \
-                                                TYPE                 alpha,                                   \
-                                                const rocsparse_int* bsr_mask_ptr,                            \
-                                                const rocsparse_int* bsr_row_ptr,                             \
-                                                const rocsparse_int* bsr_end_ptr,                             \
-                                                const rocsparse_int* bsr_col_ind,                             \
-                                                const TYPE*          bsr_val,                                 \
-                                                rocsparse_int        bsr_dim,                                 \
-                                                const TYPE*          x,                                       \
-                                                TYPE                 beta,                                    \
-                                                TYPE*                y,                                       \
-                                                rocsparse_index_base base);                                   \
+                                    rocsparse_operation  trans,                                   \
+                                    rocsparse_int        size_of_mask,                            \
+                                    rocsparse_int        mb,                                      \
+                                    rocsparse_int        nb,                                      \
+                                    rocsparse_int        nnzb,                                    \
+                                    TYPE                 alpha,                                   \
+                                    const rocsparse_int* bsr_mask_ptr,                            \
+                                    const rocsparse_int* bsr_row_ptr,                             \
+                                    const rocsparse_int* bsr_end_ptr,                             \
+                                    const rocsparse_int* bsr_col_ind,                             \
+                                    const TYPE*          bsr_val,                                 \
+                                    rocsparse_int        bsr_dim,                                 \
+                                    const TYPE*          x,                                       \
+                                    TYPE                 beta,                                    \
+                                    TYPE*                y,                                       \
+                                    rocsparse_index_base base);                                   \
     template void             host_bsrpad_value<TYPE>(rocsparse_int m,                                        \
-                                                      rocsparse_int mb,                                       \
-                                                      rocsparse_int nnzb,                                     \
-                                                      rocsparse_int block_dim,                                \
-                                                      TYPE          value,                                    \
-                                                      TYPE * bsr_val,                                         \
-                                                      const rocsparse_int* bsr_row_ptr,                       \
-                                                      const rocsparse_int* bsr_col_ind,                       \
-                                                      rocsparse_index_base bsr_base);                         \
+                                          rocsparse_int mb,                                       \
+                                          rocsparse_int nnzb,                                     \
+                                          rocsparse_int block_dim,                                \
+                                          TYPE          value,                                    \
+                                          TYPE * bsr_val,                                         \
+                                          const rocsparse_int* bsr_row_ptr,                       \
+                                          const rocsparse_int* bsr_col_ind,                       \
+                                          rocsparse_index_base bsr_base);                         \
     template void             host_gebsrmm<TYPE>(rocsparse_handle          handle,                            \
-                                                 rocsparse_direction       dir,                               \
-                                                 rocsparse_operation       trans_A,                           \
-                                                 rocsparse_operation       trans_B,                           \
-                                                 rocsparse_int             mb,                                \
-                                                 rocsparse_int             n,                                 \
-                                                 rocsparse_int             kb,                                \
-                                                 rocsparse_int             nnzb,                              \
-                                                 const TYPE*               alpha,                             \
-                                                 const rocsparse_mat_descr descr,                             \
-                                                 const TYPE*               bsr_val,                           \
-                                                 const rocsparse_int*      bsr_row_ptr,                       \
-                                                 const rocsparse_int*      bsr_col_ind,                       \
-                                                 rocsparse_int             row_block_dim,                     \
-                                                 rocsparse_int             col_block_dim,                     \
-                                                 const TYPE*               B,                                 \
-                                                 int64_t                   ldb,                               \
-                                                 const TYPE*               beta,                              \
-                                                 TYPE*                     C,                                 \
-                                                 int64_t                   ldc);                              \
+                                     rocsparse_direction       dir,                               \
+                                     rocsparse_operation       trans_A,                           \
+                                     rocsparse_operation       trans_B,                           \
+                                     rocsparse_int             mb,                                \
+                                     rocsparse_int             n,                                 \
+                                     rocsparse_int             kb,                                \
+                                     rocsparse_int             nnzb,                              \
+                                     const TYPE*               alpha,                             \
+                                     const rocsparse_mat_descr descr,                             \
+                                     const TYPE*               bsr_val,                           \
+                                     const rocsparse_int*      bsr_row_ptr,                       \
+                                     const rocsparse_int*      bsr_col_ind,                       \
+                                     rocsparse_int             row_block_dim,                     \
+                                     rocsparse_int             col_block_dim,                     \
+                                     const TYPE*               B,                                 \
+                                     int64_t                   ldb,                               \
+                                     const TYPE*               beta,                              \
+                                     TYPE*                     C,                                 \
+                                     int64_t                   ldc);                                                \
     template void             host_bsrsm<TYPE>(rocsparse_int        mb,                                       \
-                                               rocsparse_int        nrhs,                                     \
-                                               rocsparse_int        nnzb,                                     \
-                                               rocsparse_direction  dir,                                      \
-                                               rocsparse_operation  transA,                                   \
-                                               rocsparse_operation  transX,                                   \
-                                               TYPE                 alpha,                                    \
-                                               const rocsparse_int* bsr_row_ptr,                              \
-                                               const rocsparse_int* bsr_col_ind,                              \
-                                               const TYPE*          bsr_val,                                  \
-                                               rocsparse_int        bsr_dim,                                  \
-                                               const TYPE*          B,                                        \
-                                               int64_t              ldb,                                      \
-                                               TYPE*                X,                                        \
-                                               int64_t              ldx,                                      \
-                                               rocsparse_diag_type  diag_type,                                \
-                                               rocsparse_fill_mode  fill_mode,                                \
-                                               rocsparse_index_base base,                                     \
-                                               rocsparse_int*       struct_pivot,                             \
-                                               rocsparse_int*       numeric_pivot);                           \
+                                   rocsparse_int        nrhs,                                     \
+                                   rocsparse_int        nnzb,                                     \
+                                   rocsparse_direction  dir,                                      \
+                                   rocsparse_operation  transA,                                   \
+                                   rocsparse_operation  transX,                                   \
+                                   TYPE                 alpha,                                    \
+                                   const rocsparse_int* bsr_row_ptr,                              \
+                                   const rocsparse_int* bsr_col_ind,                              \
+                                   const TYPE*          bsr_val,                                  \
+                                   rocsparse_int        bsr_dim,                                  \
+                                   const TYPE*          B,                                        \
+                                   int64_t              ldb,                                      \
+                                   TYPE*                X,                                        \
+                                   int64_t              ldx,                                      \
+                                   rocsparse_diag_type  diag_type,                                \
+                                   rocsparse_fill_mode  fill_mode,                                \
+                                   rocsparse_index_base base,                                     \
+                                   rocsparse_int*       struct_pivot,                             \
+                                   rocsparse_int*       numeric_pivot);                                 \
     template void             host_gemmi<TYPE>(rocsparse_int        M,                                        \
-                                               rocsparse_int        N,                                        \
-                                               rocsparse_operation  transA,                                   \
-                                               rocsparse_operation  transB,                                   \
-                                               TYPE                 alpha,                                    \
-                                               const TYPE*          A,                                        \
-                                               int64_t              lda,                                      \
-                                               const rocsparse_int* csr_row_ptr,                              \
-                                               const rocsparse_int* csr_col_ind,                              \
-                                               const TYPE*          csr_val,                                  \
-                                               TYPE                 beta,                                     \
-                                               TYPE*                C,                                        \
-                                               int64_t              ldc,                                      \
-                                               rocsparse_index_base base);                                    \
+                                   rocsparse_int        N,                                        \
+                                   rocsparse_operation  transA,                                   \
+                                   rocsparse_operation  transB,                                   \
+                                   TYPE                 alpha,                                    \
+                                   const TYPE*          A,                                        \
+                                   int64_t              lda,                                      \
+                                   const rocsparse_int* csr_row_ptr,                              \
+                                   const rocsparse_int* csr_col_ind,                              \
+                                   const TYPE*          csr_val,                                  \
+                                   TYPE                 beta,                                     \
+                                   TYPE*                C,                                        \
+                                   int64_t              ldc,                                      \
+                                   rocsparse_index_base base);                                    \
     template void             host_bsrgeam_nnzb<TYPE>(rocsparse_direction  dir,                               \
-                                                      rocsparse_int        Mb,                                \
-                                                      rocsparse_int        Nb,                                \
-                                                      rocsparse_int        block_dim,                         \
-                                                      const TYPE*          alpha,                             \
-                                                      const rocsparse_int* bsr_row_ptr_A,                     \
-                                                      const rocsparse_int* bsr_col_ind_A,                     \
-                                                      const TYPE*          beta,                              \
-                                                      const rocsparse_int* bsr_row_ptr_B,                     \
-                                                      const rocsparse_int* bsr_col_ind_B,                     \
-                                                      rocsparse_int*       bsr_row_ptr_C,                     \
-                                                      rocsparse_int*       nnzb_C,                            \
-                                                      rocsparse_index_base base_A,                            \
-                                                      rocsparse_index_base base_B,                            \
-                                                      rocsparse_index_base base_C);                           \
+                                          rocsparse_int        Mb,                                \
+                                          rocsparse_int        Nb,                                \
+                                          rocsparse_int        block_dim,                         \
+                                          const TYPE*          alpha,                             \
+                                          const rocsparse_int* bsr_row_ptr_A,                     \
+                                          const rocsparse_int* bsr_col_ind_A,                     \
+                                          const TYPE*          beta,                              \
+                                          const rocsparse_int* bsr_row_ptr_B,                     \
+                                          const rocsparse_int* bsr_col_ind_B,                     \
+                                          rocsparse_int*       bsr_row_ptr_C,                     \
+                                          rocsparse_int*       nnzb_C,                            \
+                                          rocsparse_index_base base_A,                            \
+                                          rocsparse_index_base base_B,                            \
+                                          rocsparse_index_base base_C);                           \
     template void             host_bsrgeam<TYPE>(rocsparse_direction  dir,                                    \
-                                                 rocsparse_int        Mb,                                     \
-                                                 rocsparse_int        Nb,                                     \
-                                                 rocsparse_int        block_dim,                              \
-                                                 const TYPE*          alpha,                                  \
-                                                 const rocsparse_int* bsr_row_ptr_A,                          \
-                                                 const rocsparse_int* bsr_col_ind_A,                          \
-                                                 const TYPE*          bsr_val_A,                              \
-                                                 const TYPE*          beta,                                   \
-                                                 const rocsparse_int* bsr_row_ptr_B,                          \
-                                                 const rocsparse_int* bsr_col_ind_B,                          \
-                                                 const TYPE*          bsr_val_B,                              \
-                                                 const rocsparse_int* bsr_row_ptr_C,                          \
-                                                 rocsparse_int*       bsr_col_ind_C,                          \
-                                                 TYPE*                bsr_val_C,                              \
-                                                 rocsparse_index_base base_A,                                 \
-                                                 rocsparse_index_base base_B,                                 \
-                                                 rocsparse_index_base base_C);                                \
+                                     rocsparse_int        Mb,                                     \
+                                     rocsparse_int        Nb,                                     \
+                                     rocsparse_int        block_dim,                              \
+                                     const TYPE*          alpha,                                  \
+                                     const rocsparse_int* bsr_row_ptr_A,                          \
+                                     const rocsparse_int* bsr_col_ind_A,                          \
+                                     const TYPE*          bsr_val_A,                              \
+                                     const TYPE*          beta,                                   \
+                                     const rocsparse_int* bsr_row_ptr_B,                          \
+                                     const rocsparse_int* bsr_col_ind_B,                          \
+                                     const TYPE*          bsr_val_B,                              \
+                                     const rocsparse_int* bsr_row_ptr_C,                          \
+                                     rocsparse_int*       bsr_col_ind_C,                          \
+                                     TYPE*                bsr_val_C,                              \
+                                     rocsparse_index_base base_A,                                 \
+                                     rocsparse_index_base base_B,                                 \
+                                     rocsparse_index_base base_C);                                \
     template void             host_bsric0<TYPE>(rocsparse_direction               direction,                  \
-                                                rocsparse_int                     Mb,                         \
-                                                rocsparse_int                     block_dim,                  \
-                                                const std::vector<rocsparse_int>& bsr_row_ptr,                \
-                                                const std::vector<rocsparse_int>& bsr_col_ind,                \
-                                                std::vector<TYPE>&                bsr_val,                    \
-                                                rocsparse_index_base              base,                       \
-                                                rocsparse_int*                    struct_pivot,               \
-                                                rocsparse_int*                    numeric_pivot);             \
+                                    rocsparse_int                     Mb,                         \
+                                    rocsparse_int                     block_dim,                  \
+                                    const std::vector<rocsparse_int>& bsr_row_ptr,                \
+                                    const std::vector<rocsparse_int>& bsr_col_ind,                \
+                                    std::vector<TYPE>&                bsr_val,                    \
+                                    rocsparse_index_base              base,                       \
+                                    rocsparse_int*                    struct_pivot,               \
+                                    rocsparse_int*                    numeric_pivot);                                \
     template void             host_bsrilu0<TYPE>(rocsparse_direction               dir,                       \
-                                                 rocsparse_int                     mb,                        \
-                                                 const std::vector<rocsparse_int>& bsr_row_ptr,               \
-                                                 const std::vector<rocsparse_int>& bsr_col_ind,               \
-                                                 std::vector<TYPE>&                bsr_val,                   \
-                                                 rocsparse_int                     bsr_dim,                   \
-                                                 rocsparse_index_base              base,                      \
-                                                 rocsparse_int*                    struct_pivot,              \
-                                                 rocsparse_int*                    numeric_pivot,             \
-                                                 bool                              boost,                     \
-                                                 floating_data_t<TYPE>             boost_tol,                 \
-                                                 TYPE                              boost_val);                \
+                                     rocsparse_int                     mb,                        \
+                                     const std::vector<rocsparse_int>& bsr_row_ptr,               \
+                                     const std::vector<rocsparse_int>& bsr_col_ind,               \
+                                     std::vector<TYPE>&                bsr_val,                   \
+                                     rocsparse_int                     bsr_dim,                   \
+                                     rocsparse_index_base              base,                      \
+                                     rocsparse_int*                    struct_pivot,              \
+                                     rocsparse_int*                    numeric_pivot,             \
+                                     bool                              boost,                     \
+                                     floating_data_t<TYPE>             boost_tol,                 \
+                                     TYPE                              boost_val);                                             \
     template void             host_csric0<TYPE>(rocsparse_int                     M,                          \
-                                                const std::vector<rocsparse_int>& csr_row_ptr,                \
-                                                const std::vector<rocsparse_int>& csr_col_ind,                \
-                                                std::vector<TYPE>&                csr_val,                    \
-                                                rocsparse_index_base              base,                       \
-                                                rocsparse_int*                    struct_pivot,               \
-                                                rocsparse_int*                    numeric_pivot,              \
-                                                rocsparse_int*                    singular_pivot,             \
-                                                double                            tol);                       \
+                                    const std::vector<rocsparse_int>& csr_row_ptr,                \
+                                    const std::vector<rocsparse_int>& csr_col_ind,                \
+                                    std::vector<TYPE>&                csr_val,                    \
+                                    rocsparse_index_base              base,                       \
+                                    rocsparse_int*                    struct_pivot,               \
+                                    rocsparse_int*                    numeric_pivot,              \
+                                    rocsparse_int*                    singular_pivot,             \
+                                    double                            tol);                                                  \
     template void             host_csrilu0<TYPE>(rocsparse_int                     M,                         \
-                                                 const std::vector<rocsparse_int>& csr_row_ptr,               \
-                                                 const std::vector<rocsparse_int>& csr_col_ind,               \
-                                                 std::vector<TYPE>&                csr_val,                   \
-                                                 rocsparse_index_base              base,                      \
-                                                 rocsparse_int*                    struct_pivot,              \
-                                                 rocsparse_int*                    numeric_pivot,             \
-                                                 rocsparse_int*                    singular_pivot,            \
-                                                 double                            tol,                       \
-                                                 bool                              boost,                     \
-                                                 floating_data_t<TYPE>             boost_tol,                 \
-                                                 TYPE                              boost_val);                \
+                                     const std::vector<rocsparse_int>& csr_row_ptr,               \
+                                     const std::vector<rocsparse_int>& csr_col_ind,               \
+                                     std::vector<TYPE>&                csr_val,                   \
+                                     rocsparse_index_base              base,                      \
+                                     rocsparse_int*                    struct_pivot,              \
+                                     rocsparse_int*                    numeric_pivot,             \
+                                     rocsparse_int*                    singular_pivot,            \
+                                     double                            tol,                       \
+                                     bool                              boost,                     \
+                                     floating_data_t<TYPE>             boost_tol,                 \
+                                     TYPE                              boost_val);                                             \
     template void             host_gtsv_no_pivot<TYPE>(rocsparse_int            m,                            \
-                                                       rocsparse_int            n,                            \
-                                                       const std::vector<TYPE>& dl,                           \
-                                                       const std::vector<TYPE>& d,                            \
-                                                       const std::vector<TYPE>& du,                           \
-                                                       std::vector<TYPE>&       B,                            \
-                                                       rocsparse_int            ldb);                         \
+                                           rocsparse_int            n,                            \
+                                           const std::vector<TYPE>& dl,                           \
+                                           const std::vector<TYPE>& d,                            \
+                                           const std::vector<TYPE>& du,                           \
+                                           std::vector<TYPE>&       B,                            \
+                                           rocsparse_int            ldb);                                    \
     template void             host_gtsv_no_pivot_strided_batch<TYPE>(rocsparse_int            m,              \
-                                                                     const std::vector<TYPE>& dl,             \
-                                                                     const std::vector<TYPE>& d,              \
-                                                                     const std::vector<TYPE>& du,             \
-                                                                     std::vector<TYPE>&       x,              \
-                                                                     rocsparse_int            batch_count,    \
-                                                                     rocsparse_int            batch_stride);  \
+                                                         const std::vector<TYPE>& dl,             \
+                                                         const std::vector<TYPE>& d,              \
+                                                         const std::vector<TYPE>& du,             \
+                                                         std::vector<TYPE>&       x,              \
+                                                         rocsparse_int            batch_count,    \
+                                                         rocsparse_int            batch_stride);             \
     template void             host_gtsv_interleaved_batch<TYPE>(rocsparse_gtsv_interleaved_alg algo,          \
-                                                                rocsparse_int                  m,             \
-                                                                const TYPE*                    dl,            \
-                                                                const TYPE*                    d,             \
-                                                                const TYPE*                    du,            \
-                                                                TYPE*                          x,             \
-                                                                rocsparse_int                  batch_count,   \
-                                                                rocsparse_int                  batch_stride); \
+                                                    rocsparse_int                  m,             \
+                                                    const TYPE*                    dl,            \
+                                                    const TYPE*                    d,             \
+                                                    const TYPE*                    du,            \
+                                                    TYPE*                          x,             \
+                                                    rocsparse_int                  batch_count,   \
+                                                    rocsparse_int                  batch_stride);                  \
     template void             host_gpsv_interleaved_batch<TYPE>(rocsparse_gpsv_interleaved_alg algo,          \
-                                                                rocsparse_int                  m,             \
-                                                                TYPE * ds,                                    \
-                                                                TYPE * dl,                                    \
-                                                                TYPE * d,                                     \
-                                                                TYPE * du,                                    \
-                                                                TYPE * dw,                                    \
-                                                                TYPE * x,                                     \
-                                                                rocsparse_int batch_count,                    \
-                                                                rocsparse_int batch_stride);                  \
+                                                    rocsparse_int                  m,             \
+                                                    TYPE * ds,                                    \
+                                                    TYPE * dl,                                    \
+                                                    TYPE * d,                                     \
+                                                    TYPE * du,                                    \
+                                                    TYPE * dw,                                    \
+                                                    TYPE * x,                                     \
+                                                    rocsparse_int batch_count,                    \
+                                                    rocsparse_int batch_stride);                  \
     template rocsparse_status host_nnz<TYPE>(rocsparse_direction dirA,                                        \
                                              rocsparse_int       m,                                           \
                                              rocsparse_int       n,                                           \
                                              const TYPE*         A,                                           \
                                              int64_t             lda,                                         \
                                              rocsparse_int*      nnz_per_row_columns,                         \
-                                             rocsparse_int*      nnz_total_dev_host_ptr);                     \
+                                             rocsparse_int*      nnz_total_dev_host_ptr);                          \
     template void             host_bsr_to_csr<TYPE>(rocsparse_direction               direction,              \
-                                                    rocsparse_int                     mb,                     \
-                                                    rocsparse_int                     nb,                     \
-                                                    rocsparse_int                     nnzb,                   \
-                                                    const std::vector<TYPE>&          bsr_val,                \
-                                                    const std::vector<rocsparse_int>& bsr_row_ptr,            \
-                                                    const std::vector<rocsparse_int>& bsr_col_ind,            \
-                                                    rocsparse_int                     block_dim,              \
-                                                    rocsparse_index_base              bsr_base,               \
-                                                    std::vector<TYPE>&                csr_val,                \
-                                                    std::vector<rocsparse_int>&       csr_row_ptr,            \
-                                                    std::vector<rocsparse_int>&       csr_col_ind,            \
-                                                    rocsparse_index_base              csr_base);              \
+                                        rocsparse_int                     mb,                     \
+                                        rocsparse_int                     nb,                     \
+                                        rocsparse_int                     nnzb,                   \
+                                        const std::vector<TYPE>&          bsr_val,                \
+                                        const std::vector<rocsparse_int>& bsr_row_ptr,            \
+                                        const std::vector<rocsparse_int>& bsr_col_ind,            \
+                                        rocsparse_int                     block_dim,              \
+                                        rocsparse_index_base              bsr_base,               \
+                                        std::vector<TYPE>&                csr_val,                \
+                                        std::vector<rocsparse_int>&       csr_row_ptr,            \
+                                        std::vector<rocsparse_int>&       csr_col_ind,            \
+                                        rocsparse_index_base              csr_base);                           \
     template void             host_csr_to_bsr<TYPE>(rocsparse_direction               direction,              \
-                                                    rocsparse_int                     m,                      \
-                                                    rocsparse_int                     n,                      \
-                                                    rocsparse_int                     nnz,                    \
-                                                    const std::vector<TYPE>&          csr_val,                \
-                                                    const std::vector<rocsparse_int>& csr_row_ptr,            \
-                                                    const std::vector<rocsparse_int>& csr_col_ind,            \
-                                                    rocsparse_int                     block_dim,              \
-                                                    rocsparse_index_base              csr_base,               \
-                                                    std::vector<TYPE>&                bsr_val,                \
-                                                    std::vector<rocsparse_int>&       bsr_row_ptr,            \
-                                                    std::vector<rocsparse_int>&       bsr_col_ind,            \
-                                                    rocsparse_index_base              bsr_base);              \
+                                        rocsparse_int                     m,                      \
+                                        rocsparse_int                     n,                      \
+                                        rocsparse_int                     nnz,                    \
+                                        const std::vector<TYPE>&          csr_val,                \
+                                        const std::vector<rocsparse_int>& csr_row_ptr,            \
+                                        const std::vector<rocsparse_int>& csr_col_ind,            \
+                                        rocsparse_int                     block_dim,              \
+                                        rocsparse_index_base              csr_base,               \
+                                        std::vector<TYPE>&                bsr_val,                \
+                                        std::vector<rocsparse_int>&       bsr_row_ptr,            \
+                                        std::vector<rocsparse_int>&       bsr_col_ind,            \
+                                        rocsparse_index_base              bsr_base);                           \
     template void             host_csr_to_gebsr<TYPE>(rocsparse_direction               direction,            \
-                                                      rocsparse_int                     m,                    \
-                                                      rocsparse_int                     n,                    \
-                                                      rocsparse_int                     nnz,                  \
-                                                      const std::vector<TYPE>&          csr_val,              \
-                                                      const std::vector<rocsparse_int>& csr_row_ptr,          \
-                                                      const std::vector<rocsparse_int>& csr_col_ind,          \
-                                                      rocsparse_int                     row_block_dim,        \
-                                                      rocsparse_int                     col_block_dim,        \
-                                                      rocsparse_index_base              csr_base,             \
-                                                      std::vector<TYPE>&                bsr_val,              \
-                                                      std::vector<rocsparse_int>&       bsr_row_ptr,          \
-                                                      std::vector<rocsparse_int>&       bsr_col_ind,          \
-                                                      rocsparse_index_base              bsr_base);            \
-    template void host_gebsr_to_gebsc<TYPE>(rocsparse_int                     Mb,                             \
-                                            rocsparse_int                     Nb,                             \
-                                            rocsparse_int                     nnzb,                           \
-                                            const std::vector<rocsparse_int>& bsr_row_ptr,                    \
-                                            const std::vector<rocsparse_int>& bsr_col_ind,                    \
-                                            const std::vector<TYPE>&          bsr_val,                        \
-                                            rocsparse_int                     row_block_dim,                  \
-                                            rocsparse_int                     col_block_dim,                  \
-                                            std::vector<rocsparse_int>&       bsc_row_ind,                    \
-                                            std::vector<rocsparse_int>&       bsc_col_ptr,                    \
-                                            std::vector<TYPE>&                bsc_val,                        \
-                                            rocsparse_action                  action,                         \
-                                            rocsparse_index_base              base);                          \
-    template void host_gebsr_to_csr<TYPE>(rocsparse_direction               direction,                        \
-                                          rocsparse_int                     mb,                               \
-                                          rocsparse_int                     nb,                               \
-                                          rocsparse_int                     nnzb,                             \
-                                          const std::vector<TYPE>&          bsr_val,                          \
-                                          const std::vector<rocsparse_int>& bsr_row_ptr,                      \
-                                          const std::vector<rocsparse_int>& bsr_col_ind,                      \
-                                          rocsparse_int                     row_block_dim,                    \
-                                          rocsparse_int                     col_block_dim,                    \
-                                          rocsparse_index_base              bsr_base,                         \
-                                          std::vector<TYPE>&                csr_val,                          \
-                                          std::vector<rocsparse_int>&       csr_row_ptr,                      \
-                                          std::vector<rocsparse_int>&       csr_col_ind,                      \
-                                          rocsparse_index_base              csr_base);                        \
-    template void host_gebsr_to_gebsr<TYPE>(rocsparse_direction               direction,                      \
-                                            rocsparse_int                     mb,                             \
-                                            rocsparse_int                     nb,                             \
-                                            rocsparse_int                     nnzb,                           \
-                                            const std::vector<TYPE>&          bsr_val_A,                      \
-                                            const std::vector<rocsparse_int>& bsr_row_ptr_A,                  \
-                                            const std::vector<rocsparse_int>& bsr_col_ind_A,                  \
-                                            rocsparse_int                     row_block_dim_A,                \
-                                            rocsparse_int                     col_block_dim_A,                \
-                                            rocsparse_index_base              base_A,                         \
-                                            std::vector<TYPE>&                bsr_val_C,                      \
-                                            std::vector<rocsparse_int>&       bsr_row_ptr_C,                  \
-                                            std::vector<rocsparse_int>&       bsr_col_ind_C,                  \
-                                            rocsparse_int                     row_block_dim_C,                \
-                                            rocsparse_int                     col_block_dim_C,                \
-                                            rocsparse_index_base              base_C);                        \
-    template void host_bsr_to_bsc<TYPE>(rocsparse_int               mb,                                       \
-                                        rocsparse_int               nb,                                       \
-                                        rocsparse_int               nnzb,                                     \
-                                        rocsparse_int               bsr_dim,                                  \
-                                        const rocsparse_int*        bsr_row_ptr,                              \
-                                        const rocsparse_int*        bsr_col_ind,                              \
-                                        const TYPE*                 bsr_val,                                  \
-                                        std::vector<rocsparse_int>& bsc_row_ind,                              \
-                                        std::vector<rocsparse_int>& bsc_col_ptr,                              \
-                                        std::vector<TYPE>&          bsc_val,                                  \
-                                        rocsparse_index_base        bsr_base,                                 \
-                                        rocsparse_index_base        bsc_base);                                \
-    template void host_csr_to_hyb<TYPE>(rocsparse_int                     M,                                  \
-                                        rocsparse_int                     N,                                  \
-                                        rocsparse_int                     nnz,                                \
-                                        const std::vector<rocsparse_int>& csr_row_ptr,                        \
-                                        const std::vector<rocsparse_int>& csr_col_ind,                        \
-                                        const std::vector<TYPE>&          csr_val,                            \
-                                        std::vector<rocsparse_int>&       ell_col_ind,                        \
-                                        std::vector<TYPE>&                ell_val,                            \
-                                        rocsparse_int&                    ell_width,                          \
-                                        rocsparse_int&                    ell_nnz,                            \
-                                        std::vector<rocsparse_int>&       coo_row_ind,                        \
-                                        std::vector<rocsparse_int>&       coo_col_ind,                        \
-                                        std::vector<TYPE>&                coo_val,                            \
-                                        rocsparse_int&                    coo_nnz,                            \
-                                        rocsparse_hyb_partition           part,                               \
-                                        rocsparse_index_base              base);                              \
-    template void host_csr_to_csr_compress<TYPE>(rocsparse_int                     M,                         \
-                                                 rocsparse_int                     N,                         \
-                                                 rocsparse_int                     nnz,                       \
-                                                 const std::vector<rocsparse_int>& csr_row_ptr_A,             \
-                                                 const std::vector<rocsparse_int>& csr_col_ind_A,             \
-                                                 const std::vector<TYPE>&          csr_val_A,                 \
-                                                 std::vector<rocsparse_int>&       csr_row_ptr_C,             \
-                                                 std::vector<rocsparse_int>&       csr_col_ind_C,             \
-                                                 std::vector<TYPE>&                csr_val_C,                 \
-                                                 rocsparse_index_base              base,                      \
-                                                 TYPE                              tol);                      \
-    template void host_ell_to_csr<TYPE>(rocsparse_int                     M,                                  \
-                                        rocsparse_int                     N,                                  \
-                                        const std::vector<rocsparse_int>& ell_col_ind,                        \
-                                        const std::vector<TYPE>&          ell_val,                            \
-                                        rocsparse_int                     ell_width,                          \
-                                        std::vector<rocsparse_int>&       csr_row_ptr,                        \
-                                        std::vector<rocsparse_int>&       csr_col_ind,                        \
-                                        std::vector<TYPE>&                csr_val,                            \
-                                        rocsparse_int&                    csr_nnz,                            \
-                                        rocsparse_index_base              ell_base,                           \
-                                        rocsparse_index_base              csr_base);                          \
-    template void host_coosort_by_column<TYPE>(rocsparse_int M,                                               \
-                                               rocsparse_int nnz,                                             \
-                                               std::vector<rocsparse_int> & coo_row_ind,                      \
-                                               std::vector<rocsparse_int> & coo_col_ind,                      \
+                                          rocsparse_int                     m,                    \
+                                          rocsparse_int                     n,                    \
+                                          rocsparse_int                     nnz,                  \
+                                          const std::vector<TYPE>&          csr_val,              \
+                                          const std::vector<rocsparse_int>& csr_row_ptr,          \
+                                          const std::vector<rocsparse_int>& csr_col_ind,          \
+                                          rocsparse_int                     row_block_dim,        \
+                                          rocsparse_int                     col_block_dim,        \
+                                          rocsparse_index_base              csr_base,             \
+                                          std::vector<TYPE>&                bsr_val,              \
+                                          std::vector<rocsparse_int>&       bsr_row_ptr,          \
+                                          std::vector<rocsparse_int>&       bsr_col_ind,          \
+                                          rocsparse_index_base              bsr_base);                         \
+    template void             host_gebsr_to_gebsc<TYPE>(rocsparse_int                     Mb,                 \
+                                            rocsparse_int                     Nb,                 \
+                                            rocsparse_int                     nnzb,               \
+                                            const std::vector<rocsparse_int>& bsr_row_ptr,        \
+                                            const std::vector<rocsparse_int>& bsr_col_ind,        \
+                                            const std::vector<TYPE>&          bsr_val,            \
+                                            rocsparse_int                     row_block_dim,      \
+                                            rocsparse_int                     col_block_dim,      \
+                                            std::vector<rocsparse_int>&       bsc_row_ind,        \
+                                            std::vector<rocsparse_int>&       bsc_col_ptr,        \
+                                            std::vector<TYPE>&                bsc_val,            \
+                                            rocsparse_action                  action,             \
+                                            rocsparse_index_base              base);                           \
+    template void             host_gebsr_to_csr<TYPE>(rocsparse_direction               direction,            \
+                                          rocsparse_int                     mb,                   \
+                                          rocsparse_int                     nb,                   \
+                                          rocsparse_int                     nnzb,                 \
+                                          const std::vector<TYPE>&          bsr_val,              \
+                                          const std::vector<rocsparse_int>& bsr_row_ptr,          \
+                                          const std::vector<rocsparse_int>& bsr_col_ind,          \
+                                          rocsparse_int                     row_block_dim,        \
+                                          rocsparse_int                     col_block_dim,        \
+                                          rocsparse_index_base              bsr_base,             \
+                                          std::vector<TYPE>&                csr_val,              \
+                                          std::vector<rocsparse_int>&       csr_row_ptr,          \
+                                          std::vector<rocsparse_int>&       csr_col_ind,          \
+                                          rocsparse_index_base              csr_base);                         \
+    template void             host_gebsr_to_gebsr<TYPE>(rocsparse_direction               direction,          \
+                                            rocsparse_int                     mb,                 \
+                                            rocsparse_int                     nb,                 \
+                                            rocsparse_int                     nnzb,               \
+                                            const std::vector<TYPE>&          bsr_val_A,          \
+                                            const std::vector<rocsparse_int>& bsr_row_ptr_A,      \
+                                            const std::vector<rocsparse_int>& bsr_col_ind_A,      \
+                                            rocsparse_int                     row_block_dim_A,    \
+                                            rocsparse_int                     col_block_dim_A,    \
+                                            rocsparse_index_base              base_A,             \
+                                            std::vector<TYPE>&                bsr_val_C,          \
+                                            std::vector<rocsparse_int>&       bsr_row_ptr_C,      \
+                                            std::vector<rocsparse_int>&       bsr_col_ind_C,      \
+                                            rocsparse_int                     row_block_dim_C,    \
+                                            rocsparse_int                     col_block_dim_C,    \
+                                            rocsparse_index_base              base_C);                         \
+    template void             host_bsr_to_bsc<TYPE>(rocsparse_int               mb,                           \
+                                        rocsparse_int               nb,                           \
+                                        rocsparse_int               nnzb,                         \
+                                        rocsparse_int               bsr_dim,                      \
+                                        const rocsparse_int*        bsr_row_ptr,                  \
+                                        const rocsparse_int*        bsr_col_ind,                  \
+                                        const TYPE*                 bsr_val,                      \
+                                        std::vector<rocsparse_int>& bsc_row_ind,                  \
+                                        std::vector<rocsparse_int>& bsc_col_ptr,                  \
+                                        std::vector<TYPE>&          bsc_val,                      \
+                                        rocsparse_index_base        bsr_base,                     \
+                                        rocsparse_index_base        bsc_base);                           \
+    template void             host_csr_to_hyb<TYPE>(rocsparse_int                     M,                      \
+                                        rocsparse_int                     N,                      \
+                                        rocsparse_int                     nnz,                    \
+                                        const std::vector<rocsparse_int>& csr_row_ptr,            \
+                                        const std::vector<rocsparse_int>& csr_col_ind,            \
+                                        const std::vector<TYPE>&          csr_val,                \
+                                        std::vector<rocsparse_int>&       ell_col_ind,            \
+                                        std::vector<TYPE>&                ell_val,                \
+                                        rocsparse_int&                    ell_width,              \
+                                        rocsparse_int&                    ell_nnz,                \
+                                        std::vector<rocsparse_int>&       coo_row_ind,            \
+                                        std::vector<rocsparse_int>&       coo_col_ind,            \
+                                        std::vector<TYPE>&                coo_val,                \
+                                        rocsparse_int&                    coo_nnz,                \
+                                        rocsparse_hyb_partition           part,                   \
+                                        rocsparse_index_base              base);                               \
+    template void             host_csr_to_csr_compress<TYPE>(rocsparse_int                     M,             \
+                                                 rocsparse_int                     N,             \
+                                                 rocsparse_int                     nnz,           \
+                                                 const std::vector<rocsparse_int>& csr_row_ptr_A, \
+                                                 const std::vector<rocsparse_int>& csr_col_ind_A, \
+                                                 const std::vector<TYPE>&          csr_val_A,     \
+                                                 std::vector<rocsparse_int>&       csr_row_ptr_C, \
+                                                 std::vector<rocsparse_int>&       csr_col_ind_C, \
+                                                 std::vector<TYPE>&                csr_val_C,     \
+                                                 rocsparse_index_base              base,          \
+                                                 TYPE                              tol);                                       \
+    template void             host_ell_to_csr<TYPE>(rocsparse_int                     M,                      \
+                                        rocsparse_int                     N,                      \
+                                        const std::vector<rocsparse_int>& ell_col_ind,            \
+                                        const std::vector<TYPE>&          ell_val,                \
+                                        rocsparse_int                     ell_width,              \
+                                        std::vector<rocsparse_int>&       csr_row_ptr,            \
+                                        std::vector<rocsparse_int>&       csr_col_ind,            \
+                                        std::vector<TYPE>&                csr_val,                \
+                                        rocsparse_int&                    csr_nnz,                \
+                                        rocsparse_index_base              ell_base,               \
+                                        rocsparse_index_base              csr_base);                           \
+    template void             host_coosort_by_column<TYPE>(rocsparse_int M,                                   \
+                                               rocsparse_int nnz,                                 \
+                                               std::vector<rocsparse_int> & coo_row_ind,          \
+                                               std::vector<rocsparse_int> & coo_col_ind,          \
                                                std::vector<TYPE> & coo_val);
 
 #define INSTANTIATE_T_REAL_ONLY(TYPE)                                                          \
@@ -9871,7 +9875,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                               std::vector<TYPE>&                csr_val_C,     \
                                               rocsparse_index_base              csr_base_A,    \
                                               rocsparse_index_base              csr_base_C,    \
-                                              TYPE                              threshold);    \
+                                              TYPE                              threshold);                                 \
     template void host_prune_csr_to_csr_by_percentage<TYPE>(                                   \
         rocsparse_int                     M,                                                   \
         rocsparse_int                     N,                                                   \
@@ -9885,7 +9889,7 @@ template struct rocsparse_host<rocsparse_double_complex,
         std::vector<TYPE>&                csr_val_C,                                           \
         rocsparse_index_base              csr_base_A,                                          \
         rocsparse_index_base              csr_base_C,                                          \
-        TYPE                              percentage);                                         \
+        TYPE                              percentage);                                                                      \
     template void host_prune_dense2csr<TYPE>(rocsparse_int               m,                    \
                                              rocsparse_int               n,                    \
                                              const std::vector<TYPE>&    A,                    \
@@ -9939,7 +9943,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   const std::vector<ITYPE>& nnz_per_row,     \
                                                   std::vector<TTYPE>&       coo_val,         \
                                                   std::vector<ITYPE>&       coo_row_ind,     \
-                                                  std::vector<ITYPE>&       coo_col_ind);    \
+                                                  std::vector<ITYPE>&       coo_col_ind);          \
     template void host_dense_to_bell<ITYPE, TTYPE>(ITYPE                     m,              \
                                                    ITYPE                     n,              \
                                                    rocsparse_index_base      base,           \
@@ -9956,7 +9960,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                 ITYPE                     nnz,             \
                                                 const std::vector<ITYPE>& csr_row_ptr,     \
                                                 std::vector<JTYPE>&       coo_row_ind,     \
-                                                rocsparse_index_base      base);           \
+                                                rocsparse_index_base      base);                \
     template void host_coo_to_csr<ITYPE, JTYPE>(JTYPE                M,                    \
                                                 ITYPE                NNZ,                  \
                                                 const JTYPE*         coo_row_ind,          \
@@ -9969,55 +9973,55 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                     std::vector<ITYPE>&       coo_ind,     \
                                                     rocsparse_index_base      base);
 
-#define INSTANTIATE_IT(ITYPE, TTYPE)                                            \
-    template void host_gemvi<ITYPE, TTYPE>(ITYPE                M,              \
-                                           ITYPE                N,              \
-                                           TTYPE                alpha,          \
-                                           const TTYPE*         A,              \
-                                           int64_t              lda,            \
-                                           ITYPE                nnz,            \
-                                           const TTYPE*         x_val,          \
-                                           const ITYPE*         x_ind,          \
-                                           TTYPE                beta,           \
-                                           TTYPE*               y,              \
-                                           rocsparse_index_base base);          \
-    template void host_coosv<ITYPE, TTYPE>(rocsparse_operation  trans,          \
-                                           ITYPE                M,              \
-                                           int64_t              nnz,            \
-                                           TTYPE                alpha,          \
-                                           const ITYPE*         coo_row_ind,    \
-                                           const ITYPE*         coo_col_ind,    \
-                                           const TTYPE*         coo_val,        \
-                                           const TTYPE*         x,              \
-                                           TTYPE*               y,              \
-                                           rocsparse_diag_type  diag_type,      \
-                                           rocsparse_fill_mode  fill_mode,      \
-                                           rocsparse_index_base base,           \
-                                           ITYPE*               struct_pivot,   \
-                                           ITYPE*               numeric_pivot); \
-    template void host_coosm<ITYPE, TTYPE>(ITYPE                M,              \
-                                           ITYPE                nrhs,           \
-                                           int64_t              nnz,            \
-                                           rocsparse_operation  transA,         \
-                                           rocsparse_operation  transB,         \
-                                           TTYPE                alpha,          \
-                                           const ITYPE*         coo_row_ind,    \
-                                           const ITYPE*         coo_col_ind,    \
-                                           const TTYPE*         coo_val,        \
-                                           TTYPE*               B,              \
-                                           int64_t              ldb,            \
-                                           rocsparse_order      order_B,        \
-                                           rocsparse_diag_type  diag_type,      \
-                                           rocsparse_fill_mode  fill_mode,      \
-                                           rocsparse_index_base base,           \
-                                           ITYPE*               struct_pivot,   \
-                                           ITYPE*               numeric_pivot); \
-    template void host_roti<ITYPE, TTYPE>(ITYPE nnz,                            \
-                                          TTYPE * x_val,                        \
-                                          const ITYPE*         x_ind,           \
-                                          TTYPE*               y,               \
-                                          const TTYPE*         c,               \
-                                          const TTYPE*         s,               \
+#define INSTANTIATE_IT(ITYPE, TTYPE)                                          \
+    template void host_gemvi<ITYPE, TTYPE>(ITYPE                M,            \
+                                           ITYPE                N,            \
+                                           TTYPE                alpha,        \
+                                           const TTYPE*         A,            \
+                                           int64_t              lda,          \
+                                           ITYPE                nnz,          \
+                                           const TTYPE*         x_val,        \
+                                           const ITYPE*         x_ind,        \
+                                           TTYPE                beta,         \
+                                           TTYPE*               y,            \
+                                           rocsparse_index_base base);        \
+    template void host_coosv<ITYPE, TTYPE>(rocsparse_operation  trans,        \
+                                           ITYPE                M,            \
+                                           int64_t              nnz,          \
+                                           TTYPE                alpha,        \
+                                           const ITYPE*         coo_row_ind,  \
+                                           const ITYPE*         coo_col_ind,  \
+                                           const TTYPE*         coo_val,      \
+                                           const TTYPE*         x,            \
+                                           TTYPE*               y,            \
+                                           rocsparse_diag_type  diag_type,    \
+                                           rocsparse_fill_mode  fill_mode,    \
+                                           rocsparse_index_base base,         \
+                                           ITYPE*               struct_pivot, \
+                                           ITYPE*               numeric_pivot);             \
+    template void host_coosm<ITYPE, TTYPE>(ITYPE                M,            \
+                                           ITYPE                nrhs,         \
+                                           int64_t              nnz,          \
+                                           rocsparse_operation  transA,       \
+                                           rocsparse_operation  transB,       \
+                                           TTYPE                alpha,        \
+                                           const ITYPE*         coo_row_ind,  \
+                                           const ITYPE*         coo_col_ind,  \
+                                           const TTYPE*         coo_val,      \
+                                           TTYPE*               B,            \
+                                           int64_t              ldb,          \
+                                           rocsparse_order      order_B,      \
+                                           rocsparse_diag_type  diag_type,    \
+                                           rocsparse_fill_mode  fill_mode,    \
+                                           rocsparse_index_base base,         \
+                                           ITYPE*               struct_pivot, \
+                                           ITYPE*               numeric_pivot);             \
+    template void host_roti<ITYPE, TTYPE>(ITYPE nnz,                          \
+                                          TTYPE * x_val,                      \
+                                          const ITYPE*         x_ind,         \
+                                          TTYPE*               y,             \
+                                          const TTYPE*         c,             \
+                                          const TTYPE*         s,             \
                                           rocsparse_index_base base);
 
 #define INSTANTIATE_IJT(ITYPE, JTYPE, TTYPE)                                                 \
@@ -10046,7 +10050,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   rocsparse_fill_mode  fill_mode,            \
                                                   rocsparse_index_base base,                 \
                                                   JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);       \
+                                                  JTYPE*               numeric_pivot);                     \
     template void host_cscsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                \
                                                   JTYPE                M,                    \
                                                   ITYPE                nnz,                  \
@@ -10061,7 +10065,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   rocsparse_fill_mode  fill_mode,            \
                                                   rocsparse_index_base base,                 \
                                                   JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);       \
+                                                  JTYPE*               numeric_pivot);                     \
     template void host_csrsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
                                                   JTYPE                nrhs,                 \
                                                   ITYPE                nnz,                  \
@@ -10078,7 +10082,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   rocsparse_fill_mode  fill_mode,            \
                                                   rocsparse_index_base base,                 \
                                                   JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);       \
+                                                  JTYPE*               numeric_pivot);                     \
     template void host_cscsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
                                                   JTYPE                nrhs,                 \
                                                   ITYPE                nnz,                  \
@@ -10095,7 +10099,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   rocsparse_fill_mode  fill_mode,            \
                                                   rocsparse_index_base base,                 \
                                                   JTYPE*               struct_pivot,         \
-                                                  JTYPE*               numeric_pivot);       \
+                                                  JTYPE*               numeric_pivot);                     \
     template void host_csrgeam_nnz<TTYPE, ITYPE, JTYPE>(JTYPE                M,              \
                                                         JTYPE                N,              \
                                                         const TTYPE*         alpha,          \
@@ -10214,7 +10218,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                        std::vector<TTYPE>&       ell_val,          \
                                                        JTYPE&                    ell_width,        \
                                                        rocsparse_index_base      csr_base,         \
-                                                       rocsparse_index_base      ell_base);        \
+                                                       rocsparse_index_base      ell_base);             \
     template void host_csr_to_sell<ITYPE, JTYPE, TTYPE>(JTYPE                     M,               \
                                                         JTYPE                     sell_slice_size, \
                                                         const std::vector<ITYPE>& csr_row_ptr,     \
@@ -10307,7 +10311,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                              YTYPE*                y,                  \
                              rocsparse_index_base  base,               \
                              rocsparse_matrix_type matrix_type,        \
-                             rocsparse_spmv_alg    algo);              \
+                             rocsparse_spmv_alg    algo);                 \
     template void host_csrmv(rocsparse_operation   trans,              \
                              JTYPE                 M,                  \
                              JTYPE                 N,                  \
@@ -10322,7 +10326,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                              rocsparse_index_base  base,               \
                              rocsparse_matrix_type matrix_type,        \
                              rocsparse_spmv_alg    algo,               \
-                             bool                  force_conj);        \
+                             bool                  force_conj);                         \
     template void host_sellmv(rocsparse_operation  trans,              \
                               JTYPE                M,                  \
                               JTYPE                N,                  \
@@ -10418,7 +10422,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                              int64_t              ldc,                                   \
                              rocsparse_order      order_C,                               \
                              rocsparse_index_base base,                                  \
-                             bool                 force_conj_A);                         \
+                             bool                 force_conj_A);                                         \
     template void host_cscmm(JTYPE                M,                                     \
                              JTYPE                N,                                     \
                              JTYPE                K,                                     \
@@ -10481,7 +10485,7 @@ template struct rocsparse_host<rocsparse_double_complex,
                                      int64_t              batch_stride_C,                \
                                      rocsparse_order      order_C,                       \
                                      rocsparse_index_base base,                          \
-                                     bool                 force_conj_A);                 \
+                                     bool                 force_conj_A);                                 \
     template void host_cscmm_batched(JTYPE                M,                             \
                                      JTYPE                N,                             \
                                      JTYPE                K,                             \

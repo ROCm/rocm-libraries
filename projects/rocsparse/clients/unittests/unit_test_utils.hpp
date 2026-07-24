@@ -126,7 +126,7 @@ namespace rocsparse_ut
             if(hipMalloc(&ptr, n * sizeof(T)) != hipSuccess)
                 ptr = nullptr;
         }
-        device_vector(const device_vector&)            = delete;
+        device_vector(const device_vector&) = delete;
         device_vector& operator=(const device_vector&) = delete;
         ~device_vector()
         {
