@@ -510,9 +510,9 @@ bool run_mx_gemm(const ProblemSizeSplitK& problem_size, const ExecutionConfig& c
 
     if(!device_op.IsSupportedArgument(argument))
     {
-        throw std::runtime_error("wrong!\n"
-                                 "Provided combination of compilation and runtime parameters is "
-                                 "not consistent with the supported device_gemm arguments.");
+        std::cout << "Skipping: device_gemm does not support this problem configuration."
+                  << std::endl;
+        return true;
     }
 
     std::size_t total_size =

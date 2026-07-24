@@ -502,14 +502,20 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
     __host__ __device__ static auto MakeBGridDescriptor_BK0_N_BK1(
         index_t K, index_t KPad, index_t N, index_t NPad, index_t StrideB, index_t BK0)
     {
+        // Convert K from A-element units to B-element units.
+        // When APackedSize != BPackedSize (e.g. A=fp4, B=fp8), B's physical K differs from A's.
+        // This is a no-op when APackedSize == BPackedSize.
+        const index_t BK    = K * APackedSize / BPackedSize;
+        const index_t BKPad = KPad * APackedSize / BPackedSize;
+
         const auto b_grid_desc_nraw_kraw = [&]() {
             if constexpr(is_same<tensor_layout::gemm::RowMajor, BLayout>::value)
             {
-                return make_naive_tensor_descriptor(make_tuple(N, K), make_tuple(I1, StrideB));
+                return make_naive_tensor_descriptor(make_tuple(N, BK), make_tuple(I1, StrideB));
             }
             else if constexpr(is_same<tensor_layout::gemm::ColumnMajor, BLayout>::value)
             {
-                return make_naive_tensor_descriptor(make_tuple(N, K), make_tuple(StrideB, I1));
+                return make_naive_tensor_descriptor(make_tuple(N, BK), make_tuple(StrideB, I1));
             }
         }();
 
@@ -536,7 +542,7 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
             const auto b_grid_desc_n_k =
                 transform_tensor_descriptor(b_grid_desc_nraw_kraw,
                                             make_tuple(make_right_pad_transform(N, NPad - N),
-                                                       make_right_pad_transform(K, KPad - K)),
+                                                       make_right_pad_transform(BK, BKPad - BK)),
                                             make_tuple(Sequence<0>{}, Sequence<1>{}),
                                             make_tuple(Sequence<0>{}, Sequence<1>{}));
 
@@ -568,7 +574,7 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
             // pad K, but not N
             const auto b_grid_desc_n_k = transform_tensor_descriptor(
                 b_grid_desc_nraw_kraw,
-                make_tuple(make_pass_through_transform(N), make_right_pad_transform(K, KPad - K)),
+                make_tuple(make_pass_through_transform(N), make_right_pad_transform(BK, BKPad - BK)),
                 make_tuple(Sequence<0>{}, Sequence<1>{}),
                 make_tuple(Sequence<0>{}, Sequence<1>{}));
 
@@ -589,14 +595,14 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
                 const auto b_grid_desc_bk0_n_bk1 = transform_tensor_descriptor(
                     b_grid_desc_nraw_kraw,
                     make_tuple(
-                        make_unmerge_transform(make_tuple(K / KPerBlock, BK0Number, BK1Value)),
+                        make_unmerge_transform(make_tuple(BK / KPerBlock, BK0Number, BK1Value)),
                         make_pass_through_transform(N)),
                     make_tuple(Sequence<1>{}, Sequence<0>{}),
                     make_tuple(Sequence<0, 1, 3>{}, Sequence<2>{}));
 
                 const auto b_grid_desc_permuted = transform_tensor_descriptor(
                     b_grid_desc_bk0_n_bk1,
-                    make_tuple(make_pass_through_transform(K / KPerBlock),
+                    make_tuple(make_pass_through_transform(BK / KPerBlock),
                                make_xor_with_modulo_transform(make_tuple(N, BK0Number)),
                                make_pass_through_transform(BK1Value)),
                     make_tuple(Sequence<0>{}, Sequence<2, 1>{}, Sequence<3>{}),
@@ -605,7 +611,7 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
                 const auto b_grid_desc = transform_tensor_descriptor(
                     b_grid_desc_permuted,
                     make_tuple(
-                        make_merge_transform_v3_division_mod(make_tuple(K / KPerBlock, BK0Number)),
+                        make_merge_transform_v3_division_mod(make_tuple(BK / KPerBlock, BK0Number)),
                         make_pass_through_transform(N),
                         make_pass_through_transform(BK1Value)),
                     make_tuple(Sequence<0, 1>{}, Sequence<2>{}, Sequence<3>{}),
@@ -915,6 +921,7 @@ struct GridwiseGemmMX_xdl_cshuffle_v3
 
         static_assert(BKPerBlock % (ScaleBlockSize / BPackedSize) == 0,
                       "KPerBlock should be multiple of ScaleBlockSize");
+
 
         if constexpr(!(GemmSpec == tensor_operation::device::GemmSpecialization::MPadding ||
                        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
