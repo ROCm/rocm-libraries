@@ -1187,6 +1187,574 @@ namespace
         EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_B), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_spmat_descr(mat_A), rocsparse_status_success);
     }
+
+    // =====================================================================
+    // helpers for the branch-dispatch suites below
+    // =====================================================================
+
+    // Build a valid mb x mb block-diagonal (GE)BSR sparsity pattern: one block
+    // on every diagonal position (nnzb == mb), zero-based.  Works for BSR
+    // (row_block_dim == col_block_dim) and GEBSR (differing block dims); the
+    // block dimensions only affect the number of values, computed by callers.
+    inline void make_block_diag(rocsparse_int               mb,
+                                std::vector<rocsparse_int>& row_ptr,
+                                std::vector<rocsparse_int>& col_ind)
+    {
+        row_ptr.resize(mb + 1);
+        col_ind.resize(mb);
+        for(rocsparse_int i = 0; i < mb; ++i)
+        {
+            row_ptr[i] = i;
+            col_ind[i] = i;
+        }
+        row_ptr[mb] = mb;
+    }
+
+    inline rocsparse_int int_max(rocsparse_int a, rocsparse_int b)
+    {
+        return a > b ? a : b;
+    }
+
+    // =====================================================================
+    // gebsrmm dispatch: cover every block-dim/direction/transpose branch of
+    // gebsrmm_template_dispatch (bsrmm path, gebsrmv path, small, large_ext,
+    // general) plus the trans_A/trans_B check-arg guards.
+    // =====================================================================
+    template <typename T>
+    void run_gebsrmm_dispatch(rocsparse_handle handle)
+    {
+        rocsparse_mat_descr descr = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+
+        const T alpha = scalar<T>(1), beta = scalar<T>(0);
+
+        struct Cfg
+        {
+            rocsparse_int mb, kb, rbd, cbd, n;
+        };
+        const Cfg cfgs[] = {
+            {2, 2, 2, 2, 2}, // row_block_dim == col_block_dim -> bsrmm path (block_dim 2, small)
+            {2, 2, 3, 3, 2}, // bsrmm path, block_dim 3
+            {2, 2, 4, 4, 2}, // bsrmm path, block_dim 4
+            {2, 2, 2, 3, 1}, // n == 1, trans_B none -> gebsrmv path
+            {2, 2, 2, 3, 2}, // block_dim (max) <= 4 -> gebsrmm_template_small
+            {2, 2, 8, 5, 2}, // 4 < block_dim <= 32 -> gebsrmm_template_large_ext
+            {2, 2, 33, 2, 2}, // block_dim > 32 -> gebsrmm_template_general
+        };
+
+        const rocsparse_direction dirs[] = {rocsparse_direction_row, rocsparse_direction_column};
+        const rocsparse_operation transAs[]
+            = {rocsparse_operation_none, rocsparse_operation_transpose};
+        const rocsparse_operation transBs[] = {rocsparse_operation_none,
+                                               rocsparse_operation_transpose,
+                                               rocsparse_operation_conjugate_transpose};
+
+        for(const Cfg& c : cfgs)
+        {
+            std::vector<rocsparse_int> h_rp, h_ci;
+            make_block_diag(c.mb, h_rp, h_ci);
+            const rocsparse_int nnzb = c.mb;
+
+            device_vector<rocsparse_int> rp{h_rp};
+            device_vector<rocsparse_int> ci{h_ci};
+            device_vector<T> val{std::vector<T>(size_t(nnzb) * c.rbd * c.cbd, scalar<T>(1))};
+            ASSERT_TRUE(rp.ptr && ci.ptr && val.ptr);
+
+            const rocsparse_int kdim = c.kb * c.cbd;
+            const rocsparse_int mdim = c.mb * c.rbd;
+            const rocsparse_int ldb  = int_max(kdim, c.n);
+            const rocsparse_int ldc  = int_max(mdim, 1);
+
+            device_vector<T> B{std::vector<T>(size_t(ldb) * (kdim + c.n), scalar<T>(1))};
+            device_vector<T> C{std::vector<T>(size_t(ldc) * c.n, scalar<T>(0))};
+            ASSERT_TRUE(B.ptr && C.ptr);
+
+            for(rocsparse_direction dir : dirs)
+            {
+                for(rocsparse_operation ta : transAs)
+                {
+                    for(rocsparse_operation tb : transBs)
+                    {
+                        expect_ok_or_ni(ut_gebsrmm(handle,
+                                                   dir,
+                                                   ta,
+                                                   tb,
+                                                   c.mb,
+                                                   c.n,
+                                                   c.kb,
+                                                   nnzb,
+                                                   &alpha,
+                                                   descr,
+                                                   val,
+                                                   rp,
+                                                   ci,
+                                                   c.rbd,
+                                                   c.cbd,
+                                                   B,
+                                                   ldb,
+                                                   &beta,
+                                                   C,
+                                                   ldc));
+                        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+                    }
+                }
+            }
+        }
+
+        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+    }
+
+    // =====================================================================
+    // bsrmm small block-dim kernels: block_dim 2..4 selects the small-block
+    // path (bsrmm_template_small); exercise both directions and the
+    // non-transposed (nn) and transposed-B (nt) launch branches.
+    // =====================================================================
+    template <typename T>
+    void run_bsrmm_small(rocsparse_handle handle)
+    {
+        rocsparse_mat_descr descr = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+
+        const T alpha = scalar<T>(1), beta = scalar<T>(0);
+
+        const rocsparse_int       mb = 2, kb = 2, n = 2, nnzb = 2;
+        const rocsparse_int       bds[]  = {2, 3, 4};
+        const rocsparse_direction dirs[] = {rocsparse_direction_row, rocsparse_direction_column};
+        const rocsparse_operation transBs[]
+            = {rocsparse_operation_none, rocsparse_operation_transpose};
+
+        std::vector<rocsparse_int> h_rp, h_ci;
+        make_block_diag(mb, h_rp, h_ci);
+        device_vector<rocsparse_int> rp{h_rp};
+        device_vector<rocsparse_int> ci{h_ci};
+        ASSERT_TRUE(rp.ptr && ci.ptr);
+
+        for(rocsparse_int bd : bds)
+        {
+            device_vector<T> val{std::vector<T>(size_t(nnzb) * bd * bd, scalar<T>(1))};
+            ASSERT_TRUE(val.ptr);
+
+            const rocsparse_int kdim = kb * bd;
+            const rocsparse_int mdim = mb * bd;
+            const rocsparse_int ldb  = int_max(kdim, n);
+            const rocsparse_int ldc  = int_max(mdim, 1);
+
+            device_vector<T> B{std::vector<T>(size_t(ldb) * (kdim + n), scalar<T>(1))};
+            device_vector<T> C{std::vector<T>(size_t(ldc) * n, scalar<T>(0))};
+            ASSERT_TRUE(B.ptr && C.ptr);
+
+            for(rocsparse_direction dir : dirs)
+            {
+                for(rocsparse_operation tb : transBs)
+                {
+                    expect_ok_or_ni(ut_bsrmm(handle,
+                                             dir,
+                                             rocsparse_operation_none,
+                                             tb,
+                                             mb,
+                                             n,
+                                             kb,
+                                             nnzb,
+                                             &alpha,
+                                             descr,
+                                             val,
+                                             rp,
+                                             ci,
+                                             bd,
+                                             B,
+                                             ldb,
+                                             &beta,
+                                             C,
+                                             ldc));
+                    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+                }
+            }
+        }
+
+        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+    }
+
+    // =====================================================================
+    // csrmm / coomm buffer-size algorithm selection: drive the generic
+    // rocsparse_spmm buffer_size stage with every CSR and COO algorithm so the
+    // alg-dispatch switches in csrmm_buffer_size_impl.cpp and
+    // coomm_buffer_size_impl.cpp are all executed.
+    // =====================================================================
+    template <typename T>
+    void spmm_buffer_size_over_algs(rocsparse_handle                        handle,
+                                    rocsparse_spmat_descr                   matA,
+                                    rocsparse_dnmat_descr                   matB,
+                                    rocsparse_dnmat_descr                   matC,
+                                    const std::vector<rocsparse_spmm_alg>&  algs)
+    {
+        const T alpha = scalar<T>(1), beta = scalar<T>(0);
+        for(rocsparse_spmm_alg alg : algs)
+        {
+            size_t buffer_size = 0;
+            expect_ok_or_ni(rocsparse_spmm(handle,
+                                           rocsparse_operation_none,
+                                           rocsparse_operation_none,
+                                           &alpha,
+                                           matA,
+                                           matB,
+                                           &beta,
+                                           matC,
+                                           dt_of<T>(),
+                                           alg,
+                                           rocsparse_spmm_stage_buffer_size,
+                                           &buffer_size,
+                                           nullptr));
+        }
+    }
+
+    template <typename T>
+    void run_buffer_size_algs(rocsparse_handle handle)
+    {
+        const int64_t m = 3, n = 2, k = 3, nnz = 3, ldb = 3, ldc = 3;
+
+        // ---- CSR path (csrmm_buffer_size alg branches) ----
+        {
+            Id3<T> A;
+            ASSERT_TRUE(A.ok());
+            device_vector<T> B{std::vector<T>(ldb * n, scalar<T>(1))};
+            device_vector<T> C{std::vector<T>(ldc * n, scalar<T>(0))};
+            ASSERT_TRUE(B.ptr && C.ptr);
+
+            rocsparse_spmat_descr mat_A = nullptr;
+            ASSERT_EQ(rocsparse_create_csr_descr(&mat_A,
+                                                 m,
+                                                 k,
+                                                 nnz,
+                                                 A.row_ptr,
+                                                 A.col_ind,
+                                                 A.val,
+                                                 it_of<rocsparse_int>(),
+                                                 it_of<rocsparse_int>(),
+                                                 rocsparse_index_base_zero,
+                                                 dt_of<T>()),
+                      rocsparse_status_success);
+
+            rocsparse_dnmat_descr mat_B = nullptr, mat_C = nullptr;
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_B, k, n, ldb, B, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_C, m, n, ldc, C, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+
+            spmm_buffer_size_over_algs<T>(handle,
+                                          mat_A,
+                                          mat_B,
+                                          mat_C,
+                                          {rocsparse_spmm_alg_default,
+                                           rocsparse_spmm_alg_csr,
+                                           rocsparse_spmm_alg_csr_row_split,
+                                           rocsparse_spmm_alg_csr_nnz_split,
+                                           rocsparse_spmm_alg_csr_merge_path});
+
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_C), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_B), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_spmat_descr(mat_A), rocsparse_status_success);
+        }
+
+        // ---- COO path (coomm_buffer_size alg branches) ----
+        {
+            device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1, 2}};
+            device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+            device_vector<T> val{std::vector<T>{scalar<T>(1), scalar<T>(1), scalar<T>(1)}};
+            device_vector<T> B{std::vector<T>(ldb * n, scalar<T>(1))};
+            device_vector<T> C{std::vector<T>(ldc * n, scalar<T>(0))};
+            ASSERT_TRUE(row_ind.ptr && col_ind.ptr && val.ptr && B.ptr && C.ptr);
+
+            rocsparse_spmat_descr mat_A = nullptr;
+            ASSERT_EQ(rocsparse_create_coo_descr(&mat_A,
+                                                 m,
+                                                 k,
+                                                 nnz,
+                                                 row_ind,
+                                                 col_ind,
+                                                 val,
+                                                 it_of<rocsparse_int>(),
+                                                 rocsparse_index_base_zero,
+                                                 dt_of<T>()),
+                      rocsparse_status_success);
+
+            rocsparse_dnmat_descr mat_B = nullptr, mat_C = nullptr;
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_B, k, n, ldb, B, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_C, m, n, ldc, C, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+
+            spmm_buffer_size_over_algs<T>(handle,
+                                          mat_A,
+                                          mat_B,
+                                          mat_C,
+                                          {rocsparse_spmm_alg_default,
+                                           rocsparse_spmm_alg_coo_segmented,
+                                           rocsparse_spmm_alg_coo_atomic,
+                                           rocsparse_spmm_alg_coo_segmented_atomic});
+
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_C), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_B), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_spmat_descr(mat_A), rocsparse_status_success);
+        }
+    }
+
+    // =====================================================================
+    // csrsm variants: exercise csrsm_solve across fill mode, diagonal type,
+    // trans_A, both analysis policies, and repeated solves (solve twice).
+    // =====================================================================
+    template <typename T>
+    void run_csrsm_variants(rocsparse_handle handle)
+    {
+        const rocsparse_int m = 3, nrhs = 2, nnz = 3, ldb = 3;
+        Id3<T>              A;
+        ASSERT_TRUE(A.ok());
+
+        const T alpha = scalar<T>(1);
+
+        const rocsparse_fill_mode fills[]     = {rocsparse_fill_mode_lower,
+                                                 rocsparse_fill_mode_upper};
+        const rocsparse_diag_type diags[]     = {rocsparse_diag_type_non_unit,
+                                                 rocsparse_diag_type_unit};
+        const rocsparse_operation transAs[]   = {rocsparse_operation_none,
+                                                 rocsparse_operation_transpose};
+
+        for(rocsparse_fill_mode fill : fills)
+        {
+            for(rocsparse_diag_type diag : diags)
+            {
+                for(rocsparse_operation ta : transAs)
+                {
+                    device_vector<T> B{std::vector<T>(ldb * nrhs, scalar<T>(1))};
+                    ASSERT_TRUE(B.ptr);
+
+                    rocsparse_mat_descr descr = nullptr;
+                    ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+                    ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, fill), rocsparse_status_success);
+                    ASSERT_EQ(rocsparse_set_mat_diag_type(descr, diag), rocsparse_status_success);
+
+                    rocsparse_mat_info info = nullptr;
+                    ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+                    size_t buffer_size = 0;
+                    const rocsparse_status bs_status
+                        = ut_csrsm_buffer_size(handle,
+                                               ta,
+                                               rocsparse_operation_none,
+                                               m,
+                                               nrhs,
+                                               nnz,
+                                               &alpha,
+                                               descr,
+                                               A.val,
+                                               A.row_ptr,
+                                               A.col_ind,
+                                               B,
+                                               ldb,
+                                               info,
+                                               rocsparse_solve_policy_auto,
+                                               &buffer_size);
+                    if(bs_status == rocsparse_status_success)
+                    {
+                        device_vector<char> buffer{buffer_size ? buffer_size : 1};
+                        ASSERT_TRUE(buffer.ptr);
+
+                        // analysis with force then reuse to hit both policies
+                        expect_ok_or_ni(ut_csrsm_analysis(handle,
+                                                          ta,
+                                                          rocsparse_operation_none,
+                                                          m,
+                                                          nrhs,
+                                                          nnz,
+                                                          &alpha,
+                                                          descr,
+                                                          A.val,
+                                                          A.row_ptr,
+                                                          A.col_ind,
+                                                          B,
+                                                          ldb,
+                                                          info,
+                                                          rocsparse_analysis_policy_force,
+                                                          rocsparse_solve_policy_auto,
+                                                          buffer.ptr));
+                        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+                        expect_ok_or_ni(ut_csrsm_analysis(handle,
+                                                          ta,
+                                                          rocsparse_operation_none,
+                                                          m,
+                                                          nrhs,
+                                                          nnz,
+                                                          &alpha,
+                                                          descr,
+                                                          A.val,
+                                                          A.row_ptr,
+                                                          A.col_ind,
+                                                          B,
+                                                          ldb,
+                                                          info,
+                                                          rocsparse_analysis_policy_reuse,
+                                                          rocsparse_solve_policy_auto,
+                                                          buffer.ptr));
+                        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+                        // solve twice (the solve stage can be reused)
+                        for(int pass = 0; pass < 2; ++pass)
+                        {
+                            expect_ok_or_ni(ut_csrsm_solve(handle,
+                                                           ta,
+                                                           rocsparse_operation_none,
+                                                           m,
+                                                           nrhs,
+                                                           nnz,
+                                                           &alpha,
+                                                           descr,
+                                                           A.val,
+                                                           A.row_ptr,
+                                                           A.col_ind,
+                                                           B,
+                                                           ldb,
+                                                           info,
+                                                           rocsparse_solve_policy_auto,
+                                                           buffer.ptr));
+                            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+                        }
+
+                        rocsparse_int position = -1;
+                        expect_ok_or_ni(rocsparse_csrsm_zero_pivot(handle, info, &position));
+                        EXPECT_EQ(rocsparse_csrsm_clear(handle, info), rocsparse_status_success);
+                    }
+                    else
+                    {
+                        expect_ok_or_ni(bs_status);
+                    }
+
+                    EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+                    EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+                }
+            }
+        }
+    }
+
+    // =====================================================================
+    // spsm (sptrsm descr path): drive the generic rocsparse_spsm
+    // buffer_size -> preprocess -> compute stages (compute twice) across fill
+    // mode and trans_A, exercising the sptrsm descriptor get/set members.
+    // =====================================================================
+    template <typename T>
+    void run_spsm_stages(rocsparse_handle handle)
+    {
+        const int64_t m = 3, nrhs = 2, nnz = 3, ldb = 3, ldc = 3;
+
+        const T alpha = scalar<T>(1);
+
+        const rocsparse_fill_mode fills[]   = {rocsparse_fill_mode_lower,
+                                               rocsparse_fill_mode_upper};
+        const rocsparse_operation transAs[] = {rocsparse_operation_none,
+                                               rocsparse_operation_transpose};
+        const rocsparse_diag_type diag      = rocsparse_diag_type_non_unit;
+
+        for(rocsparse_fill_mode fill : fills)
+        {
+            for(rocsparse_operation ta : transAs)
+            {
+                Id3<T> A;
+                ASSERT_TRUE(A.ok());
+                device_vector<T> B{std::vector<T>(ldb * nrhs, scalar<T>(1))};
+                device_vector<T> C{std::vector<T>(ldc * nrhs, scalar<T>(0))};
+                ASSERT_TRUE(B.ptr && C.ptr);
+
+                rocsparse_spmat_descr mat_A = nullptr;
+                ASSERT_EQ(rocsparse_create_csr_descr(&mat_A,
+                                                     m,
+                                                     m,
+                                                     nnz,
+                                                     A.row_ptr,
+                                                     A.col_ind,
+                                                     A.val,
+                                                     it_of<rocsparse_int>(),
+                                                     it_of<rocsparse_int>(),
+                                                     rocsparse_index_base_zero,
+                                                     dt_of<T>()),
+                          rocsparse_status_success);
+                ASSERT_EQ(
+                    rocsparse_spmat_set_attribute(mat_A, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
+                    rocsparse_status_success);
+                ASSERT_EQ(
+                    rocsparse_spmat_set_attribute(mat_A, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
+                    rocsparse_status_success);
+
+                rocsparse_dnmat_descr mat_B = nullptr, mat_C = nullptr;
+                ASSERT_EQ(rocsparse_create_dnmat_descr(
+                              &mat_B, m, nrhs, ldb, B, dt_of<T>(), rocsparse_order_column),
+                          rocsparse_status_success);
+                ASSERT_EQ(rocsparse_create_dnmat_descr(
+                              &mat_C, m, nrhs, ldc, C, dt_of<T>(), rocsparse_order_column),
+                          rocsparse_status_success);
+
+                size_t buffer_size = 0;
+                const rocsparse_status bs_status = rocsparse_spsm(handle,
+                                                                  ta,
+                                                                  rocsparse_operation_none,
+                                                                  &alpha,
+                                                                  mat_A,
+                                                                  mat_B,
+                                                                  mat_C,
+                                                                  dt_of<T>(),
+                                                                  rocsparse_spsm_alg_default,
+                                                                  rocsparse_spsm_stage_buffer_size,
+                                                                  &buffer_size,
+                                                                  nullptr);
+                if(bs_status == rocsparse_status_success)
+                {
+                    device_vector<char> buffer{buffer_size ? buffer_size : 1};
+                    ASSERT_TRUE(buffer.ptr);
+
+                    expect_ok_or_ni(rocsparse_spsm(handle,
+                                                   ta,
+                                                   rocsparse_operation_none,
+                                                   &alpha,
+                                                   mat_A,
+                                                   mat_B,
+                                                   mat_C,
+                                                   dt_of<T>(),
+                                                   rocsparse_spsm_alg_default,
+                                                   rocsparse_spsm_stage_preprocess,
+                                                   &buffer_size,
+                                                   buffer.ptr));
+                    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+                    for(int pass = 0; pass < 2; ++pass)
+                    {
+                        expect_ok_or_ni(rocsparse_spsm(handle,
+                                                       ta,
+                                                       rocsparse_operation_none,
+                                                       &alpha,
+                                                       mat_A,
+                                                       mat_B,
+                                                       mat_C,
+                                                       dt_of<T>(),
+                                                       rocsparse_spsm_alg_default,
+                                                       rocsparse_spsm_stage_compute,
+                                                       &buffer_size,
+                                                       buffer.ptr));
+                        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+                    }
+                }
+                else
+                {
+                    expect_ok_or_ni(bs_status);
+                }
+
+                EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_C), rocsparse_status_success);
+                EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_B), rocsparse_status_success);
+                EXPECT_EQ(rocsparse_destroy_spmat_descr(mat_A), rocsparse_status_success);
+            }
+        }
+    }
 } // namespace
 
 class Level3 : public HandleTest
@@ -1209,3 +1777,38 @@ UT_L3_ALL_PRECISIONS(gemmi, run_gemmi)
 UT_L3_ALL_PRECISIONS(csrsm, run_csrsm)
 UT_L3_ALL_PRECISIONS(bsrsm, run_bsrsm)
 UT_L3_ALL_PRECISIONS(coomm_spmm, run_coomm)
+
+// ---------------------------------------------------------------------------
+// branch-dispatch coverage suites (gebsrmm/bsrmm dispatch, buffer_size algs,
+// csrsm variants, spsm/sptrsm descr path)
+// ---------------------------------------------------------------------------
+class Level3GebsrmmDispatch : public HandleTest
+{
+};
+class Level3BsrmmSmall : public HandleTest
+{
+};
+class Level3BufferSizeAlgs : public HandleTest
+{
+};
+class Level3Csrsm : public HandleTest
+{
+};
+class Level3Spsm : public HandleTest
+{
+};
+
+#define UT_L3_SUITE_ALL_PRECISIONS(SUITE, NAME, FN) \
+    TEST_F(SUITE, NAME)                             \
+    {                                               \
+        FN<float>(handle);                          \
+        FN<double>(handle);                         \
+        FN<rocsparse_float_complex>(handle);        \
+        FN<rocsparse_double_complex>(handle);       \
+    }
+
+UT_L3_SUITE_ALL_PRECISIONS(Level3GebsrmmDispatch, dispatch, run_gebsrmm_dispatch)
+UT_L3_SUITE_ALL_PRECISIONS(Level3BsrmmSmall, small_blockdim, run_bsrmm_small)
+UT_L3_SUITE_ALL_PRECISIONS(Level3BufferSizeAlgs, algs, run_buffer_size_algs)
+UT_L3_SUITE_ALL_PRECISIONS(Level3Csrsm, variants, run_csrsm_variants)
+UT_L3_SUITE_ALL_PRECISIONS(Level3Spsm, stages, run_spsm_stages)
