@@ -97,3 +97,52 @@ set_target_properties(rocsparse-unit-test PROPERTIES
 add_test(NAME rocsparse-unit-test COMMAND rocsparse-unit-test)
 
 rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
+
+# ---------------------------------------------------------------------------
+# rocsparse-unit-test-device : GPU (device) unit tests.
+#
+# A SEPARATE binary from rocsparse-unit-test so the latter stays fast and
+# GPU-independent. This target links hip::device (which supplies `-x hip` and
+# `--offload-arch`) and launches individual library kernels in isolation. It
+# MUST run on a GPU (via the serializer, e.g. HIP_VISIBLE_DEVICES=0 gpu-run).
+# ---------------------------------------------------------------------------
+set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
+  rocsparse_unit_test_main.cpp
+  unit_test_device_level1.cpp
+)
+
+add_executable(rocsparse-unit-test-device ${ROCSPARSE_UNIT_TEST_DEVICE_SOURCES})
+
+target_compile_definitions(rocsparse-unit-test-device PRIVATE GOOGLE_TEST)
+target_compile_options(rocsparse-unit-test-device PRIVATE
+  -Wno-deprecated
+  -Wno-unused-command-line-argument
+)
+
+# Private library headers: rocsparse_common.hpp (macros/fma) lives in
+# library/src/include; the level-1 device kernels live in library/src/level1.
+target_include_directories(rocsparse-unit-test-device PRIVATE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
+)
+
+# hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).
+target_link_libraries(rocsparse-unit-test-device PRIVATE
+  GTest::gtest
+  roc::rocsparse
+  hip::host
+  hip::device
+)
+
+apply_omp_settings(rocsparse-unit-test-device)
+
+set_target_properties(rocsparse-unit-test-device PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+)
+
+# Registered with CTest but tagged so CI can schedule it on a GPU node only
+# (it is NOT part of the fast CPU-only gate).
+add_test(NAME rocsparse-unit-test-device COMMAND rocsparse-unit-test-device)
+set_tests_properties(rocsparse-unit-test-device PROPERTIES LABELS "gpu")
+
+rocm_install(TARGETS rocsparse-unit-test-device COMPONENT tests)
