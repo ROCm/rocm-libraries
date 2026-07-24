@@ -29,4 +29,3 @@ struct Config
 };
 
 } // namespace hipconv::cdna5::grouped_multi_g
-
