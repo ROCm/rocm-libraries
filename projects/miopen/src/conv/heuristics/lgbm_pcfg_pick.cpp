@@ -224,6 +224,30 @@ std::vector<std::string> RankBucket(const LgbmForest& forest,
     return ranked;
 }
 
+// The grouped-conv XDLOPS solvers ship a two-tower kernel-tuning-net (KTN)
+// perf-config predictor (the *_input_encoder / *_kernel_config_encoder models),
+// run inside the solver's own GetDefaultPerformanceConfig on gfx90a/gfx942/gfx950
+// (see PerformanceConfig...::IsModelApplicable). The two-tower takes precedence
+// there; the LGBM perf-config picker is the fallback for solvers/architectures
+// the two-tower does not cover. This predicate mirrors that model's coverage so
+// the picker defers rather than competing with it.
+bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx_id)
+{
+    const bool arch_covered = gfx_id.starts_with("gfx90a") || gfx_id.starts_with("gfx942") ||
+                              gfx_id.starts_with("gfx950");
+    if(!arch_covered)
+        return false;
+    static const std::array<const char*, 6> kTwoTowerSolvers = {
+        "ConvHipImplicitGemmGroupFwdXdlops",
+        "ConvHipImplicitGemmGroupBwdXdlops",
+        "ConvHipImplicitGemmGroupWrwXdlops",
+        "ConvHipImplicitGemm3DGroupFwdXdlops",
+        "ConvHipImplicitGemm3DGroupBwdXdlops",
+        "ConvHipImplicitGemm3DGroupWrwXdlops"};
+    return std::find(kTwoTowerSolvers.begin(), kTwoTowerSolvers.end(), solver_name) !=
+           kTwoTowerSolvers.end();
+}
+
 } // namespace
 
 std::vector<std::string> PickConfig(const std::string& solver_name,
@@ -240,8 +264,17 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 
     const std::string gfx_id = handle.GetDeviceName();
 
-    // The perf-config picker runs on every architecture its per-solver models
-    // cover; a bucket lookup below naturally abstains (empty result) for any
+    // Two-tower KTN takes precedence where it applies: defer to the solver's own
+    // default-config path (which runs it) rather than preempting it here.
+    if(TwoTowerCoversSolver(solver_name, gfx_id))
+    {
+        MIOPEN_LOG_I2("lgbm_pcfg: deferring " << solver_name << " on " << gfx_id
+                                              << " to the two-tower KTN model");
+        return {};
+    }
+
+    // Otherwise the perf-config picker runs on every architecture its per-solver
+    // models cover; a bucket lookup below naturally abstains (empty result) for any
     // gfx_id/direction/dtype the models were not trained on.
     const std::string key = gfx_id + "|" +
                             std::to_string(DirectionPerfDbCode(problem.GetDirection())) + "|" +
