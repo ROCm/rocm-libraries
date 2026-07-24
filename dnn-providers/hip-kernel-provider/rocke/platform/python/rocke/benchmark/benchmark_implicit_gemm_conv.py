@@ -511,14 +511,14 @@ def _run_sweep(
         )
 
         if arch == "gfx1250" and not p.is_3d:
-            ref_out = conv_reference_gfx1250(_A_f32, _B_f32, p).cuda()
+            ref_out = conv_reference_gfx1250(A_t, B_t, p, out_dtype=_torch_dtype).cuda()
             print(
                 f"Reference computed via gfx1250 hand-written conv "
                 f"({tuple(ref_out.shape)}, {ref_out.dtype}).",
                 flush=True,
             )
         else:
-            ref_out = conv_reference(_A_f32, _B_f32, p)
+            ref_out = conv_reference(A_t, B_t, p, out_dtype=_torch_dtype)
             print(
                 f"Reference computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
                 flush=True,
@@ -603,15 +603,27 @@ def _run_sweep(
         cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
         # Verify every kernel against the pre-computed reference (when --verify).
+        # Tolerances mirror CK's check_err: atol + rtol * |ref| per element.
+        _verify_tol = {
+            "bf16": (1e-1, 1e-3),
+            "fp16": (1e-3, 1e-3),
+            "fp32": (1e-5, 3e-6),
+        }
         if args.verify:
             launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
             D_out = torch.empty_like(D_t)
             rt.memcpy_d2h(_u8(D_out), D_dev, D_t.nbytes)
             if arch == "gfx1250":
-                err = float(D_out.float().cpu().sub(ref_out.cpu()).abs().max())
+                d_f32 = D_out.float().cpu()
+                r_f32 = ref_out.cpu()
             else:
-                err = float(D_out.float().cuda().sub(ref_out).abs().max())
-            status = "PASS" if err < 1e-2 else f"FAIL(err={err:.2e})"
+                d_f32 = D_out.float().cuda()
+                r_f32 = ref_out
+            rtol, atol = _verify_tol.get(dtype, (1e-2, 1e-2))
+            abs_err = d_f32.sub(r_f32).abs()
+            err = float(abs_err.max())
+            failed = bool((abs_err > atol + rtol * r_f32.abs()).any())
+            status = f"FAIL(err={err:.2e})" if failed else "PASS"
             print(f"  verify {artifact.kernel_name}: {status}", flush=True)
             rt.memset(D_dev, 0, D_t.nbytes)
 

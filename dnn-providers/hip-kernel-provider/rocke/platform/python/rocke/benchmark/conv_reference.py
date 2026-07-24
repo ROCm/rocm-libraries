@@ -17,8 +17,10 @@ import torch
 import torch.nn.functional as F
 
 
-def conv_reference(A: torch.Tensor, B: torch.Tensor, p) -> torch.Tensor:
-    """Compute a float32 reference output for a forward convolution problem.
+def conv_reference(
+    A: torch.Tensor, B: torch.Tensor, p, out_dtype: torch.dtype | None = None
+) -> torch.Tensor:
+    """Compute a reference output for a forward convolution problem.
 
     Both 2-D (NHWC input, KHWC weight) and 3-D (NDHWC input, KDHWC weight)
     problems are supported.  The computation is always done in float32.
@@ -28,6 +30,9 @@ def conv_reference(A: torch.Tensor, B: torch.Tensor, p) -> torch.Tensor:
         A: Input tensor, shape (N, H, W, C) or (N, D, H, W, C), any dtype.
         B: Weight tensor, shape (K, Y, X, C) or (K, Z, Y, X, C), any dtype.
         p: ConvProblem instance carrying stride/padding/dilation/groups.
+        out_dtype: If given, the fp32 result is cast to this dtype then back to
+            float32.  This simulates the kernel's output rounding so that the
+            reference matches the precision the kernel can actually achieve.
 
     Returns:
         Reference output as a float32 torch.Tensor.
@@ -35,7 +40,7 @@ def conv_reference(A: torch.Tensor, B: torch.Tensor, p) -> torch.Tensor:
     if not p.is_3d:
         A_t = A.float().cuda().permute(0, 3, 1, 2)  # NHWC -> NCHW
         B_t = B.float().cuda().permute(0, 3, 1, 2)  # KHWC -> KCHW
-        return (
+        result = (
             F.conv2d(
                 A_t,
                 B_t,
@@ -50,7 +55,7 @@ def conv_reference(A: torch.Tensor, B: torch.Tensor, p) -> torch.Tensor:
     else:
         A_t = A.float().cuda().permute(0, 4, 1, 2, 3)  # NDHWC -> NCDHW
         B_t = B.float().cuda().permute(0, 4, 1, 2, 3)  # KDHWC -> KCDHW
-        return (
+        result = (
             F.conv3d(
                 A_t,
                 B_t,
@@ -62,12 +67,16 @@ def conv_reference(A: torch.Tensor, B: torch.Tensor, p) -> torch.Tensor:
             .permute(0, 2, 3, 4, 1)  # NCDHW -> NDHWC
             .contiguous()
         )
+    if out_dtype is not None:
+        result = result.to(out_dtype).float()
+    return result
 
 
 def conv_reference_gfx1250(
     A: torch.Tensor,
     B: torch.Tensor,
     p,
+    out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     """Hand-written float32 reference for 2-D NHWC forward convolution.
 
@@ -84,6 +93,9 @@ def conv_reference_gfx1250(
         B: Weight tensor, shape ``(K, Y, X, C)``, any dtype.
         p: ``ConvProblem`` instance (carries stride / padding / dilation /
            groups).
+        out_dtype: If given, the fp32 result is cast to this dtype then back to
+            float32.  This simulates the kernel's output rounding so that the
+            reference matches the precision the kernel can actually achieve.
 
     Returns:
         Float32 torch.Tensor of shape ``(N, Ho, Wo, K)`` on CPU.
@@ -121,4 +133,7 @@ def conv_reference_gfx1250(
                             b_slice = b_grp[:, y, x, :].astype(np.float32)
                             out[n, ho, wo, grp * Kg : (grp + 1) * Kg] += b_slice @ a_vec
 
-    return torch.from_numpy(out.astype(np.float32))
+    result = torch.from_numpy(out.astype(np.float32))
+    if out_dtype is not None:
+        result = result.to(out_dtype).float()
+    return result
