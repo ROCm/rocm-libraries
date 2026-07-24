@@ -20,7 +20,7 @@ Documentation for rocSPARSE is available at
 * The deprecated `rocsparse_indextype_u16` enum.
 
 ### Deprecated
-* Deprecated the `rocsparse_spildlt0_input_diag` enum value used to dump the diagonal `D` of the ILDLT(0) factorization.
+* Deprecated the `rocsparse_spildlt0_input_diag` enum value. It was used to dump the diagonal `D` of the ILDLT(0) factorization, which is now stored in-place on the diagonal entries of the `L` factor. 
 
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
