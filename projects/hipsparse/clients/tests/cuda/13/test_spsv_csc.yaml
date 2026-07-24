@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,15 +26,15 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: spsv_csr_bad_arg
+- name: spsv_csc_bad_arg
   category: pre_checkin
-  function: spsv_csr_bad_arg
+  function: spsv_csc_bad_arg
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-- name: spsv_csr
+- name: spsv_csc
   category: quick
-  function: spsv_csr
+  function: spsv_csc
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
@@ -49,9 +49,9 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spsv_alg: [HIPSPARSE_SPSV_ALG_DEFAULT]
 
-- name: spsv_csr
+- name: spsv_csc
   category: pre_checkin
-  function: spsv_csr
+  function: spsv_csc
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: 1
@@ -66,12 +66,12 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spsv_alg: [HIPSPARSE_SPSV_ALG_DEFAULT]
   filename: [nos1,
-             nos3, 
+             nos3,
              nos5]
 
-- name: spsv_csr
+- name: spsv_csc
   category: pre_checkin
-  function: spsv_csr
+  function: spsv_csc
   indextype: *i32
   precision: *double_only_precisions
   M: 1

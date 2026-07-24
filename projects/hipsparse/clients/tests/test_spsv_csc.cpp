@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,23 +21,21 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief hipsparse-version.h provides the configured version and settings
- */
+#include "test.hpp"
+#include "testing_spsv_csc.hpp"
 
-#ifndef HIPSPARSE_VERSION_H
-#define HIPSPARSE_VERSION_H
-
-// clang-format off
-#define hipsparseVersionMajor    @hipsparse_VERSION_MAJOR@
-#define hipsparseVersionMinor    @hipsparse_VERSION_MINOR@
-#define hipsparseVersionPatch    @hipsparse_VERSION_PATCH@
-#define hipsparseVersionTweak    @hipsparse_VERSION_TWEAK@
-// clang-format on
-
-/* Feature flags baked in at build time. */
-#cmakedefine HIPSPARSE_WITH_SPMV_BSR
-#cmakedefine HIPSPARSE_WITH_CSC_TRSV
-#cmakedefine HIPSPARSE_WITH_CSC_TRSM
-
-#endif /* HIPSPARSE_VERSION_H */
+TEST_ROUTINE_WITH_CONFIG(spsv_csc,
+                         generic,
+                         hipsparse_test_config_ijt,
+                         arg.M,
+                         arg.N,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.transA,
+                         arg.transB,
+                         arg.orderB,
+                         arg.orderC,
+                         arg.diag_type,
+                         arg.fill_mode,
+                         arg.baseA,
+                         arg.spsv_alg);
