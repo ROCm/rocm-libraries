@@ -45,6 +45,7 @@ add_executable(rpp_tests
     src/tests/image/arithmetic/magnitude_test.cpp
     src/tests/image/effects/solarize_test.cpp
     src/tests/image/effects/posterize_test.cpp
+    src/tests/image/effects/non_linear_blend_test.cpp
     src/tests/image/effects/channel_dropout_test.cpp
     src/tests/image/effects/snow_test.cpp
     src/tests/image/effects/rain_test.cpp
