@@ -7,7 +7,8 @@
 using ADataType = ck::f8_t;
 using BDataType = ck::f8_t;
 
-using XDataType = ck::e8m0_bexp_t;
+using XDataType       = ck::e8m0_bexp_t;
+using XPackedDataType = int32_t;
 
 using CDataType        = ck::half_t;
 using AccDataType      = float;
@@ -26,16 +27,16 @@ constexpr ck::index_t KPerBlock      = 256;
 
 constexpr auto GemmSpec      = ck::tensor_operation::device::GemmSpecialization::Default;
 constexpr auto BlkGemmPSched = ck::BlockGemmPipelineScheduler::Intrawave;
-constexpr auto BlkGemmPVer   = ck::BlockGemmPipelineVersion::v3;
+constexpr auto BlkGemmPVer   = ck::BlockGemmPipelineVersion::v1;
 
 using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMX_Xdl_CShuffleV3<
     ALayout,          // ALayout
     BLayout,          // BLayout
     CLayout,          // CLayout
     ADataType,        // ADataType
-    XDataType,        // AScaleDataType
+    XPackedDataType,  // AScaleDataType
     BDataType,        // BDataType
-    XDataType,        // BScaleDataType
+    XPackedDataType,  // BScaleDataType
     CDataType,        // CDataType
     AccDataType,      // GemmAccDataType
     CShuffleDataType, // CShuffleDataType
@@ -84,7 +85,7 @@ int main(int argc, char* argv[])
                                ADataType,
                                BDataType,
                                XDataType,
-                               XDataType,
+                               XPackedDataType,
                                CDataType,
                                ALayout,
                                BLayout,

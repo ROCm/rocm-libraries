@@ -7,7 +7,8 @@
 using ADataType = ck::f6x16_pk_t;
 using BDataType = ck::f6x16_pk_t;
 
-using XDataType = ck::e8m0_bexp_t;
+using XDataType       = ck::e8m0_bexp_t;
+using XPackedDataType = int32_t;
 
 using CDataType        = ck::half_t;
 using AccDataType      = float;
@@ -33,9 +34,9 @@ using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMX_Xdl_CShuffle
     BLayout,          // BLayout
     CLayout,          // CLayout
     ADataType,        // ADataType
-    XDataType,        // AScaleDataType
+    XPackedDataType,  // AScaleDataType
     BDataType,        // BDataType
-    XDataType,        // BScaleDataType
+    XPackedDataType,  // BScaleDataType
     CDataType,        // CDataType
     AccDataType,      // GemmAccDataType
     CShuffleDataType, // CShuffleDataType
@@ -84,7 +85,7 @@ int main(int argc, char* argv[])
                                ADataType,
                                BDataType,
                                XDataType,
-                               XDataType,
+                               XPackedDataType,
                                CDataType,
                                ALayout,
                                BLayout,

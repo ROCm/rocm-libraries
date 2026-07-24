@@ -28,7 +28,7 @@ constexpr ck::index_t KPerBlock      = 256 / DataPackedSize; // 256 bf6 = 16 bf6
 
 constexpr auto GemmSpec      = ck::tensor_operation::device::GemmSpecialization::Default;
 constexpr auto BlkGemmPSched = ck::BlockGemmPipelineScheduler::Intrawave;
-constexpr auto BlkGemmPVer   = ck::BlockGemmPipelineVersion::v3;
+constexpr auto BlkGemmPVer   = ck::BlockGemmPipelineVersion::v1;
 
 using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMX_Xdl_CShuffleV3<
     ALayout,          // ALayout
