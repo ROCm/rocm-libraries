@@ -1755,6 +1755,241 @@ namespace
             }
         }
     }
+
+    // =====================================================================
+    // gebsrmm quick-return / scale-only path: with kb == 0 (and C_size > 0)
+    // gebsrmm never touches the sparse matrix but still scales C by beta.
+    // Exercises the scale-only branch, the C==nullptr && beta==nullptr guard,
+    // the C_size == 0 early-out (mb == 0) and the trans check-arg guard.
+    // =====================================================================
+    template <typename T>
+    void run_gebsrmm_quickreturn(rocsparse_handle handle)
+    {
+        rocsparse_mat_descr descr = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+
+        const rocsparse_int mb = 3, n = 2, rbd = 2, cbd = 2;
+        const rocsparse_int m   = rbd * mb; // number of rows of C
+        const rocsparse_int ldc = m;
+        const rocsparse_int ldb = 1; // not accessed by the scale-only path
+
+        std::vector<rocsparse_int>   h_rp(mb + 1, 0); // empty rows (kb == 0 => nnzb == 0)
+        device_vector<rocsparse_int> rp{h_rp};
+        device_vector<T>             B{std::vector<T>(4, scalar<T>(1))};
+        device_vector<T>             C{std::vector<T>(size_t(ldc) * n, scalar<T>(2))};
+        ASSERT_TRUE(rp.ptr && B.ptr && C.ptr);
+
+        const T alpha = scalar<T>(1), beta = scalar<T>(0);
+
+        // kb == 0 with C_size = row_block_dim*mb*n > 0 -> scale-only quick path.
+        for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            expect_ok_or_ni(ut_gebsrmm(handle,
+                                       dir,
+                                       rocsparse_operation_none,
+                                       rocsparse_operation_none,
+                                       mb,
+                                       n,
+                                       0, // kb
+                                       0, // nnzb
+                                       &alpha,
+                                       descr,
+                                       nullptr, // bsr_val (nnzb == 0)
+                                       rp,
+                                       nullptr, // bsr_col_ind (nnzb == 0)
+                                       rbd,
+                                       cbd,
+                                       B,
+                                       ldb,
+                                       &beta,
+                                       C,
+                                       ldc));
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        }
+
+        // C == nullptr && beta == nullptr on the scale path -> invalid_pointer.
+        UT_EXPECT_ROC(ut_gebsrmm(handle,
+                                 rocsparse_direction_row,
+                                 rocsparse_operation_none,
+                                 rocsparse_operation_none,
+                                 mb,
+                                 n,
+                                 0,
+                                 0,
+                                 &alpha,
+                                 descr,
+                                 nullptr,
+                                 rp,
+                                 nullptr,
+                                 rbd,
+                                 cbd,
+                                 B,
+                                 ldb,
+                                 nullptr, // beta
+                                 nullptr, // C
+                                 ldc),
+                      rocsparse_status_invalid_pointer);
+
+        // mb == 0 -> C_size == 0 -> quick return success without scaling.
+        expect_ok_or_ni(ut_gebsrmm(handle,
+                                   rocsparse_direction_row,
+                                   rocsparse_operation_none,
+                                   rocsparse_operation_none,
+                                   0, // mb
+                                   n,
+                                   0,
+                                   0,
+                                   &alpha,
+                                   descr,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   rbd,
+                                   cbd,
+                                   B,
+                                   ldb,
+                                   &beta,
+                                   C,
+                                   ldc));
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        // conjugate_transpose trans_A hits the check-arg guard (not_implemented).
+        expect_ok_or_ni(ut_gebsrmm(handle,
+                                   rocsparse_direction_row,
+                                   rocsparse_operation_conjugate_transpose,
+                                   rocsparse_operation_none,
+                                   mb,
+                                   n,
+                                   0,
+                                   0,
+                                   &alpha,
+                                   descr,
+                                   nullptr,
+                                   rp,
+                                   nullptr,
+                                   rbd,
+                                   cbd,
+                                   B,
+                                   ldb,
+                                   &beta,
+                                   C,
+                                   ldc));
+
+        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+    }
+
+    // =====================================================================
+    // csrmm / coomm buffer_size zero-size quick return: drive the generic
+    // rocsparse_spmm buffer_size stage with n == 0 (empty dense operand) so the
+    // m==0||n==0||k==0 quick return (buffer_size = 0, success) is executed for
+    // both the CSR and COO backends.
+    // =====================================================================
+    template <typename T>
+    void run_buffer_size_zero(rocsparse_handle handle)
+    {
+        const int64_t m = 3, k = 3, nnz = 3, ld = 3;
+        const T       alpha = scalar<T>(1), beta = scalar<T>(0);
+
+        // ---- CSR: n == 0 -> csrmm_buffer_size quick return ----
+        {
+            Id3<T> A;
+            ASSERT_TRUE(A.ok());
+            device_vector<T> Bv{std::vector<T>(ld, scalar<T>(1))};
+            device_vector<T> Cv{std::vector<T>(ld, scalar<T>(0))};
+            ASSERT_TRUE(Bv.ptr && Cv.ptr);
+
+            rocsparse_spmat_descr mat_A = nullptr;
+            ASSERT_EQ(rocsparse_create_csr_descr(&mat_A,
+                                                 m,
+                                                 k,
+                                                 nnz,
+                                                 A.row_ptr,
+                                                 A.col_ind,
+                                                 A.val,
+                                                 it_of<rocsparse_int>(),
+                                                 it_of<rocsparse_int>(),
+                                                 rocsparse_index_base_zero,
+                                                 dt_of<T>()),
+                      rocsparse_status_success);
+
+            rocsparse_dnmat_descr mat_B = nullptr, mat_C = nullptr;
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_B, k, 0, ld, Bv, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_C, m, 0, ld, Cv, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+
+            size_t buffer_size = 4321;
+            expect_ok_or_ni(rocsparse_spmm(handle,
+                                           rocsparse_operation_none,
+                                           rocsparse_operation_none,
+                                           &alpha,
+                                           mat_A,
+                                           mat_B,
+                                           &beta,
+                                           mat_C,
+                                           dt_of<T>(),
+                                           rocsparse_spmm_alg_csr,
+                                           rocsparse_spmm_stage_buffer_size,
+                                           &buffer_size,
+                                           nullptr));
+
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_C), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_B), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_spmat_descr(mat_A), rocsparse_status_success);
+        }
+
+        // ---- COO: n == 0 -> coomm_buffer_size quick return ----
+        {
+            device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1, 2}};
+            device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
+            device_vector<T> val{std::vector<T>{scalar<T>(1), scalar<T>(1), scalar<T>(1)}};
+            device_vector<T> Bv{std::vector<T>(ld, scalar<T>(1))};
+            device_vector<T> Cv{std::vector<T>(ld, scalar<T>(0))};
+            ASSERT_TRUE(row_ind.ptr && col_ind.ptr && val.ptr && Bv.ptr && Cv.ptr);
+
+            rocsparse_spmat_descr mat_A = nullptr;
+            ASSERT_EQ(rocsparse_create_coo_descr(&mat_A,
+                                                 m,
+                                                 k,
+                                                 nnz,
+                                                 row_ind,
+                                                 col_ind,
+                                                 val,
+                                                 it_of<rocsparse_int>(),
+                                                 rocsparse_index_base_zero,
+                                                 dt_of<T>()),
+                      rocsparse_status_success);
+
+            rocsparse_dnmat_descr mat_B = nullptr, mat_C = nullptr;
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_B, k, 0, ld, Bv, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_create_dnmat_descr(
+                          &mat_C, m, 0, ld, Cv, dt_of<T>(), rocsparse_order_column),
+                      rocsparse_status_success);
+
+            size_t buffer_size = 4321;
+            expect_ok_or_ni(rocsparse_spmm(handle,
+                                           rocsparse_operation_none,
+                                           rocsparse_operation_none,
+                                           &alpha,
+                                           mat_A,
+                                           mat_B,
+                                           &beta,
+                                           mat_C,
+                                           dt_of<T>(),
+                                           rocsparse_spmm_alg_coo_atomic,
+                                           rocsparse_spmm_stage_buffer_size,
+                                           &buffer_size,
+                                           nullptr));
+
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_C), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_dnmat_descr(mat_B), rocsparse_status_success);
+            EXPECT_EQ(rocsparse_destroy_spmat_descr(mat_A), rocsparse_status_success);
+        }
+    }
 } // namespace
 
 class Level3 : public HandleTest
@@ -1812,3 +2047,17 @@ UT_L3_SUITE_ALL_PRECISIONS(Level3BsrmmSmall, small_blockdim, run_bsrmm_small)
 UT_L3_SUITE_ALL_PRECISIONS(Level3BufferSizeAlgs, algs, run_buffer_size_algs)
 UT_L3_SUITE_ALL_PRECISIONS(Level3Csrsm, variants, run_csrsm_variants)
 UT_L3_SUITE_ALL_PRECISIONS(Level3Spsm, stages, run_spsm_stages)
+
+// ---------------------------------------------------------------------------
+// second-wave branch-coverage suites (gebsrmm scale-only quick return,
+// csrmm/coomm buffer_size zero-size quick return)
+// ---------------------------------------------------------------------------
+class Level3GebsrmmQuickReturn : public HandleTest
+{
+};
+class Level3BufferSizeZero : public HandleTest
+{
+};
+
+UT_L3_SUITE_ALL_PRECISIONS(Level3GebsrmmQuickReturn, quickreturn, run_gebsrmm_quickreturn)
+UT_L3_SUITE_ALL_PRECISIONS(Level3BufferSizeZero, zero_size, run_buffer_size_zero)
