@@ -1111,6 +1111,27 @@ namespace TensileLite
                                               (uint8_t*)inputs.ws + workspaceOffsetInByte);
             args.template append<const void*>("AmaxSync", inputs.Synchronizer);
         }
+
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
     }
 
     inline uint32_t getNumWorkGroups(const KernelInvocation& rv)
@@ -1187,6 +1208,8 @@ namespace TensileLite
                     origami::problem_t origami_problem = {
                         .size  = {sizes[0], sizes[1], sizes[3]},
                         .batch = sizes[2],
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1294,6 +1317,8 @@ namespace TensileLite
                     origami::problem_t origami_problem = {
                         .size    = {sizes[0], sizes[1], sizes[3]},
                         .batch   = sizes[2],
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
                         .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
                         .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
@@ -2192,6 +2217,26 @@ namespace TensileLite
 
         rv.args.append("beta", inputs.beta, problem.betaType());
 
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                rv.args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                rv.args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            rv.args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = 1; i < d.dimensions(); i++)
+                rv.args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
         //Pass along code object dependency
         rv.codeObjectFile = codeObjectFilename.load();
 
@@ -2256,7 +2301,10 @@ namespace TensileLite
         {
             name += "_GA";
         }
-
+        if(problemType.useGateResidual)
+        {
+            name += ("_GateR");
+        }
         return name;
     }
 
@@ -2338,6 +2386,9 @@ namespace TensileLite
             args.template append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
         }
 
+        if(problemType.useGateResidual)
+            args.template append<void const*>("gateResidual", inputs.gateResidual);
+
         if(sizeMapping.globalAccumulation == 2 || sizeMapping.streamK > 0)
             args.append("alpha", inputs.alpha, problem.alphaType());
         else
@@ -2406,6 +2457,16 @@ namespace TensileLite
         for(size_t i = 1; i < c.dimensions(); i++)
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideC", i), c.strides()[i]);
 
+        if(problemType.useGateResidual)
+        {
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            bool hasGate = problem.useGateResidual();
+            for(size_t i = 1; i < c.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+
         if(useBias)
         {
             TensorDescriptor const& bias = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
@@ -2448,6 +2509,7 @@ namespace TensileLite
             args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
             args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
         }
+
     }
 
     template <bool T_Debug>
@@ -2818,6 +2880,14 @@ namespace TensileLite
             }
         }
 
+        if(problemType.useGateResidual)
+        {
+            auto gateDtype = problem.useGateResidual()
+                                 ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                                 : problemType.gateResidualDataTypeWhiteList.at(0);
+            name += ("_Gate" + rocisa::TypeAbbrev(gateDtype));
+        }
+
         if(problemType.activationType != ActivationType::None)
         {
             if(problemType.activationType == ActivationType::All)
@@ -2875,7 +2945,10 @@ namespace TensileLite
                              sizeMapping.globalSplitUPGR));
 
         name += "_VW" + std::to_string(vw);
-
+        if(problemType.useGateResidual)
+        {
+            name += "_GateR";
+        }
         return name;
     }
 
@@ -3770,6 +3843,8 @@ namespace TensileLite
             origami::problem_t origami_problem = {
                 .size  = {x, y, z},
                 .batch = batch,
+                // CU budget hint; 0 = use all CUs.
+                .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
             };
             origami::config_t origami_config = {
                 .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3853,6 +3928,8 @@ namespace TensileLite
                 origami::problem_t origami_problem = {
                     .size  = {x, y, z},
                     .batch = batchSz,
+                    // CU budget hint; 0 = use all CUs.
+                    .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
                 };
                 origami::config_t origami_config = {
                     .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3966,9 +4043,24 @@ namespace TensileLite
                     hip::HipAMDGPU const* hipAMDGPU
                         = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
+                    // Fold both CU budgets into origami_problem.num_cus (the single
+                    // source of truth select_grid_size derives its budget from).
+                    // smCountTarget and skMaxCUs each use 0 to mean "no cap"; take the
+                    // tighter (minimum) positive cap so the analytical path honors both.
+                    auto   smt       = problem.getParams().smCountTarget(); // int, 0 = no cap
+                    auto   skm       = pAMDGPU->skMaxCUs;                   // int, 0 = no cap
+                    size_t budget    = 0;                                  // 0 = use all CUs
+                    if(smt > 0)
+                        budget = static_cast<size_t>(smt);
+                    if(skm > 0)
+                        budget = (budget == 0) ? static_cast<size_t>(skm)
+                                               : std::min(budget, static_cast<size_t>(skm));
+
                     origami::problem_t origami_problem = {
                         .size        = {x, y, z},
                         .batch       = batch,
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus     = budget,
                         .a_transpose = problem.transA() ? origami::transpose_t::T
                                                         : origami::transpose_t::N,
                         .b_transpose = problem.transB() ? origami::transpose_t::T
@@ -4004,8 +4096,7 @@ namespace TensileLite
                         origami_problem,
                         *(hipAMDGPU->analyticalHardware),
                         origami_config,
-                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid),
-                        pAMDGPU->skMaxCUs);
+                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
                 }
             }
             // Limit the CUs Stream-K is launched on either max or the specified,

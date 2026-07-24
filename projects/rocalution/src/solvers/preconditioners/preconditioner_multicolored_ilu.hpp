@@ -44,6 +44,8 @@ namespace rocalution
   * forward and backward substitution compared to the standard ILU(p) preconditioner.
   * \cite Lukarski2012
   *
+  * \note To change the preconditioner matrix format, use MultiColored::SetPrecondMatrixFormat().
+  *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
   * \tparam ValueType - can be float, double, std::complex<float> or std::complex<double>

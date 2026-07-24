@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -602,6 +602,7 @@ namespace TensileLite
             bool             useGradient               = false;
             int              useBias                   = 0;
             bool             useE                      = false;
+            bool             useGateResidual           = false;
             std::string      useScaleAB                = "";
             bool             useScaleCD                = false;
             int              useScaleAlphaVec          = 0;
@@ -616,6 +617,7 @@ namespace TensileLite
 
             std::vector<int>              biasSrcWhiteList;
             std::vector<rocisa::DataType> biasDataTypeWhiteList;
+            std::vector<rocisa::DataType> gateResidualDataTypeWhiteList;
 
             int  sparse                     = 0;
             bool stochasticRounding         = false;
