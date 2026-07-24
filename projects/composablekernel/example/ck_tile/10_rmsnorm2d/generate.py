@@ -524,9 +524,10 @@ float rmsnorm2d_fwd(rmsnorm2d_fwd_traits t,
                             F_instance_func=ins.call_name,
                         )
                     # inner_str = inner_str + vec_str
-                n_cnd = f"(a.n <= {n_})" if (i_n < len(blob_per_t) - 1) else ""
+                is_numeric_n = str(n_).isdigit()
+                n_cnd = f"(a.n <= {n_})" if is_numeric_n else ""
                 n_str += self.API_PER_N_CASE.format(
-                    F_if=get_if_str(i_n, len(blob_per_t)),
+                    F_if=get_if_str(i_n, len(blob_per_t), not is_numeric_n),
                     F_N_COND=n_cnd,
                     F_inner_dispatch=inner_str,
                 )
