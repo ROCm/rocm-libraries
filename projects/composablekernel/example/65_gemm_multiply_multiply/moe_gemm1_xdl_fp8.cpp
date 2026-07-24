@@ -183,9 +183,9 @@ static constexpr ck::index_t D1Vec     = 1;
 #ifndef MOE_ACTOP
 #define MOE_ACTOP 1
 #endif
-static constexpr ck::index_t ActOP     = MOE_ACTOP;
-static constexpr bool MulRoutedWeight  = false;
-using DeviceOpInstance                 = ck::tensor_operation::device::DeviceMoeGemm
+static constexpr ck::index_t ActOP    = MOE_ACTOP;
+static constexpr bool MulRoutedWeight = false;
+using DeviceOpInstance                = ck::tensor_operation::device::DeviceMoeGemm
     // clang-format off
         <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
                AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   
