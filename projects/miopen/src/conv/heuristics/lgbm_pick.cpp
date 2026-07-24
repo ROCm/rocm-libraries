@@ -298,7 +298,7 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // well-tuned existing heuristics (TunaNet + perf-db) that outperform the LGBM
     // picker, so defer to them. GetDeviceName() strips the SKU suffix, so a bare
     // prefix match covers every SKU (gfx942-mi300x, gfx950-mi355x, ...).
-    if(gfx_id.rfind("gfx942", 0) == 0 || gfx_id.rfind("gfx950", 0) == 0)
+    if(gfx_id.starts_with("gfx942") || gfx_id.starts_with("gfx950"))
     {
         MIOPEN_LOG_I2("lgbm: abstain (arch " << gfx_id << " excluded; using existing heuristics)");
         return {};

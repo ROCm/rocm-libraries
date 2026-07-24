@@ -224,18 +224,19 @@ double LgbmForest::ScoreTree(const Tree& tree, const LgbmEntry* row) const
             // default_left). A None/Zero-type node coerces the NaN to 0.0 first;
             // a Zero-type node then routes an exact zero by default_left, and
             // everything else is the ordinary threshold compare.
-            double fval = is_missing ? 0.0 : e.fvalue;
-            if(is_missing && n.missing_type == kMissingTypeNaN)
-                go_left = n.default_left;
-            else if(n.missing_type == kMissingTypeZero && fval == 0.0)
-                go_left = n.default_left;
-            else
-                go_left = fval <= n.threshold;
+            const double fval          = is_missing ? 0.0 : e.fvalue;
+            const bool decided_missing = (is_missing && n.missing_type == kMissingTypeNaN) ||
+                                         (n.missing_type == kMissingTypeZero && fval == 0.0);
+            go_left = decided_missing ? n.default_left : (fval <= n.threshold);
         }
 
         const int child = go_left ? n.left : n.right;
         if(child < 0)
-            return tree.leaf_values[static_cast<std::size_t>(~child)];
+        {
+            // LightGBM encodes a leaf child as ~leaf_index, so leaf_index is
+            // -child - 1. Compute in the signed domain, then index.
+            return tree.leaf_values[static_cast<std::size_t>(-child - 1)];
+        }
         node = child;
     }
 }

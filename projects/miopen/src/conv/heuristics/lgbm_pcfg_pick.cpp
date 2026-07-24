@@ -245,7 +245,7 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     // perf-config picker there. GetDeviceName() strips the SKU suffix, so a bare
     // prefix match covers every SKU (gfx942-mi300x, gfx950-mi355x, ...). Matches
     // the same exclusion in the layer-1 solver picker (lgbm_pick.cpp).
-    if(gfx_id.rfind("gfx942", 0) == 0 || gfx_id.rfind("gfx950", 0) == 0)
+    if(gfx_id.starts_with("gfx942") || gfx_id.starts_with("gfx950"))
     {
         MIOPEN_LOG_I2("lgbm_pcfg: abstain (arch " << gfx_id
                                                   << " excluded; using existing heuristics)");
