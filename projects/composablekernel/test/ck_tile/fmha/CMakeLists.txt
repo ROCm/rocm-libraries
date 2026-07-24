@@ -217,7 +217,7 @@ function(add_gtest_fwd_quick)
     # Generate only the FP16 feature traits exercised below. The API-specific
     # filters are ordered as fwd, split-KV combine@kernel, append-KV, paged-KV.
     set(quick_codegen_filter
-        "fmha_fwd_d[36][24]_fp16_*_nlogits*_nskip*_nsink*,*d32_fp16_batch*lse*@*d32_fp16_batch*_nlogits_nbias_nmask_lse*_npagedkv_nsink*,*d32_fp16*,*d128_fp16_batch*_nlogits_nbias_nmask_nlse_nskip*_pagedkv_nsink*"
+        "fmha_fwd_d[36][24]_fp16_*_nlogits*_nskip*_nsink*,*d32_fp16_batch*lse*@*d32_fp16_batch*_nlogits_nbias_nmask_lse*_npagedkv_nsink*,*d32_fp16*,*d128_fp16_*_nlogits_nbias_*mask_nlse_nskip*_pagedkv_nsink*"
     )
     add_fmha_quick_codegen(
         ${quick_instance_target}
@@ -242,7 +242,6 @@ function(add_gtest_fwd_quick)
         "TestCkTileFmhaFwd/ElementwiseBias.FmhaFwdFp16/0"
         "TestCkTileFmhaFwd/Alibi.FmhaFwdFp16/0"
         "TestCkTileFmhaFwd/Dropout.FmhaFwdFp16/0"
-        "TestCkTileFmhaFwd/PagedKV.FmhaFwdFp16/72"
         "TestCkTileFmhaFwd/SplitKV.FmhaFwdFp16/0"
         "TestCkTileFmhaFwd/AppendKV.FmhaFwdFp16/1"
     )
@@ -250,6 +249,20 @@ function(add_gtest_fwd_quick)
         test_ck_tile_fmha_quick
         ${quick_test_target}
         ${quick_cases}
+    )
+
+    # Keep paged attention visible as its own quick entry. These cases span
+    # batch/group modes, 128/256-token pages, contiguous/permuted KV layouts,
+    # and regular plus masked/odd sequence shapes while sharing one d128
+    # bounded code-generation family.
+    add_fmha_quick_category_test(
+        test_ck_tile_fmha_paged_quick
+        ${quick_test_target}
+        "TestCkTileFmhaFwd/PagedKV.FmhaFwdFp16/72"
+        "TestCkTileFmhaFwd/PagedKV.FmhaFwdFp16/75"
+        "TestCkTileFmhaFwd/PagedKV.FmhaFwdFp16/83"
+        "TestCkTileFmhaFwd/PagedKV.FmhaFwdFp16/84"
+        "TestCkTileFmhaFwd/PagedKV.FmhaFwdFp16/94"
     )
 endfunction()
 

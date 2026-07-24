@@ -95,6 +95,7 @@ set(CK_TILE_CTEST_QUICK_TESTS
     test_ck_tile_streamk_bf16_persistent_quick
     test_ck_tile_streamk_fp8_quick
     test_ck_tile_fmha_quick
+    test_ck_tile_fmha_paged_quick
     test_ck_tile_fmha_fwd_tuning_quick
     test_ck_tile_fmha_fwd_fp8_quick
     test_ck_tile_fmha_bwd_tuning_quick
