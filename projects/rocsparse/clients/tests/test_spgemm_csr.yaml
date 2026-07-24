@@ -128,6 +128,28 @@ Tests:
   matrix: [rocsparse_matrix_random]
   spgemm_alg: [rocsparse_spgemm_alg_default]
 
+# Coverage: dense output rows to exercise nnz-per-row group kernels 2-5 in
+# csrgemm_numeric_calc / csrgemm_nnz_calc (the generic SpGEMM numeric path).
+# Both A and B are generated with tunedavg here, so the product saturates
+# to hundreds/~thousand non-zeros per output row.
+- name: spgemm_mult_csr_dense
+  category: pre_checkin
+  function: spgemm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  M: [512]
+  N: [512, 1024, 2048]
+  K: [512, 1024]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+  spgemm_alg: [rocsparse_spgemm_alg_default]
+
 - name: spgemm_mult_csr_file
   category: quick
   function: spgemm_csr

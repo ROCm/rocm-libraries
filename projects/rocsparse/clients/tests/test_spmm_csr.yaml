@@ -264,6 +264,82 @@ Tests:
   orderC: [rocsparse_order_column]
 
 ##############################
+# Quick - coverage widening (nnz_split / merge_path column-count dispatch)
+##############################
+# nnz_split NT path: sweep N to hit the n>=256 / >=192 / >=128 / >=64 main
+# kernels plus the <=1/2/4/8/16/32 remainder kernels in csrmm_template_nnz_split.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [64, 100, 128, 160, 192, 200, 256, 260]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# nnz_split NN path: small N to hit the n>=8/4/2/1 main + <=1/2/4/8 remainder.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [1, 2, 3, 5, 9, 13]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# merge_path NT path: sweep N across the same column-count dispatch chain.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [64, 100, 128, 160, 192, 200, 256, 260]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# merge_path NN path.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [1, 2, 3, 5, 9, 13, 32]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+##############################
 # Precheckin
 ##############################
 - name: spmm_csr
