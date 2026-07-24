@@ -116,6 +116,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_conversion.cpp
   unit_test_host_extra.cpp
   unit_test_host_precond.cpp
+  unit_test_host_info.cpp
   unit_test_host_level2.cpp
   unit_test_host_level3.cpp
   unit_test_host_generic.cpp
