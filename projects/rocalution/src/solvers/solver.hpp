@@ -170,7 +170,15 @@ namespace rocalution
   * - Print() to show solver information.
   * - ReBuildNumeric() to only re-build the solver numerically (if possible).
   * - MoveToHost() and MoveToAccelerator() to offload the solver (including
-  *   preconditioners and sub-solvers) to the host/accelerator.
+  *   preconditioners and sub-solvers) to the host/accelerator. If a preconditioner is
+  *   associated with the solver, it is moved automatically to the accelerator when the
+  *   solver is moved.
+  *
+  * \note Clear() frees all data in the solver, including the associated preconditioner.
+  * The solver is no longer associated with that preconditioner. The preconditioner is
+  * not destroyed; Preconditioner::Clear() is called on it. The solver destructor also
+  * calls Clear(). When the solver and preconditioner are declared separately, manually
+  * call Clear() on the solver rather than relying on the destructor.
   *
   * \tparam OperatorType - can be LocalMatrix, GlobalMatrix or LocalStencil
   * \tparam VectorType - can be LocalVector or GlobalVector
@@ -529,6 +537,8 @@ namespace rocalution
   * dense and then the selected method will be applied. These methods are not very
   * optimal and due to the fact that the matrix is converted to a dense format, these
   * methods should be used only for very small matrices.
+  *
+  * \note These methods can only be used with local-type problems.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
