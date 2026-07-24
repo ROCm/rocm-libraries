@@ -5,6 +5,15 @@ This document proposes a planning layer between `rocke.helpers.transforms` and
 semantic source of truth while preventing complex convolution and attention
 descriptors from lowering into repeated hot-loop VALU address arithmetic.
 
+> **Status: future design.** The proposed `rocke/coord/` modules,
+> `offset_expr()`, `address_plan()`, and `AddressPlan` interfaces below are not
+> implemented. Current code provides narrower building blocks:
+> `TensorDescriptor.move()` and `unmerge_magic()` in
+> `python/rocke/helpers/transforms.py`, plus `make_tensor_coordinate()` and
+> `move_tensor_coordinate()` in `python/rocke/helpers/tensor_view.py`. Those
+> helpers reduce specific address-recomputation patterns but do not implement
+> the general planning and uniformity-analysis layer proposed here.
+
 ## Problem
 
 CK DSL inherits CK Tile's coordinate-transform model: a tensor descriptor is a
