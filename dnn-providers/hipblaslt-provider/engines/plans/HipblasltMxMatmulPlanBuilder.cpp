@@ -16,6 +16,7 @@
 #include "HipblasltMxMatmulPlan.hpp"
 #include "HipblasltMxMatmulPlanBuilder.hpp"
 #include "HipblasltUtils.hpp"
+#include "Workarounds.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -443,6 +444,7 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
+    REJECT_IF_WORKAROUND_ISSUE_9962(handle);
     try
     {
         auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);

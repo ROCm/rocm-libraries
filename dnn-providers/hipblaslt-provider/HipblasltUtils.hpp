@@ -103,4 +103,8 @@ bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType
 
 bool isTypeMxOcp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 
+// GPU arch (e.g. "gfx942", ":"-suffix stripped) of the device backing the given
+// HIP stream. Throws HipdnnPluginException on HIP failure.
+std::string getDeviceArch(hipStream_t stream);
+
 } // namespace hipblaslt_plugin::hipblaslt_utils
