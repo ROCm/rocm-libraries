@@ -53,13 +53,11 @@ namespace rocsparse
     using csrsm_solve_tuple
         = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
 
-#define CSRSM_SOLVE_CONFIG(I_, J_, T_)                                             \
-    {                                                                              \
-        csrsm_solve_tuple(I_, J_, T_),                                             \
-            csrsm_solve_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                 typename rocsparse::indextype_traits<J_>::type_t, \
-                                 typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
+#define CSRSM_SOLVE_CONFIG(I_, J_, T_)                                      \
+    {csrsm_solve_tuple(I_, J_, T_),                                         \
+     csrsm_solve_template<typename rocsparse::indextype_traits<I_>::type_t, \
+                          typename rocsparse::indextype_traits<J_>::type_t, \
+                          typename rocsparse::datatype_traits<T_>::type_t>}
 
     static const std::map<csrsm_solve_tuple, csrsm_solve_t> s_csrsm_solve_dispatch{
         {CSRSM_SOLVE_CONFIG(

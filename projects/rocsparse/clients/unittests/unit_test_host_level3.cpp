@@ -728,21 +728,21 @@ namespace
 
         size_t                 buffer_size = 0;
         const rocsparse_status bs_status   = ut_csrsm_buffer_size(handle,
-                                                                ta,
-                                                                tb,
-                                                                m,
-                                                                nrhs,
-                                                                nnz,
-                                                                &alpha,
-                                                                descr,
-                                                                A.val,
-                                                                A.row_ptr,
-                                                                A.col_ind,
-                                                                B,
-                                                                ldb,
-                                                                info,
-                                                                rocsparse_solve_policy_auto,
-                                                                &buffer_size);
+                                                                  ta,
+                                                                  tb,
+                                                                  m,
+                                                                  nrhs,
+                                                                  nnz,
+                                                                  &alpha,
+                                                                  descr,
+                                                                  A.val,
+                                                                  A.row_ptr,
+                                                                  A.col_ind,
+                                                                  B,
+                                                                  ldb,
+                                                                  info,
+                                                                  rocsparse_solve_policy_auto,
+                                                                  &buffer_size);
         if(bs_status == rocsparse_status_success)
         {
             device_vector<char> buffer{buffer_size ? buffer_size : 1};
@@ -962,19 +962,19 @@ namespace
 
         size_t                 buffer_size = 0;
         const rocsparse_status bs_status   = ut_bsrsm_buffer_size(handle,
-                                                                dir,
-                                                                ta,
-                                                                tx,
-                                                                mb,
-                                                                nrhs,
-                                                                nnzb,
-                                                                descr,
-                                                                A.val,
-                                                                A.row_ptr,
-                                                                A.col_ind,
-                                                                bd,
-                                                                info,
-                                                                &buffer_size);
+                                                                  dir,
+                                                                  ta,
+                                                                  tx,
+                                                                  mb,
+                                                                  nrhs,
+                                                                  nnzb,
+                                                                  descr,
+                                                                  A.val,
+                                                                  A.row_ptr,
+                                                                  A.col_ind,
+                                                                  bd,
+                                                                  info,
+                                                                  &buffer_size);
         if(bs_status == rocsparse_status_success)
         {
             device_vector<char> buffer{buffer_size ? buffer_size : 1};
@@ -1693,7 +1693,7 @@ namespace
                           rocsparse_status_success);
 
                 size_t                 buffer_size = 0;
-                const rocsparse_status bs_status   = rocsparse_spsm(handle,
+                const rocsparse_status bs_status = rocsparse_spsm(handle,
                                                                   ta,
                                                                   rocsparse_operation_none,
                                                                   &alpha,
