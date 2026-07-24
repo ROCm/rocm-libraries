@@ -18,12 +18,12 @@ enum AttentionImplementation : byte {
 
 table SdpaAttributes (umd_opcode: "sdpa_fwd") {
     // Required input tensor UIDs
-    q_tensor_uid:             long (umd_operand, umd_name: "Q");
-    k_tensor_uid:             long (umd_operand, umd_name: "K");
-    v_tensor_uid:             long (umd_operand, umd_name: "V");
+    q_tensor_uid:             long (umd_operand, umd_name: "q");
+    k_tensor_uid:             long (umd_operand, umd_name: "k");
+    v_tensor_uid:             long (umd_operand, umd_name: "v");
 
     // Required output tensor UID
-    o_tensor_uid:             long (umd_result, umd_name: "O");
+    o_tensor_uid:             long (umd_result, umd_name: "o");
 
     // Optional input tensor UIDs
     attn_mask_tensor_uid:     long = null (umd_operand, umd_name: "attn_mask");      // Additive attention bias (Bias)

@@ -93,13 +93,13 @@ TEST(UmdOpSchemaRegistry, SdpaRequiredOperandsAndResult)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
-    for(std::string_view role : {"Q", "K", "V"})
+    for(std::string_view role : {"q", "k", "v"})
     {
         const auto* op = findOperand(e, role);
         ASSERT_NE(op, nullptr) << role;
         EXPECT_FALSE(op->optional) << role;
     }
-    const auto* o = findResult(e, "O");
+    const auto* o = findResult(e, "o");
     ASSERT_NE(o, nullptr);
     EXPECT_FALSE(o->optional);
 }
@@ -173,13 +173,13 @@ TEST(UmdOpSchemaRegistry, AccessorRoundTripReadsLiveValues)
     const void* a = attrs;
 
     std::int64_t uid = 0;
-    ASSERT_TRUE(findOperand(e, "Q")->read(a, uid));
+    ASSERT_TRUE(findOperand(e, "q")->read(a, uid));
     EXPECT_EQ(uid, 101);
-    ASSERT_TRUE(findOperand(e, "K")->read(a, uid));
+    ASSERT_TRUE(findOperand(e, "k")->read(a, uid));
     EXPECT_EQ(uid, 102);
-    ASSERT_TRUE(findOperand(e, "V")->read(a, uid));
+    ASSERT_TRUE(findOperand(e, "v")->read(a, uid));
     EXPECT_EQ(uid, 103);
-    ASSERT_TRUE(findResult(e, "O")->read(a, uid));
+    ASSERT_TRUE(findResult(e, "o")->read(a, uid));
     EXPECT_EQ(uid, 201);
 }
 
