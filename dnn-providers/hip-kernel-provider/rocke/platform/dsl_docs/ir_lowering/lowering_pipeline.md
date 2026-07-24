@@ -55,13 +55,9 @@ comgr_executable    # relocatable -> HSACO
 total
 ```
 
-Typical total times observed during validation (gfx950, ROCm 7.0.2, warm `libamd_comgr`):
-
-```text
-implicit-GEMM conv (this repo, build_implicit_gemm_conv):   ~17 ms
-universal GEMM (smallest hero shape):                       ~10-30 ms
-elementwise / reduce / norm / transpose:                    ~5-15 ms
-```
+Use these fields to measure the current revision in the target environment.
+Compile-time point estimates are not retained here because they depend on host,
+toolchain, process warmth, and kernel shape.
 
 ## LLVM Lowering Details
 
@@ -69,7 +65,10 @@ Entry point: `core/lower_llvm.py::lower_kernel_to_llvm(kernel: KernelDef) -> str
 
 `_Lowerer` walks regions and emits LLVM IR text:
 
-- Datalayout (`_DATALAYOUT`) is the clang-emitted gfx950 layout, copied verbatim, and is served per target by the ISA backend (`core/isa/backend.py::backend_for(arch)`); the supported CDNA/RDNA targets share this layout/triple on the ROCm releases targeted. If the ROCm version changes, regenerate via `clang -target amdgcn-amd-amdhsa -mcpu=gfx950 -emit-llvm -S`.
+- Datalayout is selected by COMGR/LLVM flavor through
+  `_datalayout_for_flavor()` (`_DATALAYOUT_LLVM20` or
+  `_DATALAYOUT_LLVM22`), not by gfx target. Drift tests regenerate the
+  clang-emitted layouts for the supported flavors.
 - Target triple: `amdgcn-amd-amdhsa`.
 - Only intrinsics actually used by the kernel are declared (see `_INTRINSIC_DECLS`).
 - LDS allocations from `tile.smem_alloc` become module-level `addrspace(3)` globals collected in a pre-pass; uses become GEPs.
@@ -140,11 +139,19 @@ call ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1(
 - `DATA_FORMAT = 4` (32-bit dword)
 - `NUM_FORMAT = 4` (UINT)
 
-This is the canonical bounds-checked configuration on CDNA. The word3 encoding is ISA-specific: the RDNA backends (`core/isa/backend.py`) override it with the gfx10/11/12 value `0x31014000`, since `0x00027000` makes raw buffer loads/stores read 0 / drop on RDNA. Out-of-range byte offsets silently return zero on load and are dropped on store. The "OOB sentinel" pattern used everywhere in the DSL relies on this: a `select(valid, real_off_bytes, INT32_MAX)` makes false-mask lanes safe without a software branch.
+This is the canonical bounds-checked configuration on the gfx9/gfx950
+backends. The word3 encoding is ISA-specific: the gfx11, gfx12, and gfx1250
+backends use `0x31014000`, because `0x00027000` is not valid for those target
+rows. Out-of-range byte offsets silently return zero on load and are dropped on
+store. The "OOB sentinel" pattern used everywhere in the DSL relies on this: a
+`select(valid, real_off_bytes, INT32_MAX)` makes false-mask lanes safe without a
+software branch.
 
 `INT32_MAX = 2147483647 = (1 << 31) - 1` is the default `oob_sentinel` in `AsyncTileLoader.issue` and the loader helpers.
 
-A wrong DW3 flag (the `0` default in the LLVM intrinsic without these encoded bits) yields a single dword load with no bounds check, which then misreads padded boundary positions as the next row of A. This was a real correctness bug fixed during the implicit-GEMM conv bake-off (see `runbook_compliance.md` empirical pass).
+A wrong DW3 flag can break the OOB-zero contract and make padded lanes read
+neighboring data. Keep the target-specific encoding in the ISA backend and
+cover both in-range and sentinel-offset behavior in lowering/numeric tests.
 
 ## COMGR
 
@@ -253,7 +260,9 @@ See `runtime/limitations.md` for what these tools can and cannot tell you.
 
 Production lowering assumes:
 
-- the wave size of the target: CDNA (gfx942/gfx950) is wave64 and uses MFMA lane mappings; RDNA (gfx1151/gfx1201) is wave32 and uses WMMA atoms (`wave_size=32`). Lane mappings depend on the chosen target's wave size.
+- wave size from `ArchTarget` and matrix availability from the selected
+  target's `MmaCatalog`. Both are fixed by gfx; atom choice is not inferred
+  from wave width. Lane mappings depend on the selected target.
 - valid address space and vector type combinations.
 - explicit synchronization inserted by the builder/helper; lowering does not add barriers.
 - structured control flow regions are well formed (matching `scf_yield` operand count, etc.).

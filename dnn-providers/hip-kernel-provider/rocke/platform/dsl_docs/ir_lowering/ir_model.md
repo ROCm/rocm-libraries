@@ -218,7 +218,7 @@ mfma_f32_32x32x16_f16(a, b, c)     # <8 x half>, <8 x half>, <16 x float>  (gfx9
 mfma_f32_4x4x4_f16(a, b, c)        # 16 independent 4x4 matmuls per wave
 ```
 
-The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`. These MFMA atoms target the CDNA (wave64) backends. For RDNA (wave32) targets the builder also exposes WMMA matrix ops (`wmma_f32_16x16x16_f16` / `wmma_f32_16x16x16_bf16`, and the gfx12 variants) backed by `WmmaAtom` in `helpers/atoms.py`; all matrix ops route through the generic `mma()` builder method.
+The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 variants with full lane mapping and dispatch. See `reference/mfma_atom_catalog.md`. MFMA and WMMA availability is selected by the target's matrix catalog, independently of its wave width. The gfx11/gfx12 targets expose WMMA matrix ops (`wmma_f32_16x16x16_f16` / `wmma_f32_16x16x16_bf16`, and the gfx12 variants) backed by `WmmaAtom` in `helpers/atoms.py`; all matrix ops route through the generic `mma()` builder method.
 
 ### Wave / cross-lane
 
@@ -226,7 +226,7 @@ The shipped `MFMA_F16_ATOMS` catalog in `helpers/atoms.py` exposes the five f16 
 readfirstlane(v)         # llvm.amdgcn.readfirstlane.{i32,i64}; broadcast lane 0
 pin_sgpr(v)              # asm volatile("" : "+s"(x)); keep v in SGPR across uses
 to_sgpr_u32(v)           # pin_sgpr(readfirstlane(v))
-wave_all(pred)           # i32 = 1 iff all lanes' pred != 0
+wave_all(pred)           # full-EXEC wave64 only in current LLVM lowering
 wave_any(pred)           # i32 = 1 iff any lane's pred != 0
 wave_ballot(pred)        # i64 mask of lanes satisfying pred
 ds_bpermute(addr, data)  # llvm.amdgcn.ds.bpermute  (per-lane source-lane index in bits [7:2])
@@ -235,6 +235,10 @@ ds_read_tr16_b64(smem, *indices, dtype=F16)
                          # 16x16 fp16 transpose-read returning <4 x dtype> per lane
                          # exactly the v_mfma_f32_16x16x16_f16 B-operand layout
 ```
+
+The current LLVM `wave_all` compares the i64 ballot to `-1`. An all-true
+wave32 ballot is only `0x00000000ffffffff`, so wave32 use requires the
+target-aware lowering and coverage tracked in the documentation audit.
 
 ### Synchronization
 

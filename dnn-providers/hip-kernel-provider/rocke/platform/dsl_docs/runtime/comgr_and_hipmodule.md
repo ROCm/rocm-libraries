@@ -30,14 +30,20 @@ AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE  = 0x7
 AMD_COMGR_STATUS_SUCCESS                         = 0
 ```
 
-Library loading: the runtime defers `dlopen` until the first comgr call,
-then resolves the library in this order (see
-`runtime/hip_module.py::_candidate_lib_paths`):
+Library loading is lazy. The shared resolver is
+`runtime/runtime_coexistence.py::_candidate_lib_paths`; on POSIX it checks, in
+order:
 
-1. `$ROCKE_COMGR_LIB` if set (explicit override; full path).
+1. `$ROCKE_COMGR_LIB` if set (explicit full-path override).
 2. `<torch>/lib/libamd_comgr.so` if `torch` is already in `sys.modules`.
-3. `/opt/rocm/lib/libamd_comgr.so`, then `.so.3` for the SONAME.
+3. Real ROCm installations discovered without importing torch:
+   `$ROCM_PATH/lib`, `$ROCM_HOME/lib`, then version-sorted
+   `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`, including requested SONAMEs.
 4. Bare `libamd_comgr.so` via the dynamic linker's search path.
+
+On Windows the same resolver also checks torch-bundled DLLs, the
+`rocm-sdk-core` wheel, and the `bin` directories under `HIP_PATH`, `ROCM_PATH`,
+and `ROCM_HOME` before the bare DLL name.
 
 The torch-bundled-lib step exists because PyTorch+ROCm wheels (e.g.
 `torch>=2.12 / rocm7.2`) ship their own `libamdhip64.so` and
@@ -51,7 +57,7 @@ bundled libs (and lazily resolving on first use, so import order does
 not matter) keeps both halves of the process talking to the same
 runtime. `ComgrError` is raised if no candidate loads.
 
-The same resolution order applies to `libamdhip64.so` (env var
+The same shared resolver applies to `libamdhip64.so` (env var
 `ROCKE_HIP_LIB`, SONAME `.so.7`).
 
 ## Entry Point

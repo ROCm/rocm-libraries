@@ -7,7 +7,8 @@ This page is blunt. It lists what the DSL does not currently handle generally, p
 `rocke` is a high-performance AMDGPU kernel DSL, not a full Python-to-GPU compiler. It expects kernel authors to understand:
 
 - GPU grid / block decomposition;
-- wave lane behavior (wave64 on CDNA gfx942 / gfx950, wave32 on RDNA gfx1151 / gfx1201);
+- wave lane behavior (wave64 on gfx90a/gfx942/gfx950; wave32 on
+  gfx11-generic/gfx1151/gfx1201/gfx1250);
 - LDS allocation, layout, and bank-conflict semantics;
 - MFMA operand and accumulator layouts;
 - explicit synchronization (waitcnt, barriers);
@@ -18,15 +19,23 @@ It is strongest for kernels whose performance depends on explicit CK Tile-style 
 
 ## Architecture
 
-Current default and most-tested target: `amdgcn-amd-amdhsa--gfx950` (CDNA3 / MI355X-class). The DSL also runs on the other CDNA target `gfx942` (and `gfx940` for the atoms that exist there), and on the RDNA targets `gfx1151` (RDNA3.5, wave32 WMMA) and `gfx1201` (RDNA4, wave32 WMMA, including attention). Backends are registered in `core/isa/backend.py` (`backend_for`).
+Current default and byte-identity baseline: `amdgcn-amd-amdhsa--gfx950`.
+`known_arches()` currently lists gfx90a, gfx942, gfx950, gfx11-generic,
+gfx1151, gfx1201, and gfx1250. This is the platform target catalog, not a claim
+that every kernel family accepts every target; family validators own that
+contract. Backends are registered in `core/isa/backend.py` (`backend_for`).
 
 Risk areas when changing architecture:
 
-- MFMA / WMMA intrinsic availability — K-packed MFMA atoms (`f16_16x16x32`, `f16_32x32x16`) are gfx950-only; bf16 16x16x16 lowers via the `_1k` variant only on CDNA; the RDNA targets use WMMA atoms (16x16x16) instead of MFMA.
-- `s_waitcnt` encoding (vmcnt bit layout differs by family; RDNA gfx11/gfx12 use a different field layout than gfx9/10).
+- MFMA / WMMA intrinsic availability — K-packed MFMA atoms
+  (`f16_16x16x32`, `f16_32x32x16`) are gfx950-only; the selected target's
+  catalog and backend determine whether a bf16 MFMA or WMMA form is legal.
+  Wave width alone does not select the atom.
+- `s_waitcnt` encoding (vmcnt bit layout differs by target family; gfx11/gfx12 use a different field layout than gfx9/10).
 - LDS bank-conflict expectations.
 - COMGR target ISA behavior.
-- Wave size differs by family: CDNA (gfx942 / gfx950) is wave64; RDNA (gfx1151 / gfx1201) is wave32.
+- Wave size comes from `ArchTarget`: gfx90a/gfx942/gfx950 are wave64;
+  gfx11-generic/gfx1151/gfx1201/gfx1250 are wave32.
 
 Do not assume a kernel tuned for one target is optimal — or even valid — on another.
 
@@ -174,52 +183,28 @@ Runtime launchers assume:
 
 CI / dev machines without matching ROCm libraries can still build docs, import `rocke`, run the static unit suite, and inspect Python code. They cannot run end-to-end HSACO compile + launch.
 
-## Multi-GPU and RCCL
+## Multi-GPU and Collectives
 
-The DSL has **no first-class multi-GPU support**. Verified by inspecting the entire `rocke` tree on this checkout:
+Each rocKE kernel launch targets one current HIP device; the IR and kernel ABI
+do not contain collectives. The runtime does have the device plumbing needed to
+respect a host-selected device:
 
-- No collective operations in the IR (no `all_reduce`, `all_gather`, `broadcast`, `reduce_scatter`, `p2p` ops in `core/ir.py`).
-- No collective helpers in `helpers/` (no `rccl`, `nccl`, `collective`, `tensor_parallel`, `sharded` symbols anywhere).
-- No RCCL or NCCL ctypes bindings in `runtime/comgr.py` or `runtime/hip_module.py`.
-- No `hipSetDevice` / `hipGetDevice` / `hipDeviceCanAccessPeer` / `hipMemGetAccess` wrappers.
-- No multi-process / SPMD launching infrastructure (no `MPI`, no `torch.distributed.init_process_group`, no process-rank handling).
-- Every shipped kernel (GEMM / conv / attention / small ops) is a single-device kernel; the bake-off and parity numbers in `optimization/measured_results.md` are all per-GPU.
+- `runtime/hip_module.py` binds `hipSetDevice`, `hipGetDevice`, and
+  `hipGetDeviceCount`; `_ensure_hip_init()` preserves an already-selected
+  device and selects device 0 only when none is current.
+- `runtime/torch_interop.py::resolve_stream(stream, device=None)` resolves the
+  current torch stream for the requested device.
+- `benchmark/gemm/tests/test_fp16_rcr_multigpu.py` is a guarded two-or-more-GPU
+  smoke test for compiling a sweep once and running independent GEMM variants
+  across visible gfx950 GPU lanes.
 
-What does work for multi-GPU usage of the DSL:
-
-- **Per-device launchers**: build one `KernelLauncher` under each device's context. The `Runtime` singleton's `load_module` binds the HSACO to whatever HIP context is current at construction time, so the launcher is implicitly device-scoped.
-
- ```python
- launchers = {}
- for d in range(torch.cuda.device_count()):
- with torch.cuda.device(d):
- launchers[d] = KernelLauncher(
- hsaco=art.hsaco, kernel_name=art.kernel_name,
- signature=elementwise_signature(spec))
-
- for d, L in launchers.items():
- with torch.cuda.device(d):
- A = torch.arange(N, dtype=torch.float16, device=f"cuda:{d}")
- C = torch.empty_like(A)
- L({"A": A, "C": C, "N": N},
- config=LaunchConfig(grid=grid, block=block))
- ```
-
- This pattern is verified end-to-end by `dsl_docs/development/verify_dsl_docs.py` on the GPU available to this box; the per-device launcher constructed under `torch.cuda.device(d)` correctly launches on that device.
-
-- **Torch-stream-aware launches**: `runtime/torch_interop.py::resolve_stream(stream, device=None)` honors `torch.cuda.current_stream(device).cuda_stream`, so the standard pattern of allocating tensors and launching all under `torch.cuda.device(d):` interoperates with torch's caching allocator on the right device.
-
-- **Composing with `torch.distributed` (RCCL on ROCm)**: the user runs `torch.distributed.init_process_group(backend="nccl")` (PyTorch's "nccl" backend on ROCm is implemented by RCCL — `librccl.so`). DSL kernels then execute on each rank's local device; collectives (`torch.distributed.all_reduce`, `all_gather`, etc.) execute outside the DSL on a separate communication stream. The DSL never invokes RCCL itself.
-
-What does **not** work:
-
-- Fused compute + collective in a single DSL kernel (e.g. all-reduce-fused GEMM).
-- Cross-device tensor arguments inside one launcher call. A kernel arg's pointer is validated by the AMDGPU buffer descriptor against the device the kernel runs on; a pointer from a peer device is treated as out-of-range and silently clamped to zero.
-- HIP IPC handles (`hipIpcGetMemHandle` / `hipIpcOpenMemHandle`) for shared GPU buffers across processes. There are no helpers; the user must call the HIP API directly via ctypes.
-- Peer access (`hipDeviceEnablePeerAccess`). No helper; same situation.
-- A unified per-process `Runtime` that can target multiple devices interleaved within one Python thread. The `_HIP_RUNTIME` singleton in `runtime/launcher.py` is module-global; `_runtime()` returns it without context inspection. Multi-device usage relies on `torch.cuda.device(d)` properly swapping the current HIP context around each launcher build / call, which works in practice but is not formally encapsulated.
-
-In summary: **`rocke` is a single-device kernel DSL.** It composes cleanly with multi-GPU PyTorch programs that use `torch.distributed` + RCCL for collectives, but it does not provide collectives, sharding helpers, peer-access wrappers, or fused communication kernels of its own. If you need collectives in the inner loop, wire them in around the DSL kernel via `torch.distributed`; if you need a fused all-reduce-GEMM today, this DSL is not the right tool yet.
+That support is independent per-device execution, not a collective runtime.
+There are no RCCL/NCCL IR operations, fused communication kernels, peer-access
+helpers, or HIP IPC helpers in the platform. Applications may compose rocKE
+kernels with `torch.distributed`/RCCL outside the kernel, but those collectives
+are owned and synchronized by the application. Do not pass a pointer owned by
+another device to a launcher or infer collective correctness from the
+multi-GPU GEMM sweep smoke test.
 
 ## Benchmark Methodology
 
@@ -234,7 +219,10 @@ Benchmark numbers are only meaningful when methodology is labeled. Always label:
 - shape and dtype;
 - baseline implementation (which CK Tile config? which Triton kernel? which torch ref?).
 
-Single-run results are especially risky. The runbook records observed bimodality (`groups=32` 16c direct-conv oscillating between ~108 and ~86 TFLOPS within one script) and cold-cache drops (a CK Tile config dropping from ~250 to ~80 TFLOPS on the first run of a fresh process).
+Single-run results are especially risky: frequency state, cache warmth, module
+load, and execution order can create bimodal or cold-start outliers. Use
+interleaved repeated measurements and report the distribution rather than
+copying an old point estimate into a current support claim.
 
 ## Extension Guidelines
 

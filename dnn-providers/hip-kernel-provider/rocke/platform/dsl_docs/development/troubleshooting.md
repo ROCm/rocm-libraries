@@ -28,7 +28,7 @@ build from current source in `/tmp` is the source of truth.
 
 ### The provider build can't find hipDNN headers / `_deps` / `SDPA`
 A by-hand build dropped a required flag. The full set lives in
-[`../../../BUILD.md`](../../../BUILD.md) ("the flags that get
+[`../../BUILD.md`](../../BUILD.md) ("the flags that get
 forgotten") — `-D__HIP_PLATFORM_AMD__`, the generated `build/` include set
 including `_deps`, the SDPA enable, and an explicit fresh `ROCKE_LIB`. Prefer
 `tools/build.sh`, which bakes them all.

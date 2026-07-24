@@ -12,7 +12,8 @@ There are two interchangeable lowering engines that emit byte-identical AMDGPU L
 
 The backend emits AMDGPU LLVM IR text directly. Benefits:
 
-- very fast iteration vs hipcc / template instantiation (typical end-to-end build under 30 ms warm);
+- direct in-process compilation through COMGR without a compiler-frontend
+  subprocess;
 - primitives map closely to AMDGPU intrinsics;
 - generated text can be inspected, disassembled, and diffed;
 - no external compiler frontend needed.
@@ -28,12 +29,23 @@ Costs (you own them):
 
 ```text
 target triple = "amdgcn-amd-amdhsa"
-target datalayout = (clang-emitted gfx950 string; see _DATALAYOUT in core/lower_llvm.py)
+target datalayout = (clang-emitted string for the selected LLVM flavor)
 ```
 
-`_DATALAYOUT` was copied verbatim from `clang -target amdgcn-amd-amdhsa -mcpu=gfx950 -emit-llvm -S`. The datalayout/triple are now served per target by an ISA backend (`core/isa/backend.py::backend_for(arch)`), keyed off the chosen gfx; the supported CDNA and RDNA targets share this clang-verified layout/triple on the ROCm releases targeted, but other ISA details (buffer-resource word3, `s_waitcnt` encoding, MFMA vs WMMA matrix ops) diverge per backend. If you bump the ROCm version or move to a different target, regenerate the datalayout. Mismatched datalayouts produce subtle codegen drift; the comgr stage rarely flags them.
+`core/lower_llvm.py` stores clang-derived `_DATALAYOUT_LLVM20` and
+`_DATALAYOUT_LLVM22` strings and selects between them with
+`_datalayout_for_flavor()`. The choice follows the COMGR/LLVM flavor, not the
+gfx target. ISA backends own the target-dependent details such as
+buffer-resource word3, wait encoding, and matrix-op emission. If a supported
+LLVM flavor changes, regenerate its layout with clang and update the drift
+guard.
 
-The default `compile_kernel` ISA is `amdgcn-amd-amdhsa--gfx950`, and gfx950 (MI355X) is the default-target / byte-identical baseline. The lowerer also supports gfx942 (CDNA, wave64) and the RDNA targets gfx1151 (RDNA3/3.5) and gfx1201 (RDNA4) — wave32 WMMA, including attention. The CDNA targets use MFMA atoms where the chosen shape exists (16x16x16, 32x32x8, 4x4x4); the K-packed atoms (16x16x32, 32x32x16) are gfx950-only. RDNA targets use WMMA atoms (`core/isa/backend.py`) instead of MFMA.
+The default `compile_kernel` ISA and byte-identity baseline are gfx950. The
+lowerer selects wave size from `ArchTarget` and atom availability from that
+target's `MmaCatalog`; neither is chosen from the other. The current catalog
+records wave64 for gfx90a/gfx942/gfx950 and wave32 for
+gfx11-generic/gfx1151/gfx1201/gfx1250. Query the selected catalog for legal
+MFMA or WMMA shapes instead of inferring them from wave width or a family name.
 
 ## LLVM Intrinsic Flavor
 
@@ -47,7 +59,7 @@ A small set of AMDGPU intrinsic signatures changed between LLVM 20 (ROCm 7.0 / 7
 Detection (`core/lower_llvm.py::_detect_llvm_flavor`):
 
 1. `ROCKE_LLVM_FLAVOR` env var (`llvm20` or `llvm22`).
-2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (the torch-bundled lib → `torch.version.hip` when rocke ends up driving torch's bundled comgr; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. ROCm `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the runtime's torch-bundled-lib resolution (`runtime/hip_module.py::_torch_bundled_lib`).
+2. **The resolved comgr-lib vintage** — `runtime/comgr.py::resolved_lib_path()` / `resolved_lib_rocm_version()` report which `libamd_comgr` will actually load (the torch-bundled lib → `torch.version.hip` when rocke ends up driving torch's bundled comgr; else the install's `<root>/.info/version`). This is a pure lookup, no dlopen. ROCm `>= 7.2` → `llvm22`, else `llvm20`. This is the **primary** signal — it mirrors the shared runtime resolver in `runtime/runtime_coexistence.py::_torch_bundled_lib`.
 3. `torch.version.hip` / `/opt/rocm/.info/version` — fallbacks when the comgr-lib path cannot be resolved.
 4. Default: `llvm22`.
 
@@ -59,7 +71,10 @@ Tests / callers who need a specific flavor pass `lower_kernel_to_llvm(kernel, ll
 
 ## Wave Size
 
-The CDNA targets (gfx942, gfx950) are wave64: `MfmaAtom.lane_to_output`, `lane_id`, `ds_bpermute` addressing, and the loader/epilogue helpers assume wave64 there. The RDNA targets (gfx1151, gfx1201) are wave32 and use the WMMA atoms (`wave_size=32` in `helpers/atoms.py`); helpers that span both — e.g. the attention softmax wave-reduce (`helpers/attention.py`) — are parameterized by `wave_size`. Pick lane mappings for the wave size of the chosen target.
+gfx90a/gfx942/gfx950 are wave64 and use MFMA fragment mappings.
+gfx11-generic/gfx1151/gfx1201/gfx1250 are wave32 and use target-specific WMMA mappings.
+Helpers that span both, such as attention softmax wave reduction, are
+parameterized by `wave_size`; always use the selected target's layout map.
 
 ## LLVM Type Coverage
 
@@ -92,7 +107,12 @@ buffer  -> addrspace(8)   (from llvm.amdgcn.make.buffer.rsrc; see
                            20 vs 21+ signature split)
 ```
 
-Buffer-resource operations are modeled as AMDGPU buffer descriptors rather than normal pointer GEPs. They are essential for OOB-safe access in conv, attention, tails, and epilogues. The DWORD3 ("word3") format/OOB-select bits are ISA-specific: the CDNA value `0x00027000` is not binary-compatible with RDNA, so the RDNA backends (`Gfx11RdnaBackend` / `Gfx12RdnaBackend` in `core/isa/backend.py`) override it with the gfx10/11/12 word3 (`0x31014000`). Each ISA backend exposes the right value via `buffer_rsrc_word3`.
+Buffer-resource operations are modeled as AMDGPU buffer descriptors rather
+than normal pointer GEPs. They are essential for OOB-safe access in conv,
+attention, tails, and epilogues. The DWORD3 ("word3") format/OOB-select bits
+are ISA-specific: gfx9/gfx950 use `0x00027000`, while the gfx11, gfx12, and
+gfx1250 backends use `0x31014000`. Each ISA backend exposes the right value via
+`buffer_rsrc_word3`.
 
 The canonical masked access pattern is:
 
@@ -182,7 +202,9 @@ A new primitive should be added in layers:
 6. Add analysis hooks (`analysis/ir.py`, `analysis/isa.py`) if the primitive should be counted in generated IR / ISA.
 7. Add a minimal instance / example / test that emits and verifies it.
 
-For performance primitives, document the mapping in `primitives/intrinsics_and_primitives.md` and add a `runbook_compliance.md` row.
+For performance primitives, document the mapping in
+`primitives/intrinsics_and_primitives.md` and update the implementation map in
+`optimization/runbook_compliance.md` when it exposes a new public lever.
 
 ## Debugging Backend Problems
 
