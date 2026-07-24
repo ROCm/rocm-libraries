@@ -93,14 +93,18 @@ int run_contraction_multi_abd_example(int argc, char* argv[])
     };
 
     // Create host tensors for each A, B, D, E with explicit layout-aware strides.
-    const auto a_desc = ck_tile::HostTensorDescriptor(
-        std::vector<std::size_t>(A_dims.begin(), A_dims.end()), to_size_t_vec(a_strides_v));
-    const auto b_desc = ck_tile::HostTensorDescriptor(
-        std::vector<std::size_t>(B_dims.begin(), B_dims.end()), to_size_t_vec(b_strides_v));
-    const auto d_desc = ck_tile::HostTensorDescriptor(
-        std::vector<std::size_t>(E_dims.begin(), E_dims.end()), to_size_t_vec(d_strides_v));
-    const auto e_desc = ck_tile::HostTensorDescriptor(
-        std::vector<std::size_t>(E_dims.begin(), E_dims.end()), to_size_t_vec(e_strides_v));
+    const auto a_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(A_dims.begin(), A_dims.end()),
+                                      to_size_t_vec(a_strides_v));
+    const auto b_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(B_dims.begin(), B_dims.end()),
+                                      to_size_t_vec(b_strides_v));
+    const auto d_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(E_dims.begin(), E_dims.end()),
+                                      to_size_t_vec(d_strides_v));
+    const auto e_desc =
+        ck_tile::HostTensorDescriptor(std::vector<std::size_t>(E_dims.begin(), E_dims.end()),
+                                      to_size_t_vec(e_strides_v));
 
     ck_tile::HostTensor<A0DataType> a0_host(a_desc);
     ck_tile::HostTensor<A1DataType> a1_host(a_desc);
@@ -142,9 +146,9 @@ int run_contraction_multi_abd_example(int argc, char* argv[])
                                                         a1_dev.GetDeviceBuffer()};
     const std::array<const void*, NumBTensor> bs_ptr = {b0_dev.GetDeviceBuffer()};
     const std::array<const void*, NumDTensor> ds_ptr = {d0_dev.GetDeviceBuffer()};
-    const std::array<std::vector<ck_tile::index_t>, NumATensor> As_dims    = {A_dims, A_dims};
-    const std::array<std::vector<ck_tile::index_t>, NumBTensor> Bs_dims    = {B_dims};
-    const std::array<std::vector<ck_tile::index_t>, NumDTensor> Ds_dims    = {E_dims};
+    const std::array<std::vector<ck_tile::index_t>, NumATensor> As_dims = {A_dims, A_dims};
+    const std::array<std::vector<ck_tile::index_t>, NumBTensor> Bs_dims = {B_dims};
+    const std::array<std::vector<ck_tile::index_t>, NumDTensor> Ds_dims = {E_dims};
     const std::array<std::vector<ck_tile::index_t>, NumATensor> As_strides = {A0_strides,
                                                                               A1_strides};
     const std::array<std::vector<ck_tile::index_t>, NumBTensor> Bs_strides = {B0_strides};
