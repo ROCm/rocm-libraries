@@ -184,6 +184,12 @@ if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
   exit 1
 fi
 
+# The fetched compiler artifact installs the host OpenMP runtime here.
+LLVM_HOST_RUNTIME_DIR="${ROCM_PATH}/lib/llvm/lib/x86_64-unknown-linux-gnu"
+if [[ ! -f "${LLVM_HOST_RUNTIME_DIR}/libomp.so" ]]; then
+  echo "OpenMP runtime not found: ${LLVM_HOST_RUNTIME_DIR}/libomp.so" >&2
+  exit 1
+fi
 
 derive_rocjitsu_gpu_target
 select_rocjitsu_config
@@ -205,7 +211,7 @@ mkdir -p "${RACE_REPORT_DIR}"
 # that use it to find the ROCm install root.
 export ROCM_PATH
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LLVM_HOST_RUNTIME_DIR}:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "ROCM_PATH=${ROCM_PATH}"
