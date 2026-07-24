@@ -188,7 +188,21 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
         # we failed to locate it and HAS_PARENT_PATH is false.
         cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
         if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+            # With LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON the runtime library
+            # uses a target-triple subdirectory and drops the arch suffix from
+            # the filename (e.g. libclang_rt.asan.so instead of
+            # libclang_rt.asan-x86_64.so).  Try the no-suffix form as a
+            # fallback before giving up.
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan.so
+                OUTPUT_VARIABLE ASAN_LIB_PATH
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
+            if(NOT result)
+                message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+            endif()
         endif()
         # Disable a few asan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0,malloc_context_size=0,quarantine_size_mb=0")
@@ -204,7 +218,21 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
         # we failed to locate it and HAS_PARENT_PATH is false.
         cmake_path(HAS_PARENT_PATH TSAN_LIB_PATH result)
         if(NOT result)
-            message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so ")
+            # With LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON the runtime library
+            # uses a target-triple subdirectory and drops the arch suffix from
+            # the filename (e.g. libclang_rt.tsan.so instead of
+            # libclang_rt.tsan-x86_64.so).  Try the no-suffix form as a
+            # fallback before giving up.
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan.so
+                OUTPUT_VARIABLE TSAN_LIB_PATH
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+            cmake_path(HAS_PARENT_PATH TSAN_LIB_PATH result)
+            if(NOT result)
+                message(FATAL_ERROR "Failed to locate libclang_rt.tsan-x86_64.so ")
+            endif()
         endif()
         # Disable a few tsan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${TSAN_LIB_PATH}" "TSAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
