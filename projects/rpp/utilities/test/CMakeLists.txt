@@ -40,6 +40,7 @@ add_executable(rpp_tests
     src/tests/image/color/hue_test.cpp
     src/tests/image/color/lut_test.cpp
     src/tests/image/color/saturation_test.cpp
+    src/tests/image/color/histogram_equalize_test.cpp
     src/tests/image/color/color_twist_test.cpp
     src/tests/image/arithmetic/magnitude_test.cpp
     src/tests/image/effects/solarize_test.cpp
