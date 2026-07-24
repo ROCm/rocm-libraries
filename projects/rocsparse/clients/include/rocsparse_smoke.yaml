@@ -242,6 +242,7 @@ Tests:
     - sddmm: *level3_shared_mixed_index
     - spsm_coo: *level3_shared_mixed_index
     - spsm_csr: *level3_shared_mixed_index
+    - spsm_csc: *level3_shared_mixed_index
     - spmm_bell: *level3_shared
     - spmm_coo: *level3_shared
     - spmm_csc: *level3_shared_mixed_index
