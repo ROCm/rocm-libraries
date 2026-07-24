@@ -109,6 +109,7 @@ rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
 set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_device_level1.cpp
+  unit_test_primitives.cpp
   unit_test_host_level1.cpp
   unit_test_host_level1_classic.cpp
   unit_test_host_auxiliary.cpp
@@ -116,9 +117,32 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_extra.cpp
   unit_test_host_precond.cpp
   unit_test_host_level2.cpp
+  unit_test_host_level3.cpp
+  unit_test_host_generic.cpp
+  unit_test_host_reordering.cpp
 )
 
-add_executable(rocsparse-unit-test-device ${ROCSPARSE_UNIT_TEST_DEVICE_SOURCES})
+# Internal rocsparse::primitives building blocks under test. Like the host-pure
+# utilities compiled into rocsparse-unit-test, these template instantiations are
+# hidden in librocsparse (CXX_VISIBILITY_PRESET "hidden") and cannot be reached
+# by linking roc::rocsparse, so the primitive translation units are compiled
+# directly into this GPU test binary. They pull in rocprim, hence roc::rocprim
+# is added to the link libraries below. (No library source changes.)
+set(ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/unit_test_primitives_support.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_inclusive_scan.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_exclusive_scan.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_max.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_find_sum.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_run_length_encode.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_keys.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
+)
+
+add_executable(rocsparse-unit-test-device
+  ${ROCSPARSE_UNIT_TEST_DEVICE_SOURCES}
+  ${ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES}
+)
 
 target_compile_definitions(rocsparse-unit-test-device PRIVATE GOOGLE_TEST)
 target_compile_options(rocsparse-unit-test-device PRIVATE
@@ -134,9 +158,12 @@ target_include_directories(rocsparse-unit-test-device PRIVATE
 )
 
 # hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).
+# roc::rocprim supplies the rocprim headers used by the compiled-in
+# library/src/primitives translation units.
 target_link_libraries(rocsparse-unit-test-device PRIVATE
   GTest::gtest
   roc::rocsparse
+  roc::rocprim
   hip::host
   hip::device
 )
