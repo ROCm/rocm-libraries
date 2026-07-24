@@ -13,14 +13,15 @@
 7. [Kernel Source](#7-kernel-source)
 8. [Adapters and Extensibility](#8-adapters-and-extensibility)
 9. [Observability and Diagnostics](#9-observability-and-diagnostics)
-10. [Packaging and Delivery](#10-packaging-and-delivery)
-11. [Worked Example: SDPA as a UKD](#11-worked-example-sdpa-as-a-ukd)
-12. [Phased Delivery](#12-phased-delivery)
-13. [Multiple Kernels and Composition](#13-multiple-kernels-and-composition)
-14. [Risks](#14-risks)
-15. [Open Questions](#15-open-questions)
-16. [References and Prior Art](#16-references-and-prior-art)
-17. [Glossary](#17-glossary)
+10. [Tooling](#10-tooling)
+11. [Packaging and Delivery](#11-packaging-and-delivery)
+12. [Worked Example: SDPA as a UKD](#12-worked-example-sdpa-as-a-ukd)
+13. [Phased Delivery](#13-phased-delivery)
+14. [Multiple Kernels and Composition](#14-multiple-kernels-and-composition)
+15. [Risks](#15-risks)
+16. [Open Questions](#16-open-questions)
+17. [References and Prior Art](#17-references-and-prior-art)
+18. [Glossary](#18-glossary)
 
 ---
 
@@ -104,9 +105,9 @@ follow-on ([Section 8.3](#83-future-jit-and-normalized-providers)).
 
 **Scope.** This document frames the system and its direction; each descriptor format (match, dispatch,
 engine, heuristic) and subsystem (the matcher, the expression language, packaging, and the drop-in loader) is
-designed in its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)). The first deliverable is the
+designed in its own follow-up RFC ([Section 13.2](#132-follow-up-rfcs)). The first deliverable is the
 single-kernel path. Multi-kernel launch and composition
-([Section 13](#13-multiple-kernels-and-composition)) are separate follow-ups, not part of this initial design.
+([Section 14](#14-multiple-kernels-and-composition)) are separate follow-ups, not part of this initial design.
 A named escape hatch covers a step that genuinely needs C++ (Sections [5](#5-matching-and-the-umd) and
 [6](#6-dispatch-and-workspace)); anything needing a new C-API surface or runtime dependency stays a
 full provider. This complements build-time codegen rather than replacing it.
@@ -121,9 +122,9 @@ full provider. This complements build-time codegen rather than replacing it.
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
 | Kernel sources | `kpack`, `hsaco`, and the rocKE adapter (build-only, lowers to `hsaco`) first; `hip` follows | new authoring adapters, DSLs ([§8.1](#81-kernel-source-adapters)) |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables ([§8.2](#82-heuristic-adapters)) |
-| Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§10](#10-packaging-and-delivery)) |
-| Multi-kernel launch program (e.g. SDPA backward) | None | composition ([§13.1](#131-several-kernels-for-one-operation)) |
-| Selection composition: UCD pipeline | None | composition ([§13.2](#132-a-pipeline-of-separately-chosen-kernels)) |
+| Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§11](#11-packaging-and-delivery)) |
+| Multi-kernel launch program (e.g. SDPA backward) | None | composition ([§14.1](#141-several-kernels-for-one-operation)) |
+| Selection composition: UCD pipeline | None | composition ([§14.2](#142-a-pipeline-of-separately-chosen-kernels)) |
 | JIT compilation; normalized providers | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
 
 ---
@@ -148,9 +149,9 @@ when it applies, how it launches, how it is ranked, and its schema from its KDP 
 ([Section 1](#1-overview)). The KDP's one UDD holds one or more **Launches**, each a dispatch step paired
 at runtime with the UKD source that fills it: a simple kernel is a one-Launch UDD, and a multi-launch
 kernel such as SDPA backward is a several-Launch UDD run in order
-([Section 13](#13-multiple-kernels-and-composition)). The remaining term is the **UCD (Universal
+([Section 14](#14-multiple-kernels-and-composition)). The remaining term is the **UCD (Universal
 Composite Descriptor)**, which composes stages that each resolve to a UKD (future work,
-[Section 13](#13-multiple-kernels-and-composition)).
+[Section 14](#14-multiple-kernels-and-composition)).
 
 ![How the descriptors relate: an engine owning one heuristic and one metadata schema; a KDP binding a matcher set, that engine, and one UDD over a vector of child kernels](../images/ukd_concepts.svg)
 
@@ -404,7 +405,7 @@ a larger graph, without a fixed count, is the looser JIT / general-matching mode
 
 **Architecture** is handled at pack selection rather than as a runtime criterion, at least for AOT: a
 pack carries code objects for the arches it targets, so its per-architecture `kpack` manifest
-([Section 10](#10-packaging-and-delivery)) gates both loadability and arch applicability, and no arch
+([Section 11](#11-packaging-and-delivery)) gates both loadability and arch applicability, and no arch
 criterion runs at match time. A JIT pack that generates per arch may instead reference arch as a
 `$device` field at match time; that path is deferred to the JIT follow-up
 ([Section 8.3](#83-future-jit-and-normalized-providers)).
@@ -433,7 +434,7 @@ dims) against the kernel instance's tile constants (its `$kernel.*` metadata):
 **Fusion is a day-one capability.** Because a matcher's pattern is a multi-node subgraph, one matcher can
 match a fused op sequence, bind all its tensors at once, and hand it to a single UKD (the fused case is
 below). Fusion is distinct from composition, running one graph as several kernels
-([Section 13](#13-multiple-kernels-and-composition)), which goes the opposite direction and is future work.
+([Section 14](#14-multiple-kernels-and-composition)), which goes the opposite direction and is future work.
 
 The matcher below matches SDPA forward: its `nodes` bind the tensor tokens, its `criteria` constrain
 them:
@@ -556,7 +557,7 @@ in a **UDD (Universal Dispatch Descriptor)**, referenced by ID: one UDD per KDP,
 kernel. A UDD holds one or more **Launches**, each a dispatch step
 (grid, block, shared memory, workspace, and argument signature); a kernel's source fills a Launch's slot
 to run it. A single-kernel UDD has one Launch, shown below; a multi-launch UDD has several run in order
-([Section 13](#13-multiple-kernels-and-composition)). Because the launch ABI is written once here, every
+([Section 14](#14-multiple-kernels-and-composition)). Because the launch ABI is written once here, every
 kernel in the pack inherits it; a kernel that needs a different one belongs in a different pack.
 
 **One expression language**, the same one the criteria use ([Section 5](#5-matching-and-the-umd)),
@@ -619,7 +620,7 @@ logical dimension order (as listed in its `shape`), independent of its physical 
 The generic launcher then does the same steps for every kernel: resolve the argument sources against
 the bound variables, evaluate the grid/block/shared/workspace formulas, pack the arguments, load the
 kernel's code object, and launch. A parsed dispatch spec, cached kernel handle, and preallocated
-argument buffer keep this close to hand-written launch cost (see [Section 12.1](#121-testing-and-performance)).
+argument buffer keep this close to hand-written launch cost (see [Section 13.1](#131-testing-and-performance)).
 
 ![The generic dispatch dataflow: a bound symbol table feeds the UDD's formula evaluator and argument resolver](../images/ukd_dispatch_flow.svg)
 
@@ -638,7 +639,7 @@ owns everything those fields would have provided, including reporting the kernel
 query the `workspace_bytes` formula would otherwise answer). Matching still happens declaratively
 through the UMD, so only the launch itself becomes C++. On the drop-in path a custom plan must be a
 built-in registered handler, subject to the source-trust rules of
-[Section 10](#10-packaging-and-delivery).
+[Section 11](#11-packaging-and-delivery).
 
 ---
 
@@ -646,7 +647,7 @@ built-in registered handler, subject to the source-trust rules of
 
 A kernel source points at code through a small tagged union; it is the one piece unique to a UKD, and
 it fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one source; a
-multi-launch UKD supplies one per Launch ([Section 13](#13-multiple-kernels-and-composition)). The
+multi-launch UKD supplies one per Launch ([Section 14](#14-multiple-kernels-and-composition)). The
 initial variants:
 
 ```jsonc
@@ -702,7 +703,7 @@ The rocKE prototype ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207
 concrete case and gets its own **build-only** kernel-source adapter: rocKE sources are not directly
 loadable, so the adapter runs the rocKE build step to lower them into `hsaco` code objects ahead of
 time, which the runtime then loads like any other prebuilt code object. This is the adapter migrated in
-the first implementation work ([Section 12](#12-phased-delivery)).
+the first implementation work ([Section 13](#13-phased-delivery)).
 
 ### 8.2 Heuristic Adapters
 
@@ -743,7 +744,7 @@ whatever was matched.
 Longer term, providers normalize onto one implementation: AOT sources become KDPs; a
 C-API provider becomes a custom JIT version; future fusions are ingested the same way; and the model
 is expressive enough to describe compositions *within* a provider
-([Section 13](#13-multiple-kernels-and-composition)) where support is extended through
+([Section 14](#14-multiple-kernels-and-composition)) where support is extended through
 composition instead of a hand-fused kernel.
 
 ---
@@ -773,14 +774,46 @@ The provider surfaces:
   mismatch is caught here rather than corrupting the launch. Anything that fails, an unbound token, an
   unknown operator, a dangling reference, is a clear error that quarantines the offending descriptor,
   never a runtime surprise.
+- **Operator opt-out**: an engine or an individual kernel pack (KDP) can be disabled at runtime by id or
+  name through an environment variable (for example `HIPDNN_DISABLE_ENGINES` and `HIPDNN_DISABLE_KDPS`,
+  each taking a comma-separated list of ids or names), so a problematic pack or engine is removed from
+  selection without rebuilding or deleting files. Disabled descriptors are reported in the load
+  diagnostics like any other exclusion.
 
 These make a descriptor-backed kernel as debuggable as hand-written C++, and are what let an operator
-trust a system whose behavior lives in data. The tooling surface is built out alongside the phases of
-[Section 12](#12-phased-delivery).
+trust a system whose behavior lives in data. The tooling that authors and operators use to work with
+these descriptors is described in [Section 10](#10-tooling), built out alongside the phases of
+[Section 13](#13-phased-delivery).
 
 ---
 
-## 10. Packaging and Delivery
+## 10. Tooling
+
+The descriptor formats in this document are the base representation: precise, diffable, and
+machine-checkable, but deliberately low-level. Hand-writing, reviewing, and validating them at scale is
+not the intended long-term workflow, so tooling is expected to grow around the format during rollout.
+This section names the categories without committing to specific tools or interfaces; each is added as
+the need becomes concrete.
+
+- **Authoring**: generators that emit descriptors from higher-level inputs (an existing kernel's build
+  config, a template, or an interactive definition) and mint their ids, so an author does not assemble
+  descriptor files by hand.
+- **Validation**: a linter and schema checker that runs the load-time checks
+  ([Section 9](#9-observability-and-diagnostics)) offline, plus deeper checks such as criteria
+  satisfiability, UDD-to-ABI agreement, and KMD/UHD feature-signature consistency, so problems surface at
+  author time rather than at load.
+- **Bundling and packaging**: tools that assemble a KDP and its per-arch code objects into a
+  distributable bundle with its manifest ([Section 11](#11-packaging-and-delivery)) and verify arch and
+  toolchain provenance.
+- **Inspection**: viewers that render a descriptor set the way the provider sees it (the resolved plan,
+  the why-not trace, the catalog of engines and packs), so a change can be reviewed without deploying it.
+
+None of these is specified here. The intent is that authoring, validation, and inspection tooling is
+added as needed during implementation, on top of the stable descriptor format this RFC defines.
+
+---
+
+## 11. Packaging and Delivery
 
 The two ingestion paths differ only in where a kernel's code comes from:
 
@@ -809,7 +842,7 @@ including restricting drop-in to prebuilt code objects, are deferred to the deli
 
 ---
 
-## 11. Worked Example: SDPA as a UKD
+## 12. Worked Example: SDPA as a UKD
 
 The SDPA path prototyped in the rocKE work ([PR #9207](https://github.com/ROCm/rocm-libraries/pull/9207)),
 a graph allowlist plus a grid-symbol table plus hand-written argument wiring, collapses into a matcher,
@@ -893,18 +926,18 @@ Every SDPA-specific line of hand-written C++ maps to a field:
 The generic launcher runs it with no SDPA-specific code, and a sibling kernel that launches the same way
 is one more entry in this pack's kernel vector; one that launches differently is its own small KDP,
 reusing the shared matchers where it can. This descriptor set is what
-the phased delivery ([Section 12](#12-phased-delivery)) produces: the pieces land and are used to
+the phased delivery ([Section 13](#13-phased-delivery)) produces: the pieces land and are used to
 implement SDPA for rocKE as the first real target, and the existing hand-written engines are replaced
 by their descriptor-backed equivalents over time.
 
 ---
 
-## 12. Phased Delivery
+## 13. Phased Delivery
 
-Each piece is designed in its own follow-up RFC ([Section 12.2](#122-follow-up-rfcs)), one per
+Each piece is designed in its own follow-up RFC ([Section 13.2](#132-follow-up-rfcs)), one per
 descriptor format bundled with the subsystem it drives, so the design is agreed before code lands.
 Implementation proceeds against that series and is validated throughout against the SDPA path from the
-rocKE work with the checks of [Section 12.1](#121-testing-and-performance). This RFC does not commit to
+rocKE work with the checks of [Section 13.1](#131-testing-and-performance). This RFC does not commit to
 a strict build order; the pieces are implemented as their designs land.
 
 No existing engine is converted until the system has enough support to demonstrate a kernel running end
@@ -912,10 +945,10 @@ to end from descriptor data. Only then does migration begin, and it is increment
 a hand-written engine and its descriptor-backed replacement coexist until the generic one reaches
 parity on the graphs that engine covers, at which point the hand-written code is retired.
 
-Multi-kernel launch and composition ([Section 13](#13-multiple-kernels-and-composition)) are
+Multi-kernel launch and composition ([Section 14](#14-multiple-kernels-and-composition)) are
 separate follow-ups, not committed in this plan.
 
-### 12.1 Testing and Performance
+### 13.1 Testing and Performance
 
 UKD does not introduce a new testing strategy; it reuses hipDNN's (`docs/Testing.md`,
 `docs/testing/TestingStrategy.md`) and slots into the established tiers. A UKD-backed kernel runs
@@ -931,7 +964,7 @@ Three areas are new to UKD:
 
 - **Fuzzing the descriptor pipeline.** The loader, matcher, and expression interpreter parse input
   that is untrusted on the drop-in path. UKD adds a seed corpus and a fuzzer over them, run under the
-  existing ASAN build, backing the fail-closed requirement of [Section 14](#14-risks).
+  existing ASAN build, backing the fail-closed requirement of [Section 15](#15-risks).
 - **Generic-vs-hand-written parity.** A cross-engine test runs the same graph through the generic path
   and a hand-written engine and asserts numerical agreement, proving the generic launch and argument
   packing equivalent to the code they replace, and that a loaded UKD leaves the selection unchanged
@@ -942,27 +975,27 @@ Three areas are new to UKD:
   baseline. Loading is eager for UEDs and matchers and lazy for the rest ([Section 3](#3-how-it-works)),
   so that cost is paid once at first use.
 
-### 12.2 Follow-up RFCs
+### 13.2 Follow-up RFCs
 
 The pieces this document frames but does not design each land in a focused follow-up RFC. Each bundles
 a descriptor format with the subsystem it drives, and together they form the planned series below.
 
 | Follow-up RFC | Covers |
 |---|---|
-| KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§10](#10-packaging-and-delivery)) |
+| KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§11](#11-packaging-and-delivery)) |
 | UMD + graph matcher | The match format plus the pattern and criteria-expression model, the shared-matcher evaluator (run-once memoization, fail-prune), custom-operation registry, and arbitration ([§5](#5-matching-and-the-umd)) |
 | UED + engine registry | The engine format plus the registry that populates the generic engine and its plan builders from descriptor data |
 | UDD + expression language | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument language and its safe interpreter ([§6](#6-dispatch-and-workspace)) |
 | UHD + kernel selection | The heuristic format plus the generic selector that ranks the kernels matching a graph |
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
-| Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules ([§10](#10-packaging-and-delivery)) |
+| Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules ([§11](#11-packaging-and-delivery)) |
 | Adapters | Registering kernel-source and heuristic adapters ([§8](#8-adapters-and-extensibility)) |
-| Composition | Multi-kernel launch, intermediate buffers, and UCD pipelines ([§13](#13-multiple-kernels-and-composition)) |
+| Composition | Multi-kernel launch, intermediate buffers, and UCD pipelines ([§14](#14-multiple-kernels-and-composition)) |
 | JIT and normalized providers | JIT sources, general pattern matching, and normalizing existing providers onto the descriptor system ([§8.3](#83-future-jit-and-normalized-providers)) |
 
 ---
 
-## 13. Multiple Kernels and Composition
+## 14. Multiple Kernels and Composition
 
 So far a kernel descriptor is one kernel: it lives in a KDP, matched by the pack's matchers and launched
 by the pack's one shared UDD. That one kernel may already cover a *fused* multi-op subgraph, where a
@@ -985,12 +1018,12 @@ capabilities go further, and they differ in kind. Both are future work:
 Both are the target design, presented so the single-kernel format does not foreclose them; both are
 future work, not committed in this RFC or its first deliverable, and each will be specified in its own
 follow-up RFC. The pack's UDD resolves to a program: an ordered sequence of Launches over a shared
-symbol table and a shared set of intermediate buffers ([Section 13.3](#133-intermediate-buffers)). The
+symbol table and a shared set of intermediate buffers ([Section 14.3](#143-intermediate-buffers)). The
 single-Launch case is the one-step form, so nothing authored today changes.
 
 ![A multi-kernel launch UKD (several kernels, one selection) versus composition (a pipeline of independently-chosen kernels)](../images/ukd_composition.svg)
 
-### 13.1 Several Kernels for One Operation
+### 14.1 Several Kernels for One Operation
 
 The pack's one UDD generalizes from one Launch to several; nothing moves onto the UKD. The graph is
 matched once by the pack's matchers and its variables bound once; every Launch shares that binding and
@@ -1060,7 +1093,7 @@ family member (d64) is one more UKD supplying its own sources against the same U
 the launch structure, a variant that needs a different Launch count or wiring shares nothing at that
 level and belongs in its own pack.
 
-### 13.2 A Pipeline of Separately-Chosen Kernels
+### 14.2 A Pipeline of Separately-Chosen Kernels
 
 Folding `Transpose -> Work -> Transpose` into one UKD would be wrong, because the transposes are
 reusable, separately-tuned kernels that each deserve their own heuristic. A **composite descriptor
@@ -1079,7 +1112,7 @@ two ways:
 
 Either way the stage's `heuristic` ranks the resolved candidates and picks one, exactly as a single
 UKD is chosen within an engine. Because a resolved stage may itself be a multi-step program
-([Section 13.1](#131-several-kernels-for-one-operation)), the composite's plan is the concatenation of
+([Section 14.1](#141-several-kernels-for-one-operation)), the composite's plan is the concatenation of
 its stages' programs, with each stage's intermediates remapped into the composite's buffer set.
 
 ```jsonc
@@ -1110,7 +1143,7 @@ The choice between a fused kernel and a decomposed pipeline is not made inside a
 alternative is its own engine, so ordinary engine-selection ([Section 2](#2-the-descriptors))
 picks between them, with no new composite cost model.
 
-### 13.3 Intermediate Buffers
+### 14.3 Intermediate Buffers
 
 Both capabilities share one new data model: **virtual tensors**. A multi-launch UDD (or a composite)
 declares named intermediate regions that exist only across its Launches and are never part of the
@@ -1142,9 +1175,9 @@ while its own private scratch remains the `{"kind": "workspace"}` argument of a 
 Each region has a single writer and is live from that write to its last read, so regions whose
 lifetimes do not overlap can later share storage. The initial model forgoes that and simply sums the
 regions; the liveness and storage-sharing model is deferred to the composition follow-up
-([Section 12.2](#122-follow-up-rfcs)).
+([Section 13.2](#132-follow-up-rfcs)).
 
-### 13.4 Execution and Selection
+### 14.4 Execution and Selection
 
 The launcher gains one outer loop: sub-allocate each region from the plan workspace once, then for
 each Launch bind arguments, evaluate the grid/block/shared formulas, load the code object, pack, and
@@ -1163,7 +1196,7 @@ is preceded by a write with matching dtype and shape, every region is written be
 stage graph is acyclic, and a composite is offered on a given architecture only if every mandatory
 stage has at least one candidate kernel for that architecture.
 
-### 13.5 What This Adds
+### 14.5 What This Adds
 
 | Capability | Existing piece | Extension |
 |---|---|---|
@@ -1179,7 +1212,7 @@ that resolves to ordinary UKDs.
 
 ---
 
-## 14. Risks
+## 15. Risks
 
 This proposal is high-level by design, so several hard areas are called out here and deferred to
 follow-up RFCs rather than solved now.
@@ -1187,10 +1220,10 @@ follow-up RFCs rather than solved now.
 - **Performance.** Generic launch and plan-time matching add overhead; matching is compiled and indexed
   by root opcode so match cost does not grow linearly with descriptor count, though per-candidate
   constraint, predicate, and expression evaluation is separate and unbounded by that index. The overhead
-  target and its validation live in [Section 12.1](#121-testing-and-performance).
+  target and its validation live in [Section 13.1](#131-testing-and-performance).
 - **Trust and enablement.** Prebuilt drop-in inherits install-tree trust and is opt-in and off by
   default; runtime JIT of author source is a separate opt-in with trust rules deferred to the delivery
-  follow-up RFC ([Section 10](#10-packaging-and-delivery)).
+  follow-up RFC ([Section 11](#11-packaging-and-delivery)).
 - **Hostile and malformed input.** The descriptor loader, the matcher, and the expression interpreter
   parse input that, on the drop-in path, may be untrusted or simply malformed. They must be bounded
   (recursion, step count, and size limits) and fail closed rather than crash, and shape and workspace
@@ -1205,7 +1238,7 @@ follow-up RFCs rather than solved now.
   architecture and toolchain are gated before load. Additive schema evolution and JIT cache-key
   composition (architecture, toolchain, driver and runtime version, source hash, descriptor version)
   will be defined per subsystem.
-- **Composition correctness (future).** When composition ([Section 13](#13-multiple-kernels-and-composition))
+- **Composition correctness (future).** When composition ([Section 14](#14-multiple-kernels-and-composition))
   is pursued, concatenating and remapping programs must preserve each sub-program's buffer
   assumptions (dtype, shape, alignment, single-writer, no aliasing between concurrently-live regions),
   all steps must run on the plan stream, and a composite must have per-arch stage coverage. The
@@ -1213,11 +1246,11 @@ follow-up RFCs rather than solved now.
 
 ---
 
-## 15. Open Questions
+## 16. Open Questions
 
 1. **Source trust for drop-in:** what is the minimum trust requirement for drop-in JIT source, from
    restricting drop-in to prebuilt code objects, to bounding compiler inputs, to a separate opt-in?
-2. **Composition:** if composition ([Section 13](#13-multiple-kernels-and-composition)) is pursued,
+2. **Composition:** if composition ([Section 14](#14-multiple-kernels-and-composition)) is pursued,
    should multi-kernel launch land before composite pipelines?
 3. **Expression coverage:** validate the expression language against several real kernels (for
    example a split-K GEMM with workspace, a normalization, and a ragged attention that forces the
@@ -1227,7 +1260,7 @@ follow-up RFCs rather than solved now.
 
 ---
 
-## 16. References and Prior Art
+## 17. References and Prior Art
 
 The design borrows established ideas rather than inventing new ones. These systems informed specific
 choices; none is a dependency.
@@ -1246,7 +1279,7 @@ choices; none is a dependency.
 
 ---
 
-## 17. Glossary
+## 18. Glossary
 
 - **UKD (Universal Kernel Descriptor):** one launchable kernel, carrying no logic of its own: its source
   details (a compiled kernel, or how to build it AOT; one source per Launch for a multi-launch pack) and
@@ -1278,7 +1311,7 @@ choices; none is a dependency.
 - **Launch:** one dispatch step in a UDD (grid, block, shared memory, argument signature) with a named
   source slot, paired at runtime with the UKD source that fills it. A UDD holds one Launch for a
   single-kernel pack, several run in order for a multi-launch pack
-  ([Section 13](#13-multiple-kernels-and-composition)); it is always one shared UDD per pack.
+  ([Section 14](#14-multiple-kernels-and-composition)); it is always one shared UDD per pack.
 - **KDP (Kernel Descriptor Pack):** one cohesive file binding a **set of matchers** (referenced by ID,
   shared across packs), **one engine**, and **one dispatch descriptor**, over a **vector of child
   kernels**, so a family of kernels is not hundreds of near-duplicate files. The engine carries the
@@ -1286,7 +1319,7 @@ choices; none is a dependency.
   dispatch. One of each is intentional: a kernel whose launch ABI, engine, or matcher set differs belongs
   in a different pack.
 - **UCD (Universal Composite Descriptor):** a pipeline of stages, each resolving to a UKD chosen by
-  its own heuristic ([Section 13.2](#132-a-pipeline-of-separately-chosen-kernels)).
+  its own heuristic ([Section 14.2](#142-a-pipeline-of-separately-chosen-kernels)).
 - **id / name:** every descriptor carries a stable `id`, a GUID minted by the author so ids never
   collide without a central authority, and a human-readable `name`; references (a KDP's `matchers`,
   `engine`, and `dispatch`, and a UED's `heuristic` and `metadata`) use the id.
@@ -1295,13 +1328,13 @@ choices; none is a dependency.
 - **ABI:** the calling convention a kernel expects, its argument layout and order plus launch
   configuration, which a UDD encodes as data.
 - **SDPA:** scaled dot-product attention, the running example operation (forward in
-  [Section 11](#11-worked-example-sdpa-as-a-ukd), backward in [Section 13.1](#131-several-kernels-for-one-operation)).
+  [Section 12](#12-worked-example-sdpa-as-a-ukd), backward in [Section 14.1](#141-several-kernels-for-one-operation)).
 - **Engine-selection heuristic / kernel-selection heuristic:** the two selection levels; the
   engine-selection heuristic (existing) picks the engine, the kernel-selection heuristic (a UHD) picks
   the kernel within it.
 - **Program / Launches:** a pack's UDD resolves to an ordered sequence of Launches sharing one symbol
   table and one set of intermediate buffers; a single-Launch UDD is the one-step case
-  ([Section 13](#13-multiple-kernels-and-composition)).
+  ([Section 14](#14-multiple-kernels-and-composition)).
 - **Intermediate buffer:** a named scratch region with a dtype and symbolic shape, written by one
   Launch and read by later ones; workspace size is the sum of a program's regions.
 - **Engine:** a named group of kernels with a stable identity; hipDNN selects among engines, then a
