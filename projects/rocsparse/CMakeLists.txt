@@ -380,10 +380,24 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocsparse-coverage_%m.profraw" ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
+    # Also fold in the standalone unit-test binaries so their host-side coverage
+    # of librocsparse is counted. The %m module hash keeps profraw names distinct
+    # per binary; they match the rocsparse-coverage_*.profraw merge glob below.
+    # Wrapped in || true so a unit-test failure cannot abort the coverage upload.
+    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test || true"
+    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device || true"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
   add_dependencies(coverage_analysis rocsparse)
+  # Build the unit-test binaries as part of coverage (best-effort: only if the
+  # client tests are enabled in this configuration).
+  if(TARGET rocsparse-unit-test)
+    add_dependencies(coverage_analysis rocsparse-unit-test)
+  endif()
+  if(TARGET rocsparse-unit-test-device)
+    add_dependencies(coverage_analysis rocsparse-unit-test-device)
+  endif()
 
   find_program(
     LLVM_PROFDATA
