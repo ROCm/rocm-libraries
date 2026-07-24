@@ -876,3 +876,106 @@ TEST_CASE("Attention: L2 estimate with splitting", "[attention]") {
     }
   }
 }
+
+/* ======================================================================================== */
+/* Causal attention tests                                                                   */
+/* ======================================================================================== */
+
+TEST_CASE("Attention: causal_active_kv_tiles_for_qtile", "[attention][causal]") {
+  // Using test helper from common.hpp (not a public API)
+
+  // Square, tile-aligned: MT_M = MT_N = 128, M = N = 4096 -> grid = 32.
+  // Q-tile m (0-indexed) attends KV-tiles [0 .. m], i.e. (m+1) tiles.
+  const size_t MT = 128, M = 4096, N = 4096, grid_n = 32;
+  REQUIRE(causal_active_kv_tiles_for_qtile(0, MT, MT, M, N, grid_n) == 1);
+  REQUIRE(causal_active_kv_tiles_for_qtile(1, MT, MT, M, N, grid_n) == 2);
+  REQUIRE(causal_active_kv_tiles_for_qtile(31, MT, MT, M, N, grid_n) == 32);
+
+  // Always at least the diagonal tile.
+  REQUIRE(causal_active_kv_tiles_for_qtile(0, MT, MT, M, N, grid_n) >= 1);
+
+  // Bottom-right alignment: N > M shifts the diagonal by (N - M) keys.
+  // M = 256 (grid_m=2), N = 4096 (grid_n=32), off = 3840 = 30 tiles.
+  // Q-tile 0 covers rows [0,128), last row 127, max_key = 127 + 3840 = 3967 -> 31 tiles.
+  REQUIRE(causal_active_kv_tiles_for_qtile(0, MT, MT, 256, 4096, 32) == 31);
+  // Q-tile 1 covers rows [128,256), last row 255, max_key = 255 + 3840 = 4095 -> 32 tiles.
+  REQUIRE(causal_active_kv_tiles_for_qtile(1, MT, MT, 256, 4096, 32) == 32);
+}
+
+TEST_CASE("Attention: causal_active_tile_pairs", "[attention][causal]") {
+  using origami::attention::causal_active_tile_pairs;
+
+  // Square, tile-aligned: grid = 32 -> triangular sum 32*33/2 = 528.
+  REQUIRE(causal_active_tile_pairs(32, 32, 128, 128, 4096, 4096) == 528);
+
+  // Bounded to [grid_m, grid_m*grid_n].
+  const size_t pairs = causal_active_tile_pairs(16, 16, 128, 128, 2048, 2048);
+  REQUIRE(pairs == 16 * 17 / 2);
+  REQUIRE(pairs >= 16);
+  REQUIRE(pairs <= 16 * 16);
+
+  // Decode scenario: single Q-tile (M=1), large KV context (N=1024)
+  // grid_m=1, grid_n=8, offset=1023, offset_tiles=7, result = 7*1 + 1*2/2 = 8
+  REQUIRE(causal_active_tile_pairs(1, 8, 128, 128, 128, 1024) == 8);
+}
+
+TEST_CASE("Attention: causal total latency lower than non-causal", "[attention][causal]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - causal < non-causal") {
+      auto hardware = make_hardware(gpu_arch);
+      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+
+      auto noncausal = make_problem(4096, 4096, 128, origami::transpose_t::T,
+                                    origami::transpose_t::N, 1, 0, 32, false);
+      auto causal    = make_problem(4096, 4096, 128, origami::transpose_t::T,
+                                    origami::transpose_t::N, 1, 0, 32, true);
+
+      double lat_noncausal = origami::attention::compute_total_latency(noncausal, hardware, config);
+      double lat_causal    = origami::attention::compute_total_latency(causal, hardware, config);
+
+      REQUIRE(lat_causal > 0.0);
+      REQUIRE(lat_causal < lat_noncausal);
+
+      // For a large square problem the loop-dominated work is ~triangular (~half).
+      // Allow generous tolerance for the prologue/epilogue and integer ceilings.
+      REQUIRE(lat_causal < 0.75 * lat_noncausal);
+    }
+  }
+}
+
+TEST_CASE("Attention: causal hit rates bounded and not above non-causal",
+          "[attention][causal]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - L2/MALL hit rate bounds") {
+      auto hardware = make_hardware(gpu_arch);
+      auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+
+      auto noncausal = make_problem(2048, 2048, 128, origami::transpose_t::T,
+                                    origami::transpose_t::N, 1, 0, 32, false);
+      auto causal    = make_problem(2048, 2048, 128, origami::transpose_t::T,
+                                    origami::transpose_t::N, 1, 0, 32, true);
+
+      double l2_causal    = origami::attention::estimate_l2_hit(causal, hardware, config, 1);
+      double l2_noncausal = origami::attention::estimate_l2_hit(noncausal, hardware, config, 1);
+      REQUIRE(l2_causal >= 0.0);
+      REQUIRE(l2_causal <= 1.0);
+      REQUIRE(l2_causal <= l2_noncausal + 1e-9);
+
+      double mall_causal =
+          origami::attention::estimate_mall_hit(causal, hardware, config, 256, 1);
+      double mall_noncausal =
+          origami::attention::estimate_mall_hit(noncausal, hardware, config, 256, 1);
+      REQUIRE(mall_causal >= 0.0);
+      REQUIRE(mall_causal <= 1.0);
+      REQUIRE(mall_causal <= mall_noncausal + 1e-9);
+
+      double g_causal = origami::attention::compute_l2_hit_rate_global(
+          causal, hardware, config, hardware.L2_capacity * 1024);
+      double g_noncausal = origami::attention::compute_l2_hit_rate_global(
+          noncausal, hardware, config, hardware.L2_capacity * 1024);
+      REQUIRE(g_causal >= 0.0);
+      REQUIRE(g_causal <= 1.0);
+      REQUIRE(g_causal <= g_noncausal + 1e-9);
+    }
+  }
+}

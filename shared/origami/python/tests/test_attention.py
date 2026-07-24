@@ -7,12 +7,14 @@ import pytest
 import origami
 
 
-def create_attention_problem(q_seq_len, kv_seq_len, head_dim, q_heads=32, batch=1, dtype="f16"):
+def create_attention_problem(q_seq_len, kv_seq_len, head_dim, q_heads=32, batch=1, dtype="f16",
+                             causal=False):
     """Create an attention problem specification."""
     problem = origami.problem_t()
     problem.size = origami.dim3_t(q_seq_len, kv_seq_len, head_dim)
     problem.batch = batch
     problem.q_heads = q_heads
+    problem.causal = causal
     problem.a_transpose = origami.transpose_t.N
     problem.b_transpose = origami.transpose_t.N
     problem.a_dtype = origami.string_to_datatype(dtype)
@@ -489,3 +491,68 @@ def test_att_batched_config_selection(hardware):
     result = origami.select_config(problem, hardware, configs, origami.model_t.attention)
     assert result.latency > 0
     assert result.config is not None
+
+
+# Causal attention tests
+
+
+@pytest.mark.integration
+def test_att_causal_active_tile_pairs(hardware):
+    """Test triangular total active (Q-tile, KV-tile) pairs."""
+    # grid=32 -> 32*33/2 = 528 (~half of 32*32=1024).
+    assert origami.att_causal_active_tile_pairs(32, 32, 128, 128, 4096, 4096) == 528
+    # grid=16 -> 16*17/2 = 136.
+    assert origami.att_causal_active_tile_pairs(16, 16, 128, 128, 2048, 2048) == 136
+    # Decode scenario: single Q-tile (M=128), large KV context (N=1024)
+    # grid_m=1, grid_n=8, offset=896, offset_tiles=7, result = 7*1 + 1*2/2 = 8
+    assert origami.att_causal_active_tile_pairs(1, 8, 128, 128, 128, 1024) == 8
+
+
+@pytest.mark.integration
+def test_att_causal_total_latency_lower(hardware):
+    """Causal total latency should be lower than non-causal for a square problem."""
+    config = create_attention_config(128, 128, 64)
+
+    noncausal = create_attention_problem(4096, 4096, 128, causal=False)
+    causal = create_attention_problem(4096, 4096, 128, causal=True)
+
+    lat_noncausal = origami.att_compute_total_latency(noncausal, hardware, config)
+    lat_causal = origami.att_compute_total_latency(causal, hardware, config)
+
+    assert lat_causal > 0.0
+    assert lat_causal < lat_noncausal
+    # Large square problem: loop work is ~triangular. Generous tolerance.
+    assert lat_causal < 0.75 * lat_noncausal
+
+
+@pytest.mark.integration
+def test_att_causal_hit_rates_bounded(hardware):
+    """Causal hit rates stay in [0,1] and do not exceed the non-causal values."""
+    config = create_attention_config(128, 128, 64)
+
+    noncausal = create_attention_problem(2048, 2048, 128, causal=False)
+    causal = create_attention_problem(2048, 2048, 128, causal=True)
+
+    l2_c = origami.att_estimate_l2_hit(causal, hardware, config, 1)
+    l2_nc = origami.att_estimate_l2_hit(noncausal, hardware, config, 1)
+    assert 0.0 <= l2_c <= 1.0
+    assert l2_c <= l2_nc + 1e-9
+
+    mall_c = origami.att_estimate_mall_hit(causal, hardware, config, 256, 1)
+    mall_nc = origami.att_estimate_mall_hit(noncausal, hardware, config, 256, 1)
+    assert 0.0 <= mall_c <= 1.0
+    assert mall_c <= mall_nc + 1e-9
+
+
+@pytest.mark.integration
+def test_att_causal_config_selection(hardware):
+    """Config selection still works for causal problems."""
+    configs = create_attention_config_list(hardware, "f16")
+    assert len(configs) > 0
+
+    problem = create_attention_problem(4096, 4096, 128, q_heads=32, batch=1, dtype="f16",
+                                       causal=True)
+    result = origami.select_config(problem, hardware, configs, origami.model_t.attention)
+    assert result.latency > 0
+    assert result.config is not None
+    assert result.config.mt.m > 0
