@@ -448,12 +448,26 @@ using QuantGroupSize = {ns}::QuantGroupSize;
 # =============================================================================
 
 
-def _default_config() -> dict:
+_DEFAULT_GFX_ARCH = "gfx950"
+
+
+def _fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
+    """Arch-derived WarpTileK for fp8/bf8 with M_Warp_Tile=16.
+
+    Mirrors ck_tile::get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16>()
+    (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp): 128 on gfx950,
+    32 on gfx942. Using 128 on gfx942 compiles but produces all-zeros output
+    (no valid 16x16x128 fp8/bf8 warp-gemm on gfx942).
+    """
+    return 128 if "gfx950" in gfx_arch else 32
+
+
+def _default_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> dict:
     """Default sweep config matching GemmConfigQuantDecode tile defaults.
 
     GemmConfigQuantDecode<fp8_t/bf8_t>: M=16, N=64, K=256/sizeof(8bit)=256,
-    warp 1x4x1, warp_tile 16x16x K_warp. On gfx950,
-    get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16>() = 128 (8-bit float, M_Warp_Tile!=32).
+    warp 1x4x1, warp_tile 16x16x K_warp. WarpTileK is arch-derived
+    (get_k_warp_tile<fp8_t/bf8_t, M_Warp_Tile=16>() = 128 on gfx950, 32 on gfx942).
     """
     return {
         "variant_keys": ["fp8", "bf8"],
@@ -464,7 +478,8 @@ def _default_config() -> dict:
         "tile_configs": [
             {"tile_m": 16, "tile_n": 64, "tile_k": 256,
              "warp_m": 1, "warp_n": 4, "warp_k": 1,
-             "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128},
+             "warp_tile_m": 16, "warp_tile_n": 16,
+             "warp_tile_k": _fp8_warp_tile_k_for_arch(gfx_arch)},
         ],
         "pad_m": False,
         "pad_n": False,
@@ -608,6 +623,9 @@ def main() -> int:
                         help="Disable parallel generation")
     parser.add_argument("--list-names", action="store_true",
                         help="Print kernel names that would be generated and exit")
+    parser.add_argument("--gfx-arch", type=str, default=_DEFAULT_GFX_ARCH,
+                        help="Target GPU arch for the built-in default config's "
+                             "arch-derived WarpTileK (gfx942 -> 32, gfx950 -> 128)")
     args = parser.parse_args()
 
     cfg: Optional[dict] = None
@@ -622,7 +640,7 @@ def main() -> int:
             cfg = json.load(f)
 
     if args.list_names:
-        specs = _build_specs(cfg or _default_config())
+        specs = _build_specs(cfg or _default_config(args.gfx_arch))
         for s in specs:
             print(s.name)
         return 0

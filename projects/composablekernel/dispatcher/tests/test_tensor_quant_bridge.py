@@ -23,6 +23,7 @@ from gemm_tensor_quant_utils import (  # noqa: E402
     TensorQuantGemmProblem,
     default_fp8_config,
     default_bf8_config,
+    fp8_warp_tile_k_for_arch,
 )
 from unified_gemm_tensor_quant_codegen import (  # noqa: E402
     make_tensor_quant_kernel_name,
@@ -93,6 +94,37 @@ class TestScope(unittest.TestCase):
     def test_layout_is_rcr(self):
         self.assertEqual(default_fp8_config().layout, "rcr")
         self.assertEqual(default_bf8_config().layout, "rcr")
+
+
+class TestArchWarpTileK(unittest.TestCase):
+    """WarpTileK must be arch-derived (get_k_warp_tile<fp8/bf8, 16>()).
+
+    Hardcoding warp_tile_k=128 on gfx942 compiles but silently outputs
+    all-zeros (confirmed on GPU, MI300X): there is no valid 16x16x128 fp8/bf8
+    warp-gemm on gfx942. The correct value there is 32; gfx950 uses 128.
+    """
+
+    def test_helper_gfx942_is_32(self):
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx942"), 32)
+
+    def test_helper_gfx950_is_128(self):
+        self.assertEqual(fp8_warp_tile_k_for_arch("gfx950"), 128)
+
+    def test_fp8_default_gfx942_warp_tile_k_32(self):
+        self.assertEqual(default_fp8_config("gfx942").warp_tile_k, 32)
+
+    def test_fp8_default_gfx950_warp_tile_k_128(self):
+        self.assertEqual(default_fp8_config("gfx950").warp_tile_k, 128)
+
+    def test_bf8_default_gfx942_warp_tile_k_32(self):
+        self.assertEqual(default_bf8_config("gfx942").warp_tile_k, 32)
+
+    def test_bf8_default_gfx950_warp_tile_k_128(self):
+        self.assertEqual(default_bf8_config("gfx950").warp_tile_k, 128)
+
+    def test_name_reflects_arch_warp_tile_k(self):
+        self.assertIn("16x16x32", default_fp8_config("gfx942").name)
+        self.assertIn("16x16x128", default_fp8_config("gfx950").name)
 
 
 class TestProblem(unittest.TestCase):
