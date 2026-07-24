@@ -1778,8 +1778,8 @@ class Solution(collections.abc.Mapping):
         # limits, stagger state, and LDS bank state before current-tile code
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
-        # Note: HalfPLR+PAP is rejected in the HalfPLR block below (HalfPLR forces
-        # SuppressNoLoadLoop after this guard runs, so it is caught there instead).
+        # HalfPLR+PAP is validated narrowly in the HalfPLR block below because
+        # HalfPLR forces SuppressNoLoadLoop after this guard runs.
         if state["StreamK"] != 3:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent is currently supported only with StreamK=3")
         if not state["BufferLoad"]:
@@ -1796,8 +1796,8 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent not supported with multiple summation indices")
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires BufferStore")
-        # HalfPLR sets SuppressNoLoadLoop *after* this guard runs, so it is not
-        # caught here; the HalfPLR block rejects HalfPLR+PAP order-independently.
+        # HalfPLR sets SuppressNoLoadLoop after this guard runs. Its supported
+        # out-of-line PAP path is validated in the HalfPLR block below.
         if state.get("SuppressNoLoadLoop", False):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path requires NoLoadLoop")
         if state["ProblemType"]["Sparse"]:
@@ -2725,14 +2725,10 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      # Order-independent reject on the raw PAP flag: HalfPLR forces
-      # SuppressNoLoadLoop=True, which disables the PAP no-load-loop handoff
-      # (isPrefetchAcrossPersistentEnabled returns False). The PAP guard runs
-      # before this block, so reject here to avoid PAP silently no-oping while
-      # its raw-flag sites still fire.
       if state.get("PrefetchAcrossPersistent", 0):
-        reject(state, printRejectionReason, "HalfPLR is incompatible with PrefetchAcrossPersistent (HalfPLR forces SuppressNoLoadLoop, which disables the PAP NLL handoff)")
-        return
+        if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
+          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")
+          return
       # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
       # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
       if state["UseSubtileImpl"]:
