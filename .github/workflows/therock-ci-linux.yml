@@ -161,7 +161,7 @@ jobs:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
@@ -171,3 +171,15 @@ jobs:
       platform: "linux"
       test_type: ${{ inputs.test_type }}
     secrets: inherit
+
+  rocjitsu-race-check-linux:
+    name: rocjitsu race check (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    # Run the narrow rocjitsu sidecar only for hipBLASLt rows and GPU families
+    # that rocjitsu can emulate here.
+    if: ${{ inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(inputs.projects_to_test, 'hipblaslt') }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      build_runs_on: ${{ inputs.build_runs_on }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}

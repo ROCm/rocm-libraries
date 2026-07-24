@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,11 +35,10 @@ from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
-from typing import IO, NamedTuple, Dict, Optional, Any
+from typing import IO, NamedTuple, List, Dict, Optional, Any
 from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
+from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs, GateTypeArgs
 from copy import deepcopy
-
 import io
 import os
 import sys
@@ -273,8 +272,8 @@ def writeMsgPack(filename, data):
     except FileNotFoundError:
         pass
 
-def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs]) -> None:
-    """Write the YAML header (version, problem sizes, bias/activation args)."""
+def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], gateTypeArgs: Optional[GateTypeArgs] = None) -> None:
+    """Write the YAML header (version, problem sizes, bias/activation/gate args)."""
     f.write("- MinimumRequiredVersion: {}\n".format(__version__))
     f.write("- ProblemSizes:\n")
     if problemSizes:
@@ -289,6 +288,8 @@ def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], bias
         f.write("- ActivationArgs:\n")
         for setting in activationArgs.settingList:
             f.write("  - [Enum: %s]\n"%(setting.activationEnum))
+    if gateTypeArgs:
+        f.write("- GateTypeArgs: [{}]\n".format([gtype.value for gtype in gateTypeArgs.gateTypes]))
 
 def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
     """Find the character offset where solution entries begin, skipping the header."""
@@ -303,7 +304,7 @@ def _findBodyOffset(filename: str, headerKeys: set[str]) -> int:
                 if key not in headerKeys:
                     return pos
 
-def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], solutions: list, cache: bool = False) -> None:
+def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs], solutions: list, gateTypeArgs: Optional[GateTypeArgs] = None, cache: bool = False) -> None:
     """Writes solution YAML file."""
 
     if cache:
@@ -311,7 +312,7 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
         with timing_context("python_wsol_prepare"):
             with timing_context("python_wsol_prepare_cache"):
                 newHeader = io.StringIO()
-                _writeSolutionsHeader(newHeader, problemSizes, biasTypeArgs, activationArgs)
+                _writeSolutionsHeader(newHeader, problemSizes, biasTypeArgs, activationArgs, gateTypeArgs)
                 newHeader = newHeader.getvalue()
                 headerKeys = {line[2:].split(":")[0].strip()
                               for line in newHeader.splitlines() if line.startswith("- ")}
@@ -344,7 +345,7 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
                 solutionStates.append(solutionState)
     with open(filename, "w") as f:
         with timing_context("python_wsol_header"):
-            _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs)
+            _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs, gateTypeArgs)
         with timing_context("python_wsol_dump"):
             fast_yaml_dump(solutionStates, f)
 
@@ -424,7 +425,8 @@ def parseSolutionsData(
         solutionStartIdxInData += 1
     if (len(data) > solutionStartIdxInData) and "ActivationArgs" in data[solutionStartIdxInData]:
         solutionStartIdxInData += 1
-
+    if (len(data) > solutionStartIdxInData) and "GateTypeArgs" in data[solutionStartIdxInData]:
+        solutionStartIdxInData += 1
     solutions = []
     for i in range(solutionStartIdxInData, len(data)):
         solutionState = data[i]
@@ -913,6 +915,10 @@ def createLibraryLogic(
                   "ActivationComputeDataType", "ActivationType", "F32XdlMathOp"):
         problemTypeState[field] = problemTypeState[field].value
     problemTypeState["BiasDataTypeList"] = [b.value for b in problemTypeState["BiasDataTypeList"]]
+    if "GateResidualDataTypeList" in problemTypeState:
+        problemTypeState["GateResidualDataTypeList"] = [
+            b.value for b in problemTypeState["GateResidualDataTypeList"]
+        ]
     for opt in ("DataTypeMetadata", "DataTypeMXSA", "DataTypeMXSB"):
         if opt in problemTypeState:
             problemTypeState[opt] = problemTypeState[opt].value
