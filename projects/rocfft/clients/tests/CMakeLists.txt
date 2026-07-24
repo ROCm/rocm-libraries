@@ -124,6 +124,12 @@ endif()
 if( NOT "${ROCFFT_LINKED_VERSION}" STREQUAL ""
     AND NOT ROCFFT_LINKED_VERSION VERSION_LESS ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION )
   add_executable( rocfft_c rocfft_c.c )
+  # Use BEFORE so that the repository's public header takes priority over
+  # any system-installed rocfft header added by directory-level
+  # include_directories() (e.g. from HIP_INCLUDE_DIRS).
+  target_include_directories( rocfft_c BEFORE PRIVATE
+    $<TARGET_PROPERTY:roc::rocfft,INTERFACE_INCLUDE_DIRECTORIES>
+    )
   target_link_libraries( rocfft_c
     PRIVATE
     roc::rocfft
