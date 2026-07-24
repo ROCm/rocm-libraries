@@ -606,6 +606,18 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4; // bytes per bank
 
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid.
+    rv["NumXCD"] = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported archs).
+    rv["CacheLineBytes"] = 128;
+
     return rv;
 }
 
