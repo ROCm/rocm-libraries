@@ -26,6 +26,7 @@ from gemm_rowcolquant_utils import (  # noqa: E402
     encode_fp8_bytes,
     quantize_dequantize_fp8,
     fp8_encoding_available,
+    _warp_tile_k_for,
 )
 from codegen_common import make_rowcolquant_kernel_name  # noqa: E402
 
@@ -93,6 +94,35 @@ class TestProblem(unittest.TestCase):
     def test_problem_defaults(self):
         p = RowColQuantGemmProblem(M=256, N=256, K=256)
         self.assertEqual(p.k_batch, 1)
+
+
+class TestArchWarpTileK(unittest.TestCase):
+    """warp_tile_k must be arch-derived (get_k_warp_tile<fp8/bf8,16>()).
+
+    gfx942 has NO valid 16x16x128 fp8/bf8 warp-gemm: warp_tile_k=128 compiles
+    but silently outputs all-zeros there (confirmed on the sibling tensor_quant
+    GPU tester). Old-TE uses 16x16x32 on gfx942. Only gfx950 gets 128.
+    """
+
+    def test_helper_gfx942(self):
+        self.assertEqual(_warp_tile_k_for("fp8", "gfx942"), 32)
+        self.assertEqual(_warp_tile_k_for("bf8", "gfx942"), 32)
+
+    def test_helper_gfx950(self):
+        self.assertEqual(_warp_tile_k_for("fp8", "gfx950"), 128)
+        self.assertEqual(_warp_tile_k_for("bf8", "gfx950"), 128)
+
+    def test_default_config_gfx942(self):
+        self.assertEqual(default_fp8_config("gfx942").warp_tile_k, 32)
+        self.assertEqual(default_bf8_config("gfx942").warp_tile_k, 32)
+
+    def test_default_config_gfx950(self):
+        self.assertEqual(default_fp8_config("gfx950").warp_tile_k, 128)
+        self.assertEqual(default_bf8_config("gfx950").warp_tile_k, 128)
+
+    def test_name_reflects_arch_warp_tile_k(self):
+        self.assertIn("16x16x32", default_fp8_config("gfx942").name)
+        self.assertIn("16x16x128", default_fp8_config("gfx950").name)
 
 
 @unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")

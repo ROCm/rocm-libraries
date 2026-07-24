@@ -766,11 +766,30 @@ def expand_rowcolquant_sweep(
 # =============================================================================
 
 
+def _warp_tile_k_for(variant_key: str, gfx_arch: str) -> int:
+    """Arch-derived K warp-tile, mirroring ck_tile::get_k_warp_tile<PrecType, 16>().
+
+    (tile_gemm_shape.hpp, M_Warp_Tile=16, non-WMMA path)
+      gfx950 (CK_GFX950_SUPPORT): fp8/bf8 -> 128
+      gfx942/other              : fp8/bf8 ->  32   (no 16x16x128 fp8/bf8 warp-gemm)
+
+    This is a BLOCKING correctness constraint, not just a naming detail: a
+    warp_tile_k=128 fp8/bf8 kernel *compiles* on gfx942 but silently produces
+    all-zeros output (confirmed on the sibling tensor_quant GPU tester). Old-TE
+    uses 16x16x32 on gfx942 and is bit-exact there with warp_tile_k=32.
+    """
+    is_8bit_float = variant_key in ("fp8", "bf8")
+    if "gfx950" in gfx_arch and is_8bit_float:
+        return 128
+    return 32
+
+
 def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelConfig:
     """Return the default fp8 RowColQuant config (tile = 16x64x256, warp = 1x4x1).
 
-    Matches GemmConfigRowColQuant<fp8_t>. WarpTileK=128: on gfx950
-    get_k_warp_tile<fp8_t, M_Warp_Tile=16>() returns 128.
+    Matches GemmConfigRowColQuant<fp8_t>. WarpTileK is arch-derived via
+    get_k_warp_tile<fp8_t, M_Warp_Tile=16>(): 128 on gfx950, 32 on gfx942
+    (128 silently outputs all-zeros on gfx942).
     """
     return RowColQuantKernelConfig(
         variant_key="fp8",
@@ -780,7 +799,8 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for("fp8", gfx_arch),
         gfx_arch=gfx_arch,
     )
 
@@ -788,7 +808,9 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
 def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelConfig:
     """Return the default bf8 RowColQuant config (tile = 16x64x256, warp = 1x4x1).
 
-    Matches GemmConfigRowColQuant<bf8_t>. WarpTileK=128 on gfx950.
+    Matches GemmConfigRowColQuant<bf8_t>. WarpTileK is arch-derived via
+    get_k_warp_tile<bf8_t, M_Warp_Tile=16>(): 128 on gfx950, 32 on gfx942
+    (128 silently outputs all-zeros on gfx942).
     """
     return RowColQuantKernelConfig(
         variant_key="bf8",
@@ -798,6 +820,7 @@ def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> RowColQuantKernelCo
         scheduler="intrawave",
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+        warp_tile_m=16, warp_tile_n=16,
+        warp_tile_k=_warp_tile_k_for("bf8", gfx_arch),
         gfx_arch=gfx_arch,
     )
