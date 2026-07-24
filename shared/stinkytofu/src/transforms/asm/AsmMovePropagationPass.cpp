@@ -3,7 +3,6 @@
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -67,7 +66,7 @@ class AsmMovePropagationPassImpl : public Pass {
     }
 
    private:
-    int runOnBasicBlock(BasicBlock& bb) {
+    void runOnBasicBlock(BasicBlock& bb) {
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& node : bb) {
             if (node.getType() == IRBase::IRType::StinkyTofu) {
@@ -75,18 +74,17 @@ class AsmMovePropagationPassImpl : public Pass {
             }
         }
 
-        int numChanged = 0;
         std::unordered_map<StinkyRegister, StinkyRegister> moveMap;
 
         auto resolveMappedSrc = [&moveMap](const StinkyRegister& reg) {
-            if (!reg.isRegister()) return reg;
-
             StinkyRegister resolved = reg;
-            for (int depth = 0; depth < 8; ++depth) {
+            // moveMap is invalidated on defs, so chains should not form cycles.
+            while (true) {
                 auto it = moveMap.find(resolved);
                 if (it == moveMap.end()) break;
-                if (it->second == resolved) break;
-                resolved = it->second;
+                const StinkyRegister& next = it->second;
+                if (next == resolved) break;
+                resolved = next;
             }
             return resolved;
         };
@@ -110,7 +108,6 @@ class AsmMovePropagationPassImpl : public Pass {
                 StinkyRegister newSrc = resolveMappedSrc(oldSrc);
                 if (newSrc != oldSrc) {
                     inst->setSrcReg(i, newSrc);
-                    numChanged++;
                 }
             }
 
@@ -124,7 +121,7 @@ class AsmMovePropagationPassImpl : public Pass {
             if (dst != src) moveMap[dst] = src;
         }
 
-        std::unordered_set<StinkyInstruction*> toErase;
+        std::vector<StinkyInstruction*> toErase;
         for (size_t i = 0; i < instructions.size(); ++i) {
             StinkyInstruction* inst = instructions[i];
             if (!isEligibleMov(*inst)) continue;
@@ -134,16 +131,14 @@ class AsmMovePropagationPassImpl : public Pass {
 
             // Identity move has no semantic effect.
             if (dst == src) {
-                toErase.insert(inst);
+                toErase.push_back(inst);
                 continue;
             }
 
-            bool usedBeforeRedef = false;
             bool redefined = false;
             for (size_t j = i + 1; j < instructions.size(); ++j) {
                 StinkyInstruction* later = instructions[j];
                 if (hasSrcOverlap(*later, dst)) {
-                    usedBeforeRedef = true;
                     break;
                 }
                 if (hasDestOverlap(*later, dst)) {
@@ -152,17 +147,14 @@ class AsmMovePropagationPassImpl : public Pass {
                 }
             }
 
-            if (redefined && !usedBeforeRedef) {
-                toErase.insert(inst);
+            if (redefined) {
+                toErase.push_back(inst);
             }
         }
 
         for (StinkyInstruction* inst : toErase) {
             inst->erase();
-            numChanged++;
         }
-
-        return numChanged;
     }
 };
 
