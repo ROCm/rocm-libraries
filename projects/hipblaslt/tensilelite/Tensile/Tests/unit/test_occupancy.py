@@ -47,6 +47,7 @@ def _make_writer(ri, isa=(9, 5, 0)):
         archCaps=ri.getArchCaps(),
         regCaps=ri.getRegCaps(),
         version=tuple(isa),
+        kernel={"WavefrontSize": 32 if isa[0] >= 10 else 64},
     )
     return kw
 
@@ -116,33 +117,34 @@ def _stub_regcaps(kw, **overrides):
 def test_getvgproccupancy_uses_physical_max_vgpr():
     """doubleVgpr occupancy denominator is PhysicalMaxVgpr, not the flat 512.
 
-    Heavy wave32 kernel, 200 vgprs: with a 1536 per-SIMD file occupancy is
-    1536 // (ceil(200/8)*8 = 200) = 7; the old 512 file gave 512 // 200 = 2.
+    Heavy wave32 kernel, 256 threads (mult = 256/(32*4) = 2), 200 vgprs: with a 1536
+    per-SIMD file occupancy is 1536 // (ceil(200/24)*24 * 2 = 432) = 3; the old 512 file
+    gave 512 // (ceil(200/8)*8 * 2 = 400) = 1.
     """
-    kw = _make_writer(_init_rocisa((11, 0, 0)))
+    kw = _make_writer(_init_rocisa((11, 0, 0)), (11, 0, 0))
     _stub_regcaps(kw, PhysicalMaxVgpr=1536)
-    assert kw.getVgprOccupancy(numThreads=256, vgprs=200, doubleVgpr=True) == 7
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=200, doubleVgpr=True) == 3
     _stub_regcaps(kw, PhysicalMaxVgpr=512)
-    assert kw.getVgprOccupancy(numThreads=256, vgprs=200, doubleVgpr=True) == 2
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=200, doubleVgpr=True) == 1
 
 
 def test_gfx11_vgpr_alloc_granularity_is_24():
     """gfx11 1536-VGPR parts allocate at 24-VGPR granularity, not 8.
 
-    150 VGPRs: gran 24 -> ceil(150/24)*24 = 168 -> 1536 // 168 = 9.
-    The old flat gran 8 gave ceil(150/8)*8 = 152 -> 1536 // 152 = 10.
+    150 VGPRs, 256 threads (mult=2): gran 24 -> ceil(150/24)*24 = 168 -> 1536 // (168*2) = 4.
+    The old flat gran 8 gave ceil(150/8)*8 = 152 -> 1536 // (152*2) = 5.
     """
-    kw = _make_writer(_init_rocisa((11, 0, 0)))
+    kw = _make_writer(_init_rocisa((11, 0, 0)), (11, 0, 0))
     _stub_regcaps(kw, PhysicalMaxVgpr=1536)
-    assert kw.getVgprOccupancy(numThreads=256, vgprs=150, doubleVgpr=True) == 9
+    assert kw.getVgprOccupancy(numThreads=256, vgprs=150, doubleVgpr=True) == 4
 
 
 def test_getmaxregs_uses_physical_max_vgpr():
     """getMaxRegsForOccupancy honours PhysicalMaxVgpr in the doubleVgpr branch."""
-    kw = _make_writer(_init_rocisa((11, 0, 0)))
+    kw = _make_writer(_init_rocisa((11, 0, 0)), (11, 0, 0))
     _stub_regcaps(kw, PhysicalMaxVgpr=1536)
     _, occ = kw.getMaxRegsForOccupancy(256, 200, 64, 0, 0, doubleVgpr=True)
-    assert occ == 7
+    assert occ == 3
 
 
 def test_non_double_branch_uses_half_physical():
