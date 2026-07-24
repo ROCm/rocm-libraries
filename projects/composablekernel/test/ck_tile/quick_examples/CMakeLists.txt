@@ -5,6 +5,152 @@
 # that is not otherwise represented by a CK-Tile GTest. Each alias is bounded
 # to one validated configuration, while repeated aliases share one binary.
 
+if(TARGET test_ck_tile_reduce2d)
+    add_ck_tile_category_test(
+        test_ck_tile_reduce_quick
+        test_ck_tile_reduce2d
+        --gtest_filter=TestCkTileReduce/0.Test2D_KeepDim0_ReduceDim1_64x32:TestCkTileReduce/1.Test2D_KeepDim0_ReduceDim1_1024x512:TestCkTileReduce/2.Test3D_KeepDim01_ReduceDim2_512x1024x16:TestCkTileReduce/3.Test4D_KeepDim03_ReduceDim12_16x32x32x128
+    )
+endif()
+
+if(TARGET test_ck_tile_multi_reduce2d_threadwise)
+    add_ck_tile_category_test(
+        test_ck_tile_multi_reduce_threadwise_quick
+        test_ck_tile_multi_reduce2d_threadwise
+        --gtest_filter=TestCkTileMultiReduceThreadwise/0.Test2D_KeepDim0_ReduceDim1_64x32:TestCkTileMultiReduceThreadwise/0.Test4D_KeepDim01_ReduceDim23_32x256x16x16:TestCkTileMultiReduceThreadwise/1.Test3D_KeepDim0_ReduceDim12_128x128x1:TestCkTileMultiReduceThreadwise/1.Test4D_KeepDim03_ReduceDim12_16x32x32x128
+    )
+endif()
+
+if(TARGET test_ck_tile_multi_reduce2d_multiblock)
+    add_ck_tile_category_test(
+        test_ck_tile_multi_reduce_multiblock_quick
+        test_ck_tile_multi_reduce2d_multiblock
+        --gtest_filter=TestCkTileMultiReduceMultiblock/0.Test2D_KeepDim0_ReduceDim1_1024x512:TestCkTileMultiReduceMultiblock/0.Test4D_KeepDim01_ReduceDim23_32x256x16x16:TestCkTileMultiReduceMultiblock/1.Test3D_KeepDim01_ReduceDim2_512x1024x16:TestCkTileMultiReduceMultiblock/1.Test4D_KeepDim03_ReduceDim12_16x32x32x128
+    )
+endif()
+
+function(add_ck_tile_quick_norm_target TARGET_NAME SOURCE_DIR MAIN_SOURCE BLOB_STEM KERNEL_FILTER)
+    set(_codegen_dir "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_codegen")
+    set(_blob_list "${_codegen_dir}/${BLOB_STEM}_blobs.txt")
+    set(_codegen_args
+        "${SOURCE_DIR}/generate.py"
+        --api fwd
+        --working_path "${_codegen_dir}"
+        --filter "${KERNEL_FILTER}"
+    )
+
+    file(MAKE_DIRECTORY "${_codegen_dir}")
+    file(REMOVE "${_blob_list}")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} ${_codegen_args} --list_blobs
+        RESULT_VARIABLE _codegen_result
+    )
+    if(_codegen_result AND NOT _codegen_result EQUAL 0)
+        message(FATAL_ERROR "Failed to list ${TARGET_NAME} kernels")
+    endif()
+    file(STRINGS "${_blob_list}" _quick_sources)
+    list(LENGTH _quick_sources _quick_source_count)
+    if(NOT _quick_source_count EQUAL 6)
+        message(FATAL_ERROR
+            "Expected four kernels plus API/header for ${TARGET_NAME}, got ${_quick_source_count}"
+        )
+    endif()
+
+    add_custom_command(
+        OUTPUT ${_quick_sources}
+        COMMAND ${Python3_EXECUTABLE} ${_codegen_args} --gen_blobs
+        DEPENDS "${SOURCE_DIR}/generate.py"
+        COMMENT "Generate four ${TARGET_NAME} kernels"
+        VERBATIM
+    )
+    add_executable(
+        ${TARGET_NAME} EXCLUDE_FROM_ALL
+        "${SOURCE_DIR}/${MAIN_SOURCE}"
+        ${_quick_sources}
+    )
+    target_include_directories(
+        ${TARGET_NAME} PRIVATE "${SOURCE_DIR}" "${_codegen_dir}"
+    )
+    target_compile_options(
+        ${TARGET_NAME} PRIVATE
+        -Wno-undefined-func-template -Wno-float-equal --offload-compress
+    )
+    set_property(
+        TARGET ${TARGET_NAME} PROPERTY HIP_ARCHITECTURES ${_norm_quick_targets}
+    )
+endfunction()
+
+set(_norm_quick_targets ${SUPPORTED_GPU_TARGETS})
+list(FILTER _norm_quick_targets INCLUDE REGEX "gfx942|gfx950")
+if(_norm_quick_targets)
+    set(_layernorm_source_dir "${PROJECT_SOURCE_DIR}/example/ck_tile/02_layernorm2d")
+    add_ck_tile_quick_norm_target(
+        tile_example_layernorm2d_quick
+        "${_layernorm_source_dir}"
+        layernorm2d_fwd.cpp
+        layernorm2d_fwd
+        "layernorm2d_fwd_fp16_n256,layernorm2d_fwd_bf16_n1024_pras,layernorm2d_fwd_fp16_fp8_n128_dquant,layernorm2d_fwd_bf16_n256_xbias"
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_layernorm_fp16_quick
+        tile_example_layernorm2d_quick
+        -m=64 -n=255 -prec_i=fp16 -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_layernorm_bf16_fused_add_quick
+        tile_example_layernorm2d_quick
+        -m=32 -n=1024 -prec_i=bf16 -fadd=1
+        -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_layernorm_fp16_fp8_quick
+        tile_example_layernorm2d_quick
+        -m=64 -n=128 -prec_i=fp16 -prec_o=fp8 -fquant=1
+        -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_layernorm_bf16_xbias_quick
+        tile_example_layernorm2d_quick
+        -m=17 -n=256 -prec_i=bf16 -xbias=1
+        -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    rocm_install(TARGETS tile_example_layernorm2d_quick COMPONENT tests)
+
+    set(_rmsnorm_source_dir "${PROJECT_SOURCE_DIR}/example/ck_tile/10_rmsnorm2d")
+    add_ck_tile_quick_norm_target(
+        tile_example_rmsnorm2d_quick
+        "${_rmsnorm_source_dir}"
+        rmsnorm2d_fwd.cpp
+        rmsnorm2d_fwd
+        "rmsnorm2d_fwd_fp16_n256_nsm,rmsnorm2d_fwd_bf16_n1024_pras_nsm,rmsnorm2d_fwd_fp16_fp8_n128_sdquant_nsm,rmsnorm2d_fwd_fp16_n256_t5ml"
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_rmsnorm_fp16_quick
+        tile_example_rmsnorm2d_quick
+        -m=64 -n=255 -prec_i=fp16 -s=0
+        -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_rmsnorm_bf16_fused_add_quick
+        tile_example_rmsnorm2d_quick
+        -m=32 -n=1024 -prec_i=bf16 -fadd=1 -s=0
+        -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_rmsnorm_fp16_fp8_quick
+        tile_example_rmsnorm2d_quick
+        -m=64 -n=128 -prec_i=fp16 -prec_o=fp8 -fquant=1 -s=0
+        -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    add_ck_tile_category_test(
+        test_ck_tile_rmsnorm_fp16_t5_quick
+        tile_example_rmsnorm2d_quick
+        -m=17 -n=256 -prec_i=fp16 -s=1
+        -v=1 -kname=0 -warmup=0 -repeat=1
+    )
+    rocm_install(TARGETS tile_example_rmsnorm2d_quick COMPONENT tests)
+endif()
+
 if(TARGET tile_example_batched_contraction)
     add_ck_tile_category_test(
         test_ck_tile_batched_contraction_basic_quick

@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from typing import List, Any
 import functools
+import fnmatch
 import itertools
 import copy
 from dataclasses import dataclass
@@ -2647,6 +2648,14 @@ float rmsnorm2d_fwd(rmsnorm2d_fwd_traits t,
                             current_hs,
                         )
                     )
+        if self.kernel_filter:
+            patterns = [pattern.strip() for pattern in self.kernel_filter.split(",")]
+            total_blob = [
+                blob
+                for blob in total_blob
+                if any(fnmatch.fnmatch(blob.name, pattern) for pattern in patterns)
+            ]
+
         return total_blob
 
     def list_blobs(self) -> None:
@@ -2733,7 +2742,7 @@ if __name__ == "__main__":
         "-f",
         "--filter",
         required=False,
-        help="filter out kernels that need to generate, using fnmatch module",
+        help="comma-separated fnmatch patterns selecting kernels to generate",
     )
 
     parser.add_argument(

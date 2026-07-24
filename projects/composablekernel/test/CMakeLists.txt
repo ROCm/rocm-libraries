@@ -65,6 +65,17 @@ set(CK_TILE_CTEST_QUICK_TESTS
     test_ck_tile_pk_int4
     test_ck_tile_tf32
     test_ck_tile_elementwise_1d
+    test_ck_tile_reduce_quick
+    test_ck_tile_multi_reduce_threadwise_quick
+    test_ck_tile_multi_reduce_multiblock_quick
+    test_ck_tile_layernorm_fp16_quick
+    test_ck_tile_layernorm_bf16_fused_add_quick
+    test_ck_tile_layernorm_fp16_fp8_quick
+    test_ck_tile_layernorm_bf16_xbias_quick
+    test_ck_tile_rmsnorm_fp16_quick
+    test_ck_tile_rmsnorm_bf16_fused_add_quick
+    test_ck_tile_rmsnorm_fp16_fp8_quick
+    test_ck_tile_rmsnorm_fp16_t5_quick
     test_ck_tile_gemm_quick
     test_ck_tile_gemm_block_scale_quick
     test_ck_tile_mx_gemm_quick

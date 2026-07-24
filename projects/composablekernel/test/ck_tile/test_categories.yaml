@@ -11,6 +11,17 @@ test_categories:
       - test_ck_tile_pk_int4
       - test_ck_tile_tf32
       - test_ck_tile_elementwise_1d
+      - test_ck_tile_reduce_quick
+      - test_ck_tile_multi_reduce_threadwise_quick
+      - test_ck_tile_multi_reduce_multiblock_quick
+      - test_ck_tile_layernorm_fp16_quick
+      - test_ck_tile_layernorm_bf16_fused_add_quick
+      - test_ck_tile_layernorm_fp16_fp8_quick
+      - test_ck_tile_layernorm_bf16_xbias_quick
+      - test_ck_tile_rmsnorm_fp16_quick
+      - test_ck_tile_rmsnorm_bf16_fused_add_quick
+      - test_ck_tile_rmsnorm_fp16_fp8_quick
+      - test_ck_tile_rmsnorm_fp16_t5_quick
       - test_ck_tile_gemm_quick
       - test_ck_tile_gemm_block_scale_quick
       - test_ck_tile_mx_gemm_quick
@@ -81,6 +92,14 @@ general_exclude:
       - test_ck_tile_grouped_gemm_quant_quick
       - test_ck_tile_moe_smoothquant_fp16_fp8_quick
       - test_ck_tile_moe_smoothquant_bf16_int8_quick
+      - test_ck_tile_layernorm_fp16_quick
+      - test_ck_tile_layernorm_bf16_fused_add_quick
+      - test_ck_tile_layernorm_fp16_fp8_quick
+      - test_ck_tile_layernorm_bf16_xbias_quick
+      - test_ck_tile_rmsnorm_fp16_quick
+      - test_ck_tile_rmsnorm_bf16_fused_add_quick
+      - test_ck_tile_rmsnorm_fp16_fp8_quick
+      - test_ck_tile_rmsnorm_fp16_t5_quick
     labels:
       - ex_gpu_gfx90a
 
@@ -101,6 +120,14 @@ general_exclude:
       - test_ck_tile_moe_quick
       - test_ck_tile_moe_smoothquant_fp16_fp8_quick
       - test_ck_tile_moe_smoothquant_bf16_int8_quick
+      - test_ck_tile_layernorm_fp16_quick
+      - test_ck_tile_layernorm_bf16_fused_add_quick
+      - test_ck_tile_layernorm_fp16_fp8_quick
+      - test_ck_tile_layernorm_bf16_xbias_quick
+      - test_ck_tile_rmsnorm_fp16_quick
+      - test_ck_tile_rmsnorm_bf16_fused_add_quick
+      - test_ck_tile_rmsnorm_fp16_fp8_quick
+      - test_ck_tile_rmsnorm_fp16_t5_quick
     labels:
       - ex_gpu_gfx908
 
@@ -131,6 +158,14 @@ general_exclude:
       - test_ck_tile_vsa_sparse_attn_quick
       - test_ck_tile_moe_smoothquant_fp16_fp8_quick
       - test_ck_tile_moe_smoothquant_bf16_int8_quick
+      - test_ck_tile_layernorm_fp16_quick
+      - test_ck_tile_layernorm_bf16_fused_add_quick
+      - test_ck_tile_layernorm_fp16_fp8_quick
+      - test_ck_tile_layernorm_bf16_xbias_quick
+      - test_ck_tile_rmsnorm_fp16_quick
+      - test_ck_tile_rmsnorm_bf16_fused_add_quick
+      - test_ck_tile_rmsnorm_fp16_fp8_quick
+      - test_ck_tile_rmsnorm_fp16_t5_quick
     labels:
       - ex_gpu_gfx1100
       - ex_gpu_gfx1101
@@ -152,6 +187,14 @@ general_exclude:
       - test_ck_tile_sageattn_group_quick
       - test_ck_tile_moe_smoothquant_fp16_fp8_quick
       - test_ck_tile_moe_smoothquant_bf16_int8_quick
+      - test_ck_tile_layernorm_fp16_quick
+      - test_ck_tile_layernorm_bf16_fused_add_quick
+      - test_ck_tile_layernorm_fp16_fp8_quick
+      - test_ck_tile_layernorm_bf16_xbias_quick
+      - test_ck_tile_rmsnorm_fp16_quick
+      - test_ck_tile_rmsnorm_bf16_fused_add_quick
+      - test_ck_tile_rmsnorm_fp16_fp8_quick
+      - test_ck_tile_rmsnorm_fp16_t5_quick
     labels:
       - ex_gpu_gfx1200
       - ex_gpu_gfx1201
