@@ -30,24 +30,36 @@ namespace
 const umd::InputTensorBinding* findInputTensor(const umd::OpSchemaEntry* e, std::string_view name)
 {
     for(std::size_t i = 0; i < e->inputTensorCount; ++i)
+    {
         if(e->inputTensors[i].name == name)
+        {
             return &e->inputTensors[i];
+        }
+    }
     return nullptr;
 }
 
 const umd::OutputTensorBinding* findOutputTensor(const umd::OpSchemaEntry* e, std::string_view name)
 {
     for(std::size_t i = 0; i < e->outputTensorCount; ++i)
+    {
         if(e->outputTensors[i].name == name)
+        {
             return &e->outputTensors[i];
+        }
+    }
     return nullptr;
 }
 
 const umd::AttrBinding* findAttr(const umd::OpSchemaEntry* e, std::string_view name)
 {
     for(std::size_t i = 0; i < e->attributeCount; ++i)
+    {
         if(e->attributes[i].name == name)
+        {
             return &e->attributes[i];
+        }
+    }
     return nullptr;
 }
 
@@ -92,7 +104,7 @@ TEST(UmdOpSchemaRegistry, SdpaRequiredOperandsAndResult)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
-    for(std::string_view name : {"q", "k", "v"})
+    for(const std::string_view name : {"q", "k", "v"})
     {
         const auto* op = findInputTensor(e, name);
         ASSERT_NE(op, nullptr) << name;
@@ -107,14 +119,15 @@ TEST(UmdOpSchemaRegistry, SdpaOptionalOperandsClassifiedOptional)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
-    for(std::string_view name : {"attn_mask", "page_table_k", "page_table_v", "scale", "seed"})
+    for(const std::string_view name :
+        {"attn_mask", "page_table_k", "page_table_v", "scale", "seed"})
     {
         const auto* op = findInputTensor(e, name);
         ASSERT_NE(op, nullptr) << name;
         EXPECT_TRUE(op->optional) << name;
     }
     // Optional results too.
-    for(std::string_view name : {"stats", "amax_s", "amax_o"})
+    for(const std::string_view name : {"stats", "amax_s", "amax_o"})
     {
         const auto* r = findOutputTensor(e, name);
         ASSERT_NE(r, nullptr) << name;
@@ -129,23 +142,23 @@ TEST(UmdOpSchemaRegistry, SdpaScalarAttributeOptionalityParity)
     ASSERT_NE(e, nullptr);
 
     // `= null` scalars are optional.
-    for(std::string_view name : {"generate_stats",
-                                 "dropout_probability",
-                                 "attn_scale_value",
-                                 "left_bound",
-                                 "right_bound",
-                                 "max_seq_len_kv"})
+    for(const std::string_view name : {"generate_stats",
+                                       "dropout_probability",
+                                       "attn_scale_value",
+                                       "left_bound",
+                                       "right_bound",
+                                       "max_seq_len_kv"})
     {
         const auto* a = findAttr(e, name);
         ASSERT_NE(a, nullptr) << name;
         EXPECT_TRUE(a->optional) << name;
     }
     // Defaulted (non-null) scalars/enums are required.
-    for(std::string_view name : {"alibi_mask",
-                                 "padding_mask",
-                                 "causal_mask",
-                                 "causal_mask_bottom_right",
-                                 "diagonal_alignment"})
+    for(const std::string_view name : {"alibi_mask",
+                                       "padding_mask",
+                                       "causal_mask",
+                                       "causal_mask_bottom_right",
+                                       "diagonal_alignment"})
     {
         const auto* a = findAttr(e, name);
         ASSERT_NE(a, nullptr) << name;
@@ -157,10 +170,10 @@ TEST(UmdOpSchemaRegistry, SdpaScalarAttributeTypes)
 {
     const auto* e = sdpaEntry();
     ASSERT_NE(e, nullptr);
-    EXPECT_EQ(findAttr(e, "alibi_mask")->type, umd::AttrType::Bool);
-    EXPECT_EQ(findAttr(e, "dropout_probability")->type, umd::AttrType::Float);
-    EXPECT_EQ(findAttr(e, "left_bound")->type, umd::AttrType::Int);
-    EXPECT_EQ(findAttr(e, "diagonal_alignment")->type, umd::AttrType::Dtype);
+    EXPECT_EQ(findAttr(e, "alibi_mask")->type, umd::AttrType::BOOL);
+    EXPECT_EQ(findAttr(e, "dropout_probability")->type, umd::AttrType::FLOAT);
+    EXPECT_EQ(findAttr(e, "left_bound")->type, umd::AttrType::INT);
+    EXPECT_EQ(findAttr(e, "diagonal_alignment")->type, umd::AttrType::DTYPE);
 }
 
 TEST(UmdOpSchemaRegistry, AccessorRoundTripReadsLiveValues)
@@ -204,21 +217,21 @@ TEST(UmdOpSchemaRegistry, ScalarReadersReflectPresenceAndValue)
     const void* a = attrs;
 
     const umd::ScalarValue alibi = findAttr(e, "alibi_mask")->read(a);
-    EXPECT_EQ(alibi.type, umd::AttrType::Bool);
+    EXPECT_EQ(alibi.type, umd::AttrType::BOOL);
     EXPECT_TRUE(alibi.present);
     EXPECT_TRUE(alibi.b);
 
     const umd::ScalarValue drop = findAttr(e, "dropout_probability")->read(a);
-    EXPECT_EQ(drop.type, umd::AttrType::Float);
+    EXPECT_EQ(drop.type, umd::AttrType::FLOAT);
     EXPECT_TRUE(drop.present);
     EXPECT_DOUBLE_EQ(drop.f, 0.25);
 
     const umd::ScalarValue stats = findAttr(e, "generate_stats")->read(a);
-    EXPECT_EQ(stats.type, umd::AttrType::Bool);
+    EXPECT_EQ(stats.type, umd::AttrType::BOOL);
     EXPECT_FALSE(stats.present); // optional, unset
 
     const umd::ScalarValue align = findAttr(e, "diagonal_alignment")->read(a);
-    EXPECT_EQ(align.type, umd::AttrType::Dtype);
+    EXPECT_EQ(align.type, umd::AttrType::DTYPE);
     EXPECT_TRUE(align.present);
     ASSERT_NE(align.dtype, nullptr);
     EXPECT_STREQ(align.dtype, "TOP_LEFT");

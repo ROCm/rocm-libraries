@@ -259,7 +259,13 @@ HeaderFileExtensions: ['h','hpp']
 # This regex is a inclusion filter for the files to be checked. Its a Posix regex and
 # does not seem to support negative lookahead.
 HeaderFilterRegex: '.'
-ExcludeHeaderFilterRegex: '^(.*(data_objects|python3\.[0-9]+|nanobind|_deps).*)$'
+# Skip machine-generated headers: the FlatBuffers reflection headers live under
+# data_objects, and the umd registry emitter (umd_registry_gen) writes
+# umd/*_generated.hpp (e.g. umd/op_schema_registry_generated.hpp). Their C-style
+# arrays, non-conforming identifiers, and brace-less statements are artifacts of the
+# emitter, not fixable in-tree. The umd match is scoped to that directory so a
+# hand-written file elsewhere that happens to end in _generated is still checked.
+ExcludeHeaderFilterRegex: '^(.*(data_objects|python3\.[0-9]+|nanobind|_deps).*|.*/umd/.*_generated\.(h|hpp))$'
 
 CheckOptions:
   # Disable type analysis for misc-use-internal-linkage to maintain consistent

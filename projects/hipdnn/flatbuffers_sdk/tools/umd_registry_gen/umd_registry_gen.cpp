@@ -29,6 +29,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "flatbuffers/reflection.h"
@@ -43,12 +44,27 @@ namespace
     std::exit(1);
 }
 
+// Reports a per-field schema error as `table.field: msg` and exits. Builds the
+// message by appending so these cold error paths avoid chained-`+` temporaries.
+[[noreturn]] void
+    failField(const std::string& table, const std::string& field, std::string_view msg)
+{
+    std::string s = table;
+    s += '.';
+    s += field;
+    s += ": ";
+    s += msg;
+    fail(s);
+}
+
 std::string readFile(const std::string& path)
 {
     std::ifstream f(path, std::ios::binary);
     if(!f)
+    {
         fail("cannot open input schema: " + path);
-    return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    }
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
 // Short (unqualified) name: text after the last '.'.
@@ -60,18 +76,22 @@ std::string shortName(const std::string& qualified)
 
 const reflection::KeyValue* attr(const reflection::Field* f, const char* key)
 {
-    return f->attributes() ? f->attributes()->LookupByKey(key) : nullptr;
+    return (f->attributes() != nullptr) ? f->attributes()->LookupByKey(key) : nullptr;
 }
 
 // Table-level attribute value (e.g. `umd_opcode`), or empty when absent.
 std::string objAttr(const reflection::Object* o, const char* key)
 {
-    if(!o->attributes())
+    if(o->attributes() == nullptr)
+    {
         return {};
+    }
     const auto* kv = o->attributes()->LookupByKey(key);
-    if(!kv)
+    if(kv == nullptr)
+    {
         return {};
-    return kv->value() ? kv->value()->str() : std::string();
+    }
+    return (kv->value() != nullptr) ? kv->value()->str() : std::string();
 }
 
 bool isIntegerBase(reflection::BaseType t)
@@ -90,7 +110,7 @@ bool isScalarBase(reflection::BaseType t)
 // C++ keywords flatc suffixes with '_' when emitting an accessor name.
 const std::set<std::string>& cppKeywords()
 {
-    static const std::set<std::string> k
+    static const std::set<std::string> s_keywords
         = {"alignas", "alignof",   "and",      "asm",      "auto",      "bool",     "break",
            "case",    "catch",     "char",     "class",    "const",     "continue", "default",
            "delete",  "do",        "double",   "else",     "enum",      "explicit", "export",
@@ -101,12 +121,12 @@ const std::set<std::string>& cppKeywords()
            "true",    "try",       "typedef",  "typename", "union",     "unsigned", "using",
            "virtual", "void",      "volatile", "while",    "and_eq",    "bitand",   "bitor",
            "compl",   "not",       "not_eq",   "or",       "or_eq",     "xor",      "xor_eq"};
-    return k;
+    return s_keywords;
 }
 
 std::string accessorName(const std::string& fieldName)
 {
-    return cppKeywords().count(fieldName) ? fieldName + "_" : fieldName;
+    return (cppKeywords().count(fieldName) != 0u) ? fieldName + "_" : fieldName;
 }
 
 bool isReservedRoot(const std::string& n)
@@ -114,7 +134,7 @@ bool isReservedRoot(const std::string& n)
     return n == "graph" || n == "kernel" || n == "device";
 }
 
-constexpr const char* kNs = "::hipdnn_flatbuffers_sdk::data_objects";
+constexpr const char* NS = "::hipdnn_flatbuffers_sdk::data_objects";
 
 struct Emitted
 {
@@ -136,11 +156,15 @@ std::string emitUidBinding(const std::string& table,
     o << "    {\"" << name << "\", " << (optional ? "true" : "false") << ", "
       << "+[](const void* a, std::int64_t& out) -> bool { ";
     if(optional)
-        o << "auto v = static_cast<const " << kNs << "::" << table << "*>(a)->" << acc
+    {
+        o << "auto v = static_cast<const " << NS << "::" << table << "*>(a)->" << acc
           << "(); if(!v) return false; out = *v; return true;";
+    }
     else
-        o << "out = static_cast<const " << kNs << "::" << table << "*>(a)->" << acc
+    {
+        o << "out = static_cast<const " << NS << "::" << table << "*>(a)->" << acc
           << "(); return true;";
+    }
     o << " }},\n";
     return o.str();
 }
@@ -162,16 +186,20 @@ std::string emitAttrBinding(const reflection::Schema* schema,
     if(isEnum)
     {
         const std::string enumShort = shortName(schema->enums()->Get(enumIdx)->name()->str());
-        attrType = "AttrType::Dtype";
+        attrType = "AttrType::DTYPE";
         std::ostringstream b;
-        b << "ScalarValue s; s.type = AttrType::Dtype; ";
+        b << "ScalarValue s; s.type = AttrType::DTYPE; ";
         if(optional)
-            b << "auto v = static_cast<const " << kNs << "::" << table << "*>(a)->" << acc
-              << "(); s.present = v.has_value(); if(v) s.dtype = " << kNs << "::EnumName"
+        {
+            b << "auto v = static_cast<const " << NS << "::" << table << "*>(a)->" << acc
+              << "(); s.present = v.has_value(); if(v) s.dtype = " << NS << "::EnumName"
               << enumShort << "(*v);";
+        }
         else
-            b << "s.present = true; s.dtype = " << kNs << "::EnumName" << enumShort
-              << "(static_cast<const " << kNs << "::" << table << "*>(a)->" << acc << "());";
+        {
+            b << "s.present = true; s.dtype = " << NS << "::EnumName" << enumShort
+              << "(static_cast<const " << NS << "::" << table << "*>(a)->" << acc << "());";
+        }
         b << " return s;";
         body = b.str();
     }
@@ -180,34 +208,42 @@ std::string emitAttrBinding(const reflection::Schema* schema,
         std::string member;
         if(base == reflection::Bool)
         {
-            attrType = "AttrType::Bool";
+            attrType = "AttrType::BOOL";
             member = "b";
         }
         else if(base == reflection::Float || base == reflection::Double)
         {
-            attrType = "AttrType::Float";
+            attrType = "AttrType::FLOAT";
             member = "f";
         }
         else
         {
-            attrType = "AttrType::Int";
+            attrType = "AttrType::INT";
             member = "i";
         }
         std::string cast;
         if(member == "i")
+        {
             cast = "std::int64_t";
+        }
         else if(member == "f")
+        {
             cast = "double";
+        }
         const std::string readExpr
-            = "static_cast<const " + std::string(kNs) + "::" + table + "*>(a)->" + acc + "()";
+            = "static_cast<const " + std::string(NS) + "::" + table + "*>(a)->" + acc + "()";
         std::ostringstream b;
         b << "ScalarValue s; s.type = " << attrType << "; ";
         if(optional)
+        {
             b << "auto v = " << readExpr << "; s.present = v.has_value(); if(v) s." << member
               << " = " << (cast.empty() ? "*v" : "static_cast<" + cast + ">(*v)") << ";";
+        }
         else
+        {
             b << "s.present = true; s." << member << " = "
               << (cast.empty() ? readExpr : "static_cast<" + cast + ">(" + readExpr + ")") << ";";
+        }
         b << " return s;";
         body = b.str();
     }
@@ -232,29 +268,48 @@ Emitted classifyTable(const reflection::Schema* schema, const reflection::Object
         const auto* nameAttr = attr(fld, "umd_name");
         const auto base = fld->type()->base_type();
 
-        if(inputTensorFlag && outputTensorFlag)
-            fail(table + "." + name + ": has both umd_input_tensor and umd_output_tensor");
+        if((inputTensorFlag != nullptr) && (outputTensorFlag != nullptr))
+        {
+            failField(table, name, "has both umd_input_tensor and umd_output_tensor");
+        }
 
-        const bool isEdge = inputTensorFlag || outputTensorFlag;
+        const bool isEdge = (inputTensorFlag != nullptr) || (outputTensorFlag != nullptr);
         if(isEdge)
         {
-            if(!nameAttr)
-                fail(table + "." + name + ": umd_input_tensor/umd_output_tensor requires umd_name");
-            const std::string bindName = nameAttr->value() ? nameAttr->value()->str() : "";
+            if(nameAttr == nullptr)
+            {
+                failField(table, name, "umd_input_tensor/umd_output_tensor requires umd_name");
+            }
+            const std::string bindName
+                = (nameAttr->value() != nullptr) ? nameAttr->value()->str() : "";
             if(bindName.empty())
-                fail(table + "." + name + ": umd_name must be non-empty");
+            {
+                failField(table, name, "umd_name must be non-empty");
+            }
             if(base != reflection::Long)
-                fail(table + "." + name
-                     + ": umd_input_tensor/umd_output_tensor field must be `long` (a UID)");
+            {
+                failField(
+                    table, name, "umd_input_tensor/umd_output_tensor field must be `long` (a UID)");
+            }
             if(isReservedRoot(bindName))
-                fail(table + "." + name + ": umd_name '" + bindName
-                     + "' collides with a reserved root (graph/kernel/device)");
+            {
+                std::string msg = "umd_name '";
+                msg += bindName;
+                msg += "' collides with a reserved root (graph/kernel/device)";
+                failField(table, name, msg);
+            }
             if(!seenNames.insert(bindName).second)
-                fail(table + ": duplicate umd_name '" + bindName + "'");
+            {
+                std::string msg = table;
+                msg += ": duplicate umd_name '";
+                msg += bindName;
+                msg += '\'';
+                fail(msg);
+            }
 
             const std::string acc = accessorName(name);
             const bool optl = fld->optional();
-            if(inputTensorFlag)
+            if(inputTensorFlag != nullptr)
             {
                 out.inputTensors += emitUidBinding(table, bindName, acc, optl);
                 ++out.inputTensorCount;
@@ -267,8 +322,10 @@ Emitted classifyTable(const reflection::Schema* schema, const reflection::Object
             continue;
         }
 
-        if(nameAttr)
-            fail(table + "." + name + ": umd_name without umd_input_tensor/umd_output_tensor");
+        if(nameAttr != nullptr)
+        {
+            failField(table, name, "umd_name without umd_input_tensor/umd_output_tensor");
+        }
 
         // Unannotated: a scalar attribute (if a scalar base type). Non-scalar
         // fields (vector/table/union/string) are not UMD scalars -- skip.
@@ -286,23 +343,31 @@ Emitted classifyTable(const reflection::Schema* schema, const reflection::Object
 int main(int argc, char** argv)
 {
     if(argc != 3)
+    {
         fail("usage: umd_registry_gen <graph.bfbs> <output.hpp>");
+    }
     const std::string bfbsPath = argv[1];
     const std::string outPath = argv[2];
 
     const std::string buf = readFile(bfbsPath);
     const auto* schema = reflection::GetSchema(buf.data());
-    if(!schema)
+    if(schema == nullptr)
+    {
         fail("input is not a valid reflection schema: " + bfbsPath);
+    }
 
     const reflection::Enum* nodeAttrs = nullptr;
     for(const auto* e : *schema->enums())
     {
         if(e->is_union() && shortName(e->name()->str()) == "NodeAttributes")
+        {
             nodeAttrs = e;
+        }
     }
-    if(!nodeAttrs)
+    if(nodeAttrs == nullptr)
+    {
         fail("NodeAttributes union not found in schema");
+    }
 
     std::ostringstream body;
     std::ostringstream entries;
@@ -311,11 +376,15 @@ int main(int argc, char** argv)
 
     for(const auto* ev : *nodeAttrs->values())
     {
-        if(!ev->union_type())
+        if(ev->union_type() == nullptr)
+        {
             continue;
+        }
         const int objIdx = ev->union_type()->index();
         if(objIdx < 0)
+        {
             continue; // NONE
+        }
         const reflection::Object* obj = schema->objects()->Get(objIdx);
         const std::string table = shortName(obj->name()->str());
         const std::string member = ev->name()->str(); // union value name == table type name
@@ -324,9 +393,13 @@ int main(int argc, char** argv)
         // table type name. Must be unique across ops.
         std::string opcode = objAttr(obj, "umd_opcode");
         if(opcode.empty())
+        {
             opcode = member;
+        }
         if(!seenOpcodes.insert(opcode).second)
+        {
             fail("duplicate umd_opcode '" + opcode + "'");
+        }
 
         const Emitted em = classifyTable(schema, obj);
 
@@ -334,30 +407,35 @@ int main(int argc, char** argv)
         std::string inputTensorsRef = "nullptr";
         std::string outputTensorsRef = "nullptr";
         std::string attrsRef = "nullptr";
-        const bool anyTable = em.inputTensorCount || em.outputTensorCount || em.attributeCount;
+        const bool anyTable = (em.inputTensorCount != 0u) || (em.outputTensorCount != 0u)
+                              || (em.attributeCount != 0u);
         if(anyTable)
+        {
             body << "// " << table << "\nnamespace " << tag << " {\n";
-        if(em.inputTensorCount)
+        }
+        if(em.inputTensorCount != 0u)
         {
             body << "inline const InputTensorBinding inputTensors[] = {\n"
                  << em.inputTensors << "};\n";
             inputTensorsRef = tag + "::inputTensors";
         }
-        if(em.outputTensorCount)
+        if(em.outputTensorCount != 0u)
         {
             body << "inline const OutputTensorBinding outputTensors[] = {\n"
                  << em.outputTensors << "};\n";
             outputTensorsRef = tag + "::outputTensors";
         }
-        if(em.attributeCount)
+        if(em.attributeCount != 0u)
         {
             body << "inline const AttrBinding attributes[] = {\n" << em.attributes << "};\n";
             attrsRef = tag + "::attributes";
         }
         if(anyTable)
+        {
             body << "} // namespace " << tag << "\n\n";
+        }
 
-        entries << "    {\"" << opcode << "\", \"" << member << "\", " << kNs
+        entries << "    {\"" << opcode << "\", \"" << member << "\", " << NS
                 << "::NodeAttributes::" << member << ", " << inputTensorsRef << ", "
                 << em.inputTensorCount << "u, " << outputTensorsRef << ", " << em.outputTensorCount
                 << "u, " << attrsRef << ", " << em.attributeCount << "u},\n";
@@ -390,10 +468,14 @@ int main(int argc, char** argv)
 
     std::ofstream ofs(outPath, std::ios::binary);
     if(!ofs)
+    {
         fail("cannot open output for writing: " + outPath);
+    }
     ofs << hdr.str();
     if(!ofs)
+    {
         fail("failed writing output: " + outPath);
+    }
 
     std::fprintf(
         stderr, "umd_registry_gen: emitted %zu op entries to %s\n", opCount, outPath.c_str());

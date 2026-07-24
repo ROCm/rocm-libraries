@@ -39,23 +39,23 @@ namespace hipdnn_flatbuffers_sdk::umd
 
 // The value kind of a scalar attribute. Mirrors the JsonLogic value domain a
 // criteria expression type-checks against (RFC 0018 Appendix A.7): integer,
-// float, boolean, or an enum name (`Dtype`). Enum-typed attributes surface as
-// `Dtype`, carrying the enum-value name string.
+// float, boolean, or an enum name (`DTYPE`). Enum-typed attributes surface as
+// `DTYPE`, carrying the enum-value name string.
 enum class AttrType : std::uint8_t
 {
-    Int,
-    Float,
-    Bool,
-    Dtype,
+    INT,
+    FLOAT,
+    BOOL,
+    DTYPE,
 };
 
 // A resolved scalar attribute value. `present` is false only for an optional
 // attribute the graph omitted; a present value populates exactly the member
 // selected by `type`. `dtype` points at a static enum-name string (no
-// ownership) when `type == Dtype`.
+// ownership) when `type == DTYPE`.
 struct ScalarValue
 {
-    AttrType type = AttrType::Int;
+    AttrType type = AttrType::INT;
     bool present = false;
     std::int64_t i = 0;
     double f = 0.0;
@@ -90,7 +90,7 @@ struct AttrBinding
 {
     std::string_view name;
     bool optional = false;
-    AttrType type = AttrType::Int;
+    AttrType type = AttrType::INT;
     ScalarReader read = nullptr;
 };
 
