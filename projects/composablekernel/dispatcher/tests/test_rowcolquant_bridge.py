@@ -23,6 +23,9 @@ from gemm_rowcolquant_utils import (  # noqa: E402
     RowColQuantGemmProblem,
     default_fp8_config,
     default_bf8_config,
+    encode_fp8_bytes,
+    quantize_dequantize_fp8,
+    fp8_encoding_available,
 )
 from codegen_common import make_rowcolquant_kernel_name  # noqa: E402
 
@@ -90,6 +93,44 @@ class TestProblem(unittest.TestCase):
     def test_problem_defaults(self):
         p = RowColQuantGemmProblem(M=256, N=256, K=256)
         self.assertEqual(p.k_batch, 1)
+
+
+@unittest.skipUnless(fp8_encoding_available(), "ml_dtypes fp8 not installed")
+class TestFp8Encode(unittest.TestCase):
+    """The self-test's genuine numeric path depends on these host-side encoders.
+
+    Encoded fp8/bf8 must be exactly 1 byte per element (the ctypes lib reads
+    A/B as const fp8_t*/bf8_t*), and the reference-side quantize->dequantize
+    must produce values consistent with that same encoding.
+    """
+
+    def test_encode_is_one_byte_per_element(self):
+        import numpy as np
+
+        a = np.array([[0.5, -1.25, 2.0, -0.03]], dtype=np.float32)
+        for variant in ("fp8", "bf8"):
+            enc = encode_fp8_bytes(a, variant)
+            self.assertEqual(enc.dtype, np.uint8)
+            self.assertEqual(enc.shape, a.shape)
+            self.assertEqual(enc.nbytes, a.size)  # 1 byte/element, not 4
+
+    def test_quant_dequant_matches_encoding(self):
+        import numpy as np
+
+        a = np.array([0.5, -1.25, 2.0, 1.0], dtype=np.float32)
+        # Exactly representable e4m3 values survive the round-trip.
+        qd = quantize_dequantize_fp8(a, "fp8")
+        np.testing.assert_allclose(qd, a, rtol=0, atol=0)
+
+    def test_fp8_and_bf8_round_differently(self):
+        import numpy as np
+
+        # 0.03 is not exactly representable; e4m3 and e5m2 round it differently.
+        a = np.array([0.03], dtype=np.float32)
+        self.assertNotEqual(
+            float(quantize_dequantize_fp8(a, "fp8")[0]),
+            float(quantize_dequantize_fp8(a, "bf8")[0]),
+        )
 
 
 if __name__ == "__main__":

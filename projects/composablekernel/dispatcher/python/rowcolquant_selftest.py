@@ -12,12 +12,20 @@ Two modes:
                  required. Verifies the whole toolchain up to a loadable .so.
 
   (default)      build + run on a GPU: generates random A/B and per-row/per-col
-                 scales, runs each kernel, and (when numpy is available) checks
-                 the result against a plain numpy RowColQuant reference.
+                 scales, runs each kernel, and -- when ml_dtypes is available --
+                 performs a GENUINE numeric check: A/B are encoded to real
+                 fp8/bf8 bytes fed to the kernel, and the numpy reference is
+                 rounded through the SAME fp8/bf8 quantization so the comparison
+                 is apples-to-apples. If ml_dtypes is unavailable the run is
+                 SMOKE-ONLY (kernel launches, timing reported, NO correctness
+                 claim) -- genuine numeric verify is then left to the tester.
 
 Reference math (RowColQuant):
     C[m, n] = sum_k ( A[m, k] * AQ[m] ) * ( B[k, n] * BQ[n] )
             = AQ[m] * BQ[n] * sum_k A[m, k] * B[k, n]
+
+where A[m, k] and B[k, n] are the fp8/bf8-rounded values (quantize->dequantize),
+matching exactly what the kernel dequantizes on device.
 
 Usage:
     python3 rowcolquant_selftest.py --build-only
@@ -44,31 +52,57 @@ def _reference(A, B, AQ, BQ):
     return acc
 
 
-def _run_one(so_path, M, N, K, verify):
+def _run_one(so_path, variant_key, M, N, K, verify):
     import numpy as np
 
     runner = u.RowColQuantGpuGemmRunner(so_path)
     name = runner.kernel_name
 
+    # Genuine numeric verify requires ml_dtypes to encode real fp8/bf8 bytes and
+    # to round the reference identically. Without it we can only smoke-test.
+    can_verify = verify and u.fp8_encoding_available()
+    if verify and not can_verify:
+        log.warning(
+            "  ml_dtypes unavailable: running SMOKE-ONLY (no correctness "
+            "claim). Install ml_dtypes for a genuine fp8/bf8 numeric check."
+        )
+
     rng = np.random.default_rng(0)
-    # fp8/bf8 inputs are represented on the host as float32 here for the
-    # reference; the kernel's ADataType/BDataType handle narrowing on device.
-    # For a genuine numeric check, use small integer-ish values.
-    A = rng.uniform(-2.0, 2.0, size=(M, K)).astype(np.float32)
-    B = rng.uniform(-2.0, 2.0, size=(K, N)).astype(np.float32)
+    A_f = rng.uniform(-2.0, 2.0, size=(M, K)).astype(np.float32)
+    B_f = rng.uniform(-2.0, 2.0, size=(K, N)).astype(np.float32)
     AQ = rng.uniform(0.5, 1.5, size=(M,)).astype(np.float32)
     BQ = rng.uniform(0.5, 1.5, size=(N,)).astype(np.float32)
+
+    if can_verify:
+        # Feed the kernel REAL 1-byte-per-element fp8/bf8 bytes (the ctypes lib
+        # reads A/B as const fp8_t*/bf8_t*). Encoding to uint8 preserves shape
+        # and the exact bit pattern the device dequantizes.
+        A = u.encode_fp8_bytes(A_f, variant_key)
+        B = u.encode_fp8_bytes(B_f, variant_key)
+        # Round the reference inputs through the SAME quantization.
+        A_ref = u.quantize_dequantize_fp8(A_f, variant_key)
+        B_ref = u.quantize_dequantize_fp8(B_f, variant_key)
+    else:
+        # SMOKE-ONLY: pass float32 so the kernel launches; we make no numeric
+        # claim in this path (the buffer is not a valid fp8 encoding).
+        A, B = A_f, B_f
 
     result = runner.run(A, B, AQ, BQ, u.RowColQuantGemmProblem(M=M, N=N, K=K))
     log.info("kernel %s ran in %.4f ms", name, result.time_ms)
 
-    if verify:
-        ref = _reference(A, B, AQ, BQ)
+    if can_verify:
+        ref = _reference(A_ref, B_ref, AQ, BQ)
         got = result.C.astype(np.float32)
         denom = np.maximum(np.abs(ref), 1.0)
         rel = np.abs(got - ref) / denom
         max_rel = float(rel.max())
-        log.info("  max relative error vs numpy reference: %.4g", max_rel)
+        log.info("  max relative error vs fp8/bf8-rounded reference: %.4g", max_rel)
+        # fp8 e4m3 has ~2 decimal digits of precision; accumulate over K terms.
+        tol = 0.15
+        if max_rel > tol:
+            log.error("  VERIFY FAILED: max_rel %.4g > tol %.4g", max_rel, tol)
+            return False
+        log.info("  VERIFY PASSED (max_rel %.4g <= tol %.4g)", max_rel, tol)
     return True
 
 
@@ -108,9 +142,11 @@ def main() -> int:
         log.info("build-only: all %d kernels built", len(configs))
         return 0
 
-    for so in so_paths:
+    for cfg, so in zip(configs, so_paths):
         try:
-            _run_one(so, args.m, args.n, args.k, verify=not args.no_verify)
+            if not _run_one(so, cfg.variant_key, args.m, args.n, args.k,
+                            verify=not args.no_verify):
+                ok = False
         except Exception as e:
             log.error("RUN FAILED for %s: %s", so, e)
             ok = False

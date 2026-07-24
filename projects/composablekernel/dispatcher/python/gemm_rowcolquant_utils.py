@@ -355,24 +355,110 @@ class RowColQuantGpuGemmRunner:
 
 
 # =============================================================================
+# fp8 / bf8 host-side encode helpers (for genuine numeric self-tests)
+# =============================================================================
+#
+# The kernel's ADataType/BDataType are 1-byte OCP fp8 (e4m3) / bf8 (e5m2) on
+# gfx950. The ctypes lib reinterprets the raw A/B pointers as const fp8_t*, so
+# the host MUST hand it actual 1-byte-per-element encoded buffers -- NOT float32
+# arrays (that would make it read a quarter of the buffer as garbage). These
+# helpers encode float32 -> fp8/bf8 bytes and decode back, so a self-test can
+# both feed real bytes to the kernel and round its numpy reference identically.
+
+
+# Map our variant_key -> the ml_dtypes fp8 dtype that matches the kernel's
+# OCP encoding on gfx950 (fp8 = e4m3, bf8 = e5m2).
+_ML_DTYPE_FOR_VARIANT = {"fp8": "float8_e4m3", "bf8": "float8_e5m2"}
+
+
+def _ml_fp8_dtype(variant_key: str):
+    """Return the numpy fp8 dtype (via ml_dtypes) for a variant, or None."""
+    try:
+        import ml_dtypes  # noqa: F401
+    except Exception:
+        return None
+    name = _ML_DTYPE_FOR_VARIANT.get(variant_key)
+    if name is None:
+        return None
+    return getattr(__import__("ml_dtypes"), name, None)
+
+
+def encode_fp8_bytes(arr, variant_key: str):
+    """Encode a float32/float array to packed 1-byte-per-element fp8/bf8.
+
+    Returns a C-contiguous uint8 numpy array with the same shape as ``arr``
+    whose raw bytes are exactly what the kernel expects to read as fp8_t*/bf8_t*.
+    Requires ml_dtypes; raises RuntimeError if unavailable.
+    """
+    import numpy as np
+
+    dt = _ml_fp8_dtype(variant_key)
+    if dt is None:
+        raise RuntimeError(
+            f"ml_dtypes fp8 dtype unavailable for variant {variant_key!r}; "
+            "cannot encode real fp8/bf8 bytes for a numeric self-test."
+        )
+    enc = np.asarray(arr, dtype=np.float32).astype(dt)
+    # Reinterpret the 1-byte fp8 storage as uint8 without changing bit pattern.
+    return np.ascontiguousarray(enc).view(np.uint8)
+
+
+def quantize_dequantize_fp8(arr, variant_key: str):
+    """Round a float array through fp8/bf8 and back to float32.
+
+    This is the reference-side counterpart to encode_fp8_bytes: it applies the
+    exact same fp8 rounding the kernel sees, so a numpy reference computed on
+    the result is a fair comparison. Requires ml_dtypes.
+    """
+    import numpy as np
+
+    dt = _ml_fp8_dtype(variant_key)
+    if dt is None:
+        raise RuntimeError(
+            f"ml_dtypes fp8 dtype unavailable for variant {variant_key!r}."
+        )
+    return np.asarray(arr, dtype=np.float32).astype(dt).astype(np.float32)
+
+
+def fp8_encoding_available() -> bool:
+    """True if ml_dtypes fp8/bf8 encoding is importable (for genuine verify)."""
+    return _ml_fp8_dtype("fp8") is not None
+
+
+# =============================================================================
 # Subprocess helpers (self-contained, do not call ctypes_utils.py)
 # =============================================================================
 
 
 def _detect_gpu_arch() -> str:
-    """Detect current GPU arch via rocm_agent_enumerator. Falls back to gfx950."""
+    """Detect current GPU arch via rocm_agent_enumerator.
+
+    Raises RuntimeError if the enumerator cannot be run or returns no usable
+    arch. We deliberately do NOT silently fall back to a default arch: a flaky
+    enumerator on (say) a gfx942 box would otherwise build gfx950 objects that
+    fail to load at runtime. Callers who know their target arch should pass
+    ``gfx_arch=`` explicitly to avoid detection entirely.
+    """
     try:
         result = subprocess.run(
             ["rocm_agent_enumerator"],
             capture_output=True, text=True, timeout=10,
         )
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("gfx") and line != "gfx000":
-                return line
-    except Exception:
-        pass
-    return _DEFAULT_GFX_ARCH
+    except Exception as e:
+        raise RuntimeError(
+            "rocm_agent_enumerator failed to run; cannot detect GPU arch. "
+            "Pass gfx_arch= explicitly to build for a known target."
+        ) from e
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("gfx") and line != "gfx000":
+            return line
+
+    raise RuntimeError(
+        "rocm_agent_enumerator returned no usable gfx arch "
+        f"(stdout={result.stdout!r}). Pass gfx_arch= explicitly."
+    )
 
 
 def _get_ck_include_dir() -> Optional[Path]:
