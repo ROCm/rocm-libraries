@@ -791,10 +791,15 @@ these descriptors is described in [Section 10](#10-tooling), built out alongside
 
 The descriptor formats in this document are the base representation: precise, diffable, and
 machine-checkable, but deliberately low-level. Hand-writing, reviewing, and validating them at scale is
-not the intended long-term workflow, so tooling is expected to grow around the format during rollout.
-This section names the categories without committing to specific tools or interfaces; each is added as
-the need becomes concrete.
+not the intended long-term workflow, so tooling grows around the format during rollout, and much of it is
+expected to be agentic: agent-driven skills that build and check descriptors from intent. Agentic
+authoring is a committed first step; the specific tools in the other categories below are added as the
+need becomes concrete.
 
+- **Agentic skills**: agent-driven workflows that turn a kernel and its intent into a correct KDP, and
+  that help validate and inspect descriptors conversationally, so an author does not hand-assemble
+  descriptor files. An authoring skill is the first tool built, with further skills following for the
+  categories below.
 - **Authoring**: generators that emit descriptors from higher-level inputs (an existing kernel's build
   config, a template, or an interactive definition) and mint their ids, so an author does not assemble
   descriptor files by hand.
@@ -808,8 +813,9 @@ the need becomes concrete.
 - **Inspection**: viewers that render a descriptor set the way the provider sees it (the resolved plan,
   the why-not trace, the catalog of engines and packs), so a change can be reviewed without deploying it.
 
-None of these is specified here. The intent is that authoring, validation, and inspection tooling is
-added as needed during implementation, on top of the stable descriptor format this RFC defines.
+Beyond the agentic authoring skill, none of these is specified here. The intent is that agentic,
+authoring, validation, and inspection tooling is added as needed during implementation, on top of the
+stable descriptor format this RFC defines.
 
 ---
 
