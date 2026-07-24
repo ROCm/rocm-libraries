@@ -2338,3 +2338,70 @@ TEST_F(PrecondCsritilu0, preprocess_guards)
                                              buffer.ptr),
               rocsparse_status_zero_pivot);
 }
+
+// ======================================================================
+// gtsv second wave: cover the internal spike-solver template block_dim
+// selection and the moderate-grid grid-level kernel branches in
+// rocsparse_gtsv.cpp.
+//
+// The solve dispatch (gtsv_template) starts at block_dim = 2 and doubles it
+// while the padded gridsize exceeds 512 (BLOCKSIZE = 256, so the doubling
+// stops once block_dim * 131072 >= m). The resulting block_dim selects a
+// distinct gtsv_spike_solver_template<BLOCKSIZE, BD> instantiation:
+//   block_dim ==  16 : m in (1048576, 2097152]
+//   block_dim ==  32 : m in (2097152, 4194304]
+//   block_dim ==  64 : m in (4194304, 8388608]
+//   block_dim == 128 : m in (8388608, 16777216]
+//   block_dim == 256 : m in (16777216, 33554432]
+//   block_dim  > 256 : m > 33554432 -> rocsparse_status_not_implemented
+// Each solve uses a well-conditioned diagonally-dominant tridiagonal system
+// (d = 4, dl = du = 1) with two right-hand sides so the multi-RHS path in
+// the selected instantiation runs too.
+//
+// Moderate m additionally selects the grid-level spike kernel by the padded
+// gridsize rounded up to a power of two: gridsize == 8 for m in (2048, 4096]
+// and gridsize == 16 for m in (4096, 8192].
+// ======================================================================
+TEST_F(PrecondGtsv, grid_level_gridsize8)
+{
+    run_gtsv_solve<float>(handle, 3000, 2, 3000);
+}
+TEST_F(PrecondGtsv, grid_level_gridsize16)
+{
+    run_gtsv_solve<float>(handle, 8000, 2, 8000);
+}
+TEST_F(PrecondGtsv, spike_block_dim16)
+{
+    run_gtsv_solve<float>(handle, 1500000, 2, 1500000);
+}
+TEST_F(PrecondGtsv, spike_block_dim32)
+{
+    run_gtsv_solve<float>(handle, 3000000, 2, 3000000);
+}
+TEST_F(PrecondGtsv, spike_block_dim64)
+{
+    run_gtsv_solve<float>(handle, 6000000, 2, 6000000);
+}
+TEST_F(PrecondGtsv, spike_block_dim128)
+{
+    run_gtsv_solve<float>(handle, 12000000, 2, 12000000);
+}
+TEST_F(PrecondGtsv, spike_block_dim256)
+{
+    run_gtsv_solve<float>(handle, 25000000, 2, 25000000);
+}
+// m > 256 * 131072 forces block_dim past 256, which the solve dispatch
+// rejects with not_implemented. Only the dispatch runs (it returns before
+// touching any array), so dummy single-element inputs are sufficient.
+TEST_F(PrecondGtsv, spike_block_dim_not_implemented)
+{
+    const rocsparse_int  m = 34000000, n = 1, ldb = 34000000;
+    device_vector<float> dl{std::vector<float>{1}};
+    device_vector<float> d{std::vector<float>{4}};
+    device_vector<float> du{std::vector<float>{1}};
+    device_vector<float> B{std::vector<float>{1}};
+    device_vector<char>  buffer{size_t(1)};
+    ASSERT_TRUE(dl.ptr && d.ptr && du.ptr && B.ptr && buffer.ptr);
+    EXPECT_EQ(rocsparse_sgtsv(handle, m, n, dl, d, du, B, ldb, buffer.ptr),
+              rocsparse_status_not_implemented);
+}
