@@ -54,12 +54,12 @@ WMMA targets. Wave width is not a user-selectable matrix-family control.
 
 | Kernel | Shape | Primitive | Status |
 |---|---|---|---|
-| `gemm_universal` | matmul | MFMA | ✓ |
-| `batched_gemm` | matmul (batched) | MFMA (via universal) | ✓ |
-| `grouped_gemm` | matmul (per-group) | MFMA (via universal) | ✓ |
-| `flatmm` | matmul (small-decode) | MFMA (via universal) | ✓ |
-| `gemm_multi_d` | matmul + variadic D | MFMA (via universal) | ✓ |
-| `gemm_multi_abd` | matmul (multi-A/B) | MFMA (via universal) | ✓ |
+| `gemm_universal` | matmul | target-selected MFMA or WMMA | ✓ |
+| `batched_gemm` | matmul (batched) | MFMA or WMMA (via universal) | ✓ |
+| `grouped_gemm` | matmul (per-group) | MFMA or WMMA (via universal) | ✓ |
+| `flatmm` | matmul (small-decode) | MFMA or WMMA (via universal) | ✓ |
+| `gemm_multi_d` | matmul + variadic D | MFMA or WMMA (via universal) | ✓ |
+| `gemm_multi_abd` | matmul (multi-A/B) | MFMA or WMMA (via universal) | ✓ |
 | `mfma_gemm` | matmul (16x16 atom) | MFMA direct | ✓ |
 | `streamk_gemm` | matmul (atomic split-K) | MFMA + atomic f32 | ✓ |
 | `block_scale_gemm` | matmul (FP8/BF8 + scale) | MFMA + explicit per-group scale | ✓ (`abquant` subset) |

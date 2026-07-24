@@ -62,8 +62,10 @@ CK Tile is powerful, but several pieces are hard to iterate on in C++:
 
 - explicit LDS allocation and layout (`tile.smem_alloc`, `LdsLayout`);
 - raw AMDGPU buffer descriptors (`tile.buffer_rsrc` with DW3 selected by the
-  active gfx backend; gfx9/gfx950 use `0x00027000`, while
-  gfx11-generic/gfx1151/gfx1201/gfx1250 use `0x31014000`);
+  exact gfx backend, not inferred from accelerator family: gfx9/gfx950 use
+  `0x00027000`, gfx1151/gfx1201 use `0x31014000`, and the CDNA5 gfx1250 backend
+  currently inherits `0x31014000` as a bring-up placeholder pending validation
+  of its 57-bit SRD model);
 - async DRAM-to-LDS via `raw_ptr_buffer_load_lds`;
 - MFMA atoms keyed by dtype and shape (`MfmaAtom`);
 - `s_waitcnt`, `s.barrier`, `sched_group_barrier`, `s_setprio`;

@@ -16,28 +16,30 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 
 - [`engines_and_switching.md`](engines_and_switching.md) — Python and C++
   engine selection.
-- [`dual_backend_unification_rfc.md`](dual_backend_unification_rfc.md) — design
-  record for the implemented serialized-IR backend seam.
+- [`dual_backend_unification_rfc.md`](dual_backend_unification_rfc.md) — broader
+  dual-backend migration proposal; its serialized-IR seam is implemented, while
+  other phases remain proposed.
 - [`ir_serialization_format.md`](ir_serialization_format.md) — serialized IR
   format consumed across that seam.
 
 ## Addressing and layout
 
 - [`transform_dag.md`](transform_dag.md) — coordinate-transform semantics.
-- [`coordinate_address_planning.md`](coordinate_address_planning.md) — current
-  offset, magic-unmerge, and incremental-move lowering.
-- [`multi_arch_data_layout.md`](multi_arch_data_layout.md) — architecture facts,
-  matrix catalogs, layout maps, ISA backends, and family policy.
+- [`coordinate_address_planning.md`](coordinate_address_planning.md) — proposed
+  transform-aware physical-address planning layer.
+- [`multi_arch_data_layout.md`](multi_arch_data_layout.md) — current architecture
+  facts plus forward design for matrix catalogs, layout maps, ISA backends, and
+  family policy.
 
 ## Code-generation controls
 
 - [`backend_support_agpr_res.md`](backend_support_agpr_res.md) — implemented
-  AGPR allocation control and its tradeoffs.
+  engine-level AGPR allocation control, current scope, and remaining validation.
 
 ## Kernel optimization design
 
-- [`kernel_opt_design.md`](kernel_opt_design.md) — current gfx950 tiled-2D
-  attention optimization controls and guards.
+- [`kernel_opt_design.md`](kernel_opt_design.md) — proposal for combining current
+  gfx950 tiled-2D attention optimization controls.
 
 Experiment summaries are historical evidence tied to their stated hardware,
 toolchain, and configuration. They are not current performance promises.
