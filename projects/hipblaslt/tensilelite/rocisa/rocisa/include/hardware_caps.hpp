@@ -640,7 +640,8 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
             = checkInList(isaVersion, {{11, 0, 0}, {11, 0, 1}, {11, 5, 1}}) ? 1536 : 1024;
     else
         rv["PhysicalMaxVgpr"] = 512;
-    rv["PhysicalMaxSgpr"]   = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it never binds.
+    rv["PhysicalMaxSgpr"]   = isaVersion[0] == 11 ? 2048 : 800;
     rv["maxLDSConstOffset"] = 65536;
     rv["GlobalPrefetchSize"] = 256;
 
