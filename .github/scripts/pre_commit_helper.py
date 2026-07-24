@@ -24,13 +24,14 @@ Arguments:
 
 Outputs (written to GITHUB_OUTPUT):
     diff_ref      : The resolved diff base, consumed by pre-commit --from-ref.
-    changed_files : Comma-separated, sorted list of changed files.
+    changed_files : New line -separated, sorted list of changed files.
 """
 
 from ci_utils import set_github_output, get_modified_paths
 from pathlib import Path
 import subprocess
 import argparse
+import sys
 
 NULL_REF = "0" * 40
 
@@ -122,12 +123,17 @@ def main():
     )
 
     args = parser.parse_args()
-
-    from_ref = select_diff_base(args.from_ref, args.default_ref)
-    set_github_output({"diff_ref": f"{from_ref}"})
-    fetch_diff_base(from_ref, args.pushed_branch_name)
-    changed_files = sparse_checkout_changed_projects(from_ref)
-    set_github_output({"changed_files": ",".join(changed_files)})
+    try:
+        from_ref = select_diff_base(args.from_ref, args.default_ref)
+        set_github_output({"diff_ref": f"{from_ref}"})
+        fetch_diff_base(from_ref, args.pushed_branch_name)
+        changed_files = sparse_checkout_changed_projects(from_ref)
+        set_github_output({"changed_files": "\n".join(changed_files)})
+    except subprocess.CalledProcessError as e:
+        if e.stderr:
+            sys.stderr.write(e.stderr)
+        sys.stderr.write(f"{e}")
+        sys.exit(e.returncode)
 
 
 if __name__ == "__main__":

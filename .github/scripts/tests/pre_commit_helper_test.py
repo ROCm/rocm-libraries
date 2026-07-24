@@ -121,7 +121,7 @@ class PreCommitHelperTest(unittest.TestCase):
         )
         mock_set_github_output.assert_any_call({"diff_ref": "origin/develop"})
         mock_set_github_output.assert_any_call(
-            {"changed_files": ",".join(sorted(changed_files))}
+            {"changed_files": "\n".join(sorted(changed_files))}
         )
 
     @patch("pre_commit_helper.is_shallow_repo", return_value=True)

@@ -38,6 +38,11 @@ jobs:
           filter: blob:none
           sparse-checkout: .github
 
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
       - name: Prepare pre-commit diff base and sparse-checkout
         id: prep
         env:
@@ -51,11 +56,11 @@ jobs:
       - name: Detect project changes
         id: changes
         env:
+          CHANGED_FILES: ${{ steps.prep.outputs.changed_files }}
           # Add project names here (one per line) to enable conditional dependency installation
           PROJECTS_WITH_OPTIONAL_DEPS: >-
             hipdnn
         run: |
-          CHANGED_FILES=$(echo "${{ steps.prep.outputs.changed_files }}" | tr ',' '\n')
           # Check each project for changes
           for project in $PROJECTS_WITH_OPTIONAL_DEPS; do
             if echo "$CHANGED_FILES" | grep -qE "^(projects|shared)/$project/"; then
