@@ -1235,6 +1235,406 @@ namespace
         EXPECT_EQ(rocsparse_destroy_hyb_mat(hyb), rocsparse_status_success);
         EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
     }
+
+    // -----------------------------------------------------------------------
+    // gebsrmv with row_block_dim in {9..16} and col_block_dim in
+    // {1..8, 10, 16, 17}. row_block_dim != col_block_dim routes through the
+    // gebsrmv_template_row_block_dim_9_12 / _13_16 dispatch cascades, so this
+    // fires every col_block_dim==N branch, the "col_block_dim <= 16" branch
+    // and the ">16" general-kernel else branch for each row_block_dim. Uses a
+    // minimal one-block GEBSR matrix (mb=nb=nnzb=1). Both storage directions
+    // are exercised by the caller.
+    // -----------------------------------------------------------------------
+    template <typename T>
+    void run_gebsrmv_block_dim(rocsparse_handle handle, rocsparse_direction dir)
+    {
+        rocsparse_mat_descr descr = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+        const T alpha = scalar<T>(2), beta = scalar<T>(1);
+
+        // One block column / one block row.
+        device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1}};
+        device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0}};
+        ASSERT_TRUE(row_ptr.ptr && col_ind.ptr);
+
+        const rocsparse_int row_dims[] = {9, 10, 11, 12, 13, 14, 15, 16};
+        const rocsparse_int col_dims[] = {1, 2, 3, 4, 5, 6, 7, 8, 10, 16, 17};
+
+        for(rocsparse_int R : row_dims)
+        {
+            for(rocsparse_int C : col_dims)
+            {
+                // A single R x C block, dense x (nb*C) and y (mb*R).
+                device_vector<T> val{std::vector<T>(static_cast<size_t>(R) * C, scalar<T>(1))};
+                device_vector<T> x{std::vector<T>(static_cast<size_t>(C), scalar<T>(1))};
+                device_vector<T> y{std::vector<T>(static_cast<size_t>(R), scalar<T>(0))};
+                ASSERT_TRUE(val.ptr && x.ptr && y.ptr);
+
+                UT_EXPECT_ROC(ut_gebsrmv(handle,
+                                         dir,
+                                         rocsparse_operation_none,
+                                         1,
+                                         1,
+                                         1,
+                                         &alpha,
+                                         descr,
+                                         val,
+                                         row_ptr,
+                                         col_ind,
+                                         R,
+                                         C,
+                                         x,
+                                         &beta,
+                                         y),
+                              rocsparse_status_success);
+                ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            }
+        }
+
+        // gebsrmv only implements rocsparse_operation_none; the transpose /
+        // conjugate-transpose operations must report not_implemented.
+        {
+            const rocsparse_int R = 9, C = 1;
+            device_vector<T>    val{std::vector<T>(static_cast<size_t>(R) * C, scalar<T>(1))};
+            device_vector<T>    x{std::vector<T>(static_cast<size_t>(C), scalar<T>(1))};
+            device_vector<T>    y{std::vector<T>(static_cast<size_t>(R), scalar<T>(0))};
+            ASSERT_TRUE(val.ptr && x.ptr && y.ptr);
+
+            UT_EXPECT_ROC(ut_gebsrmv(handle,
+                                     dir,
+                                     rocsparse_operation_transpose,
+                                     1,
+                                     1,
+                                     1,
+                                     &alpha,
+                                     descr,
+                                     val,
+                                     row_ptr,
+                                     col_ind,
+                                     R,
+                                     C,
+                                     x,
+                                     &beta,
+                                     y),
+                          rocsparse_status_not_implemented);
+            UT_EXPECT_ROC(ut_gebsrmv(handle,
+                                     dir,
+                                     rocsparse_operation_conjugate_transpose,
+                                     1,
+                                     1,
+                                     1,
+                                     &alpha,
+                                     descr,
+                                     val,
+                                     row_ptr,
+                                     col_ind,
+                                     R,
+                                     C,
+                                     x,
+                                     &beta,
+                                     y),
+                          rocsparse_status_not_implemented);
+        }
+
+        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+    }
+
+    // -----------------------------------------------------------------------
+    // bsrsv_buffer_size across directions / operations plus its argument and
+    // descriptor validation branches (invalid enums/sizes, non-general type,
+    // unsorted storage, null arrays/pointers). The transpose operation takes a
+    // distinct buffer-size adjustment path.
+    // -----------------------------------------------------------------------
+    template <typename T>
+    void run_bsrsv_buffer_size(rocsparse_handle handle)
+    {
+        Diag3<T> A;
+        ASSERT_TRUE(A.ok());
+        rocsparse_mat_descr descr = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
+        rocsparse_mat_info info = nullptr;
+        ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
+
+        size_t buffer_size = 0;
+
+        // Valid buffer-size queries: both directions, several operations and
+        // fill/diag descr settings, and block_dim 1 and 2.
+        const rocsparse_direction dirs[] = {rocsparse_direction_row, rocsparse_direction_column};
+        const rocsparse_operation ops[]  = {rocsparse_operation_none,
+                                            rocsparse_operation_transpose,
+                                            rocsparse_operation_conjugate_transpose};
+        const rocsparse_fill_mode fills[]
+            = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
+        const rocsparse_diag_type diags[]
+            = {rocsparse_diag_type_non_unit, rocsparse_diag_type_unit};
+
+        for(rocsparse_direction d : dirs)
+        {
+            for(rocsparse_operation op : ops)
+            {
+                for(rocsparse_fill_mode fm : fills)
+                {
+                    for(rocsparse_diag_type dt : diags)
+                    {
+                        ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, fm),
+                                  rocsparse_status_success);
+                        ASSERT_EQ(rocsparse_set_mat_diag_type(descr, dt),
+                                  rocsparse_status_success);
+                        for(rocsparse_int block_dim : {1, 2})
+                        {
+                            buffer_size = 0;
+                            UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                                               d,
+                                                               op,
+                                                               3,
+                                                               3,
+                                                               descr,
+                                                               A.val,
+                                                               A.row_ptr,
+                                                               A.col_ind,
+                                                               block_dim,
+                                                               info,
+                                                               &buffer_size),
+                                          rocsparse_status_success);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Reset to a plain lower/non-unit descriptor for the bad-arg cases.
+        ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_lower),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_mat_diag_type(descr, rocsparse_diag_type_non_unit),
+                  rocsparse_status_success);
+
+        // Invalid handle.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(nullptr,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_handle);
+
+        // Invalid enum: direction.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           static_cast<rocsparse_direction>(99),
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_value);
+
+        // Invalid enum: operation.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           static_cast<rocsparse_operation>(99),
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_value);
+
+        // Invalid size: mb.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           -1,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_size);
+
+        // Invalid size: nnzb.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           -1,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_size);
+
+        // Null descriptor.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           nullptr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_pointer);
+
+        // Non-general matrix type -> not_implemented.
+        {
+            rocsparse_mat_descr descr_sym = nullptr;
+            ASSERT_EQ(rocsparse_create_mat_descr(&descr_sym), rocsparse_status_success);
+            ASSERT_EQ(rocsparse_set_mat_type(descr_sym, rocsparse_matrix_type_symmetric),
+                      rocsparse_status_success);
+            UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                               rocsparse_direction_row,
+                                               rocsparse_operation_none,
+                                               3,
+                                               3,
+                                               descr_sym,
+                                               A.val,
+                                               A.row_ptr,
+                                               A.col_ind,
+                                               1,
+                                               info,
+                                               &buffer_size),
+                          rocsparse_status_not_implemented);
+            EXPECT_EQ(rocsparse_destroy_mat_descr(descr_sym), rocsparse_status_success);
+        }
+
+        // Unsorted storage mode -> requires_sorted_storage.
+        {
+            rocsparse_mat_descr descr_uns = nullptr;
+            ASSERT_EQ(rocsparse_create_mat_descr(&descr_uns), rocsparse_status_success);
+            ASSERT_EQ(rocsparse_set_mat_storage_mode(descr_uns, rocsparse_storage_mode_unsorted),
+                      rocsparse_status_success);
+            UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                               rocsparse_direction_row,
+                                               rocsparse_operation_none,
+                                               3,
+                                               3,
+                                               descr_uns,
+                                               A.val,
+                                               A.row_ptr,
+                                               A.col_ind,
+                                               1,
+                                               info,
+                                               &buffer_size),
+                          rocsparse_status_requires_sorted_storage);
+            EXPECT_EQ(rocsparse_destroy_mat_descr(descr_uns), rocsparse_status_success);
+        }
+
+        // Null bsr_val with nnzb > 0.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           static_cast<const T*>(nullptr),
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_pointer);
+
+        // Null bsr_row_ptr with mb > 0.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           static_cast<const rocsparse_int*>(nullptr),
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_pointer);
+
+        // Null bsr_col_ind with nnzb > 0.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           static_cast<const rocsparse_int*>(nullptr),
+                                           1,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_pointer);
+
+        // Invalid block_dim.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           0,
+                                           info,
+                                           &buffer_size),
+                      rocsparse_status_invalid_size);
+
+        // Null info.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           nullptr,
+                                           &buffer_size),
+                      rocsparse_status_invalid_pointer);
+
+        // Null buffer_size.
+        UT_EXPECT_ROC(ut_bsrsv_buffer_size(handle,
+                                           rocsparse_direction_row,
+                                           rocsparse_operation_none,
+                                           3,
+                                           3,
+                                           descr,
+                                           A.val,
+                                           A.row_ptr,
+                                           A.col_ind,
+                                           1,
+                                           info,
+                                           static_cast<size_t*>(nullptr)),
+                      rocsparse_status_invalid_pointer);
+
+        EXPECT_EQ(rocsparse_destroy_mat_info(info), rocsparse_status_success);
+        EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
+    }
 } // namespace
 
 // ===========================================================================
@@ -1267,6 +1667,12 @@ class Level2Bsrsv : public HandleTest
 class Level2Hybmv : public HandleTest
 {
 };
+class Level2GebsrmvBlockDim : public HandleTest
+{
+};
+class Level2BsrsvBufferSize : public HandleTest
+{
+};
 
 #define UT_L2_ALL_PRECISIONS(FIXTURE, FN)     \
     TEST_F(FIXTURE, all_precisions)           \
@@ -1286,3 +1692,19 @@ UT_L2_ALL_PRECISIONS(Level2Gemvi, run_gemvi)
 UT_L2_ALL_PRECISIONS(Level2Csrsv, run_csrsv)
 UT_L2_ALL_PRECISIONS(Level2Bsrsv, run_bsrsv)
 UT_L2_ALL_PRECISIONS(Level2Hybmv, run_hybmv)
+
+#define UT_L2_GEBSRMV_BLOCK_DIM(FIXTURE, FN)                             \
+    TEST_F(FIXTURE, all_precisions)                                      \
+    {                                                                    \
+        for(rocsparse_direction dir :                                    \
+            {rocsparse_direction_row, rocsparse_direction_column})       \
+        {                                                                \
+            FN<float>(handle, dir);                                      \
+            FN<double>(handle, dir);                                     \
+            FN<rocsparse_float_complex>(handle, dir);                    \
+            FN<rocsparse_double_complex>(handle, dir);                   \
+        }                                                                \
+    }
+
+UT_L2_GEBSRMV_BLOCK_DIM(Level2GebsrmvBlockDim, run_gebsrmv_block_dim)
+UT_L2_ALL_PRECISIONS(Level2BsrsvBufferSize, run_bsrsv_buffer_size)
