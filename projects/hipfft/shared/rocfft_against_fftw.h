@@ -62,6 +62,9 @@ static fftw_plan_wrapper_t<Tfloat>
     // to run FFTW in the first place, we must have just created an
     // uninitialized input buffer anyway.
 
+    // FFTW's planner is not thread-safe.
+    std::lock_guard<std::recursive_mutex> lock(get_fftw_mutex());
+
     switch(transformType)
     {
     case fft_transform_type_complex_forward:

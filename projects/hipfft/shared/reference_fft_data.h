@@ -61,14 +61,16 @@ inline void execute_cpu_fft(const fft_params&            cpu_fft_params,
     // run FFTW (which may destroy CPU input)
     apply_load_callback(cpu_fft_params, *input_ptr);
     cpu_fft_params.apply_host_load_ops(*input_ptr);
-    fftw_run<Tfloat>(cpu_fft_params.transform_type, cpu_plan, *input_ptr, cpu_output);
-    // clean up
-    // ask FFTW to fully clean up, since it tries to cache plan details
-    cpu_plan.reset();
-    if constexpr(std::is_same<Tfloat, double>::value)
-        fftw_cleanup();
-    else
-        fftwf_cleanup();
+    {
+        // Serialize execute + destroy against concurrent FFTW plan activity on
+        // other threads. We deliberately avoid fftw(f)_cleanup() here since it
+        // tears down ALL global FFTW state and invalidates plans that may be in
+        // use on other threads, causing intermittent access violations. Destroying
+        // the individual plan below is sufficient.
+        std::lock_guard<std::recursive_mutex> lock(get_fftw_mutex());
+        fftw_run<Tfloat>(cpu_fft_params.transform_type, cpu_plan, *input_ptr, cpu_output);
+        cpu_plan.reset();
+    }
     cpu_fft_params.apply_host_store_ops(cpu_output);
     apply_store_callback(cpu_fft_params, cpu_output);
 }

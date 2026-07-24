@@ -26,7 +26,17 @@
 #include "rocfft_complex.h"
 #include "test_params.h"
 #include <fftw3.h>
+#include <mutex>
 #include <vector>
+
+// Serializes all non-thread-safe FFTW calls (planner, execute, destroy),
+// since references are computed on async worker threads. Recursive so a thread
+// executing a plan can also destroy it without deadlocking.
+inline std::recursive_mutex& get_fftw_mutex()
+{
+    static std::recursive_mutex fftw_mutex;
+    return fftw_mutex;
+}
 
 // Function to return maximum error for float and double types.
 //
@@ -97,6 +107,8 @@ private:
         static_assert(
             std::is_same<raw_fftw_plan_type, std::remove_pointer<fftw_plan>::type>::value
             || std::is_same<raw_fftw_plan_type, std::remove_pointer<fftwf_plan>::type>::value);
+        // Plan destruction is not thread-safe.
+        std::lock_guard<std::recursive_mutex> lock(get_fftw_mutex());
         if constexpr(std::is_same<raw_fftw_plan_type, std::remove_pointer<fftw_plan>::type>::value)
             fftw_destroy_plan(plan_ptr);
         else
