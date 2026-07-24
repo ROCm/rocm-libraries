@@ -112,6 +112,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_host_level1.cpp
   unit_test_host_level1_classic.cpp
   unit_test_host_auxiliary.cpp
+  unit_test_host_conversion.cpp
+  unit_test_host_extra.cpp
+  unit_test_host_precond.cpp
 )
 
 add_executable(rocsparse-unit-test-device ${ROCSPARSE_UNIT_TEST_DEVICE_SOURCES})
