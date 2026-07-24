@@ -130,6 +130,8 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLowe
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->strides, toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->data_type, DataTypeSdk::FLOAT);
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->name, "{{ ft.name if ft else tf.name }}");
 {% endfor %}
 
     // Verify operation node

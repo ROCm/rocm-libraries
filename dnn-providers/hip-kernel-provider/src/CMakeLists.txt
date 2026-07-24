@@ -131,26 +131,6 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${_hkp_integration_test_environment}
         )
-        if(TARGET rocke_client_tests)
-            apply_test_category_labels(
-                rocke_client_tests
-                "${ROCKE_ENGINE_GTEST_CATEGORIES_YAML}"
-                "${PROJECT_BINARY_DIR}/staging"
-                "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-                INSTALL_EXECUTABLE "../hip_kernel_provider_rocke_client_tests_test"
-                ENVIRONMENT ${TEST_ENVIRONMENT}
-            )
-        endif()
-        if(TARGET rocke_client_integration_tests)
-            apply_test_category_labels(
-                rocke_client_integration_tests
-                "${ROCKE_ENGINE_GTEST_CATEGORIES_YAML}"
-                "${PROJECT_BINARY_DIR}/staging"
-                "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-                INSTALL_EXECUTABLE "../hip_kernel_provider_rocke_client_integration_tests_test"
-                ENVIRONMENT ${TEST_ENVIRONMENT}
-            )
-        endif()
     endif()
 
     set(_external_category_args "")

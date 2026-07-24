@@ -5,20 +5,22 @@
 #
 # rocke/platform/tests/CMakeLists.txt (C++ smoke binaries) and
 # rocke/platform/CMakeLists.txt (Python import/golden/pytest checks) register
-# these six directly via add_test(), not through a GTest binary, so they fall
-# outside ROCKE_ENGINE_test_categories.yaml's GTest-filter categorization.
-# Without an entry here they carry no quick/standard/comprehensive/full label:
-# the install-tree copy only has a hardcoded literal "quick" label baked in by
-# rocke/platform/CMakeLists.txt (nothing gives it standard/comprehensive/full),
-# and the build-tree copy (rocke/platform/tests/CMakeLists.txt) has no tier
-# label at all. Either way they silently drop out of `ctest -L <tier>`
-# selection, which is how TheRock CI's per-tier test_hipkernelprovider.py
-# invocation runs these suites.
+# these six directly via add_test(), not through a GTest binary categorized
+# by a shared YAML (rocKE's C++ client API and its GTest binaries were
+# removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
+# Without an entry here they carry no quick/standard/comprehensive/full
+# label: the install-tree copy only has a hardcoded literal "quick" label
+# baked in by rocke/platform/CMakeLists.txt (nothing gives it
+# standard/comprehensive/full), and the build-tree copy
+# (rocke/platform/tests/CMakeLists.txt) has no tier label at all. Either way
+# they silently drop out of `ctest -L <tier>` selection, which is how
+# TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
+# suites.
 #
 # All six are fast (<5s total combined) and carry no Full*/Standard*/
 # Comprehensive* variant, so every tier runs the same coverage -- matching
-# ROCKE_ENGINE_test_categories.yaml's convention for suites without tiered
-# coverage yet.
+# HIP_MLOPS_ENGINE_test_categories.yaml's convention for suites without
+# tiered coverage yet.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
