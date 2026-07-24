@@ -65,6 +65,7 @@ add_executable(rpp_tests
     src/tests/image/geometric/remap_test.cpp
     src/tests/image/geometric/crop_and_patch_test.cpp
     src/tests/image/geometric/phase_test.cpp
+    src/tests/image/geometric/resize_crop_mirror_test.cpp
     src/tests/image/morphological/erode_test.cpp
     src/tests/image/morphological/dilate_test.cpp
     src/tests/image/filter/box_filter_test.cpp
