@@ -223,7 +223,7 @@ the shipped `BLOCK_M=128` `use_q_direct_reg` body is already occupancy-clean;
 
 Production 142-shape trace cohort geomean Triton/CK DSL ~1.11 (105/142 win).
 Full per-lever detail:
-[attention 2D experiment summary](../architecture/attention_2d_experiment_summary.md).
+[attention 2D experiment summary](../examples/attention_2d_gfx950_experiment_summary.md).
 
 ## Build Timings
 
