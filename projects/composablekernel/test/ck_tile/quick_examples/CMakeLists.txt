@@ -9,13 +9,13 @@ if(TARGET tile_example_batched_contraction)
     add_ck_tile_category_test(
         test_ck_tile_batched_contraction_basic_quick
         tile_example_batched_contraction
-        -g_dims=2 -m_dims=128 -n_dims=128 -k_dims=64 -num_d=0
+        -g_dims=2 -m_dims=256 -n_dims=256 -k_dims=64 -num_d=0
         -v=1 -warmup=0 -repeat=1 -log=0
     )
     add_ck_tile_category_test(
         test_ck_tile_batched_contraction_multidim_quick
         tile_example_batched_contraction
-        -g_dims=2,2 -m_dims=8,16 -n_dims=16,8 -k_dims=64,2 -num_d=2
+        -g_dims=2,2 -m_dims=16,16 -n_dims=16,16 -k_dims=64,2 -num_d=2
         -v=1 -warmup=0 -repeat=1 -log=0
     )
     rocm_install(TARGETS tile_example_batched_contraction COMPONENT tests)
@@ -46,7 +46,7 @@ endif()
 set(_grouped_conv_quick_args
     -g=2 -n=2 -k=32 -c=32 -h=16 -w=16 -y=3 -x=3
     -stride_h=1 -stride_w=1 -lpad_h=1 -lpad_w=1 -rpad_h=1 -rpad_w=1
-    -prec=fp16 -v=1 -warmup=0 -repeat=1 -init=1
+    -prec=fp16 -v=1 -warmup=0 -repeat=1 -init=0
 )
 if(TARGET tile_example_grouped_conv_fwd)
     add_ck_tile_category_test(
@@ -209,7 +209,7 @@ if(_sage_quick_targets)
         test_ck_tile_sageattn_batch_quick
         tile_example_sageattn_fwd_quick
         -v=1 -prec=fp8bf16 -qscale=3 -mode=0 -b=2 -h=2 -h_k=1
-        -d=128 -d_v=128 -s=55 -s_k=256 -mask=1
+        -d=128 -d_v=128 -s=55 -s_k=255 -mask=1
         -iperm=0 -operm=0 -vlayout=r -warmup=0 -repeat=1 -kname=0
     )
     add_ck_tile_category_test(
