@@ -10,6 +10,10 @@ namespace gpu_rmsnorm_ref_test
 
 using hipdnn_data_sdk::utilities::TensorLayout;
 
+// ============================================================================
+// Small test cases for quick validation
+// ============================================================================
+
 inline std::vector<RMSNormTestCase> getRMSnormSmall4DTestCases()
 {
     return {{{2, 3, 4, 4}, {1, 3, 4, 4}, TensorLayout::NCHW},
@@ -39,6 +43,10 @@ inline std::vector<RMSNormTestCase> getRMSnormSmall5DTestCases()
             {{2, 3, 4, 2, 2}, {1, 1, 1, 1, 2}, TensorLayout::NDHWC},
             {{4, 8, 2, 4, 4}, {1, 8, 2, 4, 4}, TensorLayout::NDHWC}};
 }
+
+// ============================================================================
+// Medium test cases for standard validation
+// ============================================================================
 
 inline std::vector<RMSNormTestCase> getRMSnormMedium4DTestCases()
 {
@@ -90,6 +98,10 @@ inline std::vector<RMSNormTestCase> getRMSnormMedium5DTestCases()
             {{8, 64, 4, 28, 28}, {1, 1, 4, 28, 28}, TensorLayout::NDHWC}};
 }
 
+// ============================================================================
+// Large test cases for comprehensive validation
+// ============================================================================
+
 inline std::vector<RMSNormTestCase> getRMSnormLarge4DTestCases()
 {
     return {{{16, 288, 48, 32}, {1, 288, 48, 32}, TensorLayout::NCHW},
@@ -126,6 +138,68 @@ inline std::vector<RMSNormTestCase> getRMSnormLarge5DTestCases()
             {{16, 256, 4, 32, 32}, {1, 1, 4, 32, 32}, TensorLayout::NDHWC},
             {{32, 128, 8, 16, 16}, {1, 128, 8, 16, 16}, TensorLayout::NDHWC},
             {{32, 128, 8, 16, 16}, {1, 1, 1, 16, 16}, TensorLayout::NDHWC}};
+}
+
+// ============================================================================
+// Edge-case shapes to isolate innerSize and outerSize growth.
+// Only used with the DISABLED_TestGpuRMSNormFwdRefEdgeCaseValidation fixture.
+// ============================================================================
+
+inline std::vector<RMSNormTestCase> getRMSnormSkinnyModerateTestCases()
+{
+    // Matches the large scale dims used in getRMSnormLarge4DTestCases
+    constexpr int64_t N = 2048;
+
+    return {// 1 thread block, all work in one grid-stride loop
+            {{1, 1, 1, N}, {1, 1, 1, N}, TensorLayout::NCHW},
+            // Large thread blocks with a single active thread (degenerate reduction)
+            {{N, 1, 1, 1}, {1, 1, 1, 1}, TensorLayout::NCHW},
+            // Large thread blocks with two active threads (partial loop + two-thread reduction)
+            {{N, 1, 1, 2}, {1, 1, 1, 2}, TensorLayout::NCHW}};
+}
+
+inline std::vector<RMSNormTestCase> getRMSnormSkinnyInt32ScaleTestCases(int64_t outerBound)
+{
+    // NOTE: INNER_BOUND in these cases should be INT32_MAX, but is reduced here due to
+    // slow CPU fill/reference functions. Revisit once rocRAND-based GPU fill and
+    // golden references for large tensors are available.
+    constexpr int64_t INNER_BOUND = 100000000; // 100 million elements
+
+    // Cases are same as getRMSnormSkinnyModerateTestCases, but with innerSize and outerSize set to the int32_t boundary values
+    return {{{1, 1, 1, INNER_BOUND}, {1, 1, 1, INNER_BOUND}, TensorLayout::NCHW},
+            {{outerBound, 1, 1, 1}, {1, 1, 1, 1}, TensorLayout::NCHW},
+            {{outerBound, 1, 1, 2}, {1, 1, 1, 2}, TensorLayout::NCHW}};
+}
+
+inline std::vector<RMSNormTestCase> getRMSnormPowerOfTwoTestCases()
+{
+    // Outer size is fixed to small value to isolate innerSize's effect
+    constexpr int64_t OUTER = 2;
+
+    const std::vector<int64_t> innerSizes
+        = {1,   2,   3,   7,   8,   9,   15,  16,  17,  63,   64,   65,
+           127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025};
+
+    std::vector<RMSNormTestCase> cases;
+    cases.reserve(innerSizes.size());
+    for(int64_t inner : innerSizes)
+    {
+        cases.push_back({{OUTER, 1, 1, inner}, {1, 1, 1, inner}, TensorLayout::NCHW});
+    }
+    return cases;
+}
+
+inline std::vector<RMSNormTestCase> getRMSnormInnerSizeInt32BoundaryTestCases()
+{
+    // Unguarded innerSize boundary test to verify int32 truncation is handled correctly
+    // NOTE: INNER_BOUND in these cases should be INT32_MAX, but is reduced here due to
+    // slow CPU fill/reference functions. Revisit once rocRAND-based GPU fill and
+    // golden references for large tensors are available.
+    constexpr int64_t INNER_BOUND = 100000000; // 100 million elements
+
+    return {{{1, 1, 1, INNER_BOUND - 1}, {1, 1, 1, INNER_BOUND - 1}, TensorLayout::NCHW},
+            {{1, 1, 1, INNER_BOUND}, {1, 1, 1, INNER_BOUND}, TensorLayout::NCHW},
+            {{1, 1, 1, INNER_BOUND + 1}, {1, 1, 1, INNER_BOUND + 1}, TensorLayout::NCHW}};
 }
 
 } // namespace gpu_rmsnorm_ref_test

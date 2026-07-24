@@ -96,7 +96,7 @@ void runGpuVsCpuRMSNormFwd(const std::vector<int64_t>& ioDims,
 // ============================================================================
 
 template <typename DataType>
-class RMSNormFwdTestSuite : public ::testing::TestWithParam<gpu_rmsnorm_ref_test::RMSNormTestCase>
+class RMSNormFwdTestSuite : public ::testing::TestWithParam<RMSNormTestCase>
 {
 protected:
     void runRMSNormFwdTest()

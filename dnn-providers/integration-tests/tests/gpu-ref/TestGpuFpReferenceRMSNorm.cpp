@@ -657,3 +657,121 @@ INSTANTIATE_TEST_SUITE_P(Full, TestGpuRMSNormFwdRef5DBfp16, ::testing::ValuesIn(
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
+
+// ============================================================================
+// Edge case tests with DISABLED_ prefix to avoid running in CI.
+// Run the tests manually with --gtest_also_run_disabled_tests
+// --gtest_filter=*TestGpuRMSNormFwdRefEdgeCaseValidation* flags.
+// ============================================================================
+
+namespace
+{
+
+int64_t getMaxOuterSizeForCurrentDevice()
+{
+    int deviceId = 0;
+    EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
+
+    hipDeviceProp_t props{};
+    EXPECT_EQ(hipGetDeviceProperties(&props, deviceId), hipSuccess);
+
+    return static_cast<int64_t>(props.maxGridSize[0])
+           / static_cast<int64_t>(GpuFpReferenceRMSNorm::BLOCK_SIZE);
+}
+
+} // namespace
+
+TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksMinusOneSucceeds)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t outerSize = getMaxOuterSizeForCurrentDevice() - 1;
+    Tensor<float> x({outerSize, 1, 1, 1});
+    Tensor<float> scale({1, 1, 1, 1});
+    Tensor<float> y({outerSize, 1, 1, 1});
+
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y));
+}
+
+TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAtMaxBlocksSucceeds)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t outerSize = getMaxOuterSizeForCurrentDevice();
+    Tensor<float> x({outerSize, 1, 1, 1});
+    Tensor<float> scale({1, 1, 1, 1});
+    Tensor<float> y({outerSize, 1, 1, 1});
+
+    EXPECT_NO_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y));
+}
+
+TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_OuterSizeAboveMaxBlocksThrows)
+{
+    SKIP_IF_NO_DEVICES();
+    const int64_t outerSize = getMaxOuterSizeForCurrentDevice() + 1;
+    Tensor<float> x({outerSize, 1, 1, 1});
+    Tensor<float> scale({1, 1, 1, 1});
+    Tensor<float> y({outerSize, 1, 1, 1});
+
+    EXPECT_THROW(GpuFpReferenceRMSNorm::fprop<float>(x, scale, y), std::runtime_error);
+}
+
+TEST(TestGpuRMSNormFwdRefEdgeCaseValidation, DISABLED_BeyondInt32InnerSizeIfMemoryAllows)
+{
+    SKIP_IF_NO_DEVICES();
+
+    size_t freeBytes = 0;
+    size_t totalBytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
+
+    constexpr int64_t OUTER_SIZE = 1;
+    // NOTE: INNER_SIZE in this test should be 2^32+1, but is reduced here due to
+    // slow CPU fill/reference functions. Revisit once rocRAND-based GPU fill and
+    // golden references for large tensors are available.
+    constexpr int64_t INNER_SIZE = 100000000; // 100 million elements
+
+    Tensor<float> x({OUTER_SIZE, 1, 1, INNER_SIZE});
+    Tensor<float> scale({1, 1, 1, INNER_SIZE});
+    Tensor<float> yCpu({OUTER_SIZE, 1, 1, INNER_SIZE});
+    Tensor<float> yGpu({OUTER_SIZE, 1, 1, INNER_SIZE});
+
+    // Calculate the required memory for input, scale, and output tensors
+    const size_t requiredBytes
+        = (x.elementCount() + scale.elementCount() + yGpu.elementCount()) * sizeof(float);
+    if(requiredBytes > freeBytes)
+    {
+        GTEST_SKIP() << "Insufficient GPU memory for the test. Required: " << requiredBytes
+                     << " bytes, Free: " << freeBytes << " bytes.";
+    }
+
+    const unsigned int seed = getGlobalTestSeed();
+    x.fillWithRandomValues(-1.0f, 1.0f, seed);
+    scale.fillWithRandomValues(-1.0f, 1.0f, seed + 1);
+
+    CpuFpReferenceRMSNorm::forward<float, float, float, double>(x, scale, yCpu, 1e-5);
+    GpuFpReferenceRMSNorm::fprop<float, float, float, double>(x, scale, yGpu, 1e-5);
+
+    assertAllClose(yCpu, yGpu, getTolerance<float>());
+}
+
+using TestGpuRMSNormFwdRefEdgeCaseValidationFp32 = RMSNormFwdTestSuite<float>;
+
+TEST_P(TestGpuRMSNormFwdRefEdgeCaseValidationFp32, DISABLED_MatchesCpuRef)
+{
+    this->runRMSNormFwdTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(SkinnyModerate,
+                         TestGpuRMSNormFwdRefEdgeCaseValidationFp32,
+                         ::testing::ValuesIn(getRMSnormSkinnyModerateTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(PowerOfTwo,
+                         TestGpuRMSNormFwdRefEdgeCaseValidationFp32,
+                         ::testing::ValuesIn(getRMSnormPowerOfTwoTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(
+    SkinnyInt32Scale, TestGpuRMSNormFwdRefEdgeCaseValidationFp32, ::testing::ValuesIn([]() {
+        return getRMSnormSkinnyInt32ScaleTestCases(getMaxOuterSizeForCurrentDevice());
+    }()));
+
+INSTANTIATE_TEST_SUITE_P(InnerSizeInt32Boundary,
+                         TestGpuRMSNormFwdRefEdgeCaseValidationFp32,
+                         ::testing::ValuesIn(getRMSnormInnerSizeInt32BoundaryTestCases()));
