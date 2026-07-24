@@ -72,6 +72,12 @@ filters = ["Smoke/IntegrationGpuConvFwd3dFp32.Correctness/*"]
 atol = 5e-5
 rtol = 1e-5
 
+# Bundle equivalent of the C++ 3D fp32 conv fwd override above
+[[tolerance_overrides]]
+filters = ["quick_ConvolutionFwd_Default.*fp32_ncdhw*", "quick_ConvolutionFwd_Default.*fp32_ndhwc*"]
+atol = 5e-5
+rtol = 1e-5
+
 # -- Test Skips --
 # Skip tests on specific architectures (or globally if 'archs' is omitted).
 # Each entry requires:
