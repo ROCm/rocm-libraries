@@ -44,18 +44,23 @@ namespace rocsparse
                                            J    n,
                                            J    k,
                                            I    nnz,
+                                           int64_t              batch_count,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                            J* __restrict__ row_block_red,
                                            T* __restrict__ val_block_red,
                                            const J* __restrict__ row_limits,
+                                           int64_t              offsets_batch_stride_A,
+                                           int64_t              columns_values_batch_stride_A,
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const A* __restrict__ csr_val,
                                            const B* __restrict__ dense_B,
                                            int64_t ldb,
+                                           int64_t              batch_stride_B,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                            C* __restrict__ dense_C,
                                            int64_t              ldc,
+                                           int64_t              batch_stride_C,
                                            rocsparse_order      order_C,
                                            rocsparse_index_base idx_base,
                                            bool                 is_host_mode)
@@ -63,33 +68,46 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
-        if(alpha == 0 && beta == 1)
+        // Grid-stride loop over the batch dimension (grid y). Per-batch pointers
+        // are computed with load_pointer so the device kernels stay batch-agnostic.
+        // The reduction buffers are laid out contiguously per batch: row_block_red
+        // has stride gridDim_x (== nblocks) and val_block_red has stride
+        // gridDim_x * n. row_limits is shared across batches because every batch
+        // has the same sparsity pattern.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            row_block_red[hipBlockIdx_x] = -1;
-            return;
-        }
+            J* row_block_red_batch
+                = load_pointer(row_block_red, batch, static_cast<int64_t>(hipGridDim_x));
 
-        rocsparse::csrmmnn_nnz_split_main_device<BLOCKSIZE, WF_SIZE>(conj_A,
-                                                                     conj_B,
-                                                                     ncol,
-                                                                     m,
-                                                                     n,
-                                                                     k,
-                                                                     nnz,
-                                                                     alpha,
-                                                                     row_block_red,
-                                                                     val_block_red,
-                                                                     row_limits,
-                                                                     csr_row_ptr,
-                                                                     csr_col_ind,
-                                                                     csr_val,
-                                                                     dense_B,
-                                                                     ldb,
-                                                                     beta,
-                                                                     dense_C,
-                                                                     ldc,
-                                                                     order_C,
-                                                                     idx_base);
+            if(alpha == 0 && beta == 1)
+            {
+                row_block_red_batch[hipBlockIdx_x] = -1;
+                continue;
+            }
+
+            rocsparse::csrmmnn_nnz_split_main_device<BLOCKSIZE, WF_SIZE>(
+                conj_A,
+                conj_B,
+                ncol,
+                m,
+                n,
+                k,
+                nnz,
+                alpha,
+                row_block_red_batch,
+                load_pointer(val_block_red, batch, static_cast<int64_t>(hipGridDim_x) * n),
+                row_limits,
+                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                beta,
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C,
+                idx_base);
+        }
     }
 
     template <unsigned int BLOCKSIZE,
@@ -108,18 +126,23 @@ namespace rocsparse
                                                 J    n,
                                                 J    k,
                                                 I    nnz,
+                                                int64_t              batch_count,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                 J* __restrict__ row_block_red,
                                                 T* __restrict__ val_block_red,
                                                 const J* __restrict__ row_limits,
+                                                int64_t              offsets_batch_stride_A,
+                                                int64_t              columns_values_batch_stride_A,
                                                 const I* __restrict__ csr_row_ptr,
                                                 const J* __restrict__ csr_col_ind,
                                                 const A* __restrict__ csr_val,
                                                 const B* __restrict__ dense_B,
                                                 int64_t ldb,
+                                                int64_t              batch_stride_B,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                                 C* __restrict__ dense_C,
                                                 int64_t              ldc,
+                                                int64_t              batch_stride_C,
                                                 rocsparse_order      order_C,
                                                 rocsparse_index_base idx_base,
                                                 bool                 is_host_mode)
@@ -127,33 +150,41 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
-        if(alpha == 0 && beta == 1)
+        // Grid-stride loop over the batch dimension (grid y). See main kernel.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            row_block_red[hipBlockIdx_x] = -1;
-            return;
-        }
+            J* row_block_red_batch
+                = load_pointer(row_block_red, batch, static_cast<int64_t>(hipGridDim_x));
 
-        rocsparse::csrmmnn_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(conj_A,
-                                                                          conj_B,
-                                                                          offset,
-                                                                          m,
-                                                                          n,
-                                                                          k,
-                                                                          nnz,
-                                                                          alpha,
-                                                                          row_block_red,
-                                                                          val_block_red,
-                                                                          row_limits,
-                                                                          csr_row_ptr,
-                                                                          csr_col_ind,
-                                                                          csr_val,
-                                                                          dense_B,
-                                                                          ldb,
-                                                                          beta,
-                                                                          dense_C,
-                                                                          ldc,
-                                                                          order_C,
-                                                                          idx_base);
+            if(alpha == 0 && beta == 1)
+            {
+                row_block_red_batch[hipBlockIdx_x] = -1;
+                continue;
+            }
+
+            rocsparse::csrmmnn_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(
+                conj_A,
+                conj_B,
+                offset,
+                m,
+                n,
+                k,
+                nnz,
+                alpha,
+                row_block_red_batch,
+                load_pointer(val_block_red, batch, static_cast<int64_t>(hipGridDim_x) * n),
+                row_limits,
+                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                beta,
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C,
+                idx_base);
+        }
     }
 
     template <unsigned int BLOCKSIZE,
@@ -173,39 +204,50 @@ namespace rocsparse
                                            J    n,
                                            J    k,
                                            I    nnz,
+                                           int64_t              batch_count,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                            const J* __restrict__ row_limits,
+                                           int64_t              offsets_batch_stride_A,
+                                           int64_t              columns_values_batch_stride_A,
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const A* __restrict__ csr_val,
                                            const B* __restrict__ dense_B,
                                            int64_t ldb,
+                                           int64_t              batch_stride_B,
                                            C* __restrict__ dense_C,
                                            int64_t              ldc,
+                                           int64_t              batch_stride_C,
                                            rocsparse_order      order_C,
                                            rocsparse_index_base idx_base,
                                            bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        rocsparse::csrmmnt_nnz_split_main_device<BLOCKSIZE, WF_SIZE, LOOPS>(conj_A,
-                                                                            conj_B,
-                                                                            ncol,
-                                                                            m,
-                                                                            n,
-                                                                            k,
-                                                                            nnz,
-                                                                            alpha,
-                                                                            row_limits,
-                                                                            csr_row_ptr,
-                                                                            csr_col_ind,
-                                                                            csr_val,
-                                                                            dense_B,
-                                                                            ldb,
-                                                                            dense_C,
-                                                                            ldc,
-                                                                            order_C,
-                                                                            idx_base);
+        // Grid-stride loop over the batch dimension (grid y). Per-batch pointers
+        // are computed with load_pointer so the device kernels stay batch-agnostic.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmmnt_nnz_split_main_device<BLOCKSIZE, WF_SIZE, LOOPS>(
+                conj_A,
+                conj_B,
+                ncol,
+                m,
+                n,
+                k,
+                nnz,
+                alpha,
+                row_limits,
+                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C,
+                idx_base);
+        }
     }
 
     template <unsigned int BLOCKSIZE,
@@ -224,39 +266,49 @@ namespace rocsparse
                                                 J    n,
                                                 J    k,
                                                 I    nnz,
+                                                int64_t              batch_count,
                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                 const J* __restrict__ row_limits,
+                                                int64_t              offsets_batch_stride_A,
+                                                int64_t              columns_values_batch_stride_A,
                                                 const I* __restrict__ csr_row_ptr,
                                                 const J* __restrict__ csr_col_ind,
                                                 const A* __restrict__ csr_val,
                                                 const B* __restrict__ dense_B,
                                                 int64_t ldb,
+                                                int64_t              batch_stride_B,
                                                 C* __restrict__ dense_C,
                                                 int64_t              ldc,
+                                                int64_t              batch_stride_C,
                                                 rocsparse_order      order_C,
                                                 rocsparse_index_base idx_base,
                                                 bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        rocsparse::csrmmnt_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(conj_A,
-                                                                          conj_B,
-                                                                          offset,
-                                                                          m,
-                                                                          n,
-                                                                          k,
-                                                                          nnz,
-                                                                          alpha,
-                                                                          row_limits,
-                                                                          csr_row_ptr,
-                                                                          csr_col_ind,
-                                                                          csr_val,
-                                                                          dense_B,
-                                                                          ldb,
-                                                                          dense_C,
-                                                                          ldc,
-                                                                          order_C,
-                                                                          idx_base);
+        // Grid-stride loop over the batch dimension (grid y). See main kernel.
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmmnt_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(
+                conj_A,
+                conj_B,
+                offset,
+                m,
+                n,
+                k,
+                nnz,
+                alpha,
+                row_limits,
+                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C,
+                idx_base);
+        }
     }
 }
 
@@ -270,18 +322,23 @@ namespace rocsparse
             J    n,                                                        \
             J    k,                                                        \
             I    nnz,                                                      \
+            int64_t              batch_count,                              \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                 \
             J* __restrict__ row_block_red,                                 \
             T* __restrict__ val_block_red,                                 \
             const J* __restrict__ row_limits,                              \
+            int64_t              offsets_batch_stride_A,                   \
+            int64_t              columns_values_batch_stride_A,            \
             const I* __restrict__ csr_row_ptr,                             \
             const J* __restrict__ csr_col_ind,                             \
             const A* __restrict__ csr_val,                                 \
             const B* __restrict__ dense_B,                                 \
             int64_t ldb,                                                   \
+            int64_t              batch_stride_B,                           \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                  \
             C* __restrict__ dense_C,                                       \
             int64_t              ldc,                                      \
+            int64_t              batch_stride_C,                           \
             rocsparse_order      order_C,                                  \
             rocsparse_index_base idx_base,                                 \
             bool                 is_host_mode);
@@ -296,18 +353,23 @@ namespace rocsparse
             J    n,                                                             \
             J    k,                                                             \
             I    nnz,                                                           \
+            int64_t              batch_count,                                   \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                      \
             J* __restrict__ row_block_red,                                      \
             T* __restrict__ val_block_red,                                      \
             const J* __restrict__ row_limits,                                   \
+            int64_t              offsets_batch_stride_A,                        \
+            int64_t              columns_values_batch_stride_A,                 \
             const I* __restrict__ csr_row_ptr,                                  \
             const J* __restrict__ csr_col_ind,                                  \
             const A* __restrict__ csr_val,                                      \
             const B* __restrict__ dense_B,                                      \
             int64_t ldb,                                                        \
+            int64_t              batch_stride_B,                                \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                       \
             C* __restrict__ dense_C,                                            \
             int64_t              ldc,                                           \
+            int64_t              batch_stride_C,                                \
             rocsparse_order      order_C,                                       \
             rocsparse_index_base idx_base,                                      \
             bool                 is_host_mode);
@@ -322,15 +384,20 @@ namespace rocsparse
             J    n,                                                               \
             J    k,                                                               \
             I    nnz,                                                             \
+            int64_t              batch_count,                                     \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                        \
             const J* __restrict__ row_limits,                                     \
+            int64_t              offsets_batch_stride_A,                          \
+            int64_t              columns_values_batch_stride_A,                   \
             const I* __restrict__ csr_row_ptr,                                    \
             const J* __restrict__ csr_col_ind,                                    \
             const A* __restrict__ csr_val,                                        \
             const B* __restrict__ dense_B,                                        \
             int64_t ldb,                                                          \
+            int64_t              batch_stride_B,                                  \
             C* __restrict__ dense_C,                                              \
             int64_t              ldc,                                             \
+            int64_t              batch_stride_C,                                  \
             rocsparse_order      order_C,                                         \
             rocsparse_index_base idx_base,                                        \
             bool                 is_host_mode);
@@ -345,15 +412,20 @@ namespace rocsparse
             J    n,                                                             \
             J    k,                                                             \
             I    nnz,                                                           \
+            int64_t              batch_count,                                   \
             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                      \
             const J* __restrict__ row_limits,                                   \
+            int64_t              offsets_batch_stride_A,                        \
+            int64_t              columns_values_batch_stride_A,                 \
             const I* __restrict__ csr_row_ptr,                                  \
             const J* __restrict__ csr_col_ind,                                  \
             const A* __restrict__ csr_val,                                      \
             const B* __restrict__ dense_B,                                      \
             int64_t ldb,                                                        \
+            int64_t              batch_stride_B,                                \
             C* __restrict__ dense_C,                                            \
             int64_t              ldc,                                           \
+            int64_t              batch_stride_C,                                \
             rocsparse_order      order_C,                                       \
             rocsparse_index_base idx_base,                                      \
             bool                 is_host_mode);
