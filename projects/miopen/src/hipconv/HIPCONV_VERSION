@@ -1,8 +1,9 @@
-EMU version: v0.1.1-0-gce48734
-EMU commit: ce48734010e7bdc97bbd800f1d9f27cc413a9e4e
-Snapshot date: 2026-07-22
+EMU version: v0.1.2-0-gd24b588
+EMU commit: d24b5885b9724a3fe43979a0e6ff19f0702b5628
+Snapshot date: 2026-07-24
 Arches: cdna3,cdna4,cdna5
 Files:
+  ./.clang-format
   ./cmake/autoshard.cpp.in
   ./cmake/GpuArch.cmake
   ./cmake/libautoshard.cpp

@@ -108,7 +108,7 @@ function(hipconv_autoshard)
     add_custom_command(OUTPUT ${generated_files}
                       COMMAND ${autoshard_target} ${autogen_dir}
                       DEPENDS ${autoshard_target})
-    
+
     target_sources(${target} PRIVATE ${generated_files})
     set_source_files_properties(${generated_files} PROPERTIES LANGUAGE HIP)
 endfunction()
