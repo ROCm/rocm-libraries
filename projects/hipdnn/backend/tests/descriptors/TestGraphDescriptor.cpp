@@ -38,7 +38,6 @@ public:
         EXPECT_EQ(graph.tensors.size(), 3);
         EXPECT_EQ(graph.nodes.size(), 1);
     }
-
 };
 
 TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
