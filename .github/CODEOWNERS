@@ -25,6 +25,7 @@
 /projects/hipsolver/                                @ROCm/solvers-reviewers
 /projects/hipsparse/                                @ROCm/sparses-reviewers
 /projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
+/projects/hipthreads/                               @ROCm/hipthreads-reviewers
 /projects/hiptensor/                                @ROCm/hiptensor-reviewers
 /projects/miopen/                                   @ROCm/miopen-reviewers
 /projects/rocblas/                                  @ROCm/rocblas-reviewers
