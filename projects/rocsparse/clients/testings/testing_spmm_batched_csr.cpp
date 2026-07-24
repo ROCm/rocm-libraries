@@ -147,14 +147,6 @@ void testing_spmm_batched_csr_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename A, typename B, typename C, typename T>
 void testing_spmm_batched_csr(const Arguments& arg)
 {
-    hipDeviceProp_t prop;
-    hipGetDeviceProperties(&prop, 0);
-
-    // Print maximum grid size in the Y dimension
-    std::cout << "Max grid size Y: " << prop.maxGridSize[1] << std::endl;
-
-
-
     J                    M               = arg.M;
     J                    N               = arg.N;
     J                    K               = arg.K;

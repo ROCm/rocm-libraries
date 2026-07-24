@@ -502,7 +502,6 @@ Tests:
 # both the shared (n <= 32) and looped (n > 32) column tilings via N.
 - name: spmm_batched_csr_file
   category: stress
-  hardware: [gfx90a]
   function: spmm_batched_csr
   indextype: *i32
   precision: *single_only_precisions
@@ -510,8 +509,8 @@ Tests:
   N: [2, 45]
   K: 1
   batch_count_A: [1]
-  batch_count_B: [65536]
-  batch_count_C: [65536]
+  batch_count_B: [65537]
+  batch_count_C: [65537]
   alpha_beta: *alpha_beta_range_stress
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
