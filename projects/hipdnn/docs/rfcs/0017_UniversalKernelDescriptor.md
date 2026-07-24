@@ -124,7 +124,7 @@ full provider. This complements build-time codegen rather than replacing it.
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables ([§8.2](#82-heuristic-adapters)) |
 | Runtime drop-in | prebuilt code objects, opt-in, off by default | JIT-compiled sources ([§11](#11-packaging-and-delivery)) |
 | Multi-kernel launch program (e.g. SDPA backward) | None | composition ([§14.1](#141-several-kernels-for-one-operation)) |
-| Selection composition: UCD pipeline | None | composition ([§14.2](#142-a-pipeline-of-separately-chosen-kernels)) |
+| Selection composition: UCD (Universal Composite Descriptor) pipeline | None | composition ([§14.2](#142-a-pipeline-of-separately-chosen-kernels)) |
 | JIT compilation; normalized providers | None | JIT ([§8.3](#83-future-jit-and-normalized-providers)) |
 
 ---
@@ -287,7 +287,7 @@ its kernels require.
 {
   "schema": "hipdnn.umd/v1",
   "id":     "968156a8-ee21-4827-bcd7-893a8a72dccc",    // stable; listed in KDP matchers[], shared across packs
-  "name":   "SDPA prefill d128 bf16 match",
+  "name":   "Example attention forward (d128, bf16) match",
   "nodes":    [ ... ],     // structural pattern that binds $vars (Section 5)
   "criteria": { ... }      // declarative expression tree over bound tokens (Section 5)
 }
@@ -299,7 +299,7 @@ its kernels require.
 {
   "schema": "hipdnn.udd/v1",
   "id":     "625df14f-f0cd-4beb-9297-1872d055c1cb",
-  "name":   "SDPA prefill d128 dispatch",
+  "name":   "Example attention forward (d128) dispatch",
   "grid":   { ... }, "block": { ... },  // Section 6
   "shared_mem_bytes": 32768,
   "workspace_bytes":  0,
@@ -319,7 +319,7 @@ so it names none of them.
 {
   "schema": "hipdnn.ukd/v1",
   "id":        "15b02840-05ba-40cf-ac17-384b50f56a7d",
-  "name":      "Example attention prefill d128 bf16 (gfx942)",
+  "name":      "Example attention forward (d128, bf16, gfx942)",
   "kernel_source": { ... },                       // Section 7: a compiled kernel, or how to build it AOT
   "metadata":  {"tile_m": 128},                    // tile_m set; split_k omitted, takes the KMD default
   "priority":  100                                // tie-break when the UHD is not decisive
@@ -336,7 +336,7 @@ kernels are unique to this pack.
   "schema": "hipdnn.kdp/v1",
   "version": "1",              // pack format version, gated at load
   "arch":     ["gfx942"],      // arch is a pack property, resolved at selection (Section 5)
-  "matchers": ["968156a8-ee21-4827-bcd7-893a8a72dccc", "a541565e-09eb-471b-8507-0e00f5bf75d7", "efa31b85-150b-49aa-bc05-027b94a2b084"],  // UMD ids; a kernel applies iff all pass
+  "matchers": ["968156a8-ee21-4827-bcd7-893a8a72dccc"],   // UMD ids; a child kernel applies iff all listed matchers pass
   "engine":    "efc9eae4-fe33-4cb0-a593-95d771dc13b2",     // one UED id: the engine every child kernel joins (carries UHD + KMD)
   "dispatch":  "625df14f-f0cd-4beb-9297-1872d055c1cb",     // one UDD id, shared by every child kernel (Section 6)
   "kernelDescriptors": [       // the vector of child kernels; each is just source + metadata values
@@ -1050,7 +1050,7 @@ seqlen_k` that the Launch formulas and the `$D` intermediate use.
   "schema": "hipdnn.udd/v1",
   "id":   "f2513834-5b17-4084-b09f-f0c3b440588a",
   "name": "SDPA backward (d128) dispatch",
-  "intermediates": [        // named scratch shared across the Launches (see 13.3)
+  "intermediates": [        // named scratch shared across the Launches (see 14.3)
     {"name": "$D", "dtype": "FLOAT", "shape": ["batch", "num_heads", "seqlen_q"]}
   ],
   "launches": [             // three dispatch steps, run in order; each has a named source slot
@@ -1300,8 +1300,7 @@ choices; none is a dependency.
 - **UDD (Universal Dispatch Descriptor):** the dispatch ABI, meaning argument binding and ordering,
   grid, block, shared memory, and workspace ([Section 6](#6-dispatch-and-workspace)). It holds one or
   more Launches (one for a single-kernel pack, several for a multi-launch one). One per KDP, shared by
-  every child kernel, and reused across packs by ID. (Distinct from a tensor UID, which is an unrelated
-  unique identifier.)
+  every child kernel, and reused across packs by ID.
 - **Criteria expression:** the declarative `{"op": [args]}` tree that forms a matcher's checks, over
   `$`-prefixed references to schema-declared fields. Plain data the safe interpreter walks; it fails
   closed on any field the schema does not declare ([Section 5](#5-matching-and-the-umd)).
