@@ -5095,6 +5095,9 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesReduction = state["MaxLDS"]
 
     # lds max occupancy
+    # MaxOccupancy is workgroups per CU; the per-workgroup LDS floor is DeviceLDS//MaxOccupancy
+    # on both CDNA and RDNA (an RDNA WGP has 2x the LDS but also holds 2x the workgroups for the
+    # same wg/CU, so the per-workgroup budget is unchanged).
     ldsSizeOccupancy = isaInfoMap[isa].archCaps["DeviceLDS"] // state["MaxOccupancy"]
     ldsNumBytesOccupancy = ldsSizeOccupancy
 

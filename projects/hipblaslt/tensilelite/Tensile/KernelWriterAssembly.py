@@ -232,7 +232,16 @@ class KernelWriterAssembly(KernelWriter):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
-    multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
+    if self.states.version[0] == 12:
+      # TODO: gfx12 keeps the legacy wave64-based (256) multiplier for historic reasons; it should
+      # use the wave-size-aware divisor below (wavefront * 4 SIMDs = 128 for wave32) once gfx12
+      # occupancy has been benchmarked.
+      multiplier = int(ceil(max(numThreads, 256) / 256.0))
+    else:
+      # multiplier = the waves-per-SIMD that one workgroup occupies = numThreads / (wavefront * 4);
+      # 4 SIMDs per CU (CDNA) / WGP (RDNA).
+      simdWaves = self.states.kernel["WavefrontSize"] * 4
+      multiplier = int(ceil(numThreads / float(simdWaves)))
     maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
 
     if self.states.version[0] == 12 and self.states.version[1] == 5:
@@ -257,9 +266,12 @@ class KernelWriterAssembly(KernelWriter):
 
   ########################################
   def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to occupancy limiters """
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
-    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(deviceLdsSize, ldsSize)
+    # gfx11 (RDNA) shares a 128 KB LDS pool across the WGP (2x the 64 KB per-workgroup cap).
+    ldsPool = 2 * deviceLdsSize if self.states.version[0] == 11 else deviceLdsSize
+    ldsLimitedOccupancy = self.getLdsLimitedOccupancy(ldsPool, ldsSize)
 
     if not doubleVgpr:
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
@@ -294,6 +306,7 @@ class KernelWriterAssembly(KernelWriter):
 
   @staticmethod
   def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
+    """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to LDS size"""
     if ldsSize == 0:
       # No LDS usage: LDS is not the binding constraint.
       # Return a large sentinel so other limits (VGPR, wave cap) win in min().
