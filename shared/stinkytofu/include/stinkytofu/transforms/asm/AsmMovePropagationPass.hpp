@@ -21,9 +21,11 @@ class Pass;
 /// Before:
 ///   v0 = v_mov_b32 v1
 ///   v2 = v_add_f32 v0, v3
+///   v0 = v_sub_f32 v4, v5
 ///
 /// After:
 ///   v2 = v_add_f32 v1, v3
+///   v0 = v_sub_f32 v4, v5
 /// ```
 ///
 /// Rules:
