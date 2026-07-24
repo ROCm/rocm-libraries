@@ -39,8 +39,7 @@
 
 #include "rocsolver_device_workspace.hpp"
 
-/* #include <rocprofiler-sdk-roctx/roctx.h> */
-#include <roctracer/roctx.h>
+#include <rocprofiler-sdk-roctx/roctx.h>
 
 ROCSOLVER_BEGIN_NAMESPACE
 

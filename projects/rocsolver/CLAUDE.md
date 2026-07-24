@@ -70,6 +70,49 @@ variables, block-count tuning, and result interpretation, see:
 
 **`docs/latrd_sytrd_syevd_benchmarking_guide.md`**
 
+## Profiling with roctx markers
+
+LATRD, SYTRD/SYTD2, and SYEVD all contain roctx range markers that appear as named
+regions in `rocprofv3` traces.
+
+### Range names
+
+| Source file | Range name | Covers |
+|---|---|---|
+| `rocauxiliary_latrd.hpp` | `rocsolver_latrd` | Public LATRD entry point |
+| `rocauxiliary_latrd.hpp` | `rocsolver_latrd_forsytrd` | LATRD panel called from within SYTRD |
+| `roclapack_sytrd_hetrd.hpp` | `rocsolver_sytrd_hetrd` | Main SYTRD/HETRD path |
+| `roclapack_sytrd_hetrd.hpp` | `rocsolver_sytrd_hetrd_alt` | Alternate SYTRD/HETRD path |
+| `roclapack_sytd2_hetd2.hpp` | `rocsolver_sytd2_hetd2` | Unblocked SYTD2/HETD2 |
+| `roclapack_syevd_heevd.hpp` | `rocsolver_syevd_heevd` | Full SYEVD/HEEVD entry point |
+
+### Activating markers with rocprofv3
+
+Use `--marker-trace` to capture roctx ranges, and optionally `--kernel-rename` to
+label GPU kernel dispatches with the enclosing roctx region name:
+
+```bash
+cd build/release
+
+# Trace marker ranges only
+rocprofv3 --marker-trace \
+    -- env LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
+    ./clients/staging/rocsolver-bench -f latrd -n 2048 -k 64 --iters 5 -r s --uplo L
+
+# Trace markers + rename kernels by enclosing roctx region
+rocprofv3 --marker-trace --kernel-rename \
+    -- env LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
+    ./clients/staging/rocsolver-bench -f sytrd -n 2048 --iters 5 -r s --uplo L
+
+# Full system trace (HIP API + markers + kernel dispatches)
+rocprofv3 --sys-trace \
+    -- env LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
+    ./clients/staging/rocsolver-bench -f syevd -n 2048 --iters 3 -r s --uplo L
+```
+
+See `docs/rocprofv3_segfault_large_dispatch_count.md` for a known rocprofv3 1.1.0 crash
+at large dispatch counts and its workaround (`rocprof` v1 with `--stats`).
+
 ## Code Formatting
 
 Install the git hook for automatic formatting:

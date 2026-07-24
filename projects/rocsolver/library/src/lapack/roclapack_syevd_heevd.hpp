@@ -39,6 +39,7 @@
 #include "rocblas.hpp"
 #include "roclapack_sytrd_hetrd.hpp"
 #include "rocsolver/rocsolver.h"
+#include <rocprofiler-sdk-roctx/roctx.h>
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -271,10 +272,14 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 {
     ROCSOLVER_ENTER("syevd_heevd", "evect:", evect, "uplo:", uplo, "n:", n, "shiftA:", shiftA,
                     "lda:", lda, "bc:", batch_count);
+    roctxRangePush("rocsolver_syevd_heevd");
 
     // quick return
     if(batch_count == 0)
+    {
+        roctxRangePop();
         return rocblas_status_success;
+    }
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -321,13 +326,17 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     // quick return
     if(n == 0)
+    {
+        roctxRangePop();
         return rocblas_status_success;
+    }
 
     // quick return for n = 1 (scalar case)
     if(n == 1)
     {
         ROCSOLVER_LAUNCH_KERNEL(syev_scalar_case<T>, gridReset, threads, 0, stream, evect, A,
                                 strideA, D, strideD, batch_count);
+        roctxRangePop();
         return rocblas_status_success;
     }
 
@@ -371,6 +380,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         }
     }
 
+    roctxRangePop();
     return rocblas_status_success;
 }
 
@@ -403,10 +413,14 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 {
     ROCSOLVER_ENTER("syevd_heevd", "evect:", evect, "uplo:", uplo, "n:", n, "shiftA:", shiftA,
                     "lda:", lda, "bc:", batch_count);
+    roctxRangePush("rocsolver_syevd_heevd");
 
     // quick return
     if(batch_count == 0)
+    {
+        roctxRangePop();
         return rocblas_status_success;
+    }
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
@@ -456,13 +470,17 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     // quick return
     if(n == 0)
+    {
+        roctxRangePop();
         return rocblas_status_success;
+    }
 
     // quick return for n = 1 (scalar case)
     if(n == 1)
     {
         ROCSOLVER_LAUNCH_KERNEL(syev_scalar_case<T>, gridReset, threads, 0, stream, evect, A,
                                 strideA, D, strideD, batch_count);
+        roctxRangePop();
         return rocblas_status_success;
     }
 
@@ -506,6 +524,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         }
     }
 
+    roctxRangePop();
     return rocblas_status_success;
 }
 
