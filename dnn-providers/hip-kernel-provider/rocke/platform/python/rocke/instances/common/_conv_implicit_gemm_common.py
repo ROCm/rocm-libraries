@@ -18,7 +18,7 @@ What lives here
 * ``_ir_dtype``, ``_DTYPE_TO_IR`` — dtype helpers.
 * MFMA-body helpers: ``_emit_mfma``, ``_emit_smem_load``,
   ``_emit_frag_smem_load``, ``_apply_accumulator_epilogue``,
-  ``_choose_load_vec`` — the LDS-load + MFMA emission plumbing reused by
+  ``_choose_load_vec_for`` — the LDS-load + MFMA emission plumbing reused by
   both the forward and wgrad K-loop bodies.
 """
 
