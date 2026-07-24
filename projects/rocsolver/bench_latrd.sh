@@ -40,12 +40,12 @@ do
     i=$((i+128))
 done
 
-# i=4352
-# while [ $i -le 8192 ]
-# do
-#     echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 11 -r $prec $verify --device $dev
-#     i=$((i+256))
-# done
+i=4352
+while [ $i -le 8192 ]
+do
+    echo -n -e "$i\t"; $bench -f $func -n $i -k $k --perf 1 --iters 11 -r $prec $verify --device $dev
+    i=$((i+256))
+done
 
 # i=8704
 # while [ $i -le 12288 ]
