@@ -1446,12 +1446,17 @@ class TestSgprFactory(unittest.TestCase):
         self.assertFalse(rc.isAbs)
         self.assertFalse(rc.isOff)
 
-    def test_str_arg_rejects_isAbs_isOff(self):
-        # sgpr has no isAbs / isOff in the rocisa signature.
+    def test_str_arg_rejects_isAbs(self):
+        # sgpr has no isAbs in the rocisa signature (only vgpr does).
+        # isOff IS accepted by sgpr, matching native rocisa container.cpp.
         with self.assertRaises(TypeError):
             sgpr("Foo", 1, isAbs=True)
-        with self.assertRaises(TypeError):
-            sgpr("Foo", 1, isOff=True)
+
+    def test_str_arg_accepts_isOff(self):
+        # isOff mirrors the native rocisa sgpr binding (container.cpp).
+        rc = sgpr("Foo", 1, isOff=True)
+        self.assertTrue(rc.isOff)
+        self.assertFalse(rc.isAbs)
 
     def test_holder_dispatch(self):
         hc = sgpr(Holder(idx=4), 1)
