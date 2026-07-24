@@ -85,10 +85,9 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
 //
 // The config-list index is cross-checked against the recorded kernel name, so a
 // stale/misindexed entry is rejected rather than launching the wrong kernel.
-static hipconv::ConvKernelHandle
-ResolveKernel(hipconv::ArchHandle arch,
-              const hipconv::Conv2dParams& par,
-              const PerformanceConfigConvHipConv& config)
+static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
+                                               const hipconv::Conv2dParams& par,
+                                               const PerformanceConfigConvHipConv& config)
 {
     if(config.index < 0)
         return nullptr;
@@ -282,7 +281,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
     if(!arch.has_value())
         MIOPEN_THROW("ConvHipConv: unsupported architecture.");
 
-    const auto par    = ToHipconvParams(problem);
+    const auto par     = ToHipconvParams(problem);
     auto* const kernel = ResolveKernel(*arch, par, config);
     if(kernel == nullptr)
         MIOPEN_THROW("ConvHipConv: performance config does not resolve to a kernel.");
@@ -338,13 +337,8 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
                 const HipEventProfiler profiler(handle);
 
                 // wgrad kernel writes fp32 into the workspace...
-                if(const auto status = hipconv::launch(kernel,
-                                                       par,
-                                                       tensors.x,
-                                                       tensors.dy,
-                                                       workSpace,
-                                                       nullptr,
-                                                       handle.GetStream());
+                if(const auto status = hipconv::launch(
+                       kernel, par, tensors.x, tensors.dy, workSpace, nullptr, handle.GetStream());
                    status != hipSuccess)
                     MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: wgrad launch failed.");
 
@@ -414,14 +408,12 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
-void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext&,
-                                                 const ProblemDescription&)
+void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext&, const ProblemDescription&)
 {
 }
 bool PerformanceConfigConvHipConv::IsValidValue() const { return false; }
 bool PerformanceConfigConvHipConv::SetNextValue(const ProblemDescription&) { return false; }
-bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext&,
-                                           const ProblemDescription&) const
+bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext&, const ProblemDescription&) const
 {
     return false;
 }
