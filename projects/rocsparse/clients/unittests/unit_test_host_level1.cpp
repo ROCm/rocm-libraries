@@ -202,15 +202,10 @@ namespace
         size_t buffer_size = 0;
 
         // buffer-size query (temp_buffer == nullptr).
-        EXPECT_ROC(rocsparse_spvv(handle,
-                                  rocsparse_operation_none,
-                                  x,
-                                  y,
-                                  &result,
-                                  dt_of<T>(),
-                                  &buffer_size,
-                                  nullptr),
-                   rocsparse_status_success);
+        EXPECT_ROC(
+            rocsparse_spvv(
+                handle, rocsparse_operation_none, x, y, &result, dt_of<T>(), &buffer_size, nullptr),
+            rocsparse_status_success);
 
         void* temp = nullptr;
         ASSERT_EQ(hipMalloc(&temp, buffer_size ? buffer_size : 4), hipSuccess);
@@ -271,7 +266,8 @@ TEST_F(HostLevel1, rot_type_mismatch_not_implemented)
 {
     VecPair<float, int32_t> vp;
     // x is f32_r, y is f64_r -> mismatch.
-    ASSERT_TRUE(vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
     const float c = 1, s = 0;
     EXPECT_ROC(rocsparse_rot(handle, &c, &s, vp.x, vp.y), rocsparse_status_not_implemented);
 }
@@ -279,7 +275,8 @@ TEST_F(HostLevel1, rot_type_mismatch_not_implemented)
 TEST_F(HostLevel1, gather_type_mismatch_not_implemented)
 {
     VecPair<float, int32_t> vp;
-    ASSERT_TRUE(vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
     // gather(handle, y, x): result gathered into x from y.
     EXPECT_ROC(rocsparse_gather(handle, vp.y, vp.x), rocsparse_status_not_implemented);
 }
@@ -287,16 +284,19 @@ TEST_F(HostLevel1, gather_type_mismatch_not_implemented)
 TEST_F(HostLevel1, scatter_type_mismatch_not_implemented)
 {
     VecPair<float, int32_t> vp;
-    ASSERT_TRUE(vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
     EXPECT_ROC(rocsparse_scatter(handle, vp.x, vp.y), rocsparse_status_not_implemented);
 }
 
 TEST_F(HostLevel1, axpby_type_mismatch_not_implemented)
 {
     VecPair<float, int32_t> vp;
-    ASSERT_TRUE(vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f64_r));
     const float alpha = 1, beta = 1;
-    EXPECT_ROC(rocsparse_axpby(handle, &alpha, vp.x, &beta, vp.y), rocsparse_status_not_implemented);
+    EXPECT_ROC(rocsparse_axpby(handle, &alpha, vp.x, &beta, vp.y),
+               rocsparse_status_not_implemented);
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +306,8 @@ TEST_F(HostLevel1, axpby_type_mismatch_not_implemented)
 TEST_F(HostLevel1, gather_ok)
 {
     VecPair<float, int32_t> vp;
-    ASSERT_TRUE(vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
     EXPECT_ROC(rocsparse_gather(handle, vp.y, vp.x), rocsparse_status_success);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
@@ -314,7 +315,8 @@ TEST_F(HostLevel1, gather_ok)
 TEST_F(HostLevel1, scatter_ok)
 {
     VecPair<float, int32_t> vp;
-    ASSERT_TRUE(vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
+    ASSERT_TRUE(
+        vp.create(rocsparse_indextype_i32, rocsparse_datatype_f32_r, rocsparse_datatype_f32_r));
     EXPECT_ROC(rocsparse_scatter(handle, vp.x, vp.y), rocsparse_status_success);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 }

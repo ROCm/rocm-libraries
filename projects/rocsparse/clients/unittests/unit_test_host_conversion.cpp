@@ -204,20 +204,60 @@ static void check_csr2csc(rocsparse_handle handle)
 
     rocsparse_status st = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsr2csc(handle, m, n, nnz, csr_val, row_ptr, col_ind, csc_val, csc_row_ind,
-                                csc_col_ptr, rocsparse_action_numeric, rocsparse_index_base_zero,
+        st = rocsparse_scsr2csc(handle,
+                                m,
+                                n,
+                                nnz,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                csc_val,
+                                csc_row_ind,
+                                csc_col_ptr,
+                                rocsparse_action_numeric,
+                                rocsparse_index_base_zero,
                                 buffer.ptr);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsr2csc(handle, m, n, nnz, csr_val, row_ptr, col_ind, csc_val, csc_row_ind,
-                                csc_col_ptr, rocsparse_action_numeric, rocsparse_index_base_zero,
+        st = rocsparse_dcsr2csc(handle,
+                                m,
+                                n,
+                                nnz,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                csc_val,
+                                csc_row_ind,
+                                csc_col_ptr,
+                                rocsparse_action_numeric,
+                                rocsparse_index_base_zero,
                                 buffer.ptr);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsr2csc(handle, m, n, nnz, csr_val, row_ptr, col_ind, csc_val, csc_row_ind,
-                                csc_col_ptr, rocsparse_action_numeric, rocsparse_index_base_zero,
+        st = rocsparse_ccsr2csc(handle,
+                                m,
+                                n,
+                                nnz,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                csc_val,
+                                csc_row_ind,
+                                csc_col_ptr,
+                                rocsparse_action_numeric,
+                                rocsparse_index_base_zero,
                                 buffer.ptr);
     else
-        st = rocsparse_zcsr2csc(handle, m, n, nnz, csr_val, row_ptr, col_ind, csc_val, csc_row_ind,
-                                csc_col_ptr, rocsparse_action_numeric, rocsparse_index_base_zero,
+        st = rocsparse_zcsr2csc(handle,
+                                m,
+                                n,
+                                nnz,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                csc_val,
+                                csc_row_ind,
+                                csc_col_ptr,
+                                rocsparse_action_numeric,
+                                rocsparse_index_base_zero,
                                 buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
@@ -270,17 +310,49 @@ static void check_csr2ell_ell2csr(rocsparse_handle handle)
 
     rocsparse_status st = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsr2ell(handle, m, csr_descr, csr_val, row_ptr, col_ind, ell_descr,
-                                ell_width, ell_val, ell_col_ind);
+        st = rocsparse_scsr2ell(handle,
+                                m,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsr2ell(handle, m, csr_descr, csr_val, row_ptr, col_ind, ell_descr,
-                                ell_width, ell_val, ell_col_ind);
+        st = rocsparse_dcsr2ell(handle,
+                                m,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsr2ell(handle, m, csr_descr, csr_val, row_ptr, col_ind, ell_descr,
-                                ell_width, ell_val, ell_col_ind);
+        st = rocsparse_ccsr2ell(handle,
+                                m,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind);
     else
-        st = rocsparse_zcsr2ell(handle, m, csr_descr, csr_val, row_ptr, col_ind, ell_descr,
-                                ell_width, ell_val, ell_col_ind);
+        st = rocsparse_zcsr2ell(handle,
+                                m,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -288,9 +360,10 @@ static void check_csr2ell_ell2csr(rocsparse_handle handle)
     device_vector<rocsparse_int> csr_row_ptr_out{(size_t)(m + 1)};
     ASSERT_TRUE(csr_row_ptr_out.ptr);
     rocsparse_int csr_nnz = 0;
-    EXPECT_EQ(rocsparse_ell2csr_nnz(handle, m, n, ell_descr, ell_width, ell_col_ind, csr_descr,
-                                    csr_row_ptr_out, &csr_nnz),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        rocsparse_ell2csr_nnz(
+            handle, m, n, ell_descr, ell_width, ell_col_ind, csr_descr, csr_row_ptr_out, &csr_nnz),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(csr_nnz, nnz);
 
@@ -299,17 +372,53 @@ static void check_csr2ell_ell2csr(rocsparse_handle handle)
     ASSERT_TRUE(csr_val_out.ptr && csr_col_ind_out.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sell2csr(handle, m, n, ell_descr, ell_width, ell_val, ell_col_ind, csr_descr,
-                                csr_val_out, csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_sell2csr(handle,
+                                m,
+                                n,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dell2csr(handle, m, n, ell_descr, ell_width, ell_val, ell_col_ind, csr_descr,
-                                csr_val_out, csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_dell2csr(handle,
+                                m,
+                                n,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cell2csr(handle, m, n, ell_descr, ell_width, ell_val, ell_col_ind, csr_descr,
-                                csr_val_out, csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_cell2csr(handle,
+                                m,
+                                n,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     else
-        st = rocsparse_zell2csr(handle, m, n, ell_descr, ell_width, ell_val, ell_col_ind, csr_descr,
-                                csr_val_out, csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_zell2csr(handle,
+                                m,
+                                n,
+                                ell_descr,
+                                ell_width,
+                                ell_val,
+                                ell_col_ind,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -320,9 +429,10 @@ static void check_csr2ell_ell2csr(rocsparse_handle handle)
               rocsparse_status_invalid_size);
     EXPECT_EQ(rocsparse_csr2ell_width(handle, m, csr_descr, row_ptr, ell_descr, nullptr),
               rocsparse_status_invalid_pointer);
-    EXPECT_EQ(rocsparse_ell2csr_nnz(nullptr, m, n, ell_descr, ell_width, ell_col_ind, csr_descr,
-                                    csr_row_ptr_out, &csr_nnz),
-              rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        rocsparse_ell2csr_nnz(
+            nullptr, m, n, ell_descr, ell_width, ell_col_ind, csr_descr, csr_row_ptr_out, &csr_nnz),
+        rocsparse_status_invalid_handle);
 
     EXPECT_EQ(rocsparse_destroy_mat_descr(csr_descr), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_mat_descr(ell_descr), rocsparse_status_success);
@@ -355,17 +465,17 @@ static void check_csr2hyb_hyb2csr(rocsparse_handle handle)
 
     rocsparse_status st = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsr2hyb(handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0,
-                                rocsparse_hyb_partition_auto);
+        st = rocsparse_scsr2hyb(
+            handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0, rocsparse_hyb_partition_auto);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsr2hyb(handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0,
-                                rocsparse_hyb_partition_auto);
+        st = rocsparse_dcsr2hyb(
+            handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0, rocsparse_hyb_partition_auto);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsr2hyb(handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0,
-                                rocsparse_hyb_partition_auto);
+        st = rocsparse_ccsr2hyb(
+            handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0, rocsparse_hyb_partition_auto);
     else
-        st = rocsparse_zcsr2hyb(handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0,
-                                rocsparse_hyb_partition_auto);
+        st = rocsparse_zcsr2hyb(
+            handle, m, n, descr, csr_val, row_ptr, col_ind, hyb, 0, rocsparse_hyb_partition_auto);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -383,17 +493,17 @@ static void check_csr2hyb_hyb2csr(rocsparse_handle handle)
     ASSERT_TRUE(buffer.ptr && csr_val_out.ptr && csr_col_ind_out.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_shyb2csr(handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out,
-                                buffer.ptr);
+        st = rocsparse_shyb2csr(
+            handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out, buffer.ptr);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dhyb2csr(handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out,
-                                buffer.ptr);
+        st = rocsparse_dhyb2csr(
+            handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out, buffer.ptr);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_chyb2csr(handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out,
-                                buffer.ptr);
+        st = rocsparse_chyb2csr(
+            handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out, buffer.ptr);
     else
-        st = rocsparse_zhyb2csr(handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out,
-                                buffer.ptr);
+        st = rocsparse_zhyb2csr(
+            handle, descr, hyb, csr_val_out, csr_row_ptr_out, csr_col_ind_out, buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -453,17 +563,61 @@ static void check_csr_compress(rocsparse_handle handle)
     ASSERT_TRUE(csr_val_C.ptr && csr_row_ptr_C.ptr && csr_col_ind_C.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsr2csr_compress(handle, m, n, descr, csr_val, row_ptr, col_ind, nnz,
-                                         nnz_per_row, csr_val_C, csr_row_ptr_C, csr_col_ind_C, tol);
+        st = rocsparse_scsr2csr_compress(handle,
+                                         m,
+                                         n,
+                                         descr,
+                                         csr_val,
+                                         row_ptr,
+                                         col_ind,
+                                         nnz,
+                                         nnz_per_row,
+                                         csr_val_C,
+                                         csr_row_ptr_C,
+                                         csr_col_ind_C,
+                                         tol);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsr2csr_compress(handle, m, n, descr, csr_val, row_ptr, col_ind, nnz,
-                                         nnz_per_row, csr_val_C, csr_row_ptr_C, csr_col_ind_C, tol);
+        st = rocsparse_dcsr2csr_compress(handle,
+                                         m,
+                                         n,
+                                         descr,
+                                         csr_val,
+                                         row_ptr,
+                                         col_ind,
+                                         nnz,
+                                         nnz_per_row,
+                                         csr_val_C,
+                                         csr_row_ptr_C,
+                                         csr_col_ind_C,
+                                         tol);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsr2csr_compress(handle, m, n, descr, csr_val, row_ptr, col_ind, nnz,
-                                         nnz_per_row, csr_val_C, csr_row_ptr_C, csr_col_ind_C, tol);
+        st = rocsparse_ccsr2csr_compress(handle,
+                                         m,
+                                         n,
+                                         descr,
+                                         csr_val,
+                                         row_ptr,
+                                         col_ind,
+                                         nnz,
+                                         nnz_per_row,
+                                         csr_val_C,
+                                         csr_row_ptr_C,
+                                         csr_col_ind_C,
+                                         tol);
     else
-        st = rocsparse_zcsr2csr_compress(handle, m, n, descr, csr_val, row_ptr, col_ind, nnz,
-                                         nnz_per_row, csr_val_C, csr_row_ptr_C, csr_col_ind_C, tol);
+        st = rocsparse_zcsr2csr_compress(handle,
+                                         m,
+                                         n,
+                                         descr,
+                                         csr_val,
+                                         row_ptr,
+                                         col_ind,
+                                         nnz,
+                                         nnz_per_row,
+                                         csr_val_C,
+                                         csr_row_ptr_C,
+                                         csr_col_ind_C,
+                                         tol);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -476,8 +630,18 @@ static void check_csr_compress(rocsparse_handle handle)
         EXPECT_EQ(
             rocsparse_snnz_compress(handle, -1, descr, csr_val, row_ptr, nnz_per_row, &nnz_C, tol),
             rocsparse_status_invalid_size);
-        EXPECT_EQ(rocsparse_scsr2csr_compress(handle, m, n, descr, csr_val, row_ptr, col_ind, -1,
-                                              nnz_per_row, csr_val_C, csr_row_ptr_C, csr_col_ind_C,
+        EXPECT_EQ(rocsparse_scsr2csr_compress(handle,
+                                              m,
+                                              n,
+                                              descr,
+                                              csr_val,
+                                              row_ptr,
+                                              col_ind,
+                                              -1,
+                                              nnz_per_row,
+                                              csr_val_C,
+                                              csr_row_ptr_C,
+                                              csr_col_ind_C,
                                               tol),
                   rocsparse_status_invalid_size);
     }
@@ -518,13 +682,35 @@ static void check_prune_csr2csr(rocsparse_handle handle)
     size_t           buffer_size = 0;
     rocsparse_status st          = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sprune_csr2csr_buffer_size(handle, m, n, nnz, descr_A, csr_val, row_ptr,
-                                                  col_ind, &threshold, descr_C, dummy_val,
-                                                  csr_row_ptr_C, dummy_ci, &buffer_size);
+        st = rocsparse_sprune_csr2csr_buffer_size(handle,
+                                                  m,
+                                                  n,
+                                                  nnz,
+                                                  descr_A,
+                                                  csr_val,
+                                                  row_ptr,
+                                                  col_ind,
+                                                  &threshold,
+                                                  descr_C,
+                                                  dummy_val,
+                                                  csr_row_ptr_C,
+                                                  dummy_ci,
+                                                  &buffer_size);
     else
-        st = rocsparse_dprune_csr2csr_buffer_size(handle, m, n, nnz, descr_A, csr_val, row_ptr,
-                                                  col_ind, &threshold, descr_C, dummy_val,
-                                                  csr_row_ptr_C, dummy_ci, &buffer_size);
+        st = rocsparse_dprune_csr2csr_buffer_size(handle,
+                                                  m,
+                                                  n,
+                                                  nnz,
+                                                  descr_A,
+                                                  csr_val,
+                                                  row_ptr,
+                                                  col_ind,
+                                                  &threshold,
+                                                  descr_C,
+                                                  dummy_val,
+                                                  csr_row_ptr_C,
+                                                  dummy_ci,
+                                                  &buffer_size);
     EXPECT_EQ(st, rocsparse_status_success);
 
     device_vector<char> buffer{buffer_size ? buffer_size : size_t(1)};
@@ -532,11 +718,33 @@ static void check_prune_csr2csr(rocsparse_handle handle)
 
     rocsparse_int nnz_C = 0;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sprune_csr2csr_nnz(handle, m, n, nnz, descr_A, csr_val, row_ptr, col_ind,
-                                          &threshold, descr_C, csr_row_ptr_C, &nnz_C, buffer.ptr);
+        st = rocsparse_sprune_csr2csr_nnz(handle,
+                                          m,
+                                          n,
+                                          nnz,
+                                          descr_A,
+                                          csr_val,
+                                          row_ptr,
+                                          col_ind,
+                                          &threshold,
+                                          descr_C,
+                                          csr_row_ptr_C,
+                                          &nnz_C,
+                                          buffer.ptr);
     else
-        st = rocsparse_dprune_csr2csr_nnz(handle, m, n, nnz, descr_A, csr_val, row_ptr, col_ind,
-                                          &threshold, descr_C, csr_row_ptr_C, &nnz_C, buffer.ptr);
+        st = rocsparse_dprune_csr2csr_nnz(handle,
+                                          m,
+                                          n,
+                                          nnz,
+                                          descr_A,
+                                          csr_val,
+                                          row_ptr,
+                                          col_ind,
+                                          &threshold,
+                                          descr_C,
+                                          csr_row_ptr_C,
+                                          &nnz_C,
+                                          buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(nnz_C, nnz);
@@ -546,12 +754,34 @@ static void check_prune_csr2csr(rocsparse_handle handle)
     ASSERT_TRUE(csr_val_C.ptr && csr_col_ind_C.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sprune_csr2csr(handle, m, n, nnz, descr_A, csr_val, row_ptr, col_ind,
-                                      &threshold, descr_C, csr_val_C, csr_row_ptr_C, csr_col_ind_C,
+        st = rocsparse_sprune_csr2csr(handle,
+                                      m,
+                                      n,
+                                      nnz,
+                                      descr_A,
+                                      csr_val,
+                                      row_ptr,
+                                      col_ind,
+                                      &threshold,
+                                      descr_C,
+                                      csr_val_C,
+                                      csr_row_ptr_C,
+                                      csr_col_ind_C,
                                       buffer.ptr);
     else
-        st = rocsparse_dprune_csr2csr(handle, m, n, nnz, descr_A, csr_val, row_ptr, col_ind,
-                                      &threshold, descr_C, csr_val_C, csr_row_ptr_C, csr_col_ind_C,
+        st = rocsparse_dprune_csr2csr(handle,
+                                      m,
+                                      n,
+                                      nnz,
+                                      descr_A,
+                                      csr_val,
+                                      row_ptr,
+                                      col_ind,
+                                      &threshold,
+                                      descr_C,
+                                      csr_val_C,
+                                      csr_row_ptr_C,
+                                      csr_col_ind_C,
                                       buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
@@ -559,12 +789,32 @@ static void check_prune_csr2csr(rocsparse_handle handle)
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(rocsparse_sprune_csr2csr_nnz(nullptr, m, n, nnz, descr_A, csr_val, row_ptr,
-                                               col_ind, &threshold, descr_C, csr_row_ptr_C, &nnz_C,
+        EXPECT_EQ(rocsparse_sprune_csr2csr_nnz(nullptr,
+                                               m,
+                                               n,
+                                               nnz,
+                                               descr_A,
+                                               csr_val,
+                                               row_ptr,
+                                               col_ind,
+                                               &threshold,
+                                               descr_C,
+                                               csr_row_ptr_C,
+                                               &nnz_C,
                                                buffer.ptr),
                   rocsparse_status_invalid_handle);
-        EXPECT_EQ(rocsparse_sprune_csr2csr_nnz(handle, -1, n, nnz, descr_A, csr_val, row_ptr,
-                                               col_ind, &threshold, descr_C, csr_row_ptr_C, &nnz_C,
+        EXPECT_EQ(rocsparse_sprune_csr2csr_nnz(handle,
+                                               -1,
+                                               n,
+                                               nnz,
+                                               descr_A,
+                                               csr_val,
+                                               row_ptr,
+                                               col_ind,
+                                               &threshold,
+                                               descr_C,
+                                               csr_row_ptr_C,
+                                               &nnz_C,
                                                buffer.ptr),
                   rocsparse_status_invalid_size);
     }
@@ -604,11 +854,29 @@ static void check_prune_dense2csr(rocsparse_handle handle)
     size_t           buffer_size = 0;
     rocsparse_status st          = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sprune_dense2csr_buffer_size(handle, m, n, A, lda, &threshold, descr,
-                                                    dummy_val, csr_row_ptr, dummy_ci, &buffer_size);
+        st = rocsparse_sprune_dense2csr_buffer_size(handle,
+                                                    m,
+                                                    n,
+                                                    A,
+                                                    lda,
+                                                    &threshold,
+                                                    descr,
+                                                    dummy_val,
+                                                    csr_row_ptr,
+                                                    dummy_ci,
+                                                    &buffer_size);
     else
-        st = rocsparse_dprune_dense2csr_buffer_size(handle, m, n, A, lda, &threshold, descr,
-                                                    dummy_val, csr_row_ptr, dummy_ci, &buffer_size);
+        st = rocsparse_dprune_dense2csr_buffer_size(handle,
+                                                    m,
+                                                    n,
+                                                    A,
+                                                    lda,
+                                                    &threshold,
+                                                    descr,
+                                                    dummy_val,
+                                                    csr_row_ptr,
+                                                    dummy_ci,
+                                                    &buffer_size);
     EXPECT_EQ(st, rocsparse_status_success);
 
     device_vector<char> buffer{buffer_size ? buffer_size : size_t(1)};
@@ -616,11 +884,11 @@ static void check_prune_dense2csr(rocsparse_handle handle)
 
     rocsparse_int nnz_C = 0;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sprune_dense2csr_nnz(handle, m, n, A, lda, &threshold, descr, csr_row_ptr,
-                                            &nnz_C, buffer.ptr);
+        st = rocsparse_sprune_dense2csr_nnz(
+            handle, m, n, A, lda, &threshold, descr, csr_row_ptr, &nnz_C, buffer.ptr);
     else
-        st = rocsparse_dprune_dense2csr_nnz(handle, m, n, A, lda, &threshold, descr, csr_row_ptr,
-                                            &nnz_C, buffer.ptr);
+        st = rocsparse_dprune_dense2csr_nnz(
+            handle, m, n, A, lda, &threshold, descr, csr_row_ptr, &nnz_C, buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(nnz_C, 3);
@@ -630,22 +898,22 @@ static void check_prune_dense2csr(rocsparse_handle handle)
     ASSERT_TRUE(csr_val.ptr && csr_col_ind.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sprune_dense2csr(handle, m, n, A, lda, &threshold, descr, csr_val,
-                                        csr_row_ptr, csr_col_ind, buffer.ptr);
+        st = rocsparse_sprune_dense2csr(
+            handle, m, n, A, lda, &threshold, descr, csr_val, csr_row_ptr, csr_col_ind, buffer.ptr);
     else
-        st = rocsparse_dprune_dense2csr(handle, m, n, A, lda, &threshold, descr, csr_val,
-                                        csr_row_ptr, csr_col_ind, buffer.ptr);
+        st = rocsparse_dprune_dense2csr(
+            handle, m, n, A, lda, &threshold, descr, csr_val, csr_row_ptr, csr_col_ind, buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(rocsparse_sprune_dense2csr_nnz(nullptr, m, n, A, lda, &threshold, descr,
-                                                 csr_row_ptr, &nnz_C, buffer.ptr),
+        EXPECT_EQ(rocsparse_sprune_dense2csr_nnz(
+                      nullptr, m, n, A, lda, &threshold, descr, csr_row_ptr, &nnz_C, buffer.ptr),
                   rocsparse_status_invalid_handle);
-        EXPECT_EQ(rocsparse_sprune_dense2csr_nnz(handle, -1, n, A, lda, &threshold, descr,
-                                                 csr_row_ptr, &nnz_C, buffer.ptr),
+        EXPECT_EQ(rocsparse_sprune_dense2csr_nnz(
+                      handle, -1, n, A, lda, &threshold, descr, csr_row_ptr, &nnz_C, buffer.ptr),
                   rocsparse_status_invalid_size);
     }
 
@@ -669,7 +937,7 @@ class ConversionDense : public HandleTest
 template <typename T>
 static void check_nnz_csr2dense_dense2csr(rocsparse_handle handle)
 {
-    const rocsparse_int m = 3, n = 3, nnz = 3, ld = 3;
+    const rocsparse_int          m = 3, n = 3, nnz = 3, ld = 3;
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
     device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
     device_vector<T>             csr_val{std::vector<T>(nnz, scalar<T>(1.0f))};
@@ -698,17 +966,17 @@ static void check_nnz_csr2dense_dense2csr(rocsparse_handle handle)
     ASSERT_TRUE(nnz_per_row.ptr);
     rocsparse_int nnz_total = 0;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_snnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_snnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dnnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_dnnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cnnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_cnnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     else
-        st = rocsparse_znnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_znnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(nnz_total, nnz);
@@ -720,17 +988,17 @@ static void check_nnz_csr2dense_dense2csr(rocsparse_handle handle)
     ASSERT_TRUE(csr_val_out.ptr && csr_row_ptr_out.ptr && csr_col_ind_out.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sdense2csr(handle, m, n, descr, A, ld, nnz_per_row, csr_val_out,
-                                  csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_sdense2csr(
+            handle, m, n, descr, A, ld, nnz_per_row, csr_val_out, csr_row_ptr_out, csr_col_ind_out);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_ddense2csr(handle, m, n, descr, A, ld, nnz_per_row, csr_val_out,
-                                  csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_ddense2csr(
+            handle, m, n, descr, A, ld, nnz_per_row, csr_val_out, csr_row_ptr_out, csr_col_ind_out);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cdense2csr(handle, m, n, descr, A, ld, nnz_per_row, csr_val_out,
-                                  csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_cdense2csr(
+            handle, m, n, descr, A, ld, nnz_per_row, csr_val_out, csr_row_ptr_out, csr_col_ind_out);
     else
-        st = rocsparse_zdense2csr(handle, m, n, descr, A, ld, nnz_per_row, csr_val_out,
-                                  csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_zdense2csr(
+            handle, m, n, descr, A, ld, nnz_per_row, csr_val_out, csr_row_ptr_out, csr_col_ind_out);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -741,8 +1009,8 @@ static void check_nnz_csr2dense_dense2csr(rocsparse_handle handle)
                   rocsparse_status_invalid_handle);
         EXPECT_EQ(rocsparse_scsr2dense(handle, -1, n, descr, csr_val, row_ptr, col_ind, A, ld),
                   rocsparse_status_invalid_size);
-        EXPECT_EQ(rocsparse_snnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                                 nullptr),
+        EXPECT_EQ(rocsparse_snnz(
+                      handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, nullptr),
                   rocsparse_status_invalid_pointer);
     }
 
@@ -760,7 +1028,7 @@ TEST_F(ConversionDense, nnz_csr2dense_dense2csr)
 template <typename T>
 static void check_coo2dense_dense2coo(rocsparse_handle handle)
 {
-    const rocsparse_int m = 3, n = 3, nnz = 3, ld = 3;
+    const rocsparse_int          m = 3, n = 3, nnz = 3, ld = 3;
     device_vector<rocsparse_int> coo_row{std::vector<rocsparse_int>{0, 1, 2}};
     device_vector<rocsparse_int> coo_col{std::vector<rocsparse_int>{0, 1, 2}};
     device_vector<T>             coo_val{std::vector<T>(nnz, scalar<T>(1.0f))};
@@ -789,17 +1057,17 @@ static void check_coo2dense_dense2coo(rocsparse_handle handle)
     ASSERT_TRUE(nnz_per_row.ptr);
     rocsparse_int nnz_total = 0;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_snnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_snnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dnnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_dnnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cnnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_cnnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     else
-        st = rocsparse_znnz(handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row,
-                            &nnz_total);
+        st = rocsparse_znnz(
+            handle, rocsparse_direction_row, m, n, descr, A, ld, nnz_per_row, &nnz_total);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -809,26 +1077,25 @@ static void check_coo2dense_dense2coo(rocsparse_handle handle)
     ASSERT_TRUE(coo_val_out.ptr && coo_row_out.ptr && coo_col_out.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sdense2coo(handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out,
-                                  coo_col_out);
+        st = rocsparse_sdense2coo(
+            handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out, coo_col_out);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_ddense2coo(handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out,
-                                  coo_col_out);
+        st = rocsparse_ddense2coo(
+            handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out, coo_col_out);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cdense2coo(handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out,
-                                  coo_col_out);
+        st = rocsparse_cdense2coo(
+            handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out, coo_col_out);
     else
-        st = rocsparse_zdense2coo(handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out,
-                                  coo_col_out);
+        st = rocsparse_zdense2coo(
+            handle, m, n, descr, A, ld, nnz_per_row, coo_val_out, coo_row_out, coo_col_out);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(
-            rocsparse_scoo2dense(nullptr, m, n, nnz, descr, coo_val, coo_row, coo_col, A, ld),
-            rocsparse_status_invalid_handle);
+        EXPECT_EQ(rocsparse_scoo2dense(nullptr, m, n, nnz, descr, coo_val, coo_row, coo_col, A, ld),
+                  rocsparse_status_invalid_handle);
         EXPECT_EQ(rocsparse_scoo2dense(handle, m, n, -1, descr, coo_val, coo_row, coo_col, A, ld),
                   rocsparse_status_invalid_size);
     }
@@ -869,8 +1136,17 @@ static void check_csr2bsr_bsr2csr(rocsparse_handle handle)
     device_vector<rocsparse_int> bsr_row_ptr{(size_t)(mb + 1)};
     ASSERT_TRUE(bsr_row_ptr.ptr);
     rocsparse_int bsr_nnzb = 0;
-    EXPECT_EQ(rocsparse_csr2bsr_nnz(handle, rocsparse_direction_row, m, n, csr_descr, row_ptr,
-                                    col_ind, block_dim, bsr_descr, bsr_row_ptr, &bsr_nnzb),
+    EXPECT_EQ(rocsparse_csr2bsr_nnz(handle,
+                                    rocsparse_direction_row,
+                                    m,
+                                    n,
+                                    csr_descr,
+                                    row_ptr,
+                                    col_ind,
+                                    block_dim,
+                                    bsr_descr,
+                                    bsr_row_ptr,
+                                    &bsr_nnzb),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(bsr_nnzb, 1);
@@ -881,17 +1157,61 @@ static void check_csr2bsr_bsr2csr(rocsparse_handle handle)
 
     rocsparse_status st = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsr2bsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val, row_ptr,
-                                col_ind, block_dim, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_scsr2bsr(handle,
+                                rocsparse_direction_row,
+                                m,
+                                n,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                block_dim,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsr2bsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val, row_ptr,
-                                col_ind, block_dim, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_dcsr2bsr(handle,
+                                rocsparse_direction_row,
+                                m,
+                                n,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                block_dim,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsr2bsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val, row_ptr,
-                                col_ind, block_dim, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_ccsr2bsr(handle,
+                                rocsparse_direction_row,
+                                m,
+                                n,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                block_dim,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind);
     else
-        st = rocsparse_zcsr2bsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val, row_ptr,
-                                col_ind, block_dim, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_zcsr2bsr(handle,
+                                rocsparse_direction_row,
+                                m,
+                                n,
+                                csr_descr,
+                                csr_val,
+                                row_ptr,
+                                col_ind,
+                                block_dim,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -903,35 +1223,102 @@ static void check_csr2bsr_bsr2csr(rocsparse_handle handle)
     ASSERT_TRUE(csr_val_out.ptr && csr_row_ptr_out.ptr && csr_col_ind_out.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sbsr2csr(handle, rocsparse_direction_row, mb, mb, bsr_descr, bsr_val,
-                                bsr_row_ptr, bsr_col_ind, block_dim, csr_descr, csr_val_out,
-                                csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_sbsr2csr(handle,
+                                rocsparse_direction_row,
+                                mb,
+                                mb,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind,
+                                block_dim,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dbsr2csr(handle, rocsparse_direction_row, mb, mb, bsr_descr, bsr_val,
-                                bsr_row_ptr, bsr_col_ind, block_dim, csr_descr, csr_val_out,
-                                csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_dbsr2csr(handle,
+                                rocsparse_direction_row,
+                                mb,
+                                mb,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind,
+                                block_dim,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cbsr2csr(handle, rocsparse_direction_row, mb, mb, bsr_descr, bsr_val,
-                                bsr_row_ptr, bsr_col_ind, block_dim, csr_descr, csr_val_out,
-                                csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_cbsr2csr(handle,
+                                rocsparse_direction_row,
+                                mb,
+                                mb,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind,
+                                block_dim,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     else
-        st = rocsparse_zbsr2csr(handle, rocsparse_direction_row, mb, mb, bsr_descr, bsr_val,
-                                bsr_row_ptr, bsr_col_ind, block_dim, csr_descr, csr_val_out,
-                                csr_row_ptr_out, csr_col_ind_out);
+        st = rocsparse_zbsr2csr(handle,
+                                rocsparse_direction_row,
+                                mb,
+                                mb,
+                                bsr_descr,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind,
+                                block_dim,
+                                csr_descr,
+                                csr_val_out,
+                                csr_row_ptr_out,
+                                csr_col_ind_out);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(rocsparse_csr2bsr_nnz(nullptr, rocsparse_direction_row, m, n, csr_descr, row_ptr,
-                                        col_ind, block_dim, bsr_descr, bsr_row_ptr, &bsr_nnzb),
+        EXPECT_EQ(rocsparse_csr2bsr_nnz(nullptr,
+                                        rocsparse_direction_row,
+                                        m,
+                                        n,
+                                        csr_descr,
+                                        row_ptr,
+                                        col_ind,
+                                        block_dim,
+                                        bsr_descr,
+                                        bsr_row_ptr,
+                                        &bsr_nnzb),
                   rocsparse_status_invalid_handle);
-        EXPECT_EQ(rocsparse_csr2bsr_nnz(handle, rocsparse_direction_row, -1, n, csr_descr, row_ptr,
-                                        col_ind, block_dim, bsr_descr, bsr_row_ptr, &bsr_nnzb),
+        EXPECT_EQ(rocsparse_csr2bsr_nnz(handle,
+                                        rocsparse_direction_row,
+                                        -1,
+                                        n,
+                                        csr_descr,
+                                        row_ptr,
+                                        col_ind,
+                                        block_dim,
+                                        bsr_descr,
+                                        bsr_row_ptr,
+                                        &bsr_nnzb),
                   rocsparse_status_invalid_size);
-        EXPECT_EQ(rocsparse_csr2bsr_nnz(handle, rocsparse_direction_row, m, n, csr_descr, nullptr,
-                                        col_ind, block_dim, bsr_descr, bsr_row_ptr, &bsr_nnzb),
+        EXPECT_EQ(rocsparse_csr2bsr_nnz(handle,
+                                        rocsparse_direction_row,
+                                        m,
+                                        n,
+                                        csr_descr,
+                                        nullptr,
+                                        col_ind,
+                                        block_dim,
+                                        bsr_descr,
+                                        bsr_row_ptr,
+                                        &bsr_nnzb),
                   rocsparse_status_invalid_pointer);
     }
 
@@ -963,17 +1350,53 @@ static void check_csr2gebsr(rocsparse_handle handle)
     size_t           buffer_size = 0;
     rocsparse_status st          = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsr2gebsr_buffer_size(handle, rocsparse_direction_row, m, n, csr_descr,
-                                              csr_val, row_ptr, col_ind, rbd, cbd, &buffer_size);
+        st = rocsparse_scsr2gebsr_buffer_size(handle,
+                                              rocsparse_direction_row,
+                                              m,
+                                              n,
+                                              csr_descr,
+                                              csr_val,
+                                              row_ptr,
+                                              col_ind,
+                                              rbd,
+                                              cbd,
+                                              &buffer_size);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsr2gebsr_buffer_size(handle, rocsparse_direction_row, m, n, csr_descr,
-                                              csr_val, row_ptr, col_ind, rbd, cbd, &buffer_size);
+        st = rocsparse_dcsr2gebsr_buffer_size(handle,
+                                              rocsparse_direction_row,
+                                              m,
+                                              n,
+                                              csr_descr,
+                                              csr_val,
+                                              row_ptr,
+                                              col_ind,
+                                              rbd,
+                                              cbd,
+                                              &buffer_size);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsr2gebsr_buffer_size(handle, rocsparse_direction_row, m, n, csr_descr,
-                                              csr_val, row_ptr, col_ind, rbd, cbd, &buffer_size);
+        st = rocsparse_ccsr2gebsr_buffer_size(handle,
+                                              rocsparse_direction_row,
+                                              m,
+                                              n,
+                                              csr_descr,
+                                              csr_val,
+                                              row_ptr,
+                                              col_ind,
+                                              rbd,
+                                              cbd,
+                                              &buffer_size);
     else
-        st = rocsparse_zcsr2gebsr_buffer_size(handle, rocsparse_direction_row, m, n, csr_descr,
-                                              csr_val, row_ptr, col_ind, rbd, cbd, &buffer_size);
+        st = rocsparse_zcsr2gebsr_buffer_size(handle,
+                                              rocsparse_direction_row,
+                                              m,
+                                              n,
+                                              csr_descr,
+                                              csr_val,
+                                              row_ptr,
+                                              col_ind,
+                                              rbd,
+                                              cbd,
+                                              &buffer_size);
     EXPECT_EQ(st, rocsparse_status_success);
 
     device_vector<char>          buffer{buffer_size ? buffer_size : size_t(1)};
@@ -982,8 +1405,18 @@ static void check_csr2gebsr(rocsparse_handle handle)
     ASSERT_TRUE(buffer.ptr && bsr_row_ptr.ptr);
 
     rocsparse_int bsr_nnzb = 0;
-    EXPECT_EQ(rocsparse_csr2gebsr_nnz(handle, rocsparse_direction_row, m, n, csr_descr, row_ptr,
-                                      col_ind, bsr_descr, bsr_row_ptr, rbd, cbd, &bsr_nnzb,
+    EXPECT_EQ(rocsparse_csr2gebsr_nnz(handle,
+                                      rocsparse_direction_row,
+                                      m,
+                                      n,
+                                      csr_descr,
+                                      row_ptr,
+                                      col_ind,
+                                      bsr_descr,
+                                      bsr_row_ptr,
+                                      rbd,
+                                      cbd,
+                                      &bsr_nnzb,
                                       buffer.ptr),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
@@ -994,34 +1427,102 @@ static void check_csr2gebsr(rocsparse_handle handle)
     ASSERT_TRUE(bsr_val.ptr && bsr_col_ind.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsr2gebsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val,
-                                  row_ptr, col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind,
-                                  rbd, cbd, buffer.ptr);
+        st = rocsparse_scsr2gebsr(handle,
+                                  rocsparse_direction_row,
+                                  m,
+                                  n,
+                                  csr_descr,
+                                  csr_val,
+                                  row_ptr,
+                                  col_ind,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  buffer.ptr);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsr2gebsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val,
-                                  row_ptr, col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind,
-                                  rbd, cbd, buffer.ptr);
+        st = rocsparse_dcsr2gebsr(handle,
+                                  rocsparse_direction_row,
+                                  m,
+                                  n,
+                                  csr_descr,
+                                  csr_val,
+                                  row_ptr,
+                                  col_ind,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  buffer.ptr);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsr2gebsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val,
-                                  row_ptr, col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind,
-                                  rbd, cbd, buffer.ptr);
+        st = rocsparse_ccsr2gebsr(handle,
+                                  rocsparse_direction_row,
+                                  m,
+                                  n,
+                                  csr_descr,
+                                  csr_val,
+                                  row_ptr,
+                                  col_ind,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  buffer.ptr);
     else
-        st = rocsparse_zcsr2gebsr(handle, rocsparse_direction_row, m, n, csr_descr, csr_val,
-                                  row_ptr, col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind,
-                                  rbd, cbd, buffer.ptr);
+        st = rocsparse_zcsr2gebsr(handle,
+                                  rocsparse_direction_row,
+                                  m,
+                                  n,
+                                  csr_descr,
+                                  csr_val,
+                                  row_ptr,
+                                  col_ind,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(rocsparse_csr2gebsr_nnz(nullptr, rocsparse_direction_row, m, n, csr_descr,
-                                          row_ptr, col_ind, bsr_descr, bsr_row_ptr, rbd, cbd,
-                                          &bsr_nnzb, buffer.ptr),
+        EXPECT_EQ(rocsparse_csr2gebsr_nnz(nullptr,
+                                          rocsparse_direction_row,
+                                          m,
+                                          n,
+                                          csr_descr,
+                                          row_ptr,
+                                          col_ind,
+                                          bsr_descr,
+                                          bsr_row_ptr,
+                                          rbd,
+                                          cbd,
+                                          &bsr_nnzb,
+                                          buffer.ptr),
                   rocsparse_status_invalid_handle);
-        EXPECT_EQ(rocsparse_csr2gebsr_nnz(handle, rocsparse_direction_row, -1, n, csr_descr,
-                                          row_ptr, col_ind, bsr_descr, bsr_row_ptr, rbd, cbd,
-                                          &bsr_nnzb, buffer.ptr),
+        EXPECT_EQ(rocsparse_csr2gebsr_nnz(handle,
+                                          rocsparse_direction_row,
+                                          -1,
+                                          n,
+                                          csr_descr,
+                                          row_ptr,
+                                          col_ind,
+                                          bsr_descr,
+                                          bsr_row_ptr,
+                                          rbd,
+                                          cbd,
+                                          &bsr_nnzb,
+                                          buffer.ptr),
                   rocsparse_status_invalid_size);
     }
 
@@ -1059,34 +1560,100 @@ static void check_gebsr2csr(rocsparse_handle handle)
 
     rocsparse_status st = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sgebsr2csr(handle, rocsparse_direction_row, mb, nb, bsr_descr, bsr_val,
-                                  bsr_row_ptr, bsr_col_ind, rbd, cbd, csr_descr, csr_val,
-                                  csr_row_ptr, csr_col_ind);
+        st = rocsparse_sgebsr2csr(handle,
+                                  rocsparse_direction_row,
+                                  mb,
+                                  nb,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  csr_descr,
+                                  csr_val,
+                                  csr_row_ptr,
+                                  csr_col_ind);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dgebsr2csr(handle, rocsparse_direction_row, mb, nb, bsr_descr, bsr_val,
-                                  bsr_row_ptr, bsr_col_ind, rbd, cbd, csr_descr, csr_val,
-                                  csr_row_ptr, csr_col_ind);
+        st = rocsparse_dgebsr2csr(handle,
+                                  rocsparse_direction_row,
+                                  mb,
+                                  nb,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  csr_descr,
+                                  csr_val,
+                                  csr_row_ptr,
+                                  csr_col_ind);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cgebsr2csr(handle, rocsparse_direction_row, mb, nb, bsr_descr, bsr_val,
-                                  bsr_row_ptr, bsr_col_ind, rbd, cbd, csr_descr, csr_val,
-                                  csr_row_ptr, csr_col_ind);
+        st = rocsparse_cgebsr2csr(handle,
+                                  rocsparse_direction_row,
+                                  mb,
+                                  nb,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  csr_descr,
+                                  csr_val,
+                                  csr_row_ptr,
+                                  csr_col_ind);
     else
-        st = rocsparse_zgebsr2csr(handle, rocsparse_direction_row, mb, nb, bsr_descr, bsr_val,
-                                  bsr_row_ptr, bsr_col_ind, rbd, cbd, csr_descr, csr_val,
-                                  csr_row_ptr, csr_col_ind);
+        st = rocsparse_zgebsr2csr(handle,
+                                  rocsparse_direction_row,
+                                  mb,
+                                  nb,
+                                  bsr_descr,
+                                  bsr_val,
+                                  bsr_row_ptr,
+                                  bsr_col_ind,
+                                  rbd,
+                                  cbd,
+                                  csr_descr,
+                                  csr_val,
+                                  csr_row_ptr,
+                                  csr_col_ind);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(rocsparse_sgebsr2csr(nullptr, rocsparse_direction_row, mb, nb, bsr_descr, bsr_val,
-                                       bsr_row_ptr, bsr_col_ind, rbd, cbd, csr_descr, csr_val,
-                                       csr_row_ptr, csr_col_ind),
+        EXPECT_EQ(rocsparse_sgebsr2csr(nullptr,
+                                       rocsparse_direction_row,
+                                       mb,
+                                       nb,
+                                       bsr_descr,
+                                       bsr_val,
+                                       bsr_row_ptr,
+                                       bsr_col_ind,
+                                       rbd,
+                                       cbd,
+                                       csr_descr,
+                                       csr_val,
+                                       csr_row_ptr,
+                                       csr_col_ind),
                   rocsparse_status_invalid_handle);
-        EXPECT_EQ(rocsparse_sgebsr2csr(handle, rocsparse_direction_row, -1, nb, bsr_descr, bsr_val,
-                                       bsr_row_ptr, bsr_col_ind, rbd, cbd, csr_descr, csr_val,
-                                       csr_row_ptr, csr_col_ind),
+        EXPECT_EQ(rocsparse_sgebsr2csr(handle,
+                                       rocsparse_direction_row,
+                                       -1,
+                                       nb,
+                                       bsr_descr,
+                                       bsr_val,
+                                       bsr_row_ptr,
+                                       bsr_col_ind,
+                                       rbd,
+                                       cbd,
+                                       csr_descr,
+                                       csr_val,
+                                       csr_row_ptr,
+                                       csr_col_ind),
                   rocsparse_status_invalid_size);
     }
 
@@ -1119,21 +1686,65 @@ static void check_gebsr2gebsr(rocsparse_handle handle)
     size_t           buffer_size = 0;
     rocsparse_status st          = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sgebsr2gebsr_buffer_size(handle, rocsparse_direction_row, mb, nb, nnzb,
-                                                descr_A, bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A,
-                                                rbd, cbd, rbd, cbd, &buffer_size);
+        st = rocsparse_sgebsr2gebsr_buffer_size(handle,
+                                                rocsparse_direction_row,
+                                                mb,
+                                                nb,
+                                                nnzb,
+                                                descr_A,
+                                                bsr_val_A,
+                                                bsr_row_ptr_A,
+                                                bsr_col_ind_A,
+                                                rbd,
+                                                cbd,
+                                                rbd,
+                                                cbd,
+                                                &buffer_size);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dgebsr2gebsr_buffer_size(handle, rocsparse_direction_row, mb, nb, nnzb,
-                                                descr_A, bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A,
-                                                rbd, cbd, rbd, cbd, &buffer_size);
+        st = rocsparse_dgebsr2gebsr_buffer_size(handle,
+                                                rocsparse_direction_row,
+                                                mb,
+                                                nb,
+                                                nnzb,
+                                                descr_A,
+                                                bsr_val_A,
+                                                bsr_row_ptr_A,
+                                                bsr_col_ind_A,
+                                                rbd,
+                                                cbd,
+                                                rbd,
+                                                cbd,
+                                                &buffer_size);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cgebsr2gebsr_buffer_size(handle, rocsparse_direction_row, mb, nb, nnzb,
-                                                descr_A, bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A,
-                                                rbd, cbd, rbd, cbd, &buffer_size);
+        st = rocsparse_cgebsr2gebsr_buffer_size(handle,
+                                                rocsparse_direction_row,
+                                                mb,
+                                                nb,
+                                                nnzb,
+                                                descr_A,
+                                                bsr_val_A,
+                                                bsr_row_ptr_A,
+                                                bsr_col_ind_A,
+                                                rbd,
+                                                cbd,
+                                                rbd,
+                                                cbd,
+                                                &buffer_size);
     else
-        st = rocsparse_zgebsr2gebsr_buffer_size(handle, rocsparse_direction_row, mb, nb, nnzb,
-                                                descr_A, bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A,
-                                                rbd, cbd, rbd, cbd, &buffer_size);
+        st = rocsparse_zgebsr2gebsr_buffer_size(handle,
+                                                rocsparse_direction_row,
+                                                mb,
+                                                nb,
+                                                nnzb,
+                                                descr_A,
+                                                bsr_val_A,
+                                                bsr_row_ptr_A,
+                                                bsr_col_ind_A,
+                                                rbd,
+                                                cbd,
+                                                rbd,
+                                                cbd,
+                                                &buffer_size);
     EXPECT_EQ(st, rocsparse_status_success);
 
     device_vector<char>          buffer{buffer_size ? buffer_size : size_t(1)};
@@ -1141,9 +1752,22 @@ static void check_gebsr2gebsr(rocsparse_handle handle)
     ASSERT_TRUE(buffer.ptr && bsr_row_ptr_C.ptr);
 
     rocsparse_int nnzb_C = 0;
-    EXPECT_EQ(rocsparse_gebsr2gebsr_nnz(handle, rocsparse_direction_row, mb, nb, nnzb, descr_A,
-                                        bsr_row_ptr_A, bsr_col_ind_A, rbd, cbd, descr_C,
-                                        bsr_row_ptr_C, rbd, cbd, &nnzb_C, buffer.ptr),
+    EXPECT_EQ(rocsparse_gebsr2gebsr_nnz(handle,
+                                        rocsparse_direction_row,
+                                        mb,
+                                        nb,
+                                        nnzb,
+                                        descr_A,
+                                        bsr_row_ptr_A,
+                                        bsr_col_ind_A,
+                                        rbd,
+                                        cbd,
+                                        descr_C,
+                                        bsr_row_ptr_C,
+                                        rbd,
+                                        cbd,
+                                        &nnzb_C,
+                                        buffer.ptr),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(nnzb_C, 1);
@@ -1153,34 +1777,120 @@ static void check_gebsr2gebsr(rocsparse_handle handle)
     ASSERT_TRUE(bsr_val_C.ptr && bsr_col_ind_C.ptr);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sgebsr2gebsr(handle, rocsparse_direction_row, mb, nb, nnzb, descr_A,
-                                    bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A, rbd, cbd, descr_C,
-                                    bsr_val_C, bsr_row_ptr_C, bsr_col_ind_C, rbd, cbd, buffer.ptr);
+        st = rocsparse_sgebsr2gebsr(handle,
+                                    rocsparse_direction_row,
+                                    mb,
+                                    nb,
+                                    nnzb,
+                                    descr_A,
+                                    bsr_val_A,
+                                    bsr_row_ptr_A,
+                                    bsr_col_ind_A,
+                                    rbd,
+                                    cbd,
+                                    descr_C,
+                                    bsr_val_C,
+                                    bsr_row_ptr_C,
+                                    bsr_col_ind_C,
+                                    rbd,
+                                    cbd,
+                                    buffer.ptr);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dgebsr2gebsr(handle, rocsparse_direction_row, mb, nb, nnzb, descr_A,
-                                    bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A, rbd, cbd, descr_C,
-                                    bsr_val_C, bsr_row_ptr_C, bsr_col_ind_C, rbd, cbd, buffer.ptr);
+        st = rocsparse_dgebsr2gebsr(handle,
+                                    rocsparse_direction_row,
+                                    mb,
+                                    nb,
+                                    nnzb,
+                                    descr_A,
+                                    bsr_val_A,
+                                    bsr_row_ptr_A,
+                                    bsr_col_ind_A,
+                                    rbd,
+                                    cbd,
+                                    descr_C,
+                                    bsr_val_C,
+                                    bsr_row_ptr_C,
+                                    bsr_col_ind_C,
+                                    rbd,
+                                    cbd,
+                                    buffer.ptr);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cgebsr2gebsr(handle, rocsparse_direction_row, mb, nb, nnzb, descr_A,
-                                    bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A, rbd, cbd, descr_C,
-                                    bsr_val_C, bsr_row_ptr_C, bsr_col_ind_C, rbd, cbd, buffer.ptr);
+        st = rocsparse_cgebsr2gebsr(handle,
+                                    rocsparse_direction_row,
+                                    mb,
+                                    nb,
+                                    nnzb,
+                                    descr_A,
+                                    bsr_val_A,
+                                    bsr_row_ptr_A,
+                                    bsr_col_ind_A,
+                                    rbd,
+                                    cbd,
+                                    descr_C,
+                                    bsr_val_C,
+                                    bsr_row_ptr_C,
+                                    bsr_col_ind_C,
+                                    rbd,
+                                    cbd,
+                                    buffer.ptr);
     else
-        st = rocsparse_zgebsr2gebsr(handle, rocsparse_direction_row, mb, nb, nnzb, descr_A,
-                                    bsr_val_A, bsr_row_ptr_A, bsr_col_ind_A, rbd, cbd, descr_C,
-                                    bsr_val_C, bsr_row_ptr_C, bsr_col_ind_C, rbd, cbd, buffer.ptr);
+        st = rocsparse_zgebsr2gebsr(handle,
+                                    rocsparse_direction_row,
+                                    mb,
+                                    nb,
+                                    nnzb,
+                                    descr_A,
+                                    bsr_val_A,
+                                    bsr_row_ptr_A,
+                                    bsr_col_ind_A,
+                                    rbd,
+                                    cbd,
+                                    descr_C,
+                                    bsr_val_C,
+                                    bsr_row_ptr_C,
+                                    bsr_col_ind_C,
+                                    rbd,
+                                    cbd,
+                                    buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(rocsparse_gebsr2gebsr_nnz(nullptr, rocsparse_direction_row, mb, nb, nnzb, descr_A,
-                                            bsr_row_ptr_A, bsr_col_ind_A, rbd, cbd, descr_C,
-                                            bsr_row_ptr_C, rbd, cbd, &nnzb_C, buffer.ptr),
+        EXPECT_EQ(rocsparse_gebsr2gebsr_nnz(nullptr,
+                                            rocsparse_direction_row,
+                                            mb,
+                                            nb,
+                                            nnzb,
+                                            descr_A,
+                                            bsr_row_ptr_A,
+                                            bsr_col_ind_A,
+                                            rbd,
+                                            cbd,
+                                            descr_C,
+                                            bsr_row_ptr_C,
+                                            rbd,
+                                            cbd,
+                                            &nnzb_C,
+                                            buffer.ptr),
                   rocsparse_status_invalid_handle);
-        EXPECT_EQ(rocsparse_gebsr2gebsr_nnz(handle, rocsparse_direction_row, -1, nb, nnzb, descr_A,
-                                            bsr_row_ptr_A, bsr_col_ind_A, rbd, cbd, descr_C,
-                                            bsr_row_ptr_C, rbd, cbd, &nnzb_C, buffer.ptr),
+        EXPECT_EQ(rocsparse_gebsr2gebsr_nnz(handle,
+                                            rocsparse_direction_row,
+                                            -1,
+                                            nb,
+                                            nnzb,
+                                            descr_A,
+                                            bsr_row_ptr_A,
+                                            bsr_col_ind_A,
+                                            rbd,
+                                            cbd,
+                                            descr_C,
+                                            bsr_row_ptr_C,
+                                            rbd,
+                                            cbd,
+                                            &nnzb_C,
+                                            buffer.ptr),
                   rocsparse_status_invalid_size);
     }
 
@@ -1213,32 +1923,34 @@ static void check_bsrpad_value(rocsparse_handle handle)
     const T          value = scalar<T>(1.0f);
     rocsparse_status st    = rocsparse_status_success;
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_sbsrpad_value(handle, m, mb, nnzb, block_dim, value, descr, bsr_val,
-                                     bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_sbsrpad_value(
+            handle, m, mb, nnzb, block_dim, value, descr, bsr_val, bsr_row_ptr, bsr_col_ind);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dbsrpad_value(handle, m, mb, nnzb, block_dim, value, descr, bsr_val,
-                                     bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_dbsrpad_value(
+            handle, m, mb, nnzb, block_dim, value, descr, bsr_val, bsr_row_ptr, bsr_col_ind);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_cbsrpad_value(handle, m, mb, nnzb, block_dim, value, descr, bsr_val,
-                                     bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_cbsrpad_value(
+            handle, m, mb, nnzb, block_dim, value, descr, bsr_val, bsr_row_ptr, bsr_col_ind);
     else
-        st = rocsparse_zbsrpad_value(handle, m, mb, nnzb, block_dim, value, descr, bsr_val,
-                                     bsr_row_ptr, bsr_col_ind);
+        st = rocsparse_zbsrpad_value(
+            handle, m, mb, nnzb, block_dim, value, descr, bsr_val, bsr_row_ptr, bsr_col_ind);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // bad args
     if constexpr(std::is_same_v<T, float>)
     {
-        EXPECT_EQ(rocsparse_sbsrpad_value(nullptr, m, mb, nnzb, block_dim, value, descr, bsr_val,
-                                          bsr_row_ptr, bsr_col_ind),
-                  rocsparse_status_invalid_handle);
-        EXPECT_EQ(rocsparse_sbsrpad_value(handle, m, mb, nnzb, -1, value, descr, bsr_val,
-                                          bsr_row_ptr, bsr_col_ind),
+        EXPECT_EQ(
+            rocsparse_sbsrpad_value(
+                nullptr, m, mb, nnzb, block_dim, value, descr, bsr_val, bsr_row_ptr, bsr_col_ind),
+            rocsparse_status_invalid_handle);
+        EXPECT_EQ(rocsparse_sbsrpad_value(
+                      handle, m, mb, nnzb, -1, value, descr, bsr_val, bsr_row_ptr, bsr_col_ind),
                   rocsparse_status_invalid_size);
-        EXPECT_EQ(rocsparse_sbsrpad_value(handle, m, mb, nnzb, block_dim, value, descr, nullptr,
-                                          bsr_row_ptr, bsr_col_ind),
-                  rocsparse_status_invalid_pointer);
+        EXPECT_EQ(
+            rocsparse_sbsrpad_value(
+                handle, m, mb, nnzb, block_dim, value, descr, nullptr, bsr_row_ptr, bsr_col_ind),
+            rocsparse_status_invalid_pointer);
     }
 
     EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
@@ -1291,8 +2003,7 @@ namespace
     {
         // column-major: ld >= m, element (i,j) at i + j*ld
         // row-major   : ld >= n, element (i,j) at i*ld + j
-        const size_t sz
-            = (order == rocsparse_order_column) ? (size_t)ld * n : (size_t)ld * m;
+        const size_t   sz = (order == rocsparse_order_column) ? (size_t)ld * n : (size_t)ld * m;
         std::vector<T> A(sz, rocsparse_ut::scalar<T>(0.0f));
         for(rocsparse_int i = 0; i < m; ++i)
         {
@@ -1417,9 +2128,8 @@ class ConversionDense2csxOrder : public HandleTest
 // DIRECTION_column (csc, nnz per column), each with base zero/one and with the
 // leading dimension exactly equal to and strictly larger than the minimum.
 template <typename T>
-static void check_dense2csx_typed(rocsparse_handle     handle,
-                                  rocsparse_index_base base,
-                                  int64_t              ld_extra)
+static void
+    check_dense2csx_typed(rocsparse_handle handle, rocsparse_index_base base, int64_t ld_extra)
 {
     const rocsparse_int m = 3, n = 4;
     const rocsparse_int ld = (rocsparse_int)(m + ld_extra); // column-major -> ld >= m
@@ -1446,18 +2156,19 @@ static void check_dense2csx_typed(rocsparse_handle     handle,
     device_vector<rocsparse_int> csr_col_ind{(size_t)nnz_row_total};
     device_vector<T>             csr_val{(size_t)nnz_row_total};
     ASSERT_TRUE(csr_row_ptr.ptr && csr_col_ind.ptr && csr_val.ptr);
-    EXPECT_EQ(ut_dense2csr<T>(handle, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr,
-                              csr_col_ind),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        ut_dense2csr<T>(handle, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr, csr_col_ind),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // ---- DIRECTION_column: nnz-per-column + dense2csc ----
     device_vector<rocsparse_int> nnz_per_col{(size_t)n};
     ASSERT_TRUE(nnz_per_col.ptr);
     rocsparse_int nnz_col_total = 0;
-    EXPECT_EQ(ut_nnz<T>(handle, rocsparse_direction_column, m, n, descr, A, ld, nnz_per_col,
-                        &nnz_col_total),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        ut_nnz<T>(
+            handle, rocsparse_direction_column, m, n, descr, A, ld, nnz_per_col, &nnz_col_total),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     EXPECT_EQ(nnz_col_total, 4);
 
@@ -1465,9 +2176,9 @@ static void check_dense2csx_typed(rocsparse_handle     handle,
     device_vector<rocsparse_int> csc_row_ind{(size_t)nnz_col_total};
     device_vector<T>             csc_val{(size_t)nnz_col_total};
     ASSERT_TRUE(csc_col_ptr.ptr && csc_row_ind.ptr && csc_val.ptr);
-    EXPECT_EQ(ut_dense2csc<T>(handle, m, n, descr, A, ld, nnz_per_col, csc_val, csc_col_ptr,
-                              csc_row_ind),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        ut_dense2csc<T>(handle, m, n, descr, A, ld, nnz_per_col, csc_val, csc_col_ptr, csc_row_ind),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // ---- dense2coo (uses nnz-per-row / DIRECTION_row internally) ----
@@ -1475,9 +2186,9 @@ static void check_dense2csx_typed(rocsparse_handle     handle,
     device_vector<rocsparse_int> coo_col_ind{(size_t)nnz_row_total};
     device_vector<T>             coo_val{(size_t)nnz_row_total};
     ASSERT_TRUE(coo_row_ind.ptr && coo_col_ind.ptr && coo_val.ptr);
-    EXPECT_EQ(ut_dense2coo<T>(handle, m, n, descr, A, ld, nnz_per_row, coo_val, coo_row_ind,
-                              coo_col_ind),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        ut_dense2coo<T>(handle, m, n, descr, A, ld, nnz_per_row, coo_val, coo_row_ind, coo_col_ind),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
@@ -1514,16 +2225,15 @@ static void check_dense_to_sparse(rocsparse_handle     handle,
                                   rocsparse_index_base base)
 {
     const rocsparse_int m = 3, n = 4;
-    const int64_t ld = (order == rocsparse_order_column) ? (int64_t)m : (int64_t)n;
+    const int64_t       ld = (order == rocsparse_order_column) ? (int64_t)m : (int64_t)n;
 
     std::vector<T>   hA = ut_make_dense<T>(m, n, order, ld);
     device_vector<T> A{hA};
     ASSERT_TRUE(A.ptr);
 
     rocsparse_dnmat_descr dn = nullptr;
-    ASSERT_EQ(
-        rocsparse_create_dnmat_descr(&dn, m, n, ld, A.ptr, dt_of<T>(), order),
-        rocsparse_status_success);
+    ASSERT_EQ(rocsparse_create_dnmat_descr(&dn, m, n, ld, A.ptr, dt_of<T>(), order),
+              rocsparse_status_success);
 
     // Offsets array (row_ptr for CSR, col_ptr for CSC); unused for COO.
     device_vector<rocsparse_int> offsets{(size_t)((m > n ? m : n) + 1)};
@@ -1532,35 +2242,53 @@ static void check_dense_to_sparse(rocsparse_handle     handle,
     rocsparse_spmat_descr sp = nullptr;
     if(format == rocsparse_format_csr)
     {
-        ASSERT_EQ(rocsparse_create_csr_descr(&sp, m, n, 0, offsets.ptr, nullptr, nullptr,
-                                             it_of<int32_t>(), it_of<int32_t>(), base, dt_of<T>()),
+        ASSERT_EQ(rocsparse_create_csr_descr(&sp,
+                                             m,
+                                             n,
+                                             0,
+                                             offsets.ptr,
+                                             nullptr,
+                                             nullptr,
+                                             it_of<int32_t>(),
+                                             it_of<int32_t>(),
+                                             base,
+                                             dt_of<T>()),
                   rocsparse_status_success);
     }
     else if(format == rocsparse_format_csc)
     {
-        ASSERT_EQ(rocsparse_create_csc_descr(&sp, m, n, 0, offsets.ptr, nullptr, nullptr,
-                                             it_of<int32_t>(), it_of<int32_t>(), base, dt_of<T>()),
+        ASSERT_EQ(rocsparse_create_csc_descr(&sp,
+                                             m,
+                                             n,
+                                             0,
+                                             offsets.ptr,
+                                             nullptr,
+                                             nullptr,
+                                             it_of<int32_t>(),
+                                             it_of<int32_t>(),
+                                             base,
+                                             dt_of<T>()),
                   rocsparse_status_success);
     }
     else
     {
-        ASSERT_EQ(rocsparse_create_coo_descr(&sp, m, n, 0, nullptr, nullptr, nullptr,
-                                             it_of<int32_t>(), base, dt_of<T>()),
+        ASSERT_EQ(rocsparse_create_coo_descr(
+                      &sp, m, n, 0, nullptr, nullptr, nullptr, it_of<int32_t>(), base, dt_of<T>()),
                   rocsparse_status_success);
     }
 
     // Stage 1: query buffer size.
     size_t buffer_size = 0;
-    ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
-                                        &buffer_size, nullptr),
+    ASSERT_EQ(rocsparse_dense_to_sparse(
+                  handle, dn, sp, rocsparse_dense_to_sparse_alg_default, &buffer_size, nullptr),
               rocsparse_status_success);
 
     device_vector<char> buffer{buffer_size ? buffer_size : size_t(1)};
     ASSERT_TRUE(buffer.ptr);
 
     // Stage 2: analysis (computes nnz / fills offsets).
-    ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
-                                        nullptr, buffer.ptr),
+    ASSERT_EQ(rocsparse_dense_to_sparse(
+                  handle, dn, sp, rocsparse_dense_to_sparse_alg_default, nullptr, buffer.ptr),
               rocsparse_status_success);
 
     int64_t rows = 0, cols = 0, nnz = 0;
@@ -1589,8 +2317,8 @@ static void check_dense_to_sparse(rocsparse_handle     handle,
     }
 
     // Stage 3: compute (actual conversion, drives dense2csx with dn order).
-    ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
-                                        &buffer_size, buffer.ptr),
+    ASSERT_EQ(rocsparse_dense_to_sparse(
+                  handle, dn, sp, rocsparse_dense_to_sparse_alg_default, &buffer_size, buffer.ptr),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -1606,8 +2334,7 @@ static void sweep_dense_to_sparse(rocsparse_handle handle)
         for(rocsparse_format fmt :
             {rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo})
         {
-            for(rocsparse_index_base base :
-                {rocsparse_index_base_zero, rocsparse_index_base_one})
+            for(rocsparse_index_base base : {rocsparse_index_base_zero, rocsparse_index_base_one})
             {
                 check_dense_to_sparse<T>(handle, order, fmt, base);
             }
@@ -1627,8 +2354,8 @@ TEST_F(ConversionDense2csxOrder, generic_dense_to_sparse_order)
 // the dense2coo checkarg.
 TEST_F(ConversionDense2csxOrder, invalid_and_quickreturn)
 {
-    const rocsparse_int m = 3, n = 4, ld = 3;
-    std::vector<float>  hA = ut_make_dense<float>(m, n, rocsparse_order_column, ld);
+    const rocsparse_int  m = 3, n = 4, ld = 3;
+    std::vector<float>   hA = ut_make_dense<float>(m, n, rocsparse_order_column, ld);
     device_vector<float> A{hA};
     ASSERT_TRUE(A.ptr);
 
@@ -1642,27 +2369,35 @@ TEST_F(ConversionDense2csxOrder, invalid_and_quickreturn)
     ASSERT_TRUE(nnz_per_row.ptr && csr_row_ptr.ptr && csr_col_ind.ptr && csr_val.ptr);
 
     // invalid handle
-    EXPECT_EQ(rocsparse_sdense2csr(nullptr, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr,
-                                   csr_col_ind),
+    EXPECT_EQ(rocsparse_sdense2csr(
+                  nullptr, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr, csr_col_ind),
               rocsparse_status_invalid_handle);
     // negative size
-    EXPECT_EQ(rocsparse_sdense2csr(handle, -1, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr,
-                                   csr_col_ind),
+    EXPECT_EQ(rocsparse_sdense2csr(
+                  handle, -1, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr, csr_col_ind),
               rocsparse_status_invalid_size);
     // ld < m (order_column minimum)
-    EXPECT_EQ(rocsparse_sdense2csr(handle, m, n, descr, A, m - 1, nnz_per_row, csr_val,
-                                   csr_row_ptr, csr_col_ind),
+    EXPECT_EQ(rocsparse_sdense2csr(
+                  handle, m, n, descr, A, m - 1, nnz_per_row, csr_val, csr_row_ptr, csr_col_ind),
               rocsparse_status_invalid_size);
     // null dense pointer
-    EXPECT_EQ(rocsparse_sdense2csr(handle, m, n, descr, (const float*)nullptr, ld, nnz_per_row,
-                                   csr_val, csr_row_ptr, csr_col_ind),
+    EXPECT_EQ(rocsparse_sdense2csr(handle,
+                                   m,
+                                   n,
+                                   descr,
+                                   (const float*)nullptr,
+                                   ld,
+                                   nnz_per_row,
+                                   csr_val,
+                                   csr_row_ptr,
+                                   csr_col_ind),
               rocsparse_status_invalid_pointer);
 
     // requires-sorted-storage branch
     ASSERT_EQ(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_unsorted),
               rocsparse_status_success);
-    EXPECT_EQ(rocsparse_sdense2csr(handle, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr,
-                                   csr_col_ind),
+    EXPECT_EQ(rocsparse_sdense2csr(
+                  handle, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr, csr_col_ind),
               rocsparse_status_requires_sorted_storage);
     ASSERT_EQ(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_sorted),
               rocsparse_status_success);
@@ -1670,15 +2405,15 @@ TEST_F(ConversionDense2csxOrder, invalid_and_quickreturn)
     // not-implemented branch (non-general matrix type)
     ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_symmetric),
               rocsparse_status_success);
-    EXPECT_EQ(rocsparse_sdense2csr(handle, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr,
-                                   csr_col_ind),
+    EXPECT_EQ(rocsparse_sdense2csr(
+                  handle, m, n, descr, A, ld, nnz_per_row, csr_val, csr_row_ptr, csr_col_ind),
               rocsparse_status_not_implemented);
     ASSERT_EQ(rocsparse_set_mat_type(descr, rocsparse_matrix_type_general),
               rocsparse_status_success);
 
     // quick return: m == 0 (fills row_ptr[0] with base, returns success)
-    EXPECT_EQ(rocsparse_sdense2csr(handle, 0, n, descr, A, 0, nnz_per_row, csr_val, csr_row_ptr,
-                                   csr_col_ind),
+    EXPECT_EQ(rocsparse_sdense2csr(
+                  handle, 0, n, descr, A, 0, nnz_per_row, csr_val, csr_row_ptr, csr_col_ind),
               rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -1687,15 +2422,15 @@ TEST_F(ConversionDense2csxOrder, invalid_and_quickreturn)
     device_vector<rocsparse_int> coo_col{(size_t)(m * n)};
     device_vector<float>         coo_val{(size_t)(m * n)};
     ASSERT_TRUE(coo_row.ptr && coo_col.ptr && coo_val.ptr);
-    EXPECT_EQ(rocsparse_sdense2coo(handle, m, n, descr, A, m - 1, nnz_per_row, coo_val, coo_row,
-                                   coo_col),
-              rocsparse_status_invalid_size);
-    EXPECT_EQ(rocsparse_sdense2coo(handle, m, -1, descr, A, ld, nnz_per_row, coo_val, coo_row,
-                                   coo_col),
-              rocsparse_status_invalid_size);
-    EXPECT_EQ(rocsparse_sdense2coo(nullptr, m, n, descr, A, ld, nnz_per_row, coo_val, coo_row,
-                                   coo_col),
-              rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        rocsparse_sdense2coo(handle, m, n, descr, A, m - 1, nnz_per_row, coo_val, coo_row, coo_col),
+        rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        rocsparse_sdense2coo(handle, m, -1, descr, A, ld, nnz_per_row, coo_val, coo_row, coo_col),
+        rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        rocsparse_sdense2coo(nullptr, m, n, descr, A, ld, nnz_per_row, coo_val, coo_row, coo_col),
+        rocsparse_status_invalid_handle);
 
     EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
 }
@@ -1717,9 +2452,17 @@ namespace
                                         device_vector<rocsparse_int>& col_ind,
                                         device_vector<float>&         val)
     {
-        return rocsparse_create_csr_descr(descr, 3, 3, 3, row_ptr.ptr, col_ind.ptr, val.ptr,
-                                          rocsparse_indextype_i32, rocsparse_indextype_i32,
-                                          rocsparse_index_base_zero, rocsparse_datatype_f32_r);
+        return rocsparse_create_csr_descr(descr,
+                                          3,
+                                          3,
+                                          3,
+                                          row_ptr.ptr,
+                                          col_ind.ptr,
+                                          val.ptr,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_index_base_zero,
+                                          rocsparse_datatype_f32_r);
     }
 } // namespace
 
@@ -1729,8 +2472,8 @@ static void run_sparse_to_sparse_pair(rocsparse_handle            handle,
                                       bool                        permissive)
 {
     rocsparse_sparse_to_sparse_descr s2s = nullptr;
-    ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, source, target,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  &s2s, source, target, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_success);
 
     if(permissive)
@@ -1738,13 +2481,13 @@ static void run_sparse_to_sparse_pair(rocsparse_handle            handle,
         ASSERT_EQ(rocsparse_sparse_to_sparse_permissive(s2s), rocsparse_status_success);
     }
 
-    for(rocsparse_sparse_to_sparse_stage stage : {rocsparse_sparse_to_sparse_stage_analysis,
-                                                  rocsparse_sparse_to_sparse_stage_compute})
+    for(rocsparse_sparse_to_sparse_stage stage :
+        {rocsparse_sparse_to_sparse_stage_analysis, rocsparse_sparse_to_sparse_stage_compute})
     {
         size_t buffer_size = 0;
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse_buffer_size(handle, s2s, source, target, stage, &buffer_size),
-            rocsparse_status_success);
+        ASSERT_EQ(rocsparse_sparse_to_sparse_buffer_size(
+                      handle, s2s, source, target, stage, &buffer_size),
+                  rocsparse_status_success);
 
         device_vector<char> buffer{buffer_size ? buffer_size : size_t(1)};
         ASSERT_TRUE(buffer.ptr);
@@ -1771,8 +2514,15 @@ TEST_F(ConversionSparseToSparse, csr_to_coo)
 
     rocsparse_spmat_descr csr = nullptr, coo = nullptr;
     ASSERT_EQ(ut_make_csr(&csr, row_ptr, col_ind, csr_val), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_coo_descr(&coo, 3, 3, 3, coo_row.ptr, coo_col.ptr, coo_val.ptr,
-                                         rocsparse_indextype_i32, rocsparse_index_base_zero,
+    ASSERT_EQ(rocsparse_create_coo_descr(&coo,
+                                         3,
+                                         3,
+                                         3,
+                                         coo_row.ptr,
+                                         coo_col.ptr,
+                                         coo_val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
@@ -1795,8 +2545,15 @@ TEST_F(ConversionSparseToSparse, coo_to_csr)
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && csr_val.ptr);
 
     rocsparse_spmat_descr coo = nullptr, csr = nullptr;
-    ASSERT_EQ(rocsparse_create_coo_descr(&coo, 3, 3, 3, coo_row.ptr, coo_col.ptr, coo_val.ptr,
-                                         rocsparse_indextype_i32, rocsparse_index_base_zero,
+    ASSERT_EQ(rocsparse_create_coo_descr(&coo,
+                                         3,
+                                         3,
+                                         3,
+                                         coo_row.ptr,
+                                         coo_col.ptr,
+                                         coo_val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
     ASSERT_EQ(ut_make_csr(&csr, row_ptr, col_ind, csr_val), rocsparse_status_success);
@@ -1821,9 +2578,16 @@ TEST_F(ConversionSparseToSparse, csr_to_csc)
 
     rocsparse_spmat_descr csr = nullptr, csc = nullptr;
     ASSERT_EQ(ut_make_csr(&csr, row_ptr, col_ind, csr_val), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_csc_descr(&csc, 3, 3, 3, csc_col_ptr.ptr, csc_row_ind.ptr,
-                                         csc_val.ptr, rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32, rocsparse_index_base_zero,
+    ASSERT_EQ(rocsparse_create_csc_descr(&csc,
+                                         3,
+                                         3,
+                                         3,
+                                         csc_col_ptr.ptr,
+                                         csc_row_ind.ptr,
+                                         csc_val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
@@ -1846,22 +2610,29 @@ TEST_F(ConversionSparseToSparse, invalid_args)
 
     rocsparse_spmat_descr csr = nullptr, coo = nullptr;
     ASSERT_EQ(ut_make_csr(&csr, row_ptr, col_ind, csr_val), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_coo_descr(&coo, 3, 3, 3, coo_row.ptr, coo_col.ptr, coo_val.ptr,
-                                         rocsparse_indextype_i32, rocsparse_index_base_zero,
+    ASSERT_EQ(rocsparse_create_coo_descr(&coo,
+                                         3,
+                                         3,
+                                         3,
+                                         coo_row.ptr,
+                                         coo_col.ptr,
+                                         coo_val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     rocsparse_sparse_to_sparse_descr s2s = nullptr;
 
     // create_descr: null out-pointer / source / target, invalid alg enum.
-    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(nullptr, csr, coo,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  nullptr, csr, coo, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_invalid_pointer);
-    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, nullptr, coo,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  &s2s, nullptr, coo, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_invalid_pointer);
-    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, nullptr,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  &s2s, csr, nullptr, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(
                   &s2s, csr, coo, (rocsparse_sparse_to_sparse_alg)0x7fffffff),
@@ -1871,28 +2642,27 @@ TEST_F(ConversionSparseToSparse, invalid_args)
     EXPECT_EQ(rocsparse_sparse_to_sparse_permissive(nullptr), rocsparse_status_invalid_pointer);
 
     // A valid descriptor for the remaining checks.
-    ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, coo,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  &s2s, csr, coo, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_success);
 
     size_t buffer_size = 0;
     // buffer_size: invalid handle.
-    EXPECT_EQ(rocsparse_sparse_to_sparse_buffer_size(nullptr, s2s, csr, coo,
-                                                     rocsparse_sparse_to_sparse_stage_analysis,
-                                                     &buffer_size),
+    EXPECT_EQ(rocsparse_sparse_to_sparse_buffer_size(
+                  nullptr, s2s, csr, coo, rocsparse_sparse_to_sparse_stage_analysis, &buffer_size),
               rocsparse_status_invalid_handle);
     // buffer_size: null descr.
-    EXPECT_EQ(rocsparse_sparse_to_sparse_buffer_size(handle, nullptr, csr, coo,
-                                                     rocsparse_sparse_to_sparse_stage_analysis,
-                                                     &buffer_size),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_sparse_to_sparse_buffer_size(
+            handle, nullptr, csr, coo, rocsparse_sparse_to_sparse_stage_analysis, &buffer_size),
+        rocsparse_status_invalid_pointer);
     // compute call: invalid stage enum.
-    EXPECT_EQ(rocsparse_sparse_to_sparse(handle, s2s, csr, coo,
-                                         (rocsparse_sparse_to_sparse_stage)999, 0, nullptr),
+    EXPECT_EQ(rocsparse_sparse_to_sparse(
+                  handle, s2s, csr, coo, (rocsparse_sparse_to_sparse_stage)999, 0, nullptr),
               rocsparse_status_invalid_value);
     // compute call: non-null size with null buffer -> invalid_pointer.
-    EXPECT_EQ(rocsparse_sparse_to_sparse(handle, s2s, csr, coo,
-                                         rocsparse_sparse_to_sparse_stage_compute, 128, nullptr),
+    EXPECT_EQ(rocsparse_sparse_to_sparse(
+                  handle, s2s, csr, coo, rocsparse_sparse_to_sparse_stage_compute, 128, nullptr),
               rocsparse_status_invalid_pointer);
 
     EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(s2s), rocsparse_status_success);
@@ -1939,8 +2709,8 @@ namespace
                                             rocsparse_int        n,
                                             rocsparse_index_base base)
     {
-        const int64_t ld  = (order == rocsparse_order_column) ? (int64_t)m : (int64_t)n;
-        const size_t  sz  = (order == rocsparse_order_column) ? (size_t)ld * n : (size_t)ld * m;
+        const int64_t ld = (order == rocsparse_order_column) ? (int64_t)m : (int64_t)n;
+        const size_t  sz = (order == rocsparse_order_column) ? (size_t)ld * n : (size_t)ld * m;
         const rocsparse_int diag = (m < n) ? m : n;
 
         std::vector<T> hA(sz, rocsparse_ut::scalar<T>(0.0f));
@@ -1964,28 +2734,44 @@ namespace
         rocsparse_spmat_descr sp = nullptr;
         if(format == rocsparse_format_csr)
         {
-            ASSERT_EQ(rocsparse_create_csr_descr(&sp, m, n, 0, offsets.ptr, nullptr, nullptr,
-                                                 it_of<int32_t>(), it_of<int32_t>(), base,
+            ASSERT_EQ(rocsparse_create_csr_descr(&sp,
+                                                 m,
+                                                 n,
+                                                 0,
+                                                 offsets.ptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 it_of<int32_t>(),
+                                                 it_of<int32_t>(),
+                                                 base,
                                                  dt_of<T>()),
                       rocsparse_status_success);
         }
         else
         {
-            ASSERT_EQ(rocsparse_create_csc_descr(&sp, m, n, 0, offsets.ptr, nullptr, nullptr,
-                                                 it_of<int32_t>(), it_of<int32_t>(), base,
+            ASSERT_EQ(rocsparse_create_csc_descr(&sp,
+                                                 m,
+                                                 n,
+                                                 0,
+                                                 offsets.ptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 it_of<int32_t>(),
+                                                 it_of<int32_t>(),
+                                                 base,
                                                  dt_of<T>()),
                       rocsparse_status_success);
         }
 
         size_t buffer_size = 0;
-        ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
-                                            &buffer_size, nullptr),
+        ASSERT_EQ(rocsparse_dense_to_sparse(
+                      handle, dn, sp, rocsparse_dense_to_sparse_alg_default, &buffer_size, nullptr),
                   rocsparse_status_success);
         device_vector<char> buffer{buffer_size ? buffer_size : size_t(1)};
         ASSERT_TRUE(buffer.ptr);
 
-        ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
-                                            nullptr, buffer.ptr),
+        ASSERT_EQ(rocsparse_dense_to_sparse(
+                      handle, dn, sp, rocsparse_dense_to_sparse_alg_default, nullptr, buffer.ptr),
                   rocsparse_status_success);
 
         int64_t rows = 0, cols = 0, nnz = 0;
@@ -2006,9 +2792,10 @@ namespace
                       rocsparse_status_success);
         }
 
-        ASSERT_EQ(rocsparse_dense_to_sparse(handle, dn, sp, rocsparse_dense_to_sparse_alg_default,
-                                            &buffer_size, buffer.ptr),
-                  rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_dense_to_sparse(
+                handle, dn, sp, rocsparse_dense_to_sparse_alg_default, &buffer_size, buffer.ptr),
+            rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         EXPECT_EQ(rocsparse_destroy_spmat_descr(sp), rocsparse_status_success);
@@ -2023,13 +2810,15 @@ namespace
 
         // m == 0 quick return (dense2coo_checkarg returns success -> the typed C
         // wrapper takes its `status != continue` success path and returns).
-        EXPECT_EQ(ut_dense2coo<T>(handle, 0, 4, descr, (const T*)nullptr, 0, nullptr, nullptr,
-                                  nullptr, nullptr),
-                  rocsparse_status_success);
+        EXPECT_EQ(
+            ut_dense2coo<T>(
+                handle, 0, 4, descr, (const T*)nullptr, 0, nullptr, nullptr, nullptr, nullptr),
+            rocsparse_status_success);
         // n == 0 quick return (ld >= m required by the earlier ld check).
-        EXPECT_EQ(ut_dense2coo<T>(handle, 3, 0, descr, (const T*)nullptr, 3, nullptr, nullptr,
-                                  nullptr, nullptr),
-                  rocsparse_status_success);
+        EXPECT_EQ(
+            ut_dense2coo<T>(
+                handle, 3, 0, descr, (const T*)nullptr, 3, nullptr, nullptr, nullptr, nullptr),
+            rocsparse_status_success);
 
         EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
     }
@@ -2046,12 +2835,12 @@ TEST_F(ConversionDense2csxOrder, generic_large_f64_complex)
     {
         for(rocsparse_format fmt : {rocsparse_format_csr, rocsparse_format_csc})
         {
-            check_dense_to_sparse_sized<double>(handle, order, fmt, m, n,
-                                                rocsparse_index_base_zero);
-            check_dense_to_sparse_sized<rocsparse_float_complex>(handle, order, fmt, m, n,
-                                                                 rocsparse_index_base_one);
-            check_dense_to_sparse_sized<rocsparse_double_complex>(handle, order, fmt, m, n,
-                                                                  rocsparse_index_base_zero);
+            check_dense_to_sparse_sized<double>(
+                handle, order, fmt, m, n, rocsparse_index_base_zero);
+            check_dense_to_sparse_sized<rocsparse_float_complex>(
+                handle, order, fmt, m, n, rocsparse_index_base_one);
+            check_dense_to_sparse_sized<rocsparse_double_complex>(
+                handle, order, fmt, m, n, rocsparse_index_base_zero);
         }
     }
 }
@@ -2082,16 +2871,23 @@ TEST_F(ConversionSparseToSparse, batched_source_create)
 
     rocsparse_spmat_descr csr = nullptr, coo = nullptr;
     ASSERT_EQ(ut_make_csr(&csr, row_ptr, col_ind, csr_val), rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_coo_descr(&coo, 3, 3, 3, coo_row.ptr, coo_col.ptr, coo_val.ptr,
-                                         rocsparse_indextype_i32, rocsparse_index_base_zero,
+    ASSERT_EQ(rocsparse_create_coo_descr(&coo,
+                                         3,
+                                         3,
+                                         3,
+                                         coo_row.ptr,
+                                         coo_col.ptr,
+                                         coo_val.ptr,
+                                         rocsparse_indextype_i32,
+                                         rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
     // Accepted: batched source with zero strides.
     ASSERT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 0, 0), rocsparse_status_success);
     rocsparse_sparse_to_sparse_descr s2s = nullptr;
-    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, coo,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  &s2s, csr, coo, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_success);
     ASSERT_NE(s2s, nullptr);
     EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(s2s), rocsparse_status_success);
@@ -2099,8 +2895,8 @@ TEST_F(ConversionSparseToSparse, batched_source_create)
     // Rejected: positive offsets batch stride -> not_implemented.
     ASSERT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 8, 0), rocsparse_status_success);
     s2s = nullptr;
-    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, coo,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  &s2s, csr, coo, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_not_implemented);
     if(s2s != nullptr)
         EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(s2s), rocsparse_status_success);
@@ -2108,8 +2904,8 @@ TEST_F(ConversionSparseToSparse, batched_source_create)
     // Rejected: positive columns/values batch stride -> not_implemented.
     ASSERT_EQ(rocsparse_csr_set_strided_batch(csr, 2, 0, 8), rocsparse_status_success);
     s2s = nullptr;
-    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, csr, coo,
-                                                      rocsparse_sparse_to_sparse_alg_default),
+    EXPECT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                  &s2s, csr, coo, rocsparse_sparse_to_sparse_alg_default),
               rocsparse_status_not_implemented);
     if(s2s != nullptr)
         EXPECT_EQ(rocsparse_destroy_sparse_to_sparse_descr(s2s), rocsparse_status_success);

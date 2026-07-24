@@ -51,11 +51,12 @@ namespace
     {
         device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
         device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
-        device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1, 2}}; // COO row indices
-        device_vector<T>             val{std::vector<T>{scalar<T>(1), scalar<T>(1), scalar<T>(1)}};
-        device_vector<T>             x{std::vector<T>{scalar<T>(1), scalar<T>(2), scalar<T>(3)}};
-        device_vector<T>             y{std::vector<T>(3, scalar<T>(1))};
-        bool                         ok() const
+        device_vector<rocsparse_int> row_ind{
+            std::vector<rocsparse_int>{0, 1, 2}}; // COO row indices
+        device_vector<T> val{std::vector<T>{scalar<T>(1), scalar<T>(1), scalar<T>(1)}};
+        device_vector<T> x{std::vector<T>{scalar<T>(1), scalar<T>(2), scalar<T>(3)}};
+        device_vector<T> y{std::vector<T>(3, scalar<T>(1))};
+        bool             ok() const
         {
             return row_ptr.ptr && col_ind.ptr && row_ind.ptr && val.ptr && x.ptr && y.ptr;
         }
@@ -77,400 +78,399 @@ namespace
     };
 
     // ===== per-precision overload sets =====================================
-#define UT_OVL_CSRMV(T, PFX)                                                                   \
-    inline rocsparse_status ut_csrmv(rocsparse_handle          h,                              \
-                                     rocsparse_operation       trans,                          \
-                                     rocsparse_int             m,                              \
-                                     rocsparse_int             n,                              \
-                                     rocsparse_int             nnz,                            \
-                                     const T*                  alpha,                          \
-                                     const rocsparse_mat_descr descr,                          \
-                                     const T*                  val,                            \
-                                     const rocsparse_int*      row_ptr,                        \
-                                     const rocsparse_int*      col_ind,                        \
-                                     rocsparse_mat_info        info,                           \
-                                     const T*                  x,                              \
-                                     const T*                  beta,                           \
-                                     T*                        y)                              \
-    {                                                                                          \
-        return rocsparse_##PFX##csrmv(                                                         \
-            h, trans, m, n, nnz, alpha, descr, val, row_ptr, col_ind, info, x, beta, y);       \
-    }                                                                                          \
-    inline rocsparse_status ut_csrmv_analysis(rocsparse_handle          h,                     \
-                                              rocsparse_operation       trans,                 \
-                                              rocsparse_int             m,                     \
-                                              rocsparse_int             n,                     \
-                                              rocsparse_int             nnz,                   \
-                                              const rocsparse_mat_descr descr,                 \
-                                              const T*                  val,                   \
-                                              const rocsparse_int*      row_ptr,               \
-                                              const rocsparse_int*      col_ind,               \
-                                              rocsparse_mat_info        info)                  \
-    {                                                                                          \
-        return rocsparse_##PFX##csrmv_analysis(                                                \
-            h, trans, m, n, nnz, descr, val, row_ptr, col_ind, info);                          \
+#define UT_OVL_CSRMV(T, PFX)                                                             \
+    inline rocsparse_status ut_csrmv(rocsparse_handle          h,                        \
+                                     rocsparse_operation       trans,                    \
+                                     rocsparse_int             m,                        \
+                                     rocsparse_int             n,                        \
+                                     rocsparse_int             nnz,                      \
+                                     const T*                  alpha,                    \
+                                     const rocsparse_mat_descr descr,                    \
+                                     const T*                  val,                      \
+                                     const rocsparse_int*      row_ptr,                  \
+                                     const rocsparse_int*      col_ind,                  \
+                                     rocsparse_mat_info        info,                     \
+                                     const T*                  x,                        \
+                                     const T*                  beta,                     \
+                                     T*                        y)                        \
+    {                                                                                    \
+        return rocsparse_##PFX##csrmv(                                                   \
+            h, trans, m, n, nnz, alpha, descr, val, row_ptr, col_ind, info, x, beta, y); \
+    }                                                                                    \
+    inline rocsparse_status ut_csrmv_analysis(rocsparse_handle          h,               \
+                                              rocsparse_operation       trans,           \
+                                              rocsparse_int             m,               \
+                                              rocsparse_int             n,               \
+                                              rocsparse_int             nnz,             \
+                                              const rocsparse_mat_descr descr,           \
+                                              const T*                  val,             \
+                                              const rocsparse_int*      row_ptr,         \
+                                              const rocsparse_int*      col_ind,         \
+                                              rocsparse_mat_info        info)            \
+    {                                                                                    \
+        return rocsparse_##PFX##csrmv_analysis(                                          \
+            h, trans, m, n, nnz, descr, val, row_ptr, col_ind, info);                    \
     }
     UT_OVL_CSRMV(float, s)
     UT_OVL_CSRMV(double, d)
     UT_OVL_CSRMV(rocsparse_float_complex, c)
     UT_OVL_CSRMV(rocsparse_double_complex, z)
 
-#define UT_OVL_COOMV(T, PFX)                                                                   \
-    inline rocsparse_status ut_coomv(rocsparse_handle          h,                              \
-                                     rocsparse_operation       trans,                          \
-                                     rocsparse_int             m,                              \
-                                     rocsparse_int             n,                              \
-                                     rocsparse_int             nnz,                            \
-                                     const T*                  alpha,                          \
-                                     const rocsparse_mat_descr descr,                          \
-                                     const T*                  val,                            \
-                                     const rocsparse_int*      row_ind,                        \
-                                     const rocsparse_int*      col_ind,                        \
-                                     const T*                  x,                              \
-                                     const T*                  beta,                           \
-                                     T*                        y)                              \
-    {                                                                                          \
-        return rocsparse_##PFX##coomv(                                                         \
-            h, trans, m, n, nnz, alpha, descr, val, row_ind, col_ind, x, beta, y);             \
+#define UT_OVL_COOMV(T, PFX)                                                       \
+    inline rocsparse_status ut_coomv(rocsparse_handle          h,                  \
+                                     rocsparse_operation       trans,              \
+                                     rocsparse_int             m,                  \
+                                     rocsparse_int             n,                  \
+                                     rocsparse_int             nnz,                \
+                                     const T*                  alpha,              \
+                                     const rocsparse_mat_descr descr,              \
+                                     const T*                  val,                \
+                                     const rocsparse_int*      row_ind,            \
+                                     const rocsparse_int*      col_ind,            \
+                                     const T*                  x,                  \
+                                     const T*                  beta,               \
+                                     T*                        y)                  \
+    {                                                                              \
+        return rocsparse_##PFX##coomv(                                             \
+            h, trans, m, n, nnz, alpha, descr, val, row_ind, col_ind, x, beta, y); \
     }
     UT_OVL_COOMV(float, s)
     UT_OVL_COOMV(double, d)
     UT_OVL_COOMV(rocsparse_float_complex, c)
     UT_OVL_COOMV(rocsparse_double_complex, z)
 
-#define UT_OVL_ELLMV(T, PFX)                                                                   \
-    inline rocsparse_status ut_ellmv(rocsparse_handle          h,                              \
-                                     rocsparse_operation       trans,                          \
-                                     rocsparse_int             m,                              \
-                                     rocsparse_int             n,                              \
-                                     const T*                  alpha,                          \
-                                     const rocsparse_mat_descr descr,                          \
-                                     const T*                  val,                            \
-                                     const rocsparse_int*      col_ind,                        \
-                                     rocsparse_int             ell_width,                      \
-                                     const T*                  x,                              \
-                                     const T*                  beta,                           \
-                                     T*                        y)                              \
-    {                                                                                          \
-        return rocsparse_##PFX##ellmv(                                                         \
-            h, trans, m, n, alpha, descr, val, col_ind, ell_width, x, beta, y);                \
+#define UT_OVL_ELLMV(T, PFX)                                                    \
+    inline rocsparse_status ut_ellmv(rocsparse_handle          h,               \
+                                     rocsparse_operation       trans,           \
+                                     rocsparse_int             m,               \
+                                     rocsparse_int             n,               \
+                                     const T*                  alpha,           \
+                                     const rocsparse_mat_descr descr,           \
+                                     const T*                  val,             \
+                                     const rocsparse_int*      col_ind,         \
+                                     rocsparse_int             ell_width,       \
+                                     const T*                  x,               \
+                                     const T*                  beta,            \
+                                     T*                        y)               \
+    {                                                                           \
+        return rocsparse_##PFX##ellmv(                                          \
+            h, trans, m, n, alpha, descr, val, col_ind, ell_width, x, beta, y); \
     }
     UT_OVL_ELLMV(float, s)
     UT_OVL_ELLMV(double, d)
     UT_OVL_ELLMV(rocsparse_float_complex, c)
     UT_OVL_ELLMV(rocsparse_double_complex, z)
 
-#define UT_OVL_BSRMV(T, PFX)                                                                   \
-    inline rocsparse_status ut_bsrmv(rocsparse_handle          h,                              \
-                                     rocsparse_direction       dir,                            \
-                                     rocsparse_operation       trans,                          \
-                                     rocsparse_int             mb,                             \
-                                     rocsparse_int             nb,                             \
-                                     rocsparse_int             nnzb,                           \
-                                     const T*                  alpha,                          \
-                                     const rocsparse_mat_descr descr,                          \
-                                     const T*                  val,                            \
-                                     const rocsparse_int*      row_ptr,                        \
-                                     const rocsparse_int*      col_ind,                        \
-                                     rocsparse_int             block_dim,                      \
-                                     rocsparse_mat_info        info,                           \
-                                     const T*                  x,                              \
-                                     const T*                  beta,                           \
-                                     T*                        y)                              \
-    {                                                                                          \
-        return rocsparse_##PFX##bsrmv(h,                                                       \
-                                      dir,                                                     \
-                                      trans,                                                   \
-                                      mb,                                                      \
-                                      nb,                                                      \
-                                      nnzb,                                                    \
-                                      alpha,                                                   \
-                                      descr,                                                   \
-                                      val,                                                     \
-                                      row_ptr,                                                 \
-                                      col_ind,                                                 \
-                                      block_dim,                                               \
-                                      info,                                                    \
-                                      x,                                                       \
-                                      beta,                                                    \
-                                      y);                                                      \
-    }                                                                                          \
-    inline rocsparse_status ut_bsrmv_analysis(rocsparse_handle          h,                     \
-                                              rocsparse_direction       dir,                   \
-                                              rocsparse_operation       trans,                 \
-                                              rocsparse_int             mb,                    \
-                                              rocsparse_int             nb,                    \
-                                              rocsparse_int             nnzb,                  \
-                                              const rocsparse_mat_descr descr,                 \
-                                              const T*                  val,                   \
-                                              const rocsparse_int*      row_ptr,               \
-                                              const rocsparse_int*      col_ind,               \
-                                              rocsparse_int             block_dim,             \
-                                              rocsparse_mat_info        info)                  \
-    {                                                                                          \
-        return rocsparse_##PFX##bsrmv_analysis(                                                \
-            h, dir, trans, mb, nb, nnzb, descr, val, row_ptr, col_ind, block_dim, info);       \
+#define UT_OVL_BSRMV(T, PFX)                                                             \
+    inline rocsparse_status ut_bsrmv(rocsparse_handle          h,                        \
+                                     rocsparse_direction       dir,                      \
+                                     rocsparse_operation       trans,                    \
+                                     rocsparse_int             mb,                       \
+                                     rocsparse_int             nb,                       \
+                                     rocsparse_int             nnzb,                     \
+                                     const T*                  alpha,                    \
+                                     const rocsparse_mat_descr descr,                    \
+                                     const T*                  val,                      \
+                                     const rocsparse_int*      row_ptr,                  \
+                                     const rocsparse_int*      col_ind,                  \
+                                     rocsparse_int             block_dim,                \
+                                     rocsparse_mat_info        info,                     \
+                                     const T*                  x,                        \
+                                     const T*                  beta,                     \
+                                     T*                        y)                        \
+    {                                                                                    \
+        return rocsparse_##PFX##bsrmv(h,                                                 \
+                                      dir,                                               \
+                                      trans,                                             \
+                                      mb,                                                \
+                                      nb,                                                \
+                                      nnzb,                                              \
+                                      alpha,                                             \
+                                      descr,                                             \
+                                      val,                                               \
+                                      row_ptr,                                           \
+                                      col_ind,                                           \
+                                      block_dim,                                         \
+                                      info,                                              \
+                                      x,                                                 \
+                                      beta,                                              \
+                                      y);                                                \
+    }                                                                                    \
+    inline rocsparse_status ut_bsrmv_analysis(rocsparse_handle          h,               \
+                                              rocsparse_direction       dir,             \
+                                              rocsparse_operation       trans,           \
+                                              rocsparse_int             mb,              \
+                                              rocsparse_int             nb,              \
+                                              rocsparse_int             nnzb,            \
+                                              const rocsparse_mat_descr descr,           \
+                                              const T*                  val,             \
+                                              const rocsparse_int*      row_ptr,         \
+                                              const rocsparse_int*      col_ind,         \
+                                              rocsparse_int             block_dim,       \
+                                              rocsparse_mat_info        info)            \
+    {                                                                                    \
+        return rocsparse_##PFX##bsrmv_analysis(                                          \
+            h, dir, trans, mb, nb, nnzb, descr, val, row_ptr, col_ind, block_dim, info); \
     }
     UT_OVL_BSRMV(float, s)
     UT_OVL_BSRMV(double, d)
     UT_OVL_BSRMV(rocsparse_float_complex, c)
     UT_OVL_BSRMV(rocsparse_double_complex, z)
 
-#define UT_OVL_GEBSRMV(T, PFX)                                                                 \
-    inline rocsparse_status ut_gebsrmv(rocsparse_handle          h,                            \
-                                       rocsparse_direction       dir,                          \
-                                       rocsparse_operation       trans,                        \
-                                       rocsparse_int             mb,                           \
-                                       rocsparse_int             nb,                           \
-                                       rocsparse_int             nnzb,                         \
-                                       const T*                  alpha,                        \
-                                       const rocsparse_mat_descr descr,                        \
-                                       const T*                  val,                          \
-                                       const rocsparse_int*      row_ptr,                      \
-                                       const rocsparse_int*      col_ind,                      \
-                                       rocsparse_int             row_block_dim,               \
-                                       rocsparse_int             col_block_dim,               \
-                                       const T*                  x,                            \
-                                       const T*                  beta,                         \
-                                       T*                        y)                            \
-    {                                                                                          \
-        return rocsparse_##PFX##gebsrmv(h,                                                     \
-                                        dir,                                                   \
-                                        trans,                                                 \
-                                        mb,                                                    \
-                                        nb,                                                    \
-                                        nnzb,                                                  \
-                                        alpha,                                                 \
-                                        descr,                                                 \
-                                        val,                                                   \
-                                        row_ptr,                                               \
-                                        col_ind,                                               \
-                                        row_block_dim,                                         \
-                                        col_block_dim,                                         \
-                                        x,                                                     \
-                                        beta,                                                  \
-                                        y);                                                    \
+#define UT_OVL_GEBSRMV(T, PFX)                                                  \
+    inline rocsparse_status ut_gebsrmv(rocsparse_handle          h,             \
+                                       rocsparse_direction       dir,           \
+                                       rocsparse_operation       trans,         \
+                                       rocsparse_int             mb,            \
+                                       rocsparse_int             nb,            \
+                                       rocsparse_int             nnzb,          \
+                                       const T*                  alpha,         \
+                                       const rocsparse_mat_descr descr,         \
+                                       const T*                  val,           \
+                                       const rocsparse_int*      row_ptr,       \
+                                       const rocsparse_int*      col_ind,       \
+                                       rocsparse_int             row_block_dim, \
+                                       rocsparse_int             col_block_dim, \
+                                       const T*                  x,             \
+                                       const T*                  beta,          \
+                                       T*                        y)             \
+    {                                                                           \
+        return rocsparse_##PFX##gebsrmv(h,                                      \
+                                        dir,                                    \
+                                        trans,                                  \
+                                        mb,                                     \
+                                        nb,                                     \
+                                        nnzb,                                   \
+                                        alpha,                                  \
+                                        descr,                                  \
+                                        val,                                    \
+                                        row_ptr,                                \
+                                        col_ind,                                \
+                                        row_block_dim,                          \
+                                        col_block_dim,                          \
+                                        x,                                      \
+                                        beta,                                   \
+                                        y);                                     \
     }
     UT_OVL_GEBSRMV(float, s)
     UT_OVL_GEBSRMV(double, d)
     UT_OVL_GEBSRMV(rocsparse_float_complex, c)
     UT_OVL_GEBSRMV(rocsparse_double_complex, z)
 
-#define UT_OVL_HYBMV(T, PFX)                                                                   \
-    inline rocsparse_status ut_hybmv(rocsparse_handle          h,                              \
-                                     rocsparse_operation       trans,                          \
-                                     const T*                  alpha,                          \
-                                     const rocsparse_mat_descr descr,                          \
-                                     const rocsparse_hyb_mat   hyb,                            \
-                                     const T*                  x,                              \
-                                     const T*                  beta,                           \
-                                     T*                        y)                              \
-    {                                                                                          \
-        return rocsparse_##PFX##hybmv(h, trans, alpha, descr, hyb, x, beta, y);                \
-    }                                                                                          \
-    inline rocsparse_status ut_csr2hyb(rocsparse_handle          h,                            \
-                                       rocsparse_int             m,                             \
-                                       rocsparse_int             n,                             \
-                                       const rocsparse_mat_descr descr,                        \
-                                       const T*                  val,                          \
-                                       const rocsparse_int*      row_ptr,                      \
-                                       const rocsparse_int*      col_ind,                      \
-                                       rocsparse_hyb_mat         hyb)                          \
-    {                                                                                          \
-        return rocsparse_##PFX##csr2hyb(                                                       \
-            h, m, n, descr, val, row_ptr, col_ind, hyb, 0, rocsparse_hyb_partition_auto);      \
+#define UT_OVL_HYBMV(T, PFX)                                                              \
+    inline rocsparse_status ut_hybmv(rocsparse_handle          h,                         \
+                                     rocsparse_operation       trans,                     \
+                                     const T*                  alpha,                     \
+                                     const rocsparse_mat_descr descr,                     \
+                                     const rocsparse_hyb_mat   hyb,                       \
+                                     const T*                  x,                         \
+                                     const T*                  beta,                      \
+                                     T*                        y)                         \
+    {                                                                                     \
+        return rocsparse_##PFX##hybmv(h, trans, alpha, descr, hyb, x, beta, y);           \
+    }                                                                                     \
+    inline rocsparse_status ut_csr2hyb(rocsparse_handle          h,                       \
+                                       rocsparse_int             m,                       \
+                                       rocsparse_int             n,                       \
+                                       const rocsparse_mat_descr descr,                   \
+                                       const T*                  val,                     \
+                                       const rocsparse_int*      row_ptr,                 \
+                                       const rocsparse_int*      col_ind,                 \
+                                       rocsparse_hyb_mat         hyb)                     \
+    {                                                                                     \
+        return rocsparse_##PFX##csr2hyb(                                                  \
+            h, m, n, descr, val, row_ptr, col_ind, hyb, 0, rocsparse_hyb_partition_auto); \
     }
     UT_OVL_HYBMV(float, s)
     UT_OVL_HYBMV(double, d)
     UT_OVL_HYBMV(rocsparse_float_complex, c)
     UT_OVL_HYBMV(rocsparse_double_complex, z)
 
-#define UT_OVL_GEMVI(T, PFX)                                                                   \
-    inline rocsparse_status ut_gemvi_buffer_size(rocsparse_handle    h,                        \
-                                                 rocsparse_operation trans,                    \
-                                                 rocsparse_int       m,                        \
-                                                 rocsparse_int       n,                        \
-                                                 rocsparse_int       nnz,                      \
-                                                 size_t*             buffer_size,              \
-                                                 T                   dummy)                    \
-    {                                                                                          \
-        (void)dummy;                                                                           \
-        return rocsparse_##PFX##gemvi_buffer_size(h, trans, m, n, nnz, buffer_size);           \
-    }                                                                                          \
-    inline rocsparse_status ut_gemvi(rocsparse_handle     h,                                   \
-                                     rocsparse_operation  trans,                               \
-                                     rocsparse_int        m,                                   \
-                                     rocsparse_int        n,                                   \
-                                     const T*             alpha,                               \
-                                     const T*             A,                                   \
-                                     rocsparse_int        lda,                                 \
-                                     rocsparse_int        nnz,                                 \
-                                     const T*             x_val,                               \
-                                     const rocsparse_int* x_ind,                               \
-                                     const T*             beta,                                \
-                                     T*                   y,                                   \
-                                     rocsparse_index_base base,                                \
-                                     void*                buffer)                              \
-    {                                                                                          \
-        return rocsparse_##PFX##gemvi(                                                         \
-            h, trans, m, n, alpha, A, lda, nnz, x_val, x_ind, beta, y, base, buffer);          \
+#define UT_OVL_GEMVI(T, PFX)                                                          \
+    inline rocsparse_status ut_gemvi_buffer_size(rocsparse_handle    h,               \
+                                                 rocsparse_operation trans,           \
+                                                 rocsparse_int       m,               \
+                                                 rocsparse_int       n,               \
+                                                 rocsparse_int       nnz,             \
+                                                 size_t*             buffer_size,     \
+                                                 T                   dummy)           \
+    {                                                                                 \
+        (void)dummy;                                                                  \
+        return rocsparse_##PFX##gemvi_buffer_size(h, trans, m, n, nnz, buffer_size);  \
+    }                                                                                 \
+    inline rocsparse_status ut_gemvi(rocsparse_handle     h,                          \
+                                     rocsparse_operation  trans,                      \
+                                     rocsparse_int        m,                          \
+                                     rocsparse_int        n,                          \
+                                     const T*             alpha,                      \
+                                     const T*             A,                          \
+                                     rocsparse_int        lda,                        \
+                                     rocsparse_int        nnz,                        \
+                                     const T*             x_val,                      \
+                                     const rocsparse_int* x_ind,                      \
+                                     const T*             beta,                       \
+                                     T*                   y,                          \
+                                     rocsparse_index_base base,                       \
+                                     void*                buffer)                     \
+    {                                                                                 \
+        return rocsparse_##PFX##gemvi(                                                \
+            h, trans, m, n, alpha, A, lda, nnz, x_val, x_ind, beta, y, base, buffer); \
     }
     UT_OVL_GEMVI(float, s)
     UT_OVL_GEMVI(double, d)
     UT_OVL_GEMVI(rocsparse_float_complex, c)
     UT_OVL_GEMVI(rocsparse_double_complex, z)
 
-#define UT_OVL_CSRSV(T, PFX)                                                                   \
-    inline rocsparse_status ut_csrsv_buffer_size(rocsparse_handle          h,                  \
-                                                 rocsparse_operation       trans,              \
-                                                 rocsparse_int             m,                  \
-                                                 rocsparse_int             nnz,                \
-                                                 const rocsparse_mat_descr descr,              \
-                                                 const T*                  val,                \
-                                                 const rocsparse_int*      row_ptr,            \
-                                                 const rocsparse_int*      col_ind,            \
-                                                 rocsparse_mat_info        info,               \
-                                                 size_t*                   buffer_size)        \
-    {                                                                                          \
-        return rocsparse_##PFX##csrsv_buffer_size(                                             \
-            h, trans, m, nnz, descr, val, row_ptr, col_ind, info, buffer_size);                \
-    }                                                                                          \
-    inline rocsparse_status ut_csrsv_analysis(rocsparse_handle          h,                     \
-                                              rocsparse_operation       trans,                 \
-                                              rocsparse_int             m,                     \
-                                              rocsparse_int             nnz,                   \
-                                              const rocsparse_mat_descr descr,                 \
-                                              const T*                  val,                   \
-                                              const rocsparse_int*      row_ptr,               \
-                                              const rocsparse_int*      col_ind,               \
-                                              rocsparse_mat_info        info,                  \
-                                              void*                     buffer)                \
-    {                                                                                          \
-        return rocsparse_##PFX##csrsv_analysis(h,                                              \
-                                               trans,                                          \
-                                               m,                                              \
-                                               nnz,                                            \
-                                               descr,                                          \
-                                               val,                                            \
-                                               row_ptr,                                        \
-                                               col_ind,                                        \
-                                               info,                                           \
-                                               rocsparse_analysis_policy_reuse,                \
-                                               rocsparse_solve_policy_auto,                    \
-                                               buffer);                                        \
-    }                                                                                          \
-    inline rocsparse_status ut_csrsv_solve(rocsparse_handle          h,                        \
-                                           rocsparse_operation       trans,                    \
-                                           rocsparse_int             m,                         \
-                                           rocsparse_int             nnz,                       \
-                                           const T*                  alpha,                     \
-                                           const rocsparse_mat_descr descr,                     \
-                                           const T*                  val,                       \
-                                           const rocsparse_int*      row_ptr,                   \
-                                           const rocsparse_int*      col_ind,                   \
-                                           rocsparse_mat_info        info,                       \
-                                           const T*                  x,                          \
-                                           T*                        y,                          \
-                                           void*                     buffer)                     \
-    {                                                                                          \
-        return rocsparse_##PFX##csrsv_solve(h,                                                  \
-                                            trans,                                              \
-                                            m,                                                  \
-                                            nnz,                                                \
-                                            alpha,                                              \
-                                            descr,                                              \
-                                            val,                                                \
-                                            row_ptr,                                            \
-                                            col_ind,                                            \
-                                            info,                                               \
-                                            x,                                                  \
-                                            y,                                                  \
-                                            rocsparse_solve_policy_auto,                        \
-                                            buffer);                                            \
+#define UT_OVL_CSRSV(T, PFX)                                                            \
+    inline rocsparse_status ut_csrsv_buffer_size(rocsparse_handle          h,           \
+                                                 rocsparse_operation       trans,       \
+                                                 rocsparse_int             m,           \
+                                                 rocsparse_int             nnz,         \
+                                                 const rocsparse_mat_descr descr,       \
+                                                 const T*                  val,         \
+                                                 const rocsparse_int*      row_ptr,     \
+                                                 const rocsparse_int*      col_ind,     \
+                                                 rocsparse_mat_info        info,        \
+                                                 size_t*                   buffer_size) \
+    {                                                                                   \
+        return rocsparse_##PFX##csrsv_buffer_size(                                      \
+            h, trans, m, nnz, descr, val, row_ptr, col_ind, info, buffer_size);         \
+    }                                                                                   \
+    inline rocsparse_status ut_csrsv_analysis(rocsparse_handle          h,              \
+                                              rocsparse_operation       trans,          \
+                                              rocsparse_int             m,              \
+                                              rocsparse_int             nnz,            \
+                                              const rocsparse_mat_descr descr,          \
+                                              const T*                  val,            \
+                                              const rocsparse_int*      row_ptr,        \
+                                              const rocsparse_int*      col_ind,        \
+                                              rocsparse_mat_info        info,           \
+                                              void*                     buffer)         \
+    {                                                                                   \
+        return rocsparse_##PFX##csrsv_analysis(h,                                       \
+                                               trans,                                   \
+                                               m,                                       \
+                                               nnz,                                     \
+                                               descr,                                   \
+                                               val,                                     \
+                                               row_ptr,                                 \
+                                               col_ind,                                 \
+                                               info,                                    \
+                                               rocsparse_analysis_policy_reuse,         \
+                                               rocsparse_solve_policy_auto,             \
+                                               buffer);                                 \
+    }                                                                                   \
+    inline rocsparse_status ut_csrsv_solve(rocsparse_handle          h,                 \
+                                           rocsparse_operation       trans,             \
+                                           rocsparse_int             m,                 \
+                                           rocsparse_int             nnz,               \
+                                           const T*                  alpha,             \
+                                           const rocsparse_mat_descr descr,             \
+                                           const T*                  val,               \
+                                           const rocsparse_int*      row_ptr,           \
+                                           const rocsparse_int*      col_ind,           \
+                                           rocsparse_mat_info        info,              \
+                                           const T*                  x,                 \
+                                           T*                        y,                 \
+                                           void*                     buffer)            \
+    {                                                                                   \
+        return rocsparse_##PFX##csrsv_solve(h,                                          \
+                                            trans,                                      \
+                                            m,                                          \
+                                            nnz,                                        \
+                                            alpha,                                      \
+                                            descr,                                      \
+                                            val,                                        \
+                                            row_ptr,                                    \
+                                            col_ind,                                    \
+                                            info,                                       \
+                                            x,                                          \
+                                            y,                                          \
+                                            rocsparse_solve_policy_auto,                \
+                                            buffer);                                    \
     }
     UT_OVL_CSRSV(float, s)
     UT_OVL_CSRSV(double, d)
     UT_OVL_CSRSV(rocsparse_float_complex, c)
     UT_OVL_CSRSV(rocsparse_double_complex, z)
 
-#define UT_OVL_BSRSV(T, PFX)                                                                   \
-    inline rocsparse_status ut_bsrsv_buffer_size(rocsparse_handle          h,                  \
-                                                 rocsparse_direction       dir,                \
-                                                 rocsparse_operation       trans,              \
-                                                 rocsparse_int             mb,                 \
-                                                 rocsparse_int             nnzb,               \
-                                                 const rocsparse_mat_descr descr,              \
-                                                 const T*                  val,                \
-                                                 const rocsparse_int*      row_ptr,            \
-                                                 const rocsparse_int*      col_ind,            \
-                                                 rocsparse_int             block_dim,          \
-                                                 rocsparse_mat_info        info,               \
-                                                 size_t*                   buffer_size)        \
-    {                                                                                          \
-        return rocsparse_##PFX##bsrsv_buffer_size(                                             \
-            h, dir, trans, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info,            \
-            buffer_size);                                                                      \
-    }                                                                                          \
-    inline rocsparse_status ut_bsrsv_analysis(rocsparse_handle          h,                     \
-                                              rocsparse_direction       dir,                   \
-                                              rocsparse_operation       trans,                 \
-                                              rocsparse_int             mb,                    \
-                                              rocsparse_int             nnzb,                  \
-                                              const rocsparse_mat_descr descr,                 \
-                                              const T*                  val,                   \
-                                              const rocsparse_int*      row_ptr,               \
-                                              const rocsparse_int*      col_ind,               \
-                                              rocsparse_int             block_dim,             \
-                                              rocsparse_mat_info        info,                  \
-                                              void*                     buffer)                \
-    {                                                                                          \
-        return rocsparse_##PFX##bsrsv_analysis(h,                                              \
-                                               dir,                                            \
-                                               trans,                                          \
-                                               mb,                                             \
-                                               nnzb,                                           \
-                                               descr,                                          \
-                                               val,                                            \
-                                               row_ptr,                                        \
-                                               col_ind,                                        \
-                                               block_dim,                                      \
-                                               info,                                           \
-                                               rocsparse_analysis_policy_reuse,                \
-                                               rocsparse_solve_policy_auto,                    \
-                                               buffer);                                        \
-    }                                                                                          \
-    inline rocsparse_status ut_bsrsv_solve(rocsparse_handle          h,                        \
-                                           rocsparse_direction       dir,                      \
-                                           rocsparse_operation       trans,                    \
-                                           rocsparse_int             mb,                        \
-                                           rocsparse_int             nnzb,                      \
-                                           const T*                  alpha,                     \
-                                           const rocsparse_mat_descr descr,                     \
-                                           const T*                  val,                       \
-                                           const rocsparse_int*      row_ptr,                   \
-                                           const rocsparse_int*      col_ind,                   \
-                                           rocsparse_int             block_dim,                 \
-                                           rocsparse_mat_info        info,                       \
-                                           const T*                  x,                          \
-                                           T*                        y,                          \
-                                           void*                     buffer)                     \
-    {                                                                                          \
-        return rocsparse_##PFX##bsrsv_solve(h,                                                  \
-                                            dir,                                                \
-                                            trans,                                              \
-                                            mb,                                                 \
-                                            nnzb,                                               \
-                                            alpha,                                              \
-                                            descr,                                              \
-                                            val,                                                \
-                                            row_ptr,                                            \
-                                            col_ind,                                            \
-                                            block_dim,                                          \
-                                            info,                                               \
-                                            x,                                                  \
-                                            y,                                                  \
-                                            rocsparse_solve_policy_auto,                        \
-                                            buffer);                                            \
+#define UT_OVL_BSRSV(T, PFX)                                                                      \
+    inline rocsparse_status ut_bsrsv_buffer_size(rocsparse_handle          h,                     \
+                                                 rocsparse_direction       dir,                   \
+                                                 rocsparse_operation       trans,                 \
+                                                 rocsparse_int             mb,                    \
+                                                 rocsparse_int             nnzb,                  \
+                                                 const rocsparse_mat_descr descr,                 \
+                                                 const T*                  val,                   \
+                                                 const rocsparse_int*      row_ptr,               \
+                                                 const rocsparse_int*      col_ind,               \
+                                                 rocsparse_int             block_dim,             \
+                                                 rocsparse_mat_info        info,                  \
+                                                 size_t*                   buffer_size)           \
+    {                                                                                             \
+        return rocsparse_##PFX##bsrsv_buffer_size(                                                \
+            h, dir, trans, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, buffer_size); \
+    }                                                                                             \
+    inline rocsparse_status ut_bsrsv_analysis(rocsparse_handle          h,                        \
+                                              rocsparse_direction       dir,                      \
+                                              rocsparse_operation       trans,                    \
+                                              rocsparse_int             mb,                       \
+                                              rocsparse_int             nnzb,                     \
+                                              const rocsparse_mat_descr descr,                    \
+                                              const T*                  val,                      \
+                                              const rocsparse_int*      row_ptr,                  \
+                                              const rocsparse_int*      col_ind,                  \
+                                              rocsparse_int             block_dim,                \
+                                              rocsparse_mat_info        info,                     \
+                                              void*                     buffer)                   \
+    {                                                                                             \
+        return rocsparse_##PFX##bsrsv_analysis(h,                                                 \
+                                               dir,                                               \
+                                               trans,                                             \
+                                               mb,                                                \
+                                               nnzb,                                              \
+                                               descr,                                             \
+                                               val,                                               \
+                                               row_ptr,                                           \
+                                               col_ind,                                           \
+                                               block_dim,                                         \
+                                               info,                                              \
+                                               rocsparse_analysis_policy_reuse,                   \
+                                               rocsparse_solve_policy_auto,                       \
+                                               buffer);                                           \
+    }                                                                                             \
+    inline rocsparse_status ut_bsrsv_solve(rocsparse_handle          h,                           \
+                                           rocsparse_direction       dir,                         \
+                                           rocsparse_operation       trans,                       \
+                                           rocsparse_int             mb,                          \
+                                           rocsparse_int             nnzb,                        \
+                                           const T*                  alpha,                       \
+                                           const rocsparse_mat_descr descr,                       \
+                                           const T*                  val,                         \
+                                           const rocsparse_int*      row_ptr,                     \
+                                           const rocsparse_int*      col_ind,                     \
+                                           rocsparse_int             block_dim,                   \
+                                           rocsparse_mat_info        info,                        \
+                                           const T*                  x,                           \
+                                           T*                        y,                           \
+                                           void*                     buffer)                      \
+    {                                                                                             \
+        return rocsparse_##PFX##bsrsv_solve(h,                                                    \
+                                            dir,                                                  \
+                                            trans,                                                \
+                                            mb,                                                   \
+                                            nnzb,                                                 \
+                                            alpha,                                                \
+                                            descr,                                                \
+                                            val,                                                  \
+                                            row_ptr,                                              \
+                                            col_ind,                                              \
+                                            block_dim,                                            \
+                                            info,                                                 \
+                                            x,                                                    \
+                                            y,                                                    \
+                                            rocsparse_solve_policy_auto,                          \
+                                            buffer);                                              \
     }
     UT_OVL_BSRSV(float, s)
     UT_OVL_BSRSV(double, d)
@@ -483,7 +483,7 @@ namespace
     {
         Id3<T> A;
         ASSERT_TRUE(A.ok());
-        const T alpha = scalar<T>(2), beta = scalar<T>(1);
+        const T             alpha = scalar<T>(2), beta = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
 
@@ -593,7 +593,7 @@ namespace
     {
         Id3<T> A;
         ASSERT_TRUE(A.ok());
-        const T alpha = scalar<T>(2), beta = scalar<T>(1);
+        const T             alpha = scalar<T>(2), beta = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
 
@@ -684,32 +684,77 @@ namespace
         device_vector<T> x{std::vector<T>{scalar<T>(1), scalar<T>(2), scalar<T>(3)}};
         device_vector<T> y{std::vector<T>(3, scalar<T>(1))};
         ASSERT_TRUE(ell_col.ptr && ell_val.ptr && x.ptr && y.ptr);
-        const T alpha = scalar<T>(2), beta = scalar<T>(1);
+        const T             alpha = scalar<T>(2), beta = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
 
-        UT_EXPECT_ROC(
-            ut_ellmv(
-                handle, rocsparse_operation_none, 3, 3, &alpha, descr, ell_val, ell_col, 1, x, &beta, y),
-            rocsparse_status_success);
+        UT_EXPECT_ROC(ut_ellmv(handle,
+                               rocsparse_operation_none,
+                               3,
+                               3,
+                               &alpha,
+                               descr,
+                               ell_val,
+                               ell_col,
+                               1,
+                               x,
+                               &beta,
+                               y),
+                      rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        UT_EXPECT_ROC(
-            ut_ellmv(
-                nullptr, rocsparse_operation_none, 3, 3, &alpha, descr, ell_val, ell_col, 1, x, &beta, y),
-            rocsparse_status_invalid_handle);
-        UT_EXPECT_ROC(
-            ut_ellmv(
-                handle, rocsparse_operation_none, -1, 3, &alpha, descr, ell_val, ell_col, 1, x, &beta, y),
-            rocsparse_status_invalid_size);
-        UT_EXPECT_ROC(
-            ut_ellmv(
-                handle, rocsparse_operation_none, 3, 3, &alpha, descr, ell_val, ell_col, -1, x, &beta, y),
-            rocsparse_status_invalid_size);
-        UT_EXPECT_ROC(
-            ut_ellmv(
-                handle, rocsparse_operation_none, 3, 3, nullptr, descr, ell_val, ell_col, 1, x, &beta, y),
-            rocsparse_status_invalid_pointer);
+        UT_EXPECT_ROC(ut_ellmv(nullptr,
+                               rocsparse_operation_none,
+                               3,
+                               3,
+                               &alpha,
+                               descr,
+                               ell_val,
+                               ell_col,
+                               1,
+                               x,
+                               &beta,
+                               y),
+                      rocsparse_status_invalid_handle);
+        UT_EXPECT_ROC(ut_ellmv(handle,
+                               rocsparse_operation_none,
+                               -1,
+                               3,
+                               &alpha,
+                               descr,
+                               ell_val,
+                               ell_col,
+                               1,
+                               x,
+                               &beta,
+                               y),
+                      rocsparse_status_invalid_size);
+        UT_EXPECT_ROC(ut_ellmv(handle,
+                               rocsparse_operation_none,
+                               3,
+                               3,
+                               &alpha,
+                               descr,
+                               ell_val,
+                               ell_col,
+                               -1,
+                               x,
+                               &beta,
+                               y),
+                      rocsparse_status_invalid_size);
+        UT_EXPECT_ROC(ut_ellmv(handle,
+                               rocsparse_operation_none,
+                               3,
+                               3,
+                               nullptr,
+                               descr,
+                               ell_val,
+                               ell_col,
+                               1,
+                               x,
+                               &beta,
+                               y),
+                      rocsparse_status_invalid_pointer);
 
         EXPECT_EQ(rocsparse_destroy_mat_descr(descr), rocsparse_status_success);
     }
@@ -720,7 +765,7 @@ namespace
         // block_dim = 1 -> BSR identity is a 3x3 CSR identity.
         Id3<T> A;
         ASSERT_TRUE(A.ok());
-        const T alpha = scalar<T>(2), beta = scalar<T>(1);
+        const T             alpha = scalar<T>(2), beta = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
         rocsparse_mat_info info = nullptr;
@@ -843,7 +888,7 @@ namespace
         // row_block_dim = col_block_dim = 1 -> a 3x3 CSR identity.
         Id3<T> A;
         ASSERT_TRUE(A.ok());
-        const T alpha = scalar<T>(2), beta = scalar<T>(1);
+        const T             alpha = scalar<T>(2), beta = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
 
@@ -937,9 +982,9 @@ namespace
         const T alpha = scalar<T>(1), beta = scalar<T>(0);
 
         size_t buffer_size = 0;
-        UT_EXPECT_ROC(
-            ut_gemvi_buffer_size(handle, rocsparse_operation_none, 3, 3, 2, &buffer_size, scalar<T>(0)),
-            rocsparse_status_success);
+        UT_EXPECT_ROC(ut_gemvi_buffer_size(
+                          handle, rocsparse_operation_none, 3, 3, 2, &buffer_size, scalar<T>(0)),
+                      rocsparse_status_success);
         device_vector<char> buffer{buffer_size ? buffer_size : 1};
         ASSERT_TRUE(buffer.ptr);
 
@@ -962,9 +1007,9 @@ namespace
 
         // bad args. Note: Xgemvi_buffer_size unconditionally reports success
         // (buffer size is a fixed 0), so it has no handle/argument guards.
-        UT_EXPECT_ROC(
-            ut_gemvi_buffer_size(nullptr, rocsparse_operation_none, 3, 3, 2, &buffer_size, scalar<T>(0)),
-            rocsparse_status_success);
+        UT_EXPECT_ROC(ut_gemvi_buffer_size(
+                          nullptr, rocsparse_operation_none, 3, 3, 2, &buffer_size, scalar<T>(0)),
+                      rocsparse_status_success);
         UT_EXPECT_ROC(ut_gemvi(nullptr,
                                rocsparse_operation_none,
                                3,
@@ -1017,7 +1062,7 @@ namespace
     {
         Diag3<T> A;
         ASSERT_TRUE(A.ok());
-        const T alpha = scalar<T>(1);
+        const T             alpha = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
         // triangular fill mode required for a solve.
@@ -1111,7 +1156,7 @@ namespace
         // block_dim = 1 -> diagonal 3x3 solve.
         Diag3<T> A;
         ASSERT_TRUE(A.ok());
-        const T alpha = scalar<T>(1);
+        const T             alpha = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
         ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, rocsparse_fill_mode_lower),
@@ -1212,7 +1257,7 @@ namespace
     {
         Id3<T> A;
         ASSERT_TRUE(A.ok());
-        const T alpha = scalar<T>(2), beta = scalar<T>(1);
+        const T             alpha = scalar<T>(2), beta = scalar<T>(1);
         rocsparse_mat_descr descr = nullptr;
         ASSERT_EQ(rocsparse_create_mat_descr(&descr), rocsparse_status_success);
         rocsparse_hyb_mat hyb = nullptr;
@@ -1222,12 +1267,14 @@ namespace
                   rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        UT_EXPECT_ROC(ut_hybmv(handle, rocsparse_operation_none, &alpha, descr, hyb, A.x, &beta, A.y),
-                      rocsparse_status_success);
+        UT_EXPECT_ROC(
+            ut_hybmv(handle, rocsparse_operation_none, &alpha, descr, hyb, A.x, &beta, A.y),
+            rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        UT_EXPECT_ROC(ut_hybmv(nullptr, rocsparse_operation_none, &alpha, descr, hyb, A.x, &beta, A.y),
-                      rocsparse_status_invalid_handle);
+        UT_EXPECT_ROC(
+            ut_hybmv(nullptr, rocsparse_operation_none, &alpha, descr, hyb, A.x, &beta, A.y),
+            rocsparse_status_invalid_handle);
         UT_EXPECT_ROC(
             ut_hybmv(handle, rocsparse_operation_none, nullptr, descr, hyb, A.x, &beta, A.y),
             rocsparse_status_invalid_pointer);
@@ -1359,12 +1406,11 @@ namespace
 
         // Valid buffer-size queries: both directions, several operations and
         // fill/diag descr settings, and block_dim 1 and 2.
-        const rocsparse_direction dirs[] = {rocsparse_direction_row, rocsparse_direction_column};
-        const rocsparse_operation ops[]  = {rocsparse_operation_none,
-                                            rocsparse_operation_transpose,
-                                            rocsparse_operation_conjugate_transpose};
-        const rocsparse_fill_mode fills[]
-            = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
+        const rocsparse_direction dirs[]  = {rocsparse_direction_row, rocsparse_direction_column};
+        const rocsparse_operation ops[]   = {rocsparse_operation_none,
+                                             rocsparse_operation_transpose,
+                                             rocsparse_operation_conjugate_transpose};
+        const rocsparse_fill_mode fills[] = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
         const rocsparse_diag_type diags[]
             = {rocsparse_diag_type_non_unit, rocsparse_diag_type_unit};
 
@@ -1376,10 +1422,8 @@ namespace
                 {
                     for(rocsparse_diag_type dt : diags)
                     {
-                        ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, fm),
-                                  rocsparse_status_success);
-                        ASSERT_EQ(rocsparse_set_mat_diag_type(descr, dt),
-                                  rocsparse_status_success);
+                        ASSERT_EQ(rocsparse_set_mat_fill_mode(descr, fm), rocsparse_status_success);
+                        ASSERT_EQ(rocsparse_set_mat_diag_type(descr, dt), rocsparse_status_success);
                         for(rocsparse_int block_dim : {1, 2})
                         {
                             buffer_size = 0;
@@ -1693,17 +1737,16 @@ UT_L2_ALL_PRECISIONS(Level2Csrsv, run_csrsv)
 UT_L2_ALL_PRECISIONS(Level2Bsrsv, run_bsrsv)
 UT_L2_ALL_PRECISIONS(Level2Hybmv, run_hybmv)
 
-#define UT_L2_GEBSRMV_BLOCK_DIM(FIXTURE, FN)                             \
-    TEST_F(FIXTURE, all_precisions)                                      \
-    {                                                                    \
-        for(rocsparse_direction dir :                                    \
-            {rocsparse_direction_row, rocsparse_direction_column})       \
-        {                                                                \
-            FN<float>(handle, dir);                                      \
-            FN<double>(handle, dir);                                     \
-            FN<rocsparse_float_complex>(handle, dir);                    \
-            FN<rocsparse_double_complex>(handle, dir);                   \
-        }                                                                \
+#define UT_L2_GEBSRMV_BLOCK_DIM(FIXTURE, FN)                                                 \
+    TEST_F(FIXTURE, all_precisions)                                                          \
+    {                                                                                        \
+        for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column}) \
+        {                                                                                    \
+            FN<float>(handle, dir);                                                          \
+            FN<double>(handle, dir);                                                         \
+            FN<rocsparse_float_complex>(handle, dir);                                        \
+            FN<rocsparse_double_complex>(handle, dir);                                       \
+        }                                                                                    \
     }
 
 UT_L2_GEBSRMV_BLOCK_DIM(Level2GebsrmvBlockDim, run_gebsrmv_block_dim)

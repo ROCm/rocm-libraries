@@ -39,34 +39,43 @@
 // ---------------------------------------------------------------------------
 // indextype_traits<v>::type_t
 // ---------------------------------------------------------------------------
-static_assert(std::is_same<rocsparse::indextype_traits<rocsparse_indextype_i32>::type_t, int32_t>::value,
-              "indextype_traits<i32> must map to int32_t");
-static_assert(std::is_same<rocsparse::indextype_traits<rocsparse_indextype_i64>::type_t, int64_t>::value,
-              "indextype_traits<i64> must map to int64_t");
-static_assert(std::is_same<rocsparse::indextype_traits<rocsparse_indextype_u16>::type_t, uint16_t>::value,
-              "indextype_traits<u16> must map to uint16_t");
+static_assert(
+    std::is_same<rocsparse::indextype_traits<rocsparse_indextype_i32>::type_t, int32_t>::value,
+    "indextype_traits<i32> must map to int32_t");
+static_assert(
+    std::is_same<rocsparse::indextype_traits<rocsparse_indextype_i64>::type_t, int64_t>::value,
+    "indextype_traits<i64> must map to int64_t");
+static_assert(
+    std::is_same<rocsparse::indextype_traits<rocsparse_indextype_u16>::type_t, uint16_t>::value,
+    "indextype_traits<u16> must map to uint16_t");
 
 // ---------------------------------------------------------------------------
 // datatype_traits<v>::type_t
 // ---------------------------------------------------------------------------
-static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f32_r>::type_t, float>::value,
-              "datatype_traits<f32_r> must map to float");
-static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f64_r>::type_t, double>::value,
-              "datatype_traits<f64_r> must map to double");
-static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_i32_r>::type_t, int32_t>::value,
-              "datatype_traits<i32_r> must map to int32_t");
-static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_u32_r>::type_t, uint32_t>::value,
-              "datatype_traits<u32_r> must map to uint32_t");
-static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_i8_r>::type_t, int8_t>::value,
-              "datatype_traits<i8_r> must map to int8_t");
-static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_u8_r>::type_t, uint8_t>::value,
-              "datatype_traits<u8_r> must map to uint8_t");
 static_assert(
-    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f32_c>::type_t, rocsparse_float_complex>::value,
-    "datatype_traits<f32_c> must map to rocsparse_float_complex");
+    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f32_r>::type_t, float>::value,
+    "datatype_traits<f32_r> must map to float");
 static_assert(
-    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f64_c>::type_t, rocsparse_double_complex>::value,
-    "datatype_traits<f64_c> must map to rocsparse_double_complex");
+    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f64_r>::type_t, double>::value,
+    "datatype_traits<f64_r> must map to double");
+static_assert(
+    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_i32_r>::type_t, int32_t>::value,
+    "datatype_traits<i32_r> must map to int32_t");
+static_assert(
+    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_u32_r>::type_t, uint32_t>::value,
+    "datatype_traits<u32_r> must map to uint32_t");
+static_assert(
+    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_i8_r>::type_t, int8_t>::value,
+    "datatype_traits<i8_r> must map to int8_t");
+static_assert(
+    std::is_same<rocsparse::datatype_traits<rocsparse_datatype_u8_r>::type_t, uint8_t>::value,
+    "datatype_traits<u8_r> must map to uint8_t");
+static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f32_c>::type_t,
+                           rocsparse_float_complex>::value,
+              "datatype_traits<f32_c> must map to rocsparse_float_complex");
+static_assert(std::is_same<rocsparse::datatype_traits<rocsparse_datatype_f64_c>::type_t,
+                           rocsparse_double_complex>::value,
+              "datatype_traits<f64_c> must map to rocsparse_double_complex");
 
 // The static_asserts above are the real test (checked at compile time). This
 // runtime case simply records the coverage in the gtest report.

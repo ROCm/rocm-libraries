@@ -73,26 +73,26 @@ namespace
     // =====================================================================
     // csrmm
     // =====================================================================
-#define UT_OVL_CSRMM(T, PFX)                                                         \
-    inline rocsparse_status ut_csrmm(rocsparse_handle          h,                    \
-                                     rocsparse_operation       ta,                   \
-                                     rocsparse_operation       tb,                   \
-                                     rocsparse_int             m,                    \
-                                     rocsparse_int             n,                    \
-                                     rocsparse_int             k,                    \
-                                     rocsparse_int             nnz,                  \
-                                     const T*                  alpha,                \
-                                     const rocsparse_mat_descr descr,                \
-                                     const T*                  val,                  \
-                                     const rocsparse_int*      rp,                   \
-                                     const rocsparse_int*      ci,                   \
-                                     const T*                  B,                    \
-                                     rocsparse_int             ldb,                  \
-                                     const T*                  beta,                 \
-                                     T*                        C,                    \
-                                     rocsparse_int             ldc)                  \
-    {                                                                                \
-        return rocsparse_##PFX##csrmm(                                               \
+#define UT_OVL_CSRMM(T, PFX)                                                           \
+    inline rocsparse_status ut_csrmm(rocsparse_handle          h,                      \
+                                     rocsparse_operation       ta,                     \
+                                     rocsparse_operation       tb,                     \
+                                     rocsparse_int             m,                      \
+                                     rocsparse_int             n,                      \
+                                     rocsparse_int             k,                      \
+                                     rocsparse_int             nnz,                    \
+                                     const T*                  alpha,                  \
+                                     const rocsparse_mat_descr descr,                  \
+                                     const T*                  val,                    \
+                                     const rocsparse_int*      rp,                     \
+                                     const rocsparse_int*      ci,                     \
+                                     const T*                  B,                      \
+                                     rocsparse_int             ldb,                    \
+                                     const T*                  beta,                   \
+                                     T*                        C,                      \
+                                     rocsparse_int             ldc)                    \
+    {                                                                                  \
+        return rocsparse_##PFX##csrmm(                                                 \
             h, ta, tb, m, n, k, nnz, alpha, descr, val, rp, ci, B, ldb, beta, C, ldc); \
     }
     UT_OVL_CSRMM(float, s)
@@ -233,30 +233,29 @@ namespace
     // =====================================================================
     // bsrmm  (block_dim == 1  =>  behaves like csrmm on the identity)
     // =====================================================================
-#define UT_OVL_BSRMM(T, PFX)                                                              \
-    inline rocsparse_status ut_bsrmm(rocsparse_handle          h,                         \
-                                     rocsparse_direction       dir,                       \
-                                     rocsparse_operation       ta,                        \
-                                     rocsparse_operation       tb,                        \
-                                     rocsparse_int             mb,                        \
-                                     rocsparse_int             n,                         \
-                                     rocsparse_int             kb,                        \
-                                     rocsparse_int             nnzb,                      \
-                                     const T*                  alpha,                     \
-                                     const rocsparse_mat_descr descr,                     \
-                                     const T*                  val,                       \
-                                     const rocsparse_int*      rp,                        \
-                                     const rocsparse_int*      ci,                        \
-                                     rocsparse_int             bd,                        \
-                                     const T*                  B,                         \
-                                     rocsparse_int             ldb,                       \
-                                     const T*                  beta,                      \
-                                     T*                        C,                         \
-                                     rocsparse_int             ldc)                       \
-    {                                                                                     \
-        return rocsparse_##PFX##bsrmm(                                                    \
-            h, dir, ta, tb, mb, n, kb, nnzb, alpha, descr, val, rp, ci, bd, B, ldb, beta, \
-            C, ldc);                                                                      \
+#define UT_OVL_BSRMM(T, PFX)                                                                       \
+    inline rocsparse_status ut_bsrmm(rocsparse_handle          h,                                  \
+                                     rocsparse_direction       dir,                                \
+                                     rocsparse_operation       ta,                                 \
+                                     rocsparse_operation       tb,                                 \
+                                     rocsparse_int             mb,                                 \
+                                     rocsparse_int             n,                                  \
+                                     rocsparse_int             kb,                                 \
+                                     rocsparse_int             nnzb,                               \
+                                     const T*                  alpha,                              \
+                                     const rocsparse_mat_descr descr,                              \
+                                     const T*                  val,                                \
+                                     const rocsparse_int*      rp,                                 \
+                                     const rocsparse_int*      ci,                                 \
+                                     rocsparse_int             bd,                                 \
+                                     const T*                  B,                                  \
+                                     rocsparse_int             ldb,                                \
+                                     const T*                  beta,                               \
+                                     T*                        C,                                  \
+                                     rocsparse_int             ldc)                                \
+    {                                                                                              \
+        return rocsparse_##PFX##bsrmm(                                                             \
+            h, dir, ta, tb, mb, n, kb, nnzb, alpha, descr, val, rp, ci, bd, B, ldb, beta, C, ldc); \
     }
     UT_OVL_BSRMM(float, s)
     UT_OVL_BSRMM(double, d)
@@ -366,48 +365,48 @@ namespace
     // =====================================================================
     // gebsrmm  (row_block_dim == col_block_dim == 1)
     // =====================================================================
-#define UT_OVL_GEBSRMM(T, PFX)                                                            \
-    inline rocsparse_status ut_gebsrmm(rocsparse_handle          h,                       \
-                                       rocsparse_direction       dir,                     \
-                                       rocsparse_operation       ta,                      \
-                                       rocsparse_operation       tb,                      \
-                                       rocsparse_int             mb,                      \
-                                       rocsparse_int             n,                       \
-                                       rocsparse_int             kb,                      \
-                                       rocsparse_int             nnzb,                    \
-                                       const T*                  alpha,                   \
-                                       const rocsparse_mat_descr descr,                   \
-                                       const T*                  val,                     \
-                                       const rocsparse_int*      rp,                      \
-                                       const rocsparse_int*      ci,                      \
-                                       rocsparse_int             rbd,                     \
-                                       rocsparse_int             cbd,                     \
-                                       const T*                  B,                       \
-                                       rocsparse_int             ldb,                     \
-                                       const T*                  beta,                    \
-                                       T*                        C,                       \
-                                       rocsparse_int             ldc)                     \
-    {                                                                                     \
-        return rocsparse_##PFX##gebsrmm(h,                                                \
-                                        dir,                                              \
-                                        ta,                                               \
-                                        tb,                                               \
-                                        mb,                                               \
-                                        n,                                                \
-                                        kb,                                               \
-                                        nnzb,                                             \
-                                        alpha,                                            \
-                                        descr,                                            \
-                                        val,                                              \
-                                        rp,                                               \
-                                        ci,                                               \
-                                        rbd,                                              \
-                                        cbd,                                              \
-                                        B,                                                \
-                                        ldb,                                              \
-                                        beta,                                             \
-                                        C,                                                \
-                                        ldc);                                             \
+#define UT_OVL_GEBSRMM(T, PFX)                                          \
+    inline rocsparse_status ut_gebsrmm(rocsparse_handle          h,     \
+                                       rocsparse_direction       dir,   \
+                                       rocsparse_operation       ta,    \
+                                       rocsparse_operation       tb,    \
+                                       rocsparse_int             mb,    \
+                                       rocsparse_int             n,     \
+                                       rocsparse_int             kb,    \
+                                       rocsparse_int             nnzb,  \
+                                       const T*                  alpha, \
+                                       const rocsparse_mat_descr descr, \
+                                       const T*                  val,   \
+                                       const rocsparse_int*      rp,    \
+                                       const rocsparse_int*      ci,    \
+                                       rocsparse_int             rbd,   \
+                                       rocsparse_int             cbd,   \
+                                       const T*                  B,     \
+                                       rocsparse_int             ldb,   \
+                                       const T*                  beta,  \
+                                       T*                        C,     \
+                                       rocsparse_int             ldc)   \
+    {                                                                   \
+        return rocsparse_##PFX##gebsrmm(h,                              \
+                                        dir,                            \
+                                        ta,                             \
+                                        tb,                             \
+                                        mb,                             \
+                                        n,                              \
+                                        kb,                             \
+                                        nnzb,                           \
+                                        alpha,                          \
+                                        descr,                          \
+                                        val,                            \
+                                        rp,                             \
+                                        ci,                             \
+                                        rbd,                            \
+                                        cbd,                            \
+                                        B,                              \
+                                        ldb,                            \
+                                        beta,                           \
+                                        C,                              \
+                                        ldc);                           \
     }
     UT_OVL_GEBSRMM(float, s)
     UT_OVL_GEBSRMM(double, d)
@@ -521,26 +520,26 @@ namespace
     // =====================================================================
     // gemmi  (dense * sparse^T ; only trans_A none / trans_B transpose)
     // =====================================================================
-#define UT_OVL_GEMMI(T, PFX)                                                         \
-    inline rocsparse_status ut_gemmi(rocsparse_handle          h,                    \
-                                     rocsparse_operation       ta,                   \
-                                     rocsparse_operation       tb,                   \
-                                     rocsparse_int             m,                    \
-                                     rocsparse_int             n,                    \
-                                     rocsparse_int             k,                    \
-                                     rocsparse_int             nnz,                  \
-                                     const T*                  alpha,                \
-                                     const T*                  A,                    \
-                                     rocsparse_int             lda,                  \
-                                     const rocsparse_mat_descr descr,                \
-                                     const T*                  val,                  \
-                                     const rocsparse_int*      rp,                   \
-                                     const rocsparse_int*      ci,                   \
-                                     const T*                  beta,                 \
-                                     T*                        C,                    \
-                                     rocsparse_int             ldc)                  \
-    {                                                                                \
-        return rocsparse_##PFX##gemmi(                                               \
+#define UT_OVL_GEMMI(T, PFX)                                                           \
+    inline rocsparse_status ut_gemmi(rocsparse_handle          h,                      \
+                                     rocsparse_operation       ta,                     \
+                                     rocsparse_operation       tb,                     \
+                                     rocsparse_int             m,                      \
+                                     rocsparse_int             n,                      \
+                                     rocsparse_int             k,                      \
+                                     rocsparse_int             nnz,                    \
+                                     const T*                  alpha,                  \
+                                     const T*                  A,                      \
+                                     rocsparse_int             lda,                    \
+                                     const rocsparse_mat_descr descr,                  \
+                                     const T*                  val,                    \
+                                     const rocsparse_int*      rp,                     \
+                                     const rocsparse_int*      ci,                     \
+                                     const T*                  beta,                   \
+                                     T*                        C,                      \
+                                     rocsparse_int             ldc)                    \
+    {                                                                                  \
+        return rocsparse_##PFX##gemmi(                                                 \
             h, ta, tb, m, n, k, nnz, alpha, A, lda, descr, val, rp, ci, beta, C, ldc); \
     }
     UT_OVL_GEMMI(float, s)
@@ -643,67 +642,67 @@ namespace
     // =====================================================================
     // csrsm  (buffer_size -> analysis -> solve -> zero_pivot -> clear)
     // =====================================================================
-#define UT_OVL_CSRSM_BUF(T, PFX)                                                     \
-    inline rocsparse_status ut_csrsm_buffer_size(rocsparse_handle          h,        \
-                                                 rocsparse_operation       ta,       \
-                                                 rocsparse_operation       tb,       \
-                                                 rocsparse_int             m,        \
-                                                 rocsparse_int             nrhs,     \
-                                                 rocsparse_int             nnz,      \
-                                                 const T*                  alpha,    \
-                                                 const rocsparse_mat_descr descr,    \
-                                                 const T*                  val,      \
-                                                 const rocsparse_int*      rp,       \
-                                                 const rocsparse_int*      ci,       \
-                                                 const T*                  B,        \
-                                                 rocsparse_int             ldb,      \
-                                                 rocsparse_mat_info        info,     \
-                                                 rocsparse_solve_policy    policy,   \
-                                                 size_t*                   bs)       \
-    {                                                                                \
-        return rocsparse_##PFX##csrsm_buffer_size(                                   \
-            h, ta, tb, m, nrhs, nnz, alpha, descr, val, rp, ci, B, ldb, info, policy, bs); \
-    }                                                                                \
-    inline rocsparse_status ut_csrsm_analysis(rocsparse_handle          h,           \
-                                              rocsparse_operation       ta,          \
-                                              rocsparse_operation       tb,          \
-                                              rocsparse_int             m,           \
-                                              rocsparse_int             nrhs,        \
-                                              rocsparse_int             nnz,         \
-                                              const T*                  alpha,       \
-                                              const rocsparse_mat_descr descr,       \
-                                              const T*                  val,         \
-                                              const rocsparse_int*      rp,          \
-                                              const rocsparse_int*      ci,          \
-                                              const T*                  B,           \
-                                              rocsparse_int             ldb,         \
-                                              rocsparse_mat_info        info,        \
-                                              rocsparse_analysis_policy ap,          \
-                                              rocsparse_solve_policy    sp,          \
-                                              void*                     buf)         \
-    {                                                                                \
-        return rocsparse_##PFX##csrsm_analysis(                                      \
+#define UT_OVL_CSRSM_BUF(T, PFX)                                                            \
+    inline rocsparse_status ut_csrsm_buffer_size(rocsparse_handle          h,               \
+                                                 rocsparse_operation       ta,              \
+                                                 rocsparse_operation       tb,              \
+                                                 rocsparse_int             m,               \
+                                                 rocsparse_int             nrhs,            \
+                                                 rocsparse_int             nnz,             \
+                                                 const T*                  alpha,           \
+                                                 const rocsparse_mat_descr descr,           \
+                                                 const T*                  val,             \
+                                                 const rocsparse_int*      rp,              \
+                                                 const rocsparse_int*      ci,              \
+                                                 const T*                  B,               \
+                                                 rocsparse_int             ldb,             \
+                                                 rocsparse_mat_info        info,            \
+                                                 rocsparse_solve_policy    policy,          \
+                                                 size_t*                   bs)              \
+    {                                                                                       \
+        return rocsparse_##PFX##csrsm_buffer_size(                                          \
+            h, ta, tb, m, nrhs, nnz, alpha, descr, val, rp, ci, B, ldb, info, policy, bs);  \
+    }                                                                                       \
+    inline rocsparse_status ut_csrsm_analysis(rocsparse_handle          h,                  \
+                                              rocsparse_operation       ta,                 \
+                                              rocsparse_operation       tb,                 \
+                                              rocsparse_int             m,                  \
+                                              rocsparse_int             nrhs,               \
+                                              rocsparse_int             nnz,                \
+                                              const T*                  alpha,              \
+                                              const rocsparse_mat_descr descr,              \
+                                              const T*                  val,                \
+                                              const rocsparse_int*      rp,                 \
+                                              const rocsparse_int*      ci,                 \
+                                              const T*                  B,                  \
+                                              rocsparse_int             ldb,                \
+                                              rocsparse_mat_info        info,               \
+                                              rocsparse_analysis_policy ap,                 \
+                                              rocsparse_solve_policy    sp,                 \
+                                              void*                     buf)                \
+    {                                                                                       \
+        return rocsparse_##PFX##csrsm_analysis(                                             \
             h, ta, tb, m, nrhs, nnz, alpha, descr, val, rp, ci, B, ldb, info, ap, sp, buf); \
-    }                                                                                \
-    inline rocsparse_status ut_csrsm_solve(rocsparse_handle          h,              \
-                                           rocsparse_operation       ta,             \
-                                           rocsparse_operation       tb,             \
-                                           rocsparse_int             m,              \
-                                           rocsparse_int             nrhs,           \
-                                           rocsparse_int             nnz,            \
-                                           const T*                  alpha,          \
-                                           const rocsparse_mat_descr descr,          \
-                                           const T*                  val,            \
-                                           const rocsparse_int*      rp,             \
-                                           const rocsparse_int*      ci,             \
-                                           T*                        B,              \
-                                           rocsparse_int             ldb,            \
-                                           rocsparse_mat_info        info,           \
-                                           rocsparse_solve_policy    sp,             \
-                                           void*                     buf)            \
-    {                                                                                \
-        return rocsparse_##PFX##csrsm_solve(                                         \
-            h, ta, tb, m, nrhs, nnz, alpha, descr, val, rp, ci, B, ldb, info, sp, buf); \
+    }                                                                                       \
+    inline rocsparse_status ut_csrsm_solve(rocsparse_handle          h,                     \
+                                           rocsparse_operation       ta,                    \
+                                           rocsparse_operation       tb,                    \
+                                           rocsparse_int             m,                     \
+                                           rocsparse_int             nrhs,                  \
+                                           rocsparse_int             nnz,                   \
+                                           const T*                  alpha,                 \
+                                           const rocsparse_mat_descr descr,                 \
+                                           const T*                  val,                   \
+                                           const rocsparse_int*      rp,                    \
+                                           const rocsparse_int*      ci,                    \
+                                           T*                        B,                     \
+                                           rocsparse_int             ldb,                   \
+                                           rocsparse_mat_info        info,                  \
+                                           rocsparse_solve_policy    sp,                    \
+                                           void*                     buf)                   \
+    {                                                                                       \
+        return rocsparse_##PFX##csrsm_solve(                                                \
+            h, ta, tb, m, nrhs, nnz, alpha, descr, val, rp, ci, B, ldb, info, sp, buf);     \
     }
     UT_OVL_CSRSM_BUF(float, s)
     UT_OVL_CSRSM_BUF(double, d)
@@ -713,9 +712,9 @@ namespace
     template <typename T>
     void run_csrsm(rocsparse_handle handle)
     {
-        const rocsparse_int          m = 3, nrhs = 2, nnz = 3, ldb = 3;
-        const rocsparse_operation    ta = rocsparse_operation_none, tb = rocsparse_operation_none;
-        Id3<T>                       A;
+        const rocsparse_int       m = 3, nrhs = 2, nnz = 3, ldb = 3;
+        const rocsparse_operation ta = rocsparse_operation_none, tb = rocsparse_operation_none;
+        Id3<T>                    A;
         ASSERT_TRUE(A.ok());
         device_vector<T> B{std::vector<T>(ldb * nrhs, scalar<T>(1))};
         ASSERT_TRUE(B.ptr);
@@ -727,8 +726,8 @@ namespace
 
         const T alpha = scalar<T>(1);
 
-        size_t buffer_size = 0;
-        const rocsparse_status bs_status = ut_csrsm_buffer_size(handle,
+        size_t                 buffer_size = 0;
+        const rocsparse_status bs_status   = ut_csrsm_buffer_size(handle,
                                                                 ta,
                                                                 tb,
                                                                 m,
@@ -856,86 +855,86 @@ namespace
     // =====================================================================
     // bsrsm  (block_dim == 1 ; buffer_size -> analysis -> solve -> clear)
     // =====================================================================
-#define UT_OVL_BSRSM(T, PFX)                                                              \
-    inline rocsparse_status ut_bsrsm_buffer_size(rocsparse_handle          h,             \
-                                                 rocsparse_direction       dir,           \
-                                                 rocsparse_operation       ta,            \
-                                                 rocsparse_operation       tx,            \
-                                                 rocsparse_int             mb,            \
-                                                 rocsparse_int             nrhs,          \
-                                                 rocsparse_int             nnzb,          \
-                                                 const rocsparse_mat_descr descr,         \
-                                                 const T*                  val,           \
-                                                 const rocsparse_int*      rp,            \
-                                                 const rocsparse_int*      ci,            \
-                                                 rocsparse_int             bd,            \
-                                                 rocsparse_mat_info        info,          \
-                                                 size_t*                   bs)            \
-    {                                                                                     \
-        return rocsparse_##PFX##bsrsm_buffer_size(                                        \
-            h, dir, ta, tx, mb, nrhs, nnzb, descr, val, rp, ci, bd, info, bs);            \
-    }                                                                                     \
-    inline rocsparse_status ut_bsrsm_analysis(rocsparse_handle          h,                \
-                                              rocsparse_direction       dir,              \
-                                              rocsparse_operation       ta,               \
-                                              rocsparse_operation       tx,               \
-                                              rocsparse_int             mb,               \
-                                              rocsparse_int             nrhs,             \
-                                              rocsparse_int             nnzb,             \
-                                              const rocsparse_mat_descr descr,            \
-                                              const T*                  val,              \
-                                              const rocsparse_int*      rp,               \
-                                              const rocsparse_int*      ci,               \
-                                              rocsparse_int             bd,               \
-                                              rocsparse_mat_info        info,             \
-                                              rocsparse_analysis_policy ap,               \
-                                              rocsparse_solve_policy    sp,               \
-                                              void*                     buf)              \
-    {                                                                                     \
-        return rocsparse_##PFX##bsrsm_analysis(                                           \
-            h, dir, ta, tx, mb, nrhs, nnzb, descr, val, rp, ci, bd, info, ap, sp, buf);   \
-    }                                                                                     \
-    inline rocsparse_status ut_bsrsm_solve(rocsparse_handle          h,                   \
-                                           rocsparse_direction       dir,                 \
-                                           rocsparse_operation       ta,                  \
-                                           rocsparse_operation       tx,                  \
-                                           rocsparse_int             mb,                  \
-                                           rocsparse_int             nrhs,                \
-                                           rocsparse_int             nnzb,                \
-                                           const T*                  alpha,               \
-                                           const rocsparse_mat_descr descr,               \
-                                           const T*                  val,                 \
-                                           const rocsparse_int*      rp,                  \
-                                           const rocsparse_int*      ci,                  \
-                                           rocsparse_int             bd,                  \
-                                           rocsparse_mat_info        info,                \
-                                           const T*                  B,                   \
-                                           rocsparse_int             ldb,                 \
-                                           T*                        X,                   \
-                                           rocsparse_int             ldx,                 \
-                                           rocsparse_solve_policy    sp,                  \
-                                           void*                     buf)                 \
-    {                                                                                     \
-        return rocsparse_##PFX##bsrsm_solve(h,                                            \
-                                            dir,                                          \
-                                            ta,                                           \
-                                            tx,                                           \
-                                            mb,                                           \
-                                            nrhs,                                         \
-                                            nnzb,                                         \
-                                            alpha,                                        \
-                                            descr,                                        \
-                                            val,                                          \
-                                            rp,                                           \
-                                            ci,                                           \
-                                            bd,                                           \
-                                            info,                                         \
-                                            B,                                            \
-                                            ldb,                                          \
-                                            X,                                            \
-                                            ldx,                                          \
-                                            sp,                                           \
-                                            buf);                                         \
+#define UT_OVL_BSRSM(T, PFX)                                                            \
+    inline rocsparse_status ut_bsrsm_buffer_size(rocsparse_handle          h,           \
+                                                 rocsparse_direction       dir,         \
+                                                 rocsparse_operation       ta,          \
+                                                 rocsparse_operation       tx,          \
+                                                 rocsparse_int             mb,          \
+                                                 rocsparse_int             nrhs,        \
+                                                 rocsparse_int             nnzb,        \
+                                                 const rocsparse_mat_descr descr,       \
+                                                 const T*                  val,         \
+                                                 const rocsparse_int*      rp,          \
+                                                 const rocsparse_int*      ci,          \
+                                                 rocsparse_int             bd,          \
+                                                 rocsparse_mat_info        info,        \
+                                                 size_t*                   bs)          \
+    {                                                                                   \
+        return rocsparse_##PFX##bsrsm_buffer_size(                                      \
+            h, dir, ta, tx, mb, nrhs, nnzb, descr, val, rp, ci, bd, info, bs);          \
+    }                                                                                   \
+    inline rocsparse_status ut_bsrsm_analysis(rocsparse_handle          h,              \
+                                              rocsparse_direction       dir,            \
+                                              rocsparse_operation       ta,             \
+                                              rocsparse_operation       tx,             \
+                                              rocsparse_int             mb,             \
+                                              rocsparse_int             nrhs,           \
+                                              rocsparse_int             nnzb,           \
+                                              const rocsparse_mat_descr descr,          \
+                                              const T*                  val,            \
+                                              const rocsparse_int*      rp,             \
+                                              const rocsparse_int*      ci,             \
+                                              rocsparse_int             bd,             \
+                                              rocsparse_mat_info        info,           \
+                                              rocsparse_analysis_policy ap,             \
+                                              rocsparse_solve_policy    sp,             \
+                                              void*                     buf)            \
+    {                                                                                   \
+        return rocsparse_##PFX##bsrsm_analysis(                                         \
+            h, dir, ta, tx, mb, nrhs, nnzb, descr, val, rp, ci, bd, info, ap, sp, buf); \
+    }                                                                                   \
+    inline rocsparse_status ut_bsrsm_solve(rocsparse_handle          h,                 \
+                                           rocsparse_direction       dir,               \
+                                           rocsparse_operation       ta,                \
+                                           rocsparse_operation       tx,                \
+                                           rocsparse_int             mb,                \
+                                           rocsparse_int             nrhs,              \
+                                           rocsparse_int             nnzb,              \
+                                           const T*                  alpha,             \
+                                           const rocsparse_mat_descr descr,             \
+                                           const T*                  val,               \
+                                           const rocsparse_int*      rp,                \
+                                           const rocsparse_int*      ci,                \
+                                           rocsparse_int             bd,                \
+                                           rocsparse_mat_info        info,              \
+                                           const T*                  B,                 \
+                                           rocsparse_int             ldb,               \
+                                           T*                        X,                 \
+                                           rocsparse_int             ldx,               \
+                                           rocsparse_solve_policy    sp,                \
+                                           void*                     buf)               \
+    {                                                                                   \
+        return rocsparse_##PFX##bsrsm_solve(h,                                          \
+                                            dir,                                        \
+                                            ta,                                         \
+                                            tx,                                         \
+                                            mb,                                         \
+                                            nrhs,                                       \
+                                            nnzb,                                       \
+                                            alpha,                                      \
+                                            descr,                                      \
+                                            val,                                        \
+                                            rp,                                         \
+                                            ci,                                         \
+                                            bd,                                         \
+                                            info,                                       \
+                                            B,                                          \
+                                            ldb,                                        \
+                                            X,                                          \
+                                            ldx,                                        \
+                                            sp,                                         \
+                                            buf);                                       \
     }
     UT_OVL_BSRSM(float, s)
     UT_OVL_BSRSM(double, d)
@@ -1091,9 +1090,9 @@ namespace
         // 3x3 identity in COO.
         device_vector<rocsparse_int> row_ind{std::vector<rocsparse_int>{0, 1, 2}};
         device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
-        device_vector<T> val{std::vector<T>{scalar<T>(1), scalar<T>(1), scalar<T>(1)}};
-        device_vector<T> B{std::vector<T>(ldb * n, scalar<T>(1))};
-        device_vector<T> C{std::vector<T>(ldc * n, scalar<T>(0))};
+        device_vector<T>             val{std::vector<T>{scalar<T>(1), scalar<T>(1), scalar<T>(1)}};
+        device_vector<T>             B{std::vector<T>(ldb * n, scalar<T>(1))};
+        device_vector<T>             C{std::vector<T>(ldc * n, scalar<T>(0))};
         ASSERT_TRUE(row_ind.ptr && col_ind.ptr && val.ptr && B.ptr && C.ptr);
 
         rocsparse_spmat_descr mat_A = nullptr;
@@ -1381,11 +1380,11 @@ namespace
     // coomm_buffer_size_impl.cpp are all executed.
     // =====================================================================
     template <typename T>
-    void spmm_buffer_size_over_algs(rocsparse_handle                        handle,
-                                    rocsparse_spmat_descr                   matA,
-                                    rocsparse_dnmat_descr                   matB,
-                                    rocsparse_dnmat_descr                   matC,
-                                    const std::vector<rocsparse_spmm_alg>&  algs)
+    void spmm_buffer_size_over_algs(rocsparse_handle                       handle,
+                                    rocsparse_spmat_descr                  matA,
+                                    rocsparse_dnmat_descr                  matB,
+                                    rocsparse_dnmat_descr                  matC,
+                                    const std::vector<rocsparse_spmm_alg>& algs)
     {
         const T alpha = scalar<T>(1), beta = scalar<T>(0);
         for(rocsparse_spmm_alg alg : algs)
@@ -1515,12 +1514,11 @@ namespace
 
         const T alpha = scalar<T>(1);
 
-        const rocsparse_fill_mode fills[]     = {rocsparse_fill_mode_lower,
-                                                 rocsparse_fill_mode_upper};
-        const rocsparse_diag_type diags[]     = {rocsparse_diag_type_non_unit,
-                                                 rocsparse_diag_type_unit};
-        const rocsparse_operation transAs[]   = {rocsparse_operation_none,
-                                                 rocsparse_operation_transpose};
+        const rocsparse_fill_mode fills[] = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
+        const rocsparse_diag_type diags[]
+            = {rocsparse_diag_type_non_unit, rocsparse_diag_type_unit};
+        const rocsparse_operation transAs[]
+            = {rocsparse_operation_none, rocsparse_operation_transpose};
 
         for(rocsparse_fill_mode fill : fills)
         {
@@ -1539,7 +1537,7 @@ namespace
                     rocsparse_mat_info info = nullptr;
                     ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
 
-                    size_t buffer_size = 0;
+                    size_t                 buffer_size = 0;
                     const rocsparse_status bs_status
                         = ut_csrsm_buffer_size(handle,
                                                ta,
@@ -1651,11 +1649,10 @@ namespace
 
         const T alpha = scalar<T>(1);
 
-        const rocsparse_fill_mode fills[]   = {rocsparse_fill_mode_lower,
-                                               rocsparse_fill_mode_upper};
-        const rocsparse_operation transAs[] = {rocsparse_operation_none,
-                                               rocsparse_operation_transpose};
-        const rocsparse_diag_type diag      = rocsparse_diag_type_non_unit;
+        const rocsparse_fill_mode fills[] = {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper};
+        const rocsparse_operation transAs[]
+            = {rocsparse_operation_none, rocsparse_operation_transpose};
+        const rocsparse_diag_type diag = rocsparse_diag_type_non_unit;
 
         for(rocsparse_fill_mode fill : fills)
         {
@@ -1680,12 +1677,12 @@ namespace
                                                      rocsparse_index_base_zero,
                                                      dt_of<T>()),
                           rocsparse_status_success);
-                ASSERT_EQ(
-                    rocsparse_spmat_set_attribute(mat_A, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
-                    rocsparse_status_success);
-                ASSERT_EQ(
-                    rocsparse_spmat_set_attribute(mat_A, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
-                    rocsparse_status_success);
+                ASSERT_EQ(rocsparse_spmat_set_attribute(
+                              mat_A, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
+                          rocsparse_status_success);
+                ASSERT_EQ(rocsparse_spmat_set_attribute(
+                              mat_A, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
+                          rocsparse_status_success);
 
                 rocsparse_dnmat_descr mat_B = nullptr, mat_C = nullptr;
                 ASSERT_EQ(rocsparse_create_dnmat_descr(
@@ -1695,8 +1692,8 @@ namespace
                               &mat_C, m, nrhs, ldc, C, dt_of<T>(), rocsparse_order_column),
                           rocsparse_status_success);
 
-                size_t buffer_size = 0;
-                const rocsparse_status bs_status = rocsparse_spsm(handle,
+                size_t                 buffer_size = 0;
+                const rocsparse_status bs_status   = rocsparse_spsm(handle,
                                                                   ta,
                                                                   rocsparse_operation_none,
                                                                   &alpha,
@@ -1996,13 +1993,13 @@ class Level3 : public HandleTest
 {
 };
 
-#define UT_L3_ALL_PRECISIONS(NAME, FN)       \
-    TEST_F(Level3, NAME)                     \
-    {                                        \
-        FN<float>(handle);                   \
-        FN<double>(handle);                  \
-        FN<rocsparse_float_complex>(handle); \
-        FN<rocsparse_double_complex>(handle);\
+#define UT_L3_ALL_PRECISIONS(NAME, FN)        \
+    TEST_F(Level3, NAME)                      \
+    {                                         \
+        FN<float>(handle);                    \
+        FN<double>(handle);                   \
+        FN<rocsparse_float_complex>(handle);  \
+        FN<rocsparse_double_complex>(handle); \
     }
 
 UT_L3_ALL_PRECISIONS(csrmm, run_csrmm)

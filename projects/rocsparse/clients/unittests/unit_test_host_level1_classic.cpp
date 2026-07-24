@@ -37,106 +37,106 @@ using namespace rocsparse_ut;
 namespace
 {
     // Overload sets: map (T) -> the matching per-precision C function.
-#define UT_OVL_AXPYI(T, PFX)                                                              \
-    inline rocsparse_status ut_axpyi(rocsparse_handle     h,                              \
-                                     rocsparse_int        n,                              \
-                                     const T*             a,                              \
-                                     const T*             xv,                             \
-                                     const rocsparse_int* xi,                             \
-                                     T*                   y,                              \
-                                     rocsparse_index_base b)                              \
-    {                                                                                     \
-        return rocsparse_##PFX##axpyi(h, n, a, xv, xi, y, b);                             \
+#define UT_OVL_AXPYI(T, PFX)                                  \
+    inline rocsparse_status ut_axpyi(rocsparse_handle     h,  \
+                                     rocsparse_int        n,  \
+                                     const T*             a,  \
+                                     const T*             xv, \
+                                     const rocsparse_int* xi, \
+                                     T*                   y,  \
+                                     rocsparse_index_base b)  \
+    {                                                         \
+        return rocsparse_##PFX##axpyi(h, n, a, xv, xi, y, b); \
     }
     UT_OVL_AXPYI(float, s)
     UT_OVL_AXPYI(double, d)
     UT_OVL_AXPYI(rocsparse_float_complex, c)
     UT_OVL_AXPYI(rocsparse_double_complex, z)
 
-#define UT_OVL_DOTI(T, PFX)                                                               \
-    inline rocsparse_status ut_doti(rocsparse_handle     h,                               \
-                                    rocsparse_int        n,                               \
-                                    const T*             xv,                              \
-                                    const rocsparse_int* xi,                              \
-                                    const T*             y,                               \
-                                    T*                   res,                             \
-                                    rocsparse_index_base b)                               \
-    {                                                                                     \
-        return rocsparse_##PFX##doti(h, n, xv, xi, y, res, b);                            \
+#define UT_OVL_DOTI(T, PFX)                                    \
+    inline rocsparse_status ut_doti(rocsparse_handle     h,    \
+                                    rocsparse_int        n,    \
+                                    const T*             xv,   \
+                                    const rocsparse_int* xi,   \
+                                    const T*             y,    \
+                                    T*                   res,  \
+                                    rocsparse_index_base b)    \
+    {                                                          \
+        return rocsparse_##PFX##doti(h, n, xv, xi, y, res, b); \
     }
     UT_OVL_DOTI(float, s)
     UT_OVL_DOTI(double, d)
     UT_OVL_DOTI(rocsparse_float_complex, c)
     UT_OVL_DOTI(rocsparse_double_complex, z)
 
-#define UT_OVL_DOTCI(T, PFX)                                                              \
-    inline rocsparse_status ut_dotci(rocsparse_handle     h,                              \
-                                     rocsparse_int        n,                              \
-                                     const T*             xv,                             \
-                                     const rocsparse_int* xi,                             \
-                                     const T*             y,                              \
-                                     T*                   res,                            \
-                                     rocsparse_index_base b)                              \
-    {                                                                                     \
-        return rocsparse_##PFX##dotci(h, n, xv, xi, y, res, b);                           \
+#define UT_OVL_DOTCI(T, PFX)                                    \
+    inline rocsparse_status ut_dotci(rocsparse_handle     h,    \
+                                     rocsparse_int        n,    \
+                                     const T*             xv,   \
+                                     const rocsparse_int* xi,   \
+                                     const T*             y,    \
+                                     T*                   res,  \
+                                     rocsparse_index_base b)    \
+    {                                                           \
+        return rocsparse_##PFX##dotci(h, n, xv, xi, y, res, b); \
     }
     UT_OVL_DOTCI(rocsparse_float_complex, c)
     UT_OVL_DOTCI(rocsparse_double_complex, z)
 
-#define UT_OVL_GTHR(T, PFX)                                                               \
-    inline rocsparse_status ut_gthr(rocsparse_handle     h,                               \
-                                    rocsparse_int        n,                               \
-                                    const T*             y,                               \
-                                    T*                   xv,                              \
-                                    const rocsparse_int* xi,                              \
-                                    rocsparse_index_base b)                               \
-    {                                                                                     \
-        return rocsparse_##PFX##gthr(h, n, y, xv, xi, b);                                 \
+#define UT_OVL_GTHR(T, PFX)                                  \
+    inline rocsparse_status ut_gthr(rocsparse_handle     h,  \
+                                    rocsparse_int        n,  \
+                                    const T*             y,  \
+                                    T*                   xv, \
+                                    const rocsparse_int* xi, \
+                                    rocsparse_index_base b)  \
+    {                                                        \
+        return rocsparse_##PFX##gthr(h, n, y, xv, xi, b);    \
     }
     UT_OVL_GTHR(float, s)
     UT_OVL_GTHR(double, d)
     UT_OVL_GTHR(rocsparse_float_complex, c)
     UT_OVL_GTHR(rocsparse_double_complex, z)
 
-#define UT_OVL_GTHRZ(T, PFX)                                                              \
-    inline rocsparse_status ut_gthrz(rocsparse_handle     h,                              \
-                                     rocsparse_int        n,                              \
-                                     T*                   y,                              \
-                                     T*                   xv,                             \
-                                     const rocsparse_int* xi,                             \
-                                     rocsparse_index_base b)                              \
-    {                                                                                     \
-        return rocsparse_##PFX##gthrz(h, n, y, xv, xi, b);                                \
+#define UT_OVL_GTHRZ(T, PFX)                                  \
+    inline rocsparse_status ut_gthrz(rocsparse_handle     h,  \
+                                     rocsparse_int        n,  \
+                                     T*                   y,  \
+                                     T*                   xv, \
+                                     const rocsparse_int* xi, \
+                                     rocsparse_index_base b)  \
+    {                                                         \
+        return rocsparse_##PFX##gthrz(h, n, y, xv, xi, b);    \
     }
     UT_OVL_GTHRZ(float, s)
     UT_OVL_GTHRZ(double, d)
     UT_OVL_GTHRZ(rocsparse_float_complex, c)
     UT_OVL_GTHRZ(rocsparse_double_complex, z)
 
-#define UT_OVL_ROTI(T, PFX)                                                               \
-    inline rocsparse_status ut_roti(rocsparse_handle     h,                               \
-                                    rocsparse_int        n,                               \
-                                    T*                   xv,                              \
-                                    const rocsparse_int* xi,                              \
-                                    T*                   y,                               \
-                                    const T*             c,                               \
-                                    const T*             s,                               \
-                                    rocsparse_index_base b)                               \
-    {                                                                                     \
-        return rocsparse_##PFX##roti(h, n, xv, xi, y, c, s, b);                           \
+#define UT_OVL_ROTI(T, PFX)                                     \
+    inline rocsparse_status ut_roti(rocsparse_handle     h,     \
+                                    rocsparse_int        n,     \
+                                    T*                   xv,    \
+                                    const rocsparse_int* xi,    \
+                                    T*                   y,     \
+                                    const T*             c,     \
+                                    const T*             s,     \
+                                    rocsparse_index_base b)     \
+    {                                                           \
+        return rocsparse_##PFX##roti(h, n, xv, xi, y, c, s, b); \
     }
     UT_OVL_ROTI(float, s)
     UT_OVL_ROTI(double, d)
 
-#define UT_OVL_SCTR(T, PFX)                                                               \
-    inline rocsparse_status ut_sctr(rocsparse_handle     h,                               \
-                                    rocsparse_int        n,                               \
-                                    const T*             xv,                              \
-                                    const rocsparse_int* xi,                              \
-                                    T*                   y,                               \
-                                    rocsparse_index_base b)                               \
-    {                                                                                     \
-        return rocsparse_##PFX##sctr(h, n, xv, xi, y, b);                                 \
+#define UT_OVL_SCTR(T, PFX)                                  \
+    inline rocsparse_status ut_sctr(rocsparse_handle     h,  \
+                                    rocsparse_int        n,  \
+                                    const T*             xv, \
+                                    const rocsparse_int* xi, \
+                                    T*                   y,  \
+                                    rocsparse_index_base b)  \
+    {                                                        \
+        return rocsparse_##PFX##sctr(h, n, xv, xi, y, b);    \
     }
     UT_OVL_SCTR(float, s)
     UT_OVL_SCTR(double, d)
@@ -147,11 +147,11 @@ namespace
     template <typename T>
     struct L1Data
     {
-        std::vector<rocsparse_int> hind{0, 3, 6};
+        std::vector<rocsparse_int>   hind{0, 3, 6};
         device_vector<rocsparse_int> ind{hind};
         device_vector<T>             xval{std::vector<T>{scalar<T>(1), scalar<T>(2), scalar<T>(3)}};
         device_vector<T>             y{std::vector<T>(8, scalar<T>(1))};
-        bool ok() const
+        bool                         ok() const
         {
             return ind.ptr && xval.ptr && y.ptr;
         }
@@ -274,8 +274,9 @@ namespace
                       rocsparse_status_invalid_handle);
         UT_EXPECT_ROC(ut_roti(handle, -1, d.xval, d.ind, d.y, &c, &s, rocsparse_index_base_zero),
                       rocsparse_status_invalid_size);
-        UT_EXPECT_ROC(ut_roti(handle, 3, d.xval, d.ind, d.y, nullptr, &s, rocsparse_index_base_zero),
-                      rocsparse_status_invalid_pointer);
+        UT_EXPECT_ROC(
+            ut_roti(handle, 3, d.xval, d.ind, d.y, nullptr, &s, rocsparse_index_base_zero),
+            rocsparse_status_invalid_pointer);
     }
 
     template <typename T>
@@ -297,13 +298,13 @@ namespace
     }
 } // namespace
 
-#define UT_L1_ALL_PRECISIONS(NAME, FN)                              \
-    TEST_F(L1Classic, NAME)                                         \
-    {                                                               \
-        FN<float>(handle);                                          \
-        FN<double>(handle);                                         \
-        FN<rocsparse_float_complex>(handle);                        \
-        FN<rocsparse_double_complex>(handle);                       \
+#define UT_L1_ALL_PRECISIONS(NAME, FN)        \
+    TEST_F(L1Classic, NAME)                   \
+    {                                         \
+        FN<float>(handle);                    \
+        FN<double>(handle);                   \
+        FN<rocsparse_float_complex>(handle);  \
+        FN<rocsparse_double_complex>(handle); \
     }
 
 UT_L1_ALL_PRECISIONS(axpyi, run_axpyi)

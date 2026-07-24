@@ -847,13 +847,13 @@ static void testing_spgeam_csr_extra_stage_transitions(const Arguments& arg)
     void*  buffer      = nullptr;
 
 #define PARAMS(stage) handle, descr, mat_A, mat_B, mat_C, stage, buffer_size, buffer
-#define EXPECT_INVALID(stage)                                                     \
-    do                                                                            \
-    {                                                                             \
-        ROCSPARSE_DEBUG_VERBOSE_OFF;                                              \
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(stage), nullptr),         \
-                                rocsparse_status_invalid_value);                  \
-        ROCSPARSE_DEBUG_VERBOSE_ON;                                               \
+#define EXPECT_INVALID(stage)                                             \
+    do                                                                    \
+    {                                                                     \
+        ROCSPARSE_DEBUG_VERBOSE_OFF;                                      \
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(stage), nullptr), \
+                                rocsparse_status_invalid_value);          \
+        ROCSPARSE_DEBUG_VERBOSE_ON;                                       \
     } while(0)
 
     // Symbolic analysis (mat_C not needed yet).
@@ -1000,13 +1000,13 @@ static void testing_spgeam_csr_extra_stage_transitions(const Arguments& arg)
 #undef PARAMS
 #undef EXPECT_INVALID
 #define PARAMS(stage) handle, descr2, mat_A, mat_B, mat_C2, stage, buffer_size, buffer
-#define EXPECT_INVALID(stage)                                                     \
-    do                                                                            \
-    {                                                                             \
-        ROCSPARSE_DEBUG_VERBOSE_OFF;                                              \
-        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(stage), nullptr),         \
-                                rocsparse_status_invalid_value);                  \
-        ROCSPARSE_DEBUG_VERBOSE_ON;                                               \
+#define EXPECT_INVALID(stage)                                             \
+    do                                                                    \
+    {                                                                     \
+        ROCSPARSE_DEBUG_VERBOSE_OFF;                                      \
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(stage), nullptr), \
+                                rocsparse_status_invalid_value);          \
+        ROCSPARSE_DEBUG_VERBOSE_ON;                                       \
     } while(0)
 
     rocsparse_spmat_descr mat_C2 = nullptr;

@@ -49,10 +49,10 @@ namespace
 {
     constexpr uint32_t BS = 256; // block size (all test cases use nnz <= BS, one block)
 
-#define CHECK_HIP(cmd)                                              \
-    do                                                              \
-    {                                                               \
-        hipError_t status_ = (cmd);                                 \
+#define CHECK_HIP(cmd)                                                \
+    do                                                                \
+    {                                                                 \
+        hipError_t status_ = (cmd);                                   \
         ASSERT_EQ(status_, hipSuccess) << hipGetErrorString(status_); \
     } while(0)
 
@@ -88,15 +88,14 @@ namespace
     // Wrapper kernels for the ROCSPARSE_DEVICE_ILF functions (which are meant to
     // be called from within a kernel). This exercises the exact device code.
     template <typename T, typename I>
-    __global__ void k_axpyi(
-        I nnz, T alpha, const T* x_val, const I* x_ind, T* y, rocsparse_index_base base)
+    __global__ void
+        k_axpyi(I nnz, T alpha, const T* x_val, const I* x_ind, T* y, rocsparse_index_base base)
     {
         rocsparse::axpyi_device<BS, T, I, T, T>(nnz, alpha, x_val, x_ind, y, base);
     }
 
     template <typename T, typename I>
-    __global__ void
-        k_gthr(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base base)
+    __global__ void k_gthr(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base base)
     {
         rocsparse::gthr_device<BS, I, T>(nnz, y, x_val, x_ind, base);
     }

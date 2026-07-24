@@ -328,8 +328,8 @@ TEST_F(PrimitiveTest, radix_sort_pairs_i32_i32)
     ASSERT_NE(d_vals_alt.ptr, nullptr);
 
     size_t buffer_size = 0;
-    expect_success(
-        prim::radix_sort_pairs_buffer_size<K, V>(handle, length, startbit, endbit, &buffer_size, true));
+    expect_success(prim::radix_sort_pairs_buffer_size<K, V>(
+        handle, length, startbit, endbit, &buffer_size, true));
 
     device_vector<char> d_buffer(buffer_size ? buffer_size : 1);
     ASSERT_NE(d_buffer.ptr, nullptr);

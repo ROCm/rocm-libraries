@@ -106,9 +106,9 @@ TEST_F(Info, csrsv_copy_and_singularity)
                                         buffer.ptr),
               rocsparse_status_success);
 
-    const float                  alpha = 1.0f;
-    device_vector<float>         x{std::vector<float>{1.0f, 1.0f, 1.0f}};
-    device_vector<float>         y{(size_t)g_m};
+    const float          alpha = 1.0f;
+    device_vector<float> x{std::vector<float>{1.0f, 1.0f, 1.0f}};
+    device_vector<float> y{(size_t)g_m};
     ASSERT_TRUE(x.ptr && y.ptr);
 
     EXPECT_EQ(rocsparse_scsrsv_solve(handle,
@@ -130,8 +130,7 @@ TEST_F(Info, csrsv_copy_and_singularity)
 
     // Well-conditioned system: no zero pivot expected.
     rocsparse_int position = 0;
-    EXPECT_EQ(rocsparse_csrsv_zero_pivot(handle, descr, src, &position),
-              rocsparse_status_success);
+    EXPECT_EQ(rocsparse_csrsv_zero_pivot(handle, descr, src, &position), rocsparse_status_success);
 
     // Deep-copy the populated csrsv sub-info into a fresh dest.
     rocsparse_mat_info dest = nullptr;
@@ -286,10 +285,19 @@ TEST_F(Info, bsrsv_copy)
     const rocsparse_int       block_dim = 1;
 
     size_t buffer_size = 0;
-    ASSERT_EQ(
-        rocsparse_sbsrsv_buffer_size(
-            handle, dir, trans, g_m, g_nnz, descr, val, row_ptr, col_ind, block_dim, src, &buffer_size),
-        rocsparse_status_success);
+    ASSERT_EQ(rocsparse_sbsrsv_buffer_size(handle,
+                                           dir,
+                                           trans,
+                                           g_m,
+                                           g_nnz,
+                                           descr,
+                                           val,
+                                           row_ptr,
+                                           col_ind,
+                                           block_dim,
+                                           src,
+                                           &buffer_size),
+              rocsparse_status_success);
     device_vector<char> buffer{buffer_size};
     ASSERT_TRUE(buffer.ptr);
 
@@ -413,9 +421,10 @@ TEST_F(Info, bsrilu0_copy_and_singularity)
     const rocsparse_int       block_dim = 1;
 
     size_t buffer_size = 0;
-    ASSERT_EQ(rocsparse_sbsrilu0_buffer_size(
-                  handle, dir, g_m, g_nnz, descr, val, row_ptr, col_ind, block_dim, src, &buffer_size),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_sbsrilu0_buffer_size(
+            handle, dir, g_m, g_nnz, descr, val, row_ptr, col_ind, block_dim, src, &buffer_size),
+        rocsparse_status_success);
     device_vector<char> buffer{buffer_size};
     ASSERT_TRUE(buffer.ptr);
 
@@ -479,9 +488,10 @@ TEST_F(Info, bsric0_copy_and_singularity)
     const rocsparse_int       block_dim = 1;
 
     size_t buffer_size = 0;
-    ASSERT_EQ(rocsparse_sbsric0_buffer_size(
-                  handle, dir, g_m, g_nnz, descr, val, row_ptr, col_ind, block_dim, src, &buffer_size),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_sbsric0_buffer_size(
+            handle, dir, g_m, g_nnz, descr, val, row_ptr, col_ind, block_dim, src, &buffer_size),
+        rocsparse_status_success);
     device_vector<char> buffer{buffer_size};
     ASSERT_TRUE(buffer.ptr);
 
@@ -545,30 +555,19 @@ TEST_F(Info, csrmv_adaptive_copy_and_clear)
     const rocsparse_operation trans = rocsparse_operation_none;
     const rocsparse_int       n     = g_m;
 
-    ASSERT_EQ(rocsparse_scsrmv_analysis(
-                  handle, trans, g_m, n, g_nnz, descr, val, row_ptr, col_ind, src),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_scsrmv_analysis(handle, trans, g_m, n, g_nnz, descr, val, row_ptr, col_ind, src),
+        rocsparse_status_success);
 
-    const float                  alpha = 1.0f, beta = 0.0f;
-    device_vector<float>         x{std::vector<float>{1.0f, 1.0f, 1.0f}};
-    device_vector<float>         y{(size_t)g_m};
+    const float          alpha = 1.0f, beta = 0.0f;
+    device_vector<float> x{std::vector<float>{1.0f, 1.0f, 1.0f}};
+    device_vector<float> y{(size_t)g_m};
     ASSERT_TRUE(x.ptr && y.ptr);
 
-    EXPECT_EQ(rocsparse_scsrmv(handle,
-                               trans,
-                               g_m,
-                               n,
-                               g_nnz,
-                               &alpha,
-                               descr,
-                               val,
-                               row_ptr,
-                               col_ind,
-                               src,
-                               x,
-                               &beta,
-                               y),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        rocsparse_scsrmv(
+            handle, trans, g_m, n, g_nnz, &alpha, descr, val, row_ptr, col_ind, src, x, &beta, y),
+        rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // copy path -> rocsparse::copy_csrmv_info
@@ -616,9 +615,9 @@ TEST_F(Info, bsrmv_copy_and_destroy)
     }
     ASSERT_EQ(st, rocsparse_status_success);
 
-    const float                  alpha = 1.0f, beta = 0.0f;
-    device_vector<float>         x{std::vector<float>{1.0f, 1.0f, 1.0f}};
-    device_vector<float>         y{(size_t)g_m};
+    const float          alpha = 1.0f, beta = 0.0f;
+    device_vector<float> x{std::vector<float>{1.0f, 1.0f, 1.0f}};
+    device_vector<float> y{(size_t)g_m};
     ASSERT_TRUE(x.ptr && y.ptr);
 
     EXPECT_EQ(rocsparse_sbsrmv(handle,
@@ -671,8 +670,8 @@ TEST_F(Info, csritsv_analysis_csrmv_accessors)
 
     const rocsparse_operation trans = rocsparse_operation_none;
 
-    size_t buffer_size = 0;
-    const rocsparse_status stbs = rocsparse_scsritsv_buffer_size(
+    size_t                 buffer_size = 0;
+    const rocsparse_status stbs        = rocsparse_scsritsv_buffer_size(
         handle, trans, g_m, g_nnz, descr, val, row_ptr, col_ind, src, &buffer_size);
     if(stbs == rocsparse_status_not_implemented)
     {

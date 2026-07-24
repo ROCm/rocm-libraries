@@ -60,8 +60,7 @@ namespace
         {
             if(!row_ptr.ptr || !col_ind.ptr || !val.ptr)
                 return false;
-            return rocsparse_create_csr_descr(
-                       &A, 3, 3, 3, row_ptr, col_ind, val, IT, IT, BASE, DT)
+            return rocsparse_create_csr_descr(&A, 3, 3, 3, row_ptr, col_ind, val, IT, IT, BASE, DT)
                    == rocsparse_status_success;
         }
         ~IdentityCsr()
@@ -83,8 +82,7 @@ namespace
         {
             if(!row_ind.ptr || !col_ind.ptr || !val.ptr)
                 return false;
-            return rocsparse_create_coo_descr(
-                       &A, 3, 3, 3, row_ind, col_ind, val, IT, BASE, DT)
+            return rocsparse_create_coo_descr(&A, 3, 3, 3, row_ind, col_ind, val, IT, BASE, DT)
                    == rocsparse_status_success;
         }
         ~IdentityCoo()
@@ -244,8 +242,8 @@ TEST_F(GenericSpmv, bad_args)
     IdentityCsr mat;
     ASSERT_TRUE(mat.create());
 
-    device_vector<float> x{std::vector<float>{1.0f, 2.0f, 3.0f}};
-    device_vector<float> y{std::vector<float>{0.0f, 0.0f, 0.0f}};
+    device_vector<float>  x{std::vector<float>{1.0f, 2.0f, 3.0f}};
+    device_vector<float>  y{std::vector<float>{0.0f, 0.0f, 0.0f}};
     rocsparse_dnvec_descr vx = nullptr, vy = nullptr;
     ASSERT_EQ(rocsparse_create_dnvec_descr(&vx, 3, x.ptr, DT), rocsparse_status_success);
     ASSERT_EQ(rocsparse_create_dnvec_descr(&vy, 3, y.ptr, DT), rocsparse_status_success);
@@ -407,9 +405,9 @@ TEST_F(GenericSpmm, bad_args)
     IdentityCsr mat;
     ASSERT_TRUE(mat.create());
 
-    const int            n = 2;
-    device_vector<float> B{std::vector<float>(3 * n, 1.0f)};
-    device_vector<float> C{std::vector<float>(3 * n, 0.0f)};
+    const int             n = 2;
+    device_vector<float>  B{std::vector<float>(3 * n, 1.0f)};
+    device_vector<float>  C{std::vector<float>(3 * n, 0.0f)};
     rocsparse_dnmat_descr mB = nullptr, mC = nullptr;
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mB, 3, n, 3, B.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
@@ -490,9 +488,9 @@ TEST_F(GenericSpgemm, csr_identity_full_pipeline)
                   &matC, 3, 3, 0, C_row_ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
               rocsparse_status_success);
     // Empty D (beta = 0).
-    ASSERT_EQ(rocsparse_create_csr_descr(
-                  &matD, 0, 0, 0, nullptr, nullptr, nullptr, IT, IT, BASE, DT),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_create_csr_descr(&matD, 0, 0, 0, nullptr, nullptr, nullptr, IT, IT, BASE, DT),
+        rocsparse_status_success);
 
     const float alpha = 1.0f, beta = 0.0f;
     size_t      buffer_size = 0;
@@ -573,9 +571,9 @@ TEST_F(GenericSpgemm, bad_args)
     ASSERT_EQ(rocsparse_create_csr_descr(
                   &matC, 3, 3, 0, C_row_ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
               rocsparse_status_success);
-    ASSERT_EQ(rocsparse_create_csr_descr(
-                  &matD, 0, 0, 0, nullptr, nullptr, nullptr, IT, IT, BASE, DT),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_create_csr_descr(&matD, 0, 0, 0, nullptr, nullptr, nullptr, IT, IT, BASE, DT),
+        rocsparse_status_success);
 
     const float alpha = 1.0f, beta = 0.0f;
     size_t      buffer_size = 0;
@@ -670,7 +668,7 @@ TEST_F(GenericSpsv, csr_diagonal_full_pipeline)
     ASSERT_EQ(rocsparse_create_dnvec_descr(&vx, 3, x.ptr, DT), rocsparse_status_success);
     ASSERT_EQ(rocsparse_create_dnvec_descr(&vy, 3, y.ptr, DT), rocsparse_status_success);
 
-    const float alpha = 1.0f;
+    const float alpha       = 1.0f;
     size_t      buffer_size = 0;
     ASSERT_EQ(rocsparse_spsv(handle,
                              rocsparse_operation_none,
@@ -731,13 +729,13 @@ TEST_F(GenericSpsv, bad_args)
     DiagCsr mat;
     ASSERT_TRUE(mat.create());
 
-    device_vector<float> x{std::vector<float>{2.0f, 4.0f, 8.0f}};
-    device_vector<float> y{std::vector<float>{0.0f, 0.0f, 0.0f}};
+    device_vector<float>  x{std::vector<float>{2.0f, 4.0f, 8.0f}};
+    device_vector<float>  y{std::vector<float>{0.0f, 0.0f, 0.0f}};
     rocsparse_dnvec_descr vx = nullptr, vy = nullptr;
     ASSERT_EQ(rocsparse_create_dnvec_descr(&vx, 3, x.ptr, DT), rocsparse_status_success);
     ASSERT_EQ(rocsparse_create_dnvec_descr(&vy, 3, y.ptr, DT), rocsparse_status_success);
 
-    const float alpha = 1.0f;
+    const float alpha       = 1.0f;
     size_t      buffer_size = 0;
 
     EXPECT_EQ(rocsparse_spsv(nullptr,
@@ -782,7 +780,7 @@ TEST_F(GenericSpsm, csr_diagonal_full_pipeline)
     DiagCsr mat;
     ASSERT_TRUE(mat.create());
 
-    const int n = 1; // single RHS column
+    const int            n = 1; // single RHS column
     device_vector<float> B{std::vector<float>{2.0f, 4.0f, 8.0f}};
     device_vector<float> C{std::vector<float>(3 * n, 0.0f)};
     ASSERT_TRUE(B.ptr && C.ptr);
@@ -793,7 +791,7 @@ TEST_F(GenericSpsm, csr_diagonal_full_pipeline)
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mC, 3, n, 3, C.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
 
-    const float alpha = 1.0f;
+    const float alpha       = 1.0f;
     size_t      buffer_size = 0;
     ASSERT_EQ(rocsparse_spsm(handle,
                              rocsparse_operation_none,
@@ -857,16 +855,16 @@ TEST_F(GenericSpsm, bad_args)
     DiagCsr mat;
     ASSERT_TRUE(mat.create());
 
-    const int            n = 1;
-    device_vector<float> B{std::vector<float>{2.0f, 4.0f, 8.0f}};
-    device_vector<float> C{std::vector<float>(3 * n, 0.0f)};
+    const int             n = 1;
+    device_vector<float>  B{std::vector<float>{2.0f, 4.0f, 8.0f}};
+    device_vector<float>  C{std::vector<float>(3 * n, 0.0f)};
     rocsparse_dnmat_descr mB = nullptr, mC = nullptr;
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mB, 3, n, 3, B.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mC, 3, n, 3, C.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
 
-    const float alpha = 1.0f;
+    const float alpha       = 1.0f;
     size_t      buffer_size = 0;
 
     EXPECT_EQ(rocsparse_spsm(nullptr,
@@ -978,8 +976,8 @@ TEST_F(GenericSddmm, bad_args)
     IdentityCsr matC;
     ASSERT_TRUE(matC.create());
 
-    device_vector<float> A{std::vector<float>(3 * 3, 1.0f)};
-    device_vector<float> B{std::vector<float>(3 * 3, 1.0f)};
+    device_vector<float>  A{std::vector<float>(3 * 3, 1.0f)};
+    device_vector<float>  B{std::vector<float>(3 * 3, 1.0f)};
     rocsparse_dnmat_descr mA = nullptr, mB = nullptr;
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mA, 3, 3, 3, A.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
@@ -1067,7 +1065,7 @@ TEST_F(GenericSparseToDense, bad_args)
     IdentityCsr mat;
     ASSERT_TRUE(mat.create());
 
-    device_vector<float> dense{std::vector<float>(3 * 3, 0.0f)};
+    device_vector<float>  dense{std::vector<float>(3 * 3, 0.0f)};
     rocsparse_dnmat_descr mB = nullptr;
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mB, 3, 3, 3, dense.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
@@ -1078,13 +1076,10 @@ TEST_F(GenericSparseToDense, bad_args)
                   nullptr, mat.A, mB, rocsparse_sparse_to_dense_alg_default, &buffer_size, nullptr),
               rocsparse_status_invalid_handle);
 
-    EXPECT_EQ(rocsparse_sparse_to_dense(handle,
-                                        nullptr,
-                                        mB,
-                                        rocsparse_sparse_to_dense_alg_default,
-                                        &buffer_size,
-                                        nullptr),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_sparse_to_dense(
+            handle, nullptr, mB, rocsparse_sparse_to_dense_alg_default, &buffer_size, nullptr),
+        rocsparse_status_invalid_pointer);
 
     EXPECT_EQ(rocsparse_destroy_dnmat_descr(mB), rocsparse_status_success);
 }
@@ -1112,9 +1107,9 @@ TEST_F(GenericDenseToSparse, dense_to_csr)
     ASSERT_TRUE(row_ptr.ptr);
 
     rocsparse_spmat_descr mB = nullptr;
-    ASSERT_EQ(rocsparse_create_csr_descr(
-                  &mB, 3, 3, 0, row_ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_create_csr_descr(&mB, 3, 3, 0, row_ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
+        rocsparse_status_success);
 
     size_t buffer_size = 0;
     ASSERT_EQ(rocsparse_dense_to_sparse(
@@ -1150,16 +1145,16 @@ TEST_F(GenericDenseToSparse, dense_to_csr)
 
 TEST_F(GenericDenseToSparse, bad_args)
 {
-    device_vector<float> dense{std::vector<float>(9, 0.0f)};
+    device_vector<float>  dense{std::vector<float>(9, 0.0f)};
     rocsparse_dnmat_descr mA = nullptr;
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mA, 3, 3, 3, dense.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
 
     device_vector<int32_t> row_ptr{(size_t)4};
     rocsparse_spmat_descr  mB = nullptr;
-    ASSERT_EQ(rocsparse_create_csr_descr(
-                  &mB, 3, 3, 0, row_ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_create_csr_descr(&mB, 3, 3, 0, row_ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
+        rocsparse_status_success);
 
     size_t buffer_size = 0;
 
@@ -1167,9 +1162,10 @@ TEST_F(GenericDenseToSparse, bad_args)
                   nullptr, mA, mB, rocsparse_dense_to_sparse_alg_default, &buffer_size, nullptr),
               rocsparse_status_invalid_handle);
 
-    EXPECT_EQ(rocsparse_dense_to_sparse(
-                  handle, nullptr, mB, rocsparse_dense_to_sparse_alg_default, &buffer_size, nullptr),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_dense_to_sparse(
+            handle, nullptr, mB, rocsparse_dense_to_sparse_alg_default, &buffer_size, nullptr),
+        rocsparse_status_invalid_pointer);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(mB), rocsparse_status_success);
     EXPECT_EQ(rocsparse_destroy_dnmat_descr(mA), rocsparse_status_success);
@@ -1264,11 +1260,8 @@ TEST_F(GenericCheckSpmat, bad_args)
                                     nullptr),
               rocsparse_status_invalid_pointer);
 
-    EXPECT_EQ(rocsparse_check_spmat(handle,
-                                    mat.A,
-                                    &data_status,
-                                    (rocsparse_check_spmat_stage)99,
-                                    &buffer_size,
-                                    nullptr),
-              rocsparse_status_invalid_value);
+    EXPECT_EQ(
+        rocsparse_check_spmat(
+            handle, mat.A, &data_status, (rocsparse_check_spmat_stage)99, &buffer_size, nullptr),
+        rocsparse_status_invalid_value);
 }

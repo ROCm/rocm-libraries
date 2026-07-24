@@ -546,9 +546,8 @@ TEST(AuxBell, create_get_destroy)
     rocsparse_indextype  it = rocsparse_indextype_i64;
     rocsparse_index_base ib = rocsparse_index_base_one;
     rocsparse_datatype   dt = rocsparse_datatype_f64_r;
-    EXPECT_EQ(
-        rocsparse_bell_get(A, &rows, &cols, &dir, &bdim, &ecols, &pc, &pv, &it, &ib, &dt),
-        rocsparse_status_success);
+    EXPECT_EQ(rocsparse_bell_get(A, &rows, &cols, &dir, &bdim, &ecols, &pc, &pv, &it, &ib, &dt),
+              rocsparse_status_success);
     EXPECT_EQ(rows, 4);
     EXPECT_EQ(cols, 4);
     EXPECT_EQ(dir, rocsparse_direction_row);
@@ -627,19 +626,8 @@ TEST(AuxBsr, create_get_destroy)
     rocsparse_indextype  pit = rocsparse_indextype_i64, cit = rocsparse_indextype_i64;
     rocsparse_index_base ib = rocsparse_index_base_one;
     rocsparse_datatype   dt = rocsparse_datatype_f64_r;
-    EXPECT_EQ(rocsparse_bsr_get(A,
-                                &brows,
-                                &bcols,
-                                &bnnz,
-                                &dir,
-                                &bdim,
-                                &prp,
-                                &pc,
-                                &pv,
-                                &pit,
-                                &cit,
-                                &ib,
-                                &dt),
+    EXPECT_EQ(rocsparse_bsr_get(
+                  A, &brows, &bcols, &bnnz, &dir, &bdim, &prp, &pc, &pv, &pit, &cit, &ib, &dt),
               rocsparse_status_success);
     EXPECT_EQ(brows, 2);
     EXPECT_EQ(bcols, 2);
@@ -941,46 +929,42 @@ TEST(AuxSpMatAttr, set_get_attribute)
 
     // matrix type roundtrip
     rocsparse_matrix_type mt_in = rocsparse_matrix_type_symmetric;
-    EXPECT_EQ(rocsparse_spmat_set_attribute(
-                  A, rocsparse_spmat_matrix_type, &mt_in, sizeof(mt_in)),
+    EXPECT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_matrix_type, &mt_in, sizeof(mt_in)),
               rocsparse_status_success);
     rocsparse_matrix_type mt_out = rocsparse_matrix_type_general;
-    EXPECT_EQ(rocsparse_spmat_get_attribute(
-                  A, rocsparse_spmat_matrix_type, &mt_out, sizeof(mt_out)),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        rocsparse_spmat_get_attribute(A, rocsparse_spmat_matrix_type, &mt_out, sizeof(mt_out)),
+        rocsparse_status_success);
     EXPECT_EQ(mt_out, rocsparse_matrix_type_symmetric);
 
     // fill mode roundtrip
     rocsparse_fill_mode fm_in = rocsparse_fill_mode_upper;
-    EXPECT_EQ(
-        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fm_in, sizeof(fm_in)),
-        rocsparse_status_success);
+    EXPECT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &fm_in, sizeof(fm_in)),
+              rocsparse_status_success);
     rocsparse_fill_mode fm_out = rocsparse_fill_mode_lower;
-    EXPECT_EQ(
-        rocsparse_spmat_get_attribute(A, rocsparse_spmat_fill_mode, &fm_out, sizeof(fm_out)),
-        rocsparse_status_success);
+    EXPECT_EQ(rocsparse_spmat_get_attribute(A, rocsparse_spmat_fill_mode, &fm_out, sizeof(fm_out)),
+              rocsparse_status_success);
     EXPECT_EQ(fm_out, rocsparse_fill_mode_upper);
 
     // storage mode roundtrip
     rocsparse_storage_mode sm_in = rocsparse_storage_mode_unsorted;
-    EXPECT_EQ(rocsparse_spmat_set_attribute(
-                  A, rocsparse_spmat_storage_mode, &sm_in, sizeof(sm_in)),
+    EXPECT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_storage_mode, &sm_in, sizeof(sm_in)),
               rocsparse_status_success);
     rocsparse_storage_mode sm_out = rocsparse_storage_mode_sorted;
-    EXPECT_EQ(rocsparse_spmat_get_attribute(
-                  A, rocsparse_spmat_storage_mode, &sm_out, sizeof(sm_out)),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        rocsparse_spmat_get_attribute(A, rocsparse_spmat_storage_mode, &sm_out, sizeof(sm_out)),
+        rocsparse_status_success);
     EXPECT_EQ(sm_out, rocsparse_storage_mode_unsorted);
 
     // bad args
-    EXPECT_EQ(rocsparse_spmat_set_attribute(
-                  nullptr, rocsparse_spmat_fill_mode, &fm_in, sizeof(fm_in)),
-              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_spmat_set_attribute(nullptr, rocsparse_spmat_fill_mode, &fm_in, sizeof(fm_in)),
+        rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, nullptr, sizeof(fm_in)),
               rocsparse_status_invalid_pointer);
-    EXPECT_EQ(rocsparse_spmat_set_attribute(
-                  A, (rocsparse_spmat_attribute)99, &fm_in, sizeof(fm_in)),
-              rocsparse_status_invalid_value);
+    EXPECT_EQ(
+        rocsparse_spmat_set_attribute(A, (rocsparse_spmat_attribute)99, &fm_in, sizeof(fm_in)),
+        rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_spmat_get_attribute(A, rocsparse_spmat_fill_mode, &fm_out, 0),
               rocsparse_status_invalid_size);
 
@@ -1175,7 +1159,8 @@ TEST(AuxiliaryBranchMatDescr, every_enum_value_roundtrip)
     }
 
     // storage mode: sorted & unsorted (set/get storage mode is otherwise untested)
-    for(rocsparse_storage_mode sm : {rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted})
+    for(rocsparse_storage_mode sm :
+        {rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted})
     {
         EXPECT_EQ(rocsparse_set_mat_storage_mode(descr, sm), rocsparse_status_success);
         EXPECT_EQ(rocsparse_get_mat_storage_mode(descr), sm);
@@ -1712,19 +1697,8 @@ TEST(AuxiliaryBranchBsr, const_get_set_pointers_nnz)
     rocsparse_indextype  pit = rocsparse_indextype_i64, cit = rocsparse_indextype_i64;
     rocsparse_index_base ib = rocsparse_index_base_one;
     rocsparse_datatype   dt = rocsparse_datatype_f64_r;
-    EXPECT_EQ(rocsparse_const_bsr_get(A,
-                                      &brows,
-                                      &bcols,
-                                      &bnnz,
-                                      &dir,
-                                      &bdim,
-                                      &prp,
-                                      &pc,
-                                      &pv,
-                                      &pit,
-                                      &cit,
-                                      &ib,
-                                      &dt),
+    EXPECT_EQ(rocsparse_const_bsr_get(
+                  A, &brows, &bcols, &bnnz, &dir, &bdim, &prp, &pc, &pv, &pit, &cit, &ib, &dt),
               rocsparse_status_success);
     EXPECT_EQ(brows, 2);
     EXPECT_EQ(bnnz, 2);
@@ -1752,11 +1726,11 @@ TEST(AuxiliaryBranchBsr, const_get_set_pointers_nnz)
 // ---------------------------------------------------------------------------
 TEST(AuxiliaryBranchSell, create_get_destroy)
 {
-    const int64_t          rows         = 4;
-    const int64_t          cols         = 4;
-    const int64_t          nnz          = 4;
-    const int64_t          slice_size   = 2;
-    const int64_t          colval_size  = 4;
+    const int64_t          rows        = 4;
+    const int64_t          cols        = 4;
+    const int64_t          nnz         = 4;
+    const int64_t          slice_size  = 2;
+    const int64_t          colval_size = 4;
     device_vector<int32_t> slice_offsets{std::vector<int32_t>{0, 2, 4}};
     device_vector<int32_t> col_ind{std::vector<int32_t>(colval_size, 0)};
     device_vector<float>   sell_val{std::vector<float>(colval_size, 1.0f)};
@@ -1783,20 +1757,9 @@ TEST(AuxiliaryBranchSell, create_get_destroy)
     rocsparse_indextype  ot = rocsparse_indextype_i64, ct = rocsparse_indextype_i64;
     rocsparse_index_base ib = rocsparse_index_base_one;
     rocsparse_datatype   dt = rocsparse_datatype_f64_r;
-    EXPECT_EQ(rocsparse_sell_get(A,
-                                 &grows,
-                                 &gcols,
-                                 &gnnz,
-                                 &gss,
-                                 &gcv,
-                                 &po,
-                                 &pc,
-                                 &pv,
-                                 &ot,
-                                 &ct,
-                                 &ib,
-                                 &dt),
-              rocsparse_status_success);
+    EXPECT_EQ(
+        rocsparse_sell_get(A, &grows, &gcols, &gnnz, &gss, &gcv, &po, &pc, &pv, &ot, &ct, &ib, &dt),
+        rocsparse_status_success);
     EXPECT_EQ(grows, rows);
     EXPECT_EQ(gnnz, nnz);
     EXPECT_EQ(gss, slice_size);
@@ -1980,20 +1943,21 @@ TEST(AuxiliaryBranchSpMatAttr, diag_type_and_guards)
     EXPECT_EQ(sm_out, rocsparse_storage_mode_sorted);
 
     // get_attribute guards
-    EXPECT_EQ(rocsparse_spmat_get_attribute(nullptr, rocsparse_spmat_diag_type, &dt_out,
-                                            sizeof(dt_out)),
-              rocsparse_status_invalid_pointer);
-    EXPECT_EQ(rocsparse_spmat_get_attribute(A, (rocsparse_spmat_attribute)99, &dt_out,
-                                            sizeof(dt_out)),
-              rocsparse_status_invalid_value);
+    EXPECT_EQ(
+        rocsparse_spmat_get_attribute(nullptr, rocsparse_spmat_diag_type, &dt_out, sizeof(dt_out)),
+        rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_spmat_get_attribute(A, (rocsparse_spmat_attribute)99, &dt_out, sizeof(dt_out)),
+        rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_spmat_get_attribute(A, rocsparse_spmat_diag_type, nullptr, sizeof(dt_out)),
               rocsparse_status_invalid_pointer);
     EXPECT_EQ(rocsparse_spmat_get_attribute(A, rocsparse_spmat_diag_type, &dt_out, 1),
               rocsparse_status_invalid_size);
 
     // set_attribute additional guards
-    EXPECT_EQ(rocsparse_spmat_set_attribute(A, (rocsparse_spmat_attribute)99, &dt_in, sizeof(dt_in)),
-              rocsparse_status_invalid_value);
+    EXPECT_EQ(
+        rocsparse_spmat_set_attribute(A, (rocsparse_spmat_attribute)99, &dt_in, sizeof(dt_in)),
+        rocsparse_status_invalid_value);
     EXPECT_EQ(rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &dt_in, 1),
               rocsparse_status_invalid_size);
 
@@ -2065,19 +2029,12 @@ TEST_F(AuxiliaryBranchSpGeam, create_set_input_get_output_destroy)
 
     // alpha / beta scalar pointers (data_size == sizeof(void*))
     float alpha = 1.0f, beta = 0.0f;
-    EXPECT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_scalar_alpha,
-                                         &alpha,
-                                         sizeof(void*),
-                                         nullptr),
-              rocsparse_status_success);
-    EXPECT_EQ(rocsparse_spgeam_set_input(handle,
-                                         descr,
-                                         rocsparse_spgeam_input_scalar_beta,
-                                         &beta,
-                                         sizeof(void*),
-                                         nullptr),
+    EXPECT_EQ(
+        rocsparse_spgeam_set_input(
+            handle, descr, rocsparse_spgeam_input_scalar_alpha, &alpha, sizeof(void*), nullptr),
+        rocsparse_status_success);
+    EXPECT_EQ(rocsparse_spgeam_set_input(
+                  handle, descr, rocsparse_spgeam_input_scalar_beta, &beta, sizeof(void*), nullptr),
               rocsparse_status_success);
 
     // algorithm
@@ -2149,9 +2106,9 @@ TEST_F(AuxiliaryBranchSpGeam, bad_args)
                   handle, descr, rocsparse_spgeam_input_alg, nullptr, sizeof(alg), nullptr),
               rocsparse_status_invalid_pointer);
     // wrong data size -> invalid_size
-    EXPECT_EQ(rocsparse_spgeam_set_input(
-                  handle, descr, rocsparse_spgeam_input_alg, &alg, 0, nullptr),
-              rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_alg, &alg, 0, nullptr),
+        rocsparse_status_invalid_size);
 
     // get_output guards
     int64_t nnz_C = 0;
@@ -2161,9 +2118,9 @@ TEST_F(AuxiliaryBranchSpGeam, bad_args)
     EXPECT_EQ(rocsparse_spgeam_get_output(
                   handle, descr, (rocsparse_spgeam_output)99, &nnz_C, sizeof(nnz_C), nullptr),
               rocsparse_status_invalid_value);
-    EXPECT_EQ(rocsparse_spgeam_get_output(
-                  handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, 1, nullptr),
-              rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        rocsparse_spgeam_get_output(handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, 1, nullptr),
+        rocsparse_status_invalid_size);
 
     EXPECT_EQ(rocsparse_destroy_spgeam_descr(descr), rocsparse_status_success);
 }

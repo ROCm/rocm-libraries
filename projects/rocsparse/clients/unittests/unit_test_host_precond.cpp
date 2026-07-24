@@ -127,7 +127,7 @@ static void run_csric0_pipeline(rocsparse_handle handle)
     const rocsparse_int          m = 3, nnz = 3;
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
     device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
-    device_vector<T> val{std::vector<T>{scalar<T>(2), scalar<T>(3), scalar<T>(4)}};
+    device_vector<T>             val{std::vector<T>{scalar<T>(2), scalar<T>(3), scalar<T>(4)}};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     rocsparse_mat_descr descr = nullptr;
@@ -214,17 +214,49 @@ static void run_csric0_pipeline(rocsparse_handle handle)
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     if constexpr(std::is_same_v<T, float>)
-        st = rocsparse_scsric0(
-            handle, m, nnz, descr, val, row_ptr, col_ind, info, rocsparse_solve_policy_auto, buffer.ptr);
+        st = rocsparse_scsric0(handle,
+                               m,
+                               nnz,
+                               descr,
+                               val,
+                               row_ptr,
+                               col_ind,
+                               info,
+                               rocsparse_solve_policy_auto,
+                               buffer.ptr);
     else if constexpr(std::is_same_v<T, double>)
-        st = rocsparse_dcsric0(
-            handle, m, nnz, descr, val, row_ptr, col_ind, info, rocsparse_solve_policy_auto, buffer.ptr);
+        st = rocsparse_dcsric0(handle,
+                               m,
+                               nnz,
+                               descr,
+                               val,
+                               row_ptr,
+                               col_ind,
+                               info,
+                               rocsparse_solve_policy_auto,
+                               buffer.ptr);
     else if constexpr(std::is_same_v<T, rocsparse_float_complex>)
-        st = rocsparse_ccsric0(
-            handle, m, nnz, descr, val, row_ptr, col_ind, info, rocsparse_solve_policy_auto, buffer.ptr);
+        st = rocsparse_ccsric0(handle,
+                               m,
+                               nnz,
+                               descr,
+                               val,
+                               row_ptr,
+                               col_ind,
+                               info,
+                               rocsparse_solve_policy_auto,
+                               buffer.ptr);
     else
-        st = rocsparse_zcsric0(
-            handle, m, nnz, descr, val, row_ptr, col_ind, info, rocsparse_solve_policy_auto, buffer.ptr);
+        st = rocsparse_zcsric0(handle,
+                               m,
+                               nnz,
+                               descr,
+                               val,
+                               row_ptr,
+                               col_ind,
+                               info,
+                               rocsparse_solve_policy_auto,
+                               buffer.ptr);
     EXPECT_EQ(st, rocsparse_status_success);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -300,19 +332,19 @@ class PrecondBsric0 : public HandleTest
 template <typename T>
 static void run_bsric0_pipeline(rocsparse_handle handle)
 {
-    const rocsparse_direction dir = rocsparse_direction_row;
-    const rocsparse_int       mb = 2, nnzb = 2, block_dim = 2;
+    const rocsparse_direction    dir = rocsparse_direction_row;
+    const rocsparse_int          mb = 2, nnzb = 2, block_dim = 2;
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
     device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
     // Two SPD blocks [[4,1],[1,4]] stored row-major.
-    device_vector<T>             val{std::vector<T>{scalar<T>(4),
-                                                   scalar<T>(1),
-                                                   scalar<T>(1),
-                                                   scalar<T>(4),
-                                                   scalar<T>(4),
-                                                   scalar<T>(1),
-                                                   scalar<T>(1),
-                                                   scalar<T>(4)}};
+    device_vector<T> val{std::vector<T>{scalar<T>(4),
+                                        scalar<T>(1),
+                                        scalar<T>(1),
+                                        scalar<T>(4),
+                                        scalar<T>(4),
+                                        scalar<T>(1),
+                                        scalar<T>(1),
+                                        scalar<T>(4)}};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     rocsparse_mat_descr descr = nullptr;
@@ -500,15 +532,18 @@ TEST_F(PrecondBsric0, bad_args)
     ASSERT_EQ(rocsparse_create_mat_info(&info), rocsparse_status_success);
 
     size_t buffer_size = 0;
-    EXPECT_EQ(rocsparse_sbsric0_buffer_size(
-                  nullptr, dir, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, &buffer_size),
-              rocsparse_status_invalid_handle);
-    EXPECT_EQ(rocsparse_sbsric0_buffer_size(
-                  handle, dir, mb, nnzb, nullptr, val, row_ptr, col_ind, block_dim, info, &buffer_size),
-              rocsparse_status_invalid_pointer);
-    EXPECT_EQ(rocsparse_sbsric0_buffer_size(
-                  handle, dir, -1, nnzb, descr, val, row_ptr, col_ind, block_dim, info, &buffer_size),
-              rocsparse_status_invalid_size);
+    EXPECT_EQ(
+        rocsparse_sbsric0_buffer_size(
+            nullptr, dir, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, &buffer_size),
+        rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        rocsparse_sbsric0_buffer_size(
+            handle, dir, mb, nnzb, nullptr, val, row_ptr, col_ind, block_dim, info, &buffer_size),
+        rocsparse_status_invalid_pointer);
+    EXPECT_EQ(
+        rocsparse_sbsric0_buffer_size(
+            handle, dir, -1, nnzb, descr, val, row_ptr, col_ind, block_dim, info, &buffer_size),
+        rocsparse_status_invalid_size);
     EXPECT_EQ(rocsparse_sbsric0_buffer_size(
                   handle, dir, mb, nnzb, descr, val, row_ptr, col_ind, -1, info, &buffer_size),
               rocsparse_status_invalid_size);
@@ -528,18 +563,18 @@ class PrecondBsrilu0 : public HandleTest
 template <typename T>
 static void run_bsrilu0_pipeline(rocsparse_handle handle)
 {
-    const rocsparse_direction dir = rocsparse_direction_row;
-    const rocsparse_int       mb = 2, nnzb = 2, block_dim = 2;
+    const rocsparse_direction    dir = rocsparse_direction_row;
+    const rocsparse_int          mb = 2, nnzb = 2, block_dim = 2;
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2}};
     device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1}};
     device_vector<T>             val{std::vector<T>{scalar<T>(4),
-                                                   scalar<T>(1),
-                                                   scalar<T>(1),
-                                                   scalar<T>(4),
-                                                   scalar<T>(4),
-                                                   scalar<T>(1),
-                                                   scalar<T>(1),
-                                                   scalar<T>(4)}};
+                                                    scalar<T>(1),
+                                                    scalar<T>(1),
+                                                    scalar<T>(4),
+                                                    scalar<T>(4),
+                                                    scalar<T>(1),
+                                                    scalar<T>(1),
+                                                    scalar<T>(4)}};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr);
 
     rocsparse_mat_descr descr = nullptr;
@@ -879,37 +914,37 @@ static void run_gtsv_no_pivot_strided_batch_pipeline(rocsparse_handle handle)
 {
     const rocsparse_int m = 4, batch_count = 2, batch_stride = 4;
     device_vector<T>    dl{std::vector<T>{scalar<T>(0),
-                                       scalar<T>(1),
-                                       scalar<T>(1),
-                                       scalar<T>(1),
-                                       scalar<T>(0),
-                                       scalar<T>(1),
-                                       scalar<T>(1),
-                                       scalar<T>(1)}};
+                                          scalar<T>(1),
+                                          scalar<T>(1),
+                                          scalar<T>(1),
+                                          scalar<T>(0),
+                                          scalar<T>(1),
+                                          scalar<T>(1),
+                                          scalar<T>(1)}};
     device_vector<T>    d{std::vector<T>{scalar<T>(4),
-                                      scalar<T>(4),
-                                      scalar<T>(4),
-                                      scalar<T>(4),
-                                      scalar<T>(4),
-                                      scalar<T>(4),
-                                      scalar<T>(4),
-                                      scalar<T>(4)}};
+                                         scalar<T>(4),
+                                         scalar<T>(4),
+                                         scalar<T>(4),
+                                         scalar<T>(4),
+                                         scalar<T>(4),
+                                         scalar<T>(4),
+                                         scalar<T>(4)}};
     device_vector<T>    du{std::vector<T>{scalar<T>(1),
-                                       scalar<T>(1),
-                                       scalar<T>(1),
-                                       scalar<T>(0),
-                                       scalar<T>(1),
-                                       scalar<T>(1),
-                                       scalar<T>(1),
-                                       scalar<T>(0)}};
+                                          scalar<T>(1),
+                                          scalar<T>(1),
+                                          scalar<T>(0),
+                                          scalar<T>(1),
+                                          scalar<T>(1),
+                                          scalar<T>(1),
+                                          scalar<T>(0)}};
     device_vector<T>    x{std::vector<T>{scalar<T>(1),
-                                      scalar<T>(2),
-                                      scalar<T>(3),
-                                      scalar<T>(4),
-                                      scalar<T>(1),
-                                      scalar<T>(2),
-                                      scalar<T>(3),
-                                      scalar<T>(4)}};
+                                         scalar<T>(2),
+                                         scalar<T>(3),
+                                         scalar<T>(4),
+                                         scalar<T>(1),
+                                         scalar<T>(2),
+                                         scalar<T>(3),
+                                         scalar<T>(4)}};
     ASSERT_TRUE(dl.ptr && d.ptr && du.ptr && x.ptr);
 
     size_t           buffer_size = 0;
@@ -1081,9 +1116,8 @@ TEST_F(PrecondGtsv, bad_args)
     EXPECT_EQ(rocsparse_sgtsv_buffer_size(handle, -1, n, dl, d, du, B, ldb, &buffer_size),
               rocsparse_status_invalid_size);
 
-    EXPECT_EQ(
-        rocsparse_sgtsv_no_pivot_buffer_size(nullptr, m, n, dl, d, du, B, ldb, &buffer_size),
-        rocsparse_status_invalid_handle);
+    EXPECT_EQ(rocsparse_sgtsv_no_pivot_buffer_size(nullptr, m, n, dl, d, du, B, ldb, &buffer_size),
+              rocsparse_status_invalid_handle);
     EXPECT_EQ(
         rocsparse_sgtsv_no_pivot_buffer_size(handle, m, n, nullptr, d, du, B, ldb, &buffer_size),
         rocsparse_status_invalid_pointer);
@@ -1091,9 +1125,10 @@ TEST_F(PrecondGtsv, bad_args)
     EXPECT_EQ(rocsparse_sgtsv_no_pivot_strided_batch_buffer_size(
                   nullptr, m, dl, d, du, B, 1, m, &buffer_size),
               rocsparse_status_invalid_handle);
-    EXPECT_EQ(rocsparse_sgtsv_interleaved_batch_buffer_size(
-                  nullptr, rocsparse_gtsv_interleaved_alg_default, m, dl, d, du, B, 1, 1, &buffer_size),
-              rocsparse_status_invalid_handle);
+    EXPECT_EQ(
+        rocsparse_sgtsv_interleaved_batch_buffer_size(
+            nullptr, rocsparse_gtsv_interleaved_alg_default, m, dl, d, du, B, 1, 1, &buffer_size),
+        rocsparse_status_invalid_handle);
 }
 
 // ======================================================================
@@ -1252,20 +1287,20 @@ class PrecondCsritilu0 : public HandleTest
 template <typename T>
 static void run_csritilu0_pipeline(rocsparse_handle handle)
 {
-    const rocsparse_itilu0_alg alg      = rocsparse_itilu0_alg_default;
-    const rocsparse_int        option   = 0;
+    const rocsparse_itilu0_alg alg    = rocsparse_itilu0_alg_default;
+    const rocsparse_int        option = 0;
     const rocsparse_int        m = 3, nnz = 3;
     const rocsparse_index_base base     = rocsparse_index_base_zero;
     rocsparse_int              nmaxiter = 20;
 
     device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0, 1, 2, 3}};
     device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0, 1, 2}};
-    device_vector<T> val{std::vector<T>{scalar<T>(2), scalar<T>(3), scalar<T>(4)}};
-    device_vector<T> ilu0{(size_t)nnz};
+    device_vector<T>             val{std::vector<T>{scalar<T>(2), scalar<T>(3), scalar<T>(4)}};
+    device_vector<T>             ilu0{(size_t)nnz};
     ASSERT_TRUE(row_ptr.ptr && col_ind.ptr && val.ptr && ilu0.ptr);
 
-    size_t buffer_size = 0;
-    rocsparse_status st = rocsparse_csritilu0_buffer_size(
+    size_t           buffer_size = 0;
+    rocsparse_status st          = rocsparse_csritilu0_buffer_size(
         handle, alg, option, nmaxiter, m, nnz, row_ptr, col_ind, base, dt_of<T>(), &buffer_size);
     if(st == rocsparse_status_not_implemented)
         return;
@@ -1450,10 +1485,8 @@ TEST_F(PrecondCsritilu0, bad_args)
 // stays well-conditioned across every branch.
 // ======================================================================
 template <typename T>
-static void run_gtsv_solve(rocsparse_handle handle,
-                           rocsparse_int    m,
-                           rocsparse_int    n,
-                           rocsparse_int    ldb)
+static void
+    run_gtsv_solve(rocsparse_handle handle, rocsparse_int m, rocsparse_int n, rocsparse_int ldb)
 {
     std::vector<T> hdl((size_t)m), hd((size_t)m), hdu((size_t)m);
     for(rocsparse_int i = 0; i < m; ++i)
@@ -1540,8 +1573,7 @@ TEST_F(PrecondGtsv, quick_return_n0)
     ASSERT_EQ(rocsparse_sgtsv_buffer_size(handle, m, n, dl, d, du, B, ldb, &buffer_size),
               rocsparse_status_success);
     EXPECT_EQ(buffer_size, 0u);
-    EXPECT_EQ(rocsparse_sgtsv(handle, m, n, dl, d, du, B, ldb, nullptr),
-              rocsparse_status_success);
+    EXPECT_EQ(rocsparse_sgtsv(handle, m, n, dl, d, du, B, ldb, nullptr), rocsparse_status_success);
 }
 
 // Additional size/pointer guards not covered by PrecondGtsv.bad_args.
@@ -2052,18 +2084,10 @@ TEST_F(PrecondBsrilu0, numeric_boost_enabled_pipeline)
               rocsparse_status_success);
 
     size_t buffer_size = 0;
-    ASSERT_EQ(rocsparse_dbsrilu0_buffer_size(handle,
-                                             dir,
-                                             mb,
-                                             nnzb,
-                                             descr,
-                                             val,
-                                             row_ptr,
-                                             col_ind,
-                                             block_dim,
-                                             info,
-                                             &buffer_size),
-              rocsparse_status_success);
+    ASSERT_EQ(
+        rocsparse_dbsrilu0_buffer_size(
+            handle, dir, mb, nnzb, descr, val, row_ptr, col_ind, block_dim, info, &buffer_size),
+        rocsparse_status_success);
     device_vector<char> buffer{buffer_size};
     ASSERT_TRUE(buffer.ptr);
 
@@ -2128,9 +2152,8 @@ static void run_csritilu0_ex(rocsparse_handle     handle,
     const rocsparse_int m = 3, nnz = 3;
     rocsparse_int       nmaxiter = 20;
 
-    const rocsparse_int b = (base == rocsparse_index_base_one) ? 1 : 0;
-    device_vector<rocsparse_int> row_ptr{
-        std::vector<rocsparse_int>{0 + b, 1 + b, 2 + b, 3 + b}};
+    const rocsparse_int          b = (base == rocsparse_index_base_one) ? 1 : 0;
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0 + b, 1 + b, 2 + b, 3 + b}};
     device_vector<rocsparse_int> col_ind{std::vector<rocsparse_int>{0 + b, 1 + b, 2 + b}};
     device_vector<T>             val{std::vector<T>{scalar<T>(2), scalar<T>(3), scalar<T>(4)}};
     device_vector<T>             ilu0{(size_t)nnz};
