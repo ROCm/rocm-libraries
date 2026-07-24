@@ -427,11 +427,11 @@ struct SdpaMaskCartesianParams
 template <typename T>
 void runMaskCartesianCase(const SdpaMaskCartesianParams& params)
 {
-    constexpr int64_t batch    = 1;
+    constexpr int64_t batch = 1;
     constexpr int64_t numHeads = 2;
-    constexpr int64_t headDim  = 16;
-    constexpr int64_t seqQ     = 8;
-    const int64_t seqKv        = params.skvSmaller ? 4 : 16;
+    constexpr int64_t headDim = 16;
+    constexpr int64_t seqQ = 8;
+    const int64_t seqKv = params.skvSmaller ? 4 : 16;
 
     Tensor<T> q({batch, numHeads, seqQ, headDim});
     Tensor<T> k({batch, numHeads, seqKv, headDim});
@@ -481,8 +481,8 @@ class TestGpuSdpaFwdMaskCartesianBase : public ::testing::TestWithParam<SdpaMask
 
 // Explicit per-dtype aliases with their own TEST_P/INSTANTIATE (project style:
 // prefer aliases over TYPED_TEST_P macros for readable gtest names + failures).
-using TestGpuSdpaFwdMaskCartesianFp32  = TestGpuSdpaFwdMaskCartesianBase<float>;
-using TestGpuSdpaFwdMaskCartesianFp16  = TestGpuSdpaFwdMaskCartesianBase<half>;
+using TestGpuSdpaFwdMaskCartesianFp32 = TestGpuSdpaFwdMaskCartesianBase<float>;
+using TestGpuSdpaFwdMaskCartesianFp16 = TestGpuSdpaFwdMaskCartesianBase<half>;
 using TestGpuSdpaFwdMaskCartesianBfp16 = TestGpuSdpaFwdMaskCartesianBase<bfloat16>;
 
 TEST_P(TestGpuSdpaFwdMaskCartesianFp32, SkvNotEqualSq)
